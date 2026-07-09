@@ -1,0 +1,51 @@
+# niki.toml — NIKI configuration
+
+[general]
+# Maximum Reviewer → Coder feedback rounds before forced completion
+max_revision_rounds = 3
+# Task output directory (relative to project root)
+output_dir = ".niki"
+
+[providers.anthropic]
+api_key = "sk-ant-..."               # Or set ANTHROPIC_API_KEY env var
+default_model = "claude-sonnet-4-20250514"
+
+[providers.openai]
+api_key = "sk-..."                    # Or set OPENAI_API_KEY env var
+base_url = "https://api.openai.com/v1"  # Override for compatible APIs
+default_model = "gpt-4o"
+
+[providers.google]
+api_key = "AIza..."                   # Or set GOOGLE_API_KEY env var
+default_model = "gemini-2.5-pro"
+
+[providers.ollama]
+base_url = "http://localhost:11434"   # Local Ollama instance
+default_model = "llama3.1"
+
+# Per-agent model assignment (BYOK mixing)
+[agents.planner]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"         # Best reasoning for planning
+
+[agents.coder]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+
+[agents.tester]
+provider = "openai"
+model = "gpt-4o-mini"               # Cheaper model for test generation
+
+[agents.reviewer]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"         # Best reasoning for review
+
+[docker]
+# Base image for agent containers
+base_image = "ubuntu:24.04"
+# Additional packages to install in agent containers
+extra_packages = ["nodejs", "npm", "python3"]
+# Memory limit per container
+memory_limit = "2g"
+# CPU limit per container
+cpu_limit = 2.0

@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string" },
+    "approach": { "type": "string" },
+    "files_to_modify": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "action": {
+            "type": "string",
+            "enum": ["create", "modify", "delete"]
+          },
+          "description": { "type": "string" }
+        },
+        "required": ["path", "action", "description"]
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "estimated_complexity": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    }
+  },
+  "required": [
+    "summary",
+    "approach",
+    "files_to_modify",
+    "acceptance_criteria",
+    "constraints",
+    "estimated_complexity"
+  ]
+}

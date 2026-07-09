@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "tests_written": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "file_path": { "type": "string" },
+          "description": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["passed", "failed", "skipped", "error"]
+          },
+          "error_message": { "type": ["string", "null"] }
+        },
+        "required": ["name", "file_path", "description", "status"]
+      }
+    },
+    "test_results": {
+      "type": "object",
+      "properties": {
+        "total": { "type": "integer" },
+        "passed": { "type": "integer" },
+        "failed": { "type": "integer" },
+        "skipped": { "type": "integer" },
+        "errors": { "type": "integer" }
+      },
+      "required": ["total", "passed", "failed", "skipped", "errors"]
+    },
+    "coverage_summary": {
+      "type": ["object", "null"],
+      "properties": {
+        "line_coverage_percent": { "type": "number" },
+        "branch_coverage_percent": { "type": ["number", "null"] },
+        "uncovered_files": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["line_coverage_percent", "uncovered_files"]
+    },
+    "edge_cases_found": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "tester_notes": { "type": "string" }
+  },
+  "required": [
+    "tests_written",
+    "test_results",
+    "edge_cases_found",
+    "tester_notes"
+  ]
+}

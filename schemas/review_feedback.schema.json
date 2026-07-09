@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "critical_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "major", "minor", "nit"]
+          },
+          "category": {
+            "type": "string",
+            "enum": ["bug", "security", "performance", "style", "logic", "test_gap", "spec_deviation"]
+          },
+          "file_path": { "type": ["string", "null"] },
+          "line_range": { "type": ["string", "null"] },
+          "description": { "type": "string" },
+          "suggested_fix": { "type": ["string", "null"] }
+        },
+        "required": ["severity", "category", "description"]
+      }
+    },
+    "guidance": { "type": "string" },
+    "keep_unchanged": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "revision_round": { "type": "integer" }
+  },
+  "required": [
+    "critical_issues",
+    "guidance",
+    "keep_unchanged",
+    "revision_round"
+  ]
+}

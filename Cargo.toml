@@ -1,0 +1,71 @@
+[package]
+name = "niki"
+version = "0.1.0"
+edition = "2024"
+description = "Hermetic multi-agent coding system"
+license = "BUSL-1.1"
+
+[dependencies]
+# CLI framework
+clap = { version = "4", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# JSON Schema validation
+jsonschema = "0.29"
+
+# Configuration
+toml = "0.8"
+
+# HTTP client (for LLM API calls)
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Docker interaction
+bollard = "0.18"
+
+# Git operations
+git2 = "0.20"
+
+# Template rendering (for agent prompts)
+minijinja = "2"
+
+# Terminal output
+console = "0.15"
+indicatif = "0.17"
+textwrap = "0.16"
+syntect = "5"
+
+# UUID generation (for task IDs)
+uuid = { version = "1", features = ["serde", "v4"] }
+
+# Timestamps
+chrono = { version = "0.4", features = ["serde"] }
+
+# File watching / globbing
+globset = "0.4"
+walkdir = "2"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async streaming for LLM responses
+futures = "0.3"
+tokio-stream = "0.1"
+async-trait = "0.1.89"
+dirs = "6.0.0"
+
+[dev-dependencies]
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+wiremock = "0.6"

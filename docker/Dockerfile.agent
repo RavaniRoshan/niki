@@ -1,0 +1,12 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Additional packages are installed at runtime via container exec
+# based on project requirements detected by the knowledge indexer
+
+WORKDIR /workspace
