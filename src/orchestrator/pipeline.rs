@@ -1,13 +1,11 @@
 use anyhow::Result;
-use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use crate::config::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
 use crate::sandbox::docker::{DockerSandbox, ActiveContainers};
 use crate::knowledge::indexer::index_project;
-use crate::artifacts::types::{AgentRole, Verdict, ReviewVerdict};
+use crate::artifacts::types::{AgentRole, Verdict};
 use crate::llm::provider::create_provider;
 
 pub struct Task {
@@ -26,6 +24,33 @@ pub struct PipelineResult {
     pub artifacts: Vec<(AgentRole, String)>,
 }
 
+/// Read the current on-disk contents of every file the spec wants to modify, so the
+/// Coder can produce a diff that edits the existing code instead of recreating it.
+fn build_current_files(spec: &crate::artifacts::types::TaskSpec, project_path: &Path) -> String {
+    let mut out = String::new();
+    for fc in &spec.files_to_modify {
+        let p = project_path.join(&fc.path);
+        match std::fs::read_to_string(&p) {
+            Ok(content) => {
+                out.push_str(&format!(
+                    "### File: {} (action: {:?})\n```\n{}\n```\n\n",
+                    fc.path, fc.action, content
+                ));
+            }
+            Err(_) => {
+                out.push_str(&format!(
+                    "### File: {} (does not exist yet — will be created)\n\n",
+                    fc.path
+                ));
+            }
+        }
+    }
+    if out.is_empty() {
+        out.push_str("(no files listed to modify)");
+    }
+    out
+}
+
 pub async fn execute_pipeline(
     task: &Task,
     config: &NikiConfig,
@@ -38,7 +63,7 @@ pub async fn execute_pipeline(
     let knowledge = index_project(&task.project_path, config)?;
     let knowledge_str = knowledge.render();
 
-    let mut state = super::state::PipelineState::new(task.id);
+    let state = super::state::PipelineState::new(task.id);
     let mut artifacts: Vec<(AgentRole, String)> = Vec::new();
 
     use crate::agents::run_agent;
@@ -120,6 +145,7 @@ pub async fn execute_pipeline(
     let mut review_feedback: Option<String> = None;
 
     while round < config.general.max_revision_rounds {
+        let current_files = build_current_files(&task_spec, &task.project_path);
         let (coder_json, coder_tk) = run_agent(
             AgentRole::Coder,
             coder_llm.as_ref(),
@@ -130,6 +156,7 @@ pub async fn execute_pipeline(
                 revision_context => review_feedback.clone(),
                 revision_round => round,
                 project_knowledge => knowledge_str.clone(),
+                current_files => current_files,
             },
             "schemas/code_diff.schema.json",
             display,
@@ -198,7 +225,9 @@ pub async fn execute_pipeline(
         round += 1;
     }
 
-    let final_diff = sandbox.get_diff().await?;
+    // The sandbox already applied the patch to the bind-mounted host project directory,
+    // so the host working tree holds the change. Read the diff from there.
+    let final_diff = crate::output::git::working_tree_diff(&task.project_path);
 
     sandbox.destroy().await?;
 

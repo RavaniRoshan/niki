@@ -1,11 +1,22 @@
 use anyhow::Result;
+use clap::Args;
 use std::env;
 use std::path::PathBuf;
 use crate::config::NikiConfig;
 use crate::orchestrator::state::TaskRecord;
 
-pub async fn handle() -> Result<()> {
-    let project_dir = env::current_dir()?;
+#[derive(Args)]
+pub struct StatusArgs {
+    /// Path to the project (default: current directory)
+    #[arg(short, long)]
+    pub project: Option<PathBuf>,
+}
+
+pub async fn handle(args: &StatusArgs) -> Result<()> {
+    let project_dir = match &args.project {
+        Some(p) => p.clone(),
+        None => env::current_dir()?,
+    };
     let config = NikiConfig::load(&project_dir).unwrap_or_default();
     let tasks_dir = project_dir.join(&config.general.output_dir).join("tasks");
 

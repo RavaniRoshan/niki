@@ -3,7 +3,6 @@ use minijinja::{Environment, context};
 use crate::orchestrator::pipeline::{Task, PipelineResult};
 use crate::config::NikiConfig;
 use std::fs;
-use std::path::Path;
 
 pub fn generate_report(
     task: &Task,

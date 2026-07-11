@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use minijinja::{Environment, context};
+use minijinja::Environment;
 use crate::llm::provider::{LlmProvider, CompletionRequest};
 use crate::artifacts::types::AgentRole;
 use crate::artifacts::validate::validate_artifact;

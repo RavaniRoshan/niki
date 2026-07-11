@@ -157,10 +157,13 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         });
     }
 
-    // Fail fast with a friendly message if Docker isn't reachable.
+    // Fail fast with a friendly message if Docker isn't reachable. The dry-run path
+    // never touches the sandbox, so it skips the daemon ping and works without Docker.
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| anyhow!("Docker error: {}", e))?;
-    docker.ping().await.map_err(|_| NikiError::DockerNotRunning)?;
+    if !args.dry_run {
+        docker.ping().await.map_err(|_| NikiError::DockerNotRunning)?;
+    }
 
     // Persist an initial "running" record.
     let mut record = TaskRecord::new(task.id, &task.description);

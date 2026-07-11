@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use toml;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -137,24 +137,46 @@ impl NikiConfig {
         self.providers.entry("openai".to_string()).or_default();
         self.providers.entry("google".to_string()).or_default();
 
+        // Prefer live gateway credentials (ANTHROPIC_AUTH_TOKEN / OPENROUTER_API_KEY)
+        // over any key hardcoded in niki.toml, which may be stale/revoked.
+        if let Some(p) = self.providers.get_mut("anthropic") {
+            if let Ok(token) = std::env::var("ANTHROPIC_AUTH_TOKEN") {
+                if !token.is_empty() {
+                    p.api_key = Some(token);
+                }
+            } else if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
+                if !key.is_empty() {
+                    p.api_key = Some(key);
+                }
+            }
+        }
+
         if let Ok(key) = std::env::var("NIKI_PROVIDERS_ANTHROPIC_API_KEY") {
             if let Some(p) = self.providers.get_mut("anthropic") {
-                p.api_key = Some(key);
+                if p.api_key.is_none() {
+                    p.api_key = Some(key);
+                }
             }
         }
         if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
             if let Some(p) = self.providers.get_mut("anthropic") {
-                if p.api_key.is_none() { p.api_key = Some(key); }
+                if p.api_key.is_none() {
+                    p.api_key = Some(key);
+                }
             }
         }
         if let Ok(key) = std::env::var("OPENAI_API_KEY") {
             if let Some(p) = self.providers.get_mut("openai") {
-                if p.api_key.is_none() { p.api_key = Some(key); }
+                if p.api_key.is_none() {
+                    p.api_key = Some(key);
+                }
             }
         }
         if let Ok(key) = std::env::var("GOOGLE_API_KEY") {
             if let Some(p) = self.providers.get_mut("google") {
-                if p.api_key.is_none() { p.api_key = Some(key); }
+                if p.api_key.is_none() {
+                    p.api_key = Some(key);
+                }
             }
         }
     }

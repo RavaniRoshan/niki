@@ -1,5 +1,5 @@
-use anyhow::{anyhow, Result};
-use std::path::{Path, PathBuf};
+use anyhow::Result;
+use std::path::Path;
 use std::fs;
 use walkdir::WalkDir;
 use git2::Repository;

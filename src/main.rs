@@ -14,7 +14,7 @@ enum Commands {
     /// Run a coding task through the NIKI pipeline
     Run(niki::cli::run::RunArgs),
     /// View the status of the current or most recent task
-    Status,
+    Status(niki::cli::status::StatusArgs),
     /// View the report for a completed task
     Report(niki::cli::report::ReportArgs),
     /// Manage configuration
@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
 
     match &cli.command {
         Commands::Run(args) => niki::cli::run::handle(args).await?,
-        Commands::Status => niki::cli::status::handle().await?,
+        Commands::Status(args) => niki::cli::status::handle(args).await?,
         Commands::Report(args) => niki::cli::report::handle(args).await?,
         Commands::Config { command } => niki::cli::config::handle(command).await?,
     }

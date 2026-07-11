@@ -27,7 +27,6 @@ pub struct StageState {
 pub struct AgenticDisplay {
     theme: Theme,
     term: Term,
-    term_width: u16,
     is_tty: bool,
     stages: Vec<StageState>,
     current_streaming_lines: usize,
@@ -46,11 +45,9 @@ impl AgenticDisplay {
     pub fn new() -> Self {
         let term = Term::stdout();
         let is_tty = term.is_term();
-        let term_width = term.size().1;
         Self {
             theme: Theme::new(),
             term,
-            term_width,
             is_tty,
             stages: vec![],
             current_streaming_lines: 0,

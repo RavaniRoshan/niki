@@ -1,6 +1,7 @@
 use anyhow::Result;
-use bollard::{Docker, container::{CreateContainerOptions, Config, StopContainerOptions, RemoveContainerOptions}, exec::{CreateExecOptions, StartExecResults}};
+use bollard::{Docker, container::{CreateContainerOptions, Config, RemoveContainerOptions}, exec::{CreateExecOptions, StartExecResults}};
 use futures::StreamExt;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -40,6 +41,15 @@ impl DockerSandbox {
 
         let binds = vec![format!("{}:{}", source_repo.display(), workspace_path.display())];
 
+        // Run the container as the host user's uid:gid so files it writes into the
+        // bind-mounted project directory keep the host owner. Otherwise the container
+        // (root) rewrites the files as root and the host-side git operations later fail
+        // with "Permission denied".
+        let meta = std::fs::metadata(&source_repo).ok();
+        let uid = meta.as_ref().map(|m| m.uid()).unwrap_or(0);
+        let gid = meta.as_ref().map(|m| m.gid()).unwrap_or(0);
+        let user = format!("{}:{}", uid, gid);
+
         let create_opts = CreateContainerOptions {
             name: container_name.as_str(),
             platform: None,
@@ -51,6 +61,7 @@ impl DockerSandbox {
 
         let container_config = Config {
             image: Some(config.base_image.clone()),
+            user: Some(user),
             tty: Some(true),
             cmd: Some(vec!["tail".to_string(), "-f".to_string(), "/dev/null".to_string()]),
             host_config: Some(host_config),
@@ -92,6 +103,14 @@ impl DockerSandbox {
     async fn pull_image(docker: &Docker, image: &str) -> Result<()> {
         use bollard::image::CreateImageOptions;
         use futures::StreamExt as _;
+
+        // Locally-built images (e.g. our pre-baked `niki-sandbox:24.04`) are not on any
+        // registry. `create_image` always contacts Docker Hub, so pulling them 404s. Skip
+        // the pull when the image already exists locally.
+        if docker.inspect_image(image).await.is_ok() {
+            tracing::debug!("Image {image} present locally, skipping pull");
+            return Ok(());
+        }
 
         tracing::debug!("Pulling image {image}");
         let mut stream = docker.create_image(
@@ -174,19 +193,40 @@ impl DockerSandbox {
         Ok(())
     }
 
-    pub async fn apply_patch(&self, patch: &str, host_workspace: &Path) -> Result<()> {
-        let patch_path = host_workspace.join(".niki-tmp.patch");
-        std::fs::write(&patch_path, patch)?;
+    /// Normalize an LLM-generated diff before writing it to disk: unify CRLF→LF
+    /// line endings and guarantee a trailing newline. `git apply` treats a patch
+    /// that ends mid-line (no final newline) as a "corrupt patch" at the last
+    /// context line, which silently breaks the Coder's output.
+    fn normalize_patch(patch: &str) -> String {
+        let mut s = patch.replace("\r\n", "\n");
+        if !s.ends_with('\n') {
+            s.push('\n');
+        }
+        s
+    }
 
-        let res = self.exec(&["git", "apply", ".niki-tmp.patch"]).await;
+    pub async fn apply_patch(&self, patch: &str, host_workspace: &Path) -> Result<()> {
+        // The host workspace is bind-mounted at /workspace inside the container, so the
+        // patch we write to `host_workspace` is visible there as /workspace/.niki-tmp.patch.
+        // Run git from /workspace (the repo root) or it won't find the repo or the patch.
+        let patch_path = host_workspace.join(".niki-tmp.patch");
+        // Normalize: unify line endings and guarantee a trailing newline. LLM-generated
+        // diffs often lack a final newline, which makes `git apply` reject the last
+        // context line as "corrupt patch".
+        let normalized = Self::normalize_patch(patch);
+        std::fs::write(&patch_path, normalized)?;
+
+        let res = self.exec(&["sh", "-c", "cd /workspace && git apply .niki-tmp.patch"]).await;
 
         let _ = std::fs::remove_file(&patch_path);
 
         match res {
             Ok(output) if output.exit_code == 0 => Ok(()),
             Ok(output) => {
-                // If git apply fails, try patch -p1
-                let patch_res = self.exec(&["patch", "-p1", "-i", ".niki-tmp.patch"]).await;
+                // If git apply fails, try patch -p1 as a fallback.
+                let patch_res = self
+                    .exec(&["sh", "-c", "cd /workspace && patch -p1 -i .niki-tmp.patch"])
+                    .await;
                 if let Ok(p_out) = patch_res {
                     if p_out.exit_code == 0 {
                         return Ok(());
@@ -199,7 +239,8 @@ impl DockerSandbox {
     }
 
     pub async fn get_diff(&self) -> Result<String> {
-        let output = self.exec(&["git", "diff"]).await?;
+        // Run from /workspace so `git diff` sees the repository.
+        let output = self.exec(&["sh", "-c", "cd /workspace && git diff"]).await?;
         Ok(output.stdout)
     }
 
