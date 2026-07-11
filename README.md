@@ -55,6 +55,20 @@ niki run "Add a GET /health endpoint returning { status: 'ok', uptime }" --proje
 
 Every run leaves behind a `niki/<id>` branch, a `changes.patch`, a human-readable `report.md`, and per-agent JSON artifacts — the entire decision trail is inspectable.
 
+## About
+
+> **Stop babysitting your AI. Let agents debate so you don't have to.**
+
+Today's AI coding tools — Claude Code, Cursor, Devin — run on a **single agent** in one long conversation, which brings three recurring failures:
+
+- **Confirmation bias** — one agent never truly challenges its own assumptions.
+- **Context drift** — output quality degrades as the conversation grows.
+- **The babysitting tax** — you must constantly steer, correct, and re-verify its work.
+
+NIKI takes a different path. Work is split across **independent agents that can't influence one another** — isolated at both the **filesystem** layer (each runs in its own Docker container against a copy of the repo) and the **context** layer (they share no history; they exchange only typed artifacts). Independence is the whole point: it's what removes the bias a single agent can't escape. You describe the task, the agents debate their way to a result, and you review a finished branch.
+
+**Who it's for** — solo developers, indie hackers, and small teams (2–5) who already use AI coding tools but are tired of the prompt-response loop, and want to delegate complex, multi-file tasks and review a polished result instead.
+
 ## Why NIKI
 
 |   |   |
@@ -198,5 +212,5 @@ Licensed under the **Business Source License 1.1 (BUSL-1.1)**. See [`Cargo.toml`
 ---
 
 <div align="center">
-<sub>Built in Rust 🦀 · Runs anywhere Docker does 🐳</sub>
+<sub>The name <b>NIKI</b> carries personal meaning to its founder. · Built in Rust 🦀 · Runs anywhere Docker does 🐳</sub>
 </div>
