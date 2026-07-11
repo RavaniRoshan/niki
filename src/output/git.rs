@@ -21,9 +21,26 @@ fn run_git(repo_path: &Path, args: &[&str]) -> Result<()> {
 /// Capture the current working-tree diff on the host. The sandbox applies the Coder's
 /// patch to the bind-mounted project directory, so the host working tree already holds
 /// the change — we read it from there rather than from inside the container.
+///
+/// `git diff` only reports changes to *tracked* files, so a brand-new (untracked) file
+/// the Coder created would be invisible and `changes.patch` would come back empty. We
+/// mark new files with intent-to-add (`-N`) first, which makes them show up in the diff
+/// as a normal `@@ -0,0 +1,N @@` hunk without actually staging their content.
+///
+/// The diff is restricted to real source changes: the `.niki` working directory
+/// (task artifacts) and `niki.toml` (may contain secrets) are excluded, mirroring the
+/// files `create_branch_and_commit` strips from the committed branch. This keeps the
+/// published `changes.patch` free of internal state and secrets.
 pub fn working_tree_diff(repo_path: &Path) -> String {
+    let _ = run_git(repo_path, &["add", "-A", "-N"]);
     let out = std::process::Command::new("git")
-        .args(["diff"])
+        .args([
+            "diff",
+            "--",
+            ".",
+            ":(exclude).niki",
+            ":(exclude)niki.toml",
+        ])
         .current_dir(repo_path)
         .output();
     match out {
