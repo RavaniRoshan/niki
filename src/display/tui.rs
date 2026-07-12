@@ -1,4 +1,4 @@
-//! Rich terminal TUI (opt-in via `niki run --tui`), styled after the Claude Code
+//! Rich terminal TUI (opt-in via `niki run --tui`), styled after a code-assistant
 //! CLI: a flowing vertical transcript (not bordered panels) with `⏺` action
 //! bullets, `⎿` nested result connectors, an animated sparkle spinner carrying
 //! elapsed time + token counts, and a bottom `⏵⏵` mode/status line.
@@ -29,7 +29,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Terminal;
 
-// ── Claude-Code dark palette ────────────────────────────────────────────────
+// ── Agentic dark palette ────────────────────────────────────────────────
 const FG: Color = Color::Rgb(230, 237, 243); // primary text
 const OK: Color = Color::Rgb(78, 186, 101); // success green
 const ERR: Color = Color::Rgb(255, 107, 128); // error red
@@ -44,12 +44,12 @@ const DEL_BG: Color = Color::Rgb(122, 41, 54);
 const BULLET: &str = "⏺"; // action / stage marker (U+23FA)
 const CONNECT: &str = "⎿"; // nested result connector (U+23BF)
 
-/// Sparkle spinner frames, animated ~one step per render tick (~100ms). Mirrors
-/// the Claude Code "working" pulse.
+/// Sparkle spinner frames, animated ~one step per render tick (~100ms),
+/// echoing a code assistant's "working" pulse.
 const SPINNER: &[&str] = &["✶", "✷", "✸", "✹", "✺", "✹", "✸", "✷"];
 
 /// Gerund words the spinner cycles through while a stage runs, matching
-/// Claude Code's playful status line.
+/// a code assistant's playful status line.
 const GERUNDS: &[&str] = &[
     "Thinking", "Pondering", "Herding", "Sketching", "Sauntering", "Undulating",
     "Scampering", "Brewing", "Combobulating", "Shenaniganing", "Crafting", "Reasoning",
@@ -509,7 +509,7 @@ fn render(frame: &mut ratatui::Frame, view: &TuiView) {
     };
     frame.render_widget(Paragraph::new(spinner_line), chunks[2]);
 
-    // ── Mode line (Claude Code style) ──────────────────────────────────────
+    // ── Mode line (agentic style) ──────────────────────────────────────
     let (tot_in2, tot_out2, tot_cost, _ms2) = view.totals();
     let cost_str = if tot_cost > 0.0 {
         format!(" · ${:.4}", tot_cost)

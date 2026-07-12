@@ -176,7 +176,7 @@ pub async fn index_project(path: &Path, config: &NikiConfig) -> Result<ProjectKn
                 }
             }
 
-            if ["AGENTS.md", "CLAUDE.md", ".cursorrules", ".editorconfig"].contains(&name.as_str()) {
+            if ["AGENTS.md", ".cursorrules", ".editorconfig"].contains(&name.as_str()) {
                 if let Ok(content) = fs::read_to_string(entry.path()) {
                     skills_files.push(SkillsFile {
                         path: rel_path.to_string_lossy().to_string(),

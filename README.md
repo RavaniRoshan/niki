@@ -59,7 +59,7 @@ Every run leaves behind a `niki/<id>` branch, a `changes.patch`, a human-readabl
 
 > **Stop babysitting your AI. Let agents debate so you don't have to.**
 
-Today's AI coding tools — Claude Code, Cursor, Devin — run on a **single agent** in one long conversation, which brings three recurring failures:
+Today's AI coding tools — Cursor, Devin — run on a **single agent** in one long conversation, which brings three recurring failures:
 
 - **Confirmation bias** — one agent never truly challenges its own assumptions.
 - **Context drift** — output quality degrades as the conversation grows.
@@ -263,12 +263,12 @@ docker/            # sandbox image (Dockerfile) + scripts/
 - [x] **Parallel coder agents + synthesis** — N Coders explore the spec in isolated worktrees; a Synthesizer merges the best result (`[parallel]`).
 - [x] **Security Auditor agent** — dedicated adversarial vulnerability pass (`[security]`) after the Reviewer.
 - [x] **External source ingestion** — project doc globs + external URLs as agent context via `[knowledge]`.
-- [x] **Rich terminal TUI** — `ratatui` panels, restyled as a Claude-Code-like transcript (`niki run --tui`).
+- [x] **Rich terminal TUI** — `ratatui` panels, restyled as an agentic transcript (`niki run --tui`).
 - [x] **Dashboard** — static HTML diff viewer with inline Reviewer/Security annotations (`niki dashboard`).
 - [x] **Alternative sandboxing** — `git worktree` isolation + a `Sandbox` trait (Docker / Worktree / Cloud backends).
 - [ ] **Cloud execution (beta)** — the `cloud` backend is a drop-in seam gated behind `NIKI_CLOUD_ENDPOINT`; full infra ships later.
 - [x] **Per-agent model recommendations** — `niki recommend` with cost/quality tradeoffs per role.
-- [x] **Claude-Code-style terminal UI** — ⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line.
+- [x] **Agentic terminal UI** — ⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line.
 
 ### Full version (later)
 - [ ] Living memory · pipeline marketplace · dynamic topology · visual pipeline builder

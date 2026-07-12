@@ -21,7 +21,7 @@
 | CLI streaming output **+ non-TTY log fallback** | ✅ | `is_tty` branch in `src/display/agent_stream.rs` |
 | Graceful Ctrl+C shutdown (container cleanup, exit 130) | ✅ | `src/cli/run.rs` + `ActiveContainers` registry |
 | Project knowledge indexing (tree, langs, deps, git history) | ✅ | `src/knowledge/indexer.rs` |
-| **Skills-file parsing** (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.editorconfig`) | ✅ | Already implemented — *ahead of the original MVP plan* |
+| **Skills-file parsing** (`AGENTS.md`, `.cursorrules`, `.editorconfig`) | ✅ | Already implemented — *ahead of the original MVP plan* |
 
 ## Phase 1 — MVP (Months 2–3)
 
@@ -48,12 +48,12 @@ Ordered roughly by dependency. Items lower in the list build on ones above.
 | 3 | **Parallel coder agents + synthesis** — N Coders explore the spec (each in its own git worktree); a Synthesizer merges | ✅ | — | M–L |
 | 4 | **Security Auditor agent** — dedicated, adversarial vulnerability pass (enabled via `[security]`) | ✅ | — | M |
 | 5 | **External source ingestion** — READMEs, linked docs, wikis, issue content into the knowledge layer (extends `index_project`, uses the currently-unused `_config` hook) | ✅ | — | M |
-| 6 | **Rich terminal TUI** — `ratatui` panels over the `DisplayEvent` channel, restyled as a **Claude-Code-like transcript** (⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line) | ✅ | — | L |
+| 6 | **Rich terminal TUI** — `ratatui` panels over the `DisplayEvent` channel, restyled as an **agentic transcript** (⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line) | ✅ | — | L |
 | 7 | **Dashboard: static HTML diff viewer with inline Reviewer/Security annotations** | ✅ | — | M |
 | 8 | **Alternative sandboxing** — lightweight `git worktree` isolation + `Sandbox` trait abstraction (Docker / Worktree / Cloud backends) | ✅ | Cloud microVMs later | M |
 | 9 | **Cloud execution (beta)** — `cloud` backend implements the `Sandbox` trait (drop-in seam); gated behind `NIKI_CLOUD_ENDPOINT` until infra ships | 🟡 | Revenue tier | XL |
 | 10 | **Per-agent model recommendations** — `niki recommend` with cost/quality tradeoffs per role | ✅ | Depends on #1 | M |
-| 11 | **Claude-Code-style terminal UI** — replicate Claude Code's posture, glyphs, spinner and mode line so NIKI's multi-agent flow mirrors a sub-agent workflow | ✅ | — | M |
+| 11 | **Agentic terminal UI** — replicate a sub-agent workflow's posture, glyphs, spinner and mode line so NIKI's multi-agent flow mirrors that workflow | ✅ | — | M |
 
 ### v2 — what shipped (as of this commit)
 
@@ -65,7 +65,7 @@ passing unit/integration tests**; cloud execution (#9) remains a beta scaffold.
 - **Parallel coders + synthesis** — `[parallel]` runs N Coders in isolated git worktrees; a Synthesizer reconciles their diffs.
 - **Security Auditor** — `[security]` injects a dedicated adversarial review pass after the Reviewer.
 - **External source ingestion** — `[knowledge]` pulls project doc globs and external URLs into agent context.
-- **Rich terminal TUI / Claude-Code-style UI** — `--tui` renders a Claude-Code-like transcript (⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line).
+- **Rich terminal TUI / agentic UI** — `--tui` renders an agentic transcript (⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line).
 - **Dashboard** — `niki dashboard` produces a static HTML diff viewer with inline Reviewer/Security annotations.
 - **Alternative sandboxing** — a `Sandbox` trait with Docker, git-worktree, and cloud backends (`--backend`).
 - **Per-agent recommendations** — `niki recommend` reports cost/quality tradeoffs per role.
@@ -92,7 +92,7 @@ layer proves standalone value.*
 
 1. **Built-in metrics** (Phase 1/v2 #1) — coverage, complexity, review-pass rate, disagreement points.
 2. **Benchmark campaign** — SWE-bench: multi-agent (NIKI) vs. single-agent.
-3. **Real-world case studies** — blind human review, NIKI vs. Claude Code vs. Cursor.
+3. **Real-world case studies** — blind human review, NIKI vs. Cursor.
 
 ---
 
