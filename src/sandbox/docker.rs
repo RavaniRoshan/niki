@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use bollard::{Docker, container::{CreateContainerOptions, Config, RemoveContainerOptions}, exec::{CreateExecOptions, StartExecResults}};
 use futures::StreamExt;
 use std::os::unix::fs::MetadataExt;
@@ -8,6 +9,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 use crate::artifacts::types::AgentRole;
 use crate::config::DockerConfig;
+use crate::sandbox::Sandbox;
 
 /// Shared registry of containers currently owned by an in-flight pipeline.
 /// The Ctrl+C handler drains this list to clean up dangling containers.
@@ -257,5 +259,24 @@ impl DockerSandbox {
         };
         self.docker.remove_container(&self.container_id, Some(opts)).await?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Sandbox for DockerSandbox {
+    async fn ensure_tools(&self, tools: &[String]) -> Result<()> {
+        DockerSandbox::ensure_tools(self, tools).await
+    }
+    async fn apply_patch(&self, patch: &str, host_workspace: &Path) -> Result<()> {
+        DockerSandbox::apply_patch(self, patch, host_workspace).await
+    }
+    async fn get_diff(&self) -> Result<String> {
+        DockerSandbox::get_diff(self).await
+    }
+    async fn exec(&self, cmd: &[&str]) -> Result<ExecOutput> {
+        DockerSandbox::exec(self, cmd).await
+    }
+    async fn destroy(&self) -> Result<()> {
+        DockerSandbox::destroy(self).await
     }
 }

@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 use toml;
 use crate::artifacts::types::AgentRole;
+use crate::sandbox::SandboxBackend;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NikiConfig {
@@ -24,6 +25,15 @@ pub struct NikiConfig {
     /// Optional extra context ingestion: project doc files and external URLs.
     #[serde(default)]
     pub knowledge: KnowledgeConfig,
+    /// Optional independent security audit pass (#4). When enabled, a
+    /// SecurityAuditor stage is injected after the Reviewer.
+    #[serde(default)]
+    pub security: SecurityConfig,
+    /// Optional parallel-coder mode (#3). When enabled with `coder_count > 1`,
+    /// N coder agents run concurrently (each isolated in its own git worktree),
+    /// then a Synthesizer reconciles their diffs into one change.
+    #[serde(default)]
+    pub parallel: ParallelConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -41,8 +51,57 @@ pub struct KnowledgeConfig {
     pub max_source_chars: usize,
 }
 
+/// Configuration for the optional independent security audit pass (#4).
+///
+/// When `enabled`, the pipeline injects a `SecurityAuditor` stage (driven by
+/// `provider`/`model`, defaulting to the configured `security_auditor` agent)
+/// after the Reviewer. The audit verdict is recorded as an artifact but does not
+/// gate the revision loop by default.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SecurityConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Optional provider override; defaults to `[agents] security_auditor.provider`.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Optional model override; defaults to `[agents] security_auditor.model`.
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// Configuration for the optional parallel-coder mode (#3).
+///
+/// When `enabled` with `coder_count > 1`, the pipeline runs that many Coder
+/// agents concurrently — each isolated in its own git worktree so their changes
+/// never collide — then a `Synthesizer` stage reconciles the diffs into one
+/// change the rest of the pipeline consumes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParallelConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_coder_count")]
+    pub coder_count: u32,
+}
+
+impl Default for ParallelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            coder_count: default_coder_count(),
+        }
+    }
+}
+
+fn default_coder_count() -> u32 {
+    2
+}
+
 fn default_max_source_chars() -> usize {
     8000
+}
+
+fn default_output_dir() -> String {
+    ".niki".to_string()
 }
 
 /// A user-defined, ordered pipeline of agent stages.
@@ -73,6 +132,7 @@ pub struct PipelineStageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
     pub max_revision_rounds: u32,
+    #[serde(default = "default_output_dir")]
     pub output_dir: String,
 }
 
@@ -102,6 +162,12 @@ pub struct AgentsConfig {
     pub tester: AgentConfig,
     #[serde(default = "default_anthropic_agent")]
     pub reviewer: AgentConfig,
+    /// Reconciles parallel coder diffs into one coherent change (#3).
+    #[serde(default = "default_anthropic_agent")]
+    pub synthesizer: AgentConfig,
+    /// Independent security review pass (#4).
+    #[serde(default = "default_anthropic_agent")]
+    pub security_auditor: AgentConfig,
 }
 
 impl Default for AgentsConfig {
@@ -111,6 +177,8 @@ impl Default for AgentsConfig {
             coder: default_anthropic_agent(),
             tester: default_openai_agent(),
             reviewer: default_anthropic_agent(),
+            synthesizer: default_anthropic_agent(),
+            security_auditor: default_anthropic_agent(),
         }
     }
 }
@@ -141,6 +209,10 @@ pub struct DockerConfig {
     pub extra_packages: Vec<String>,
     pub memory_limit: String,
     pub cpu_limit: f32,
+    /// Sandbox backend: `docker` (container, default), `worktree` (git worktree +
+    /// local process, no Docker), or `cloud` (NIKI infra, beta).
+    #[serde(default)]
+    pub backend: SandboxBackend,
 }
 
 impl Default for DockerConfig {
@@ -150,6 +222,7 @@ impl Default for DockerConfig {
             extra_packages: vec!["nodejs".into(), "npm".into(), "python3".into()],
             memory_limit: "2g".to_string(),
             cpu_limit: 2.0,
+            backend: SandboxBackend::Docker,
         }
     }
 }
@@ -206,6 +279,24 @@ impl NikiConfig {
         self.knowledge.urls.extend(other.knowledge.urls);
         if other.knowledge.max_source_chars != default_max_source_chars() {
             self.knowledge.max_source_chars = other.knowledge.max_source_chars;
+        }
+
+        // Security audit is an explicit toggle: if the other config enabled it,
+        // adopt its enabled flag and any provider/model overrides.
+        if other.security.enabled {
+            self.security.enabled = true;
+            if let Some(p) = other.security.provider {
+                self.security.provider = Some(p);
+            }
+            if let Some(m) = other.security.model {
+                self.security.model = Some(m);
+            }
+        }
+
+        // Parallel-coder mode is also an explicit toggle.
+        if other.parallel.enabled {
+            self.parallel.enabled = true;
+            self.parallel.coder_count = other.parallel.coder_count;
         }
     }
 
@@ -319,9 +410,62 @@ fn apply_env_model_to_agents(agents: &mut AgentsConfig, provider: &str, model: &
         &mut agents.coder,
         &mut agents.tester,
         &mut agents.reviewer,
+        &mut agents.synthesizer,
+        &mut agents.security_auditor,
     ] {
         if a.provider == provider && a.model == default_model {
             a.model = model.to_string();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_has_new_agents_and_sections() {
+        let c = NikiConfig::default();
+        assert!(c.agents.synthesizer.provider.len() > 0);
+        assert!(c.agents.security_auditor.provider.len() > 0);
+        assert!(!c.security.enabled);
+        assert_eq!(c.parallel.coder_count, 2);
+    }
+
+    #[test]
+    fn toml_round_trips_new_sections() {
+        let toml = r#"
+[general]
+max_revision_rounds = 5
+
+[security]
+enabled = true
+
+[parallel]
+enabled = true
+coder_count = 4
+
+[agents.security_auditor]
+provider = "anthropic"
+model = "claude-opus-4"
+"#;
+        let c: NikiConfig = crate::config::types::toml::from_str(toml).unwrap();
+        assert!(c.security.enabled);
+        assert!(c.parallel.enabled);
+        assert_eq!(c.parallel.coder_count, 4);
+        assert_eq!(c.agents.security_auditor.model, "claude-opus-4");
+    }
+
+    #[test]
+    fn merge_toggles_override() {
+        let mut base = NikiConfig::default();
+        let ov: NikiConfig = toml::from_str(
+            "[security]\nenabled = true\n[parallel]\nenabled = true\ncoder_count = 3\n",
+        )
+        .unwrap();
+        base.merge(ov);
+        assert!(base.security.enabled);
+        assert!(base.parallel.enabled);
+        assert_eq!(base.parallel.coder_count, 3);
     }
 }

@@ -1,9 +1,12 @@
-//! Rich terminal TUI (opt-in via `niki run --tui`).
+//! Rich terminal TUI (opt-in via `niki run --tui`), styled after the Claude Code
+//! CLI: a flowing vertical transcript (not bordered panels) with `⏺` action
+//! bullets, `⎿` nested result connectors, an animated sparkle spinner carrying
+//! elapsed time + token counts, and a bottom `⏵⏵` mode/status line.
 //!
 //! The pipeline runs on the async runtime and pushes [`DisplayEvent`]s over a
-//! channel; a dedicated OS thread owns the `ratatui` terminal and renders panels
-//! for each stage. The TUI is strictly a viewer: it never blocks the pipeline,
-//! and on exit (channel closed, `q`/`Esc`, or panic) it restores the terminal.
+//! channel; a dedicated OS thread owns the `ratatui` terminal and renders the
+//! transcript. The TUI is strictly a viewer: it never blocks the pipeline, and
+//! on exit (channel closed, `q`/`Esc`, or panic) it restores the terminal.
 //!
 //! It must not swallow Ctrl+C — the SIGINT handler lives in `cli/run.rs` and uses
 //! async signal handling, which is independent of the terminal's raw mode.
@@ -11,7 +14,7 @@
 use std::io;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::artifacts::types::AgentRole;
 use ratatui::backend::CrosstermBackend;
@@ -23,8 +26,34 @@ use ratatui::crossterm::execute;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Terminal;
+
+// ── Claude-Code dark palette ────────────────────────────────────────────────
+const FG: Color = Color::Rgb(230, 237, 243); // primary text
+const OK: Color = Color::Rgb(78, 186, 101); // success green
+const ERR: Color = Color::Rgb(255, 107, 128); // error red
+const WARN: Color = Color::Rgb(255, 193, 7); // amber
+const BLUE: Color = Color::Rgb(177, 185, 249); // permission/accent
+const SUBTLE: Color = Color::Rgb(120, 128, 140); // secondary text
+const INACTIVE: Color = Color::Rgb(110, 118, 129); // pending/dim
+const ADD_BG: Color = Color::Rgb(34, 92, 43);
+const DEL_BG: Color = Color::Rgb(122, 41, 54);
+
+// Signature glyphs.
+const BULLET: &str = "⏺"; // action / stage marker (U+23FA)
+const CONNECT: &str = "⎿"; // nested result connector (U+23BF)
+
+/// Sparkle spinner frames, animated ~one step per render tick (~100ms). Mirrors
+/// the Claude Code "working" pulse.
+const SPINNER: &[&str] = &["✶", "✷", "✸", "✹", "✺", "✹", "✸", "✷"];
+
+/// Gerund words the spinner cycles through while a stage runs, matching
+/// Claude Code's playful status line.
+const GERUNDS: &[&str] = &[
+    "Thinking", "Pondering", "Herding", "Sketching", "Sauntering", "Undulating",
+    "Scampering", "Brewing", "Combobulating", "Shenaniganing", "Crafting", "Reasoning",
+];
 
 /// Events emitted by the pipeline/display layer for the TUI to render.
 #[derive(Debug, Clone)]
@@ -47,10 +76,12 @@ pub enum DisplayEvent {
 
 fn role_color(role: AgentRole) -> Color {
     match role {
-        AgentRole::Planner => Color::Green,
-        AgentRole::Coder => Color::Blue,
-        AgentRole::Tester => Color::Magenta,
-        AgentRole::Reviewer => Color::Yellow,
+        AgentRole::Planner => Color::Rgb(126, 178, 255),      // soft blue
+        AgentRole::Coder => Color::Rgb(198, 160, 246),        // lavender
+        AgentRole::Tester => OK,                              // green
+        AgentRole::Reviewer => WARN,                          // amber
+        AgentRole::Synthesizer => Color::Rgb(129, 200, 190),  // teal
+        AgentRole::SecurityAuditor => ERR,                    // red
     }
 }
 
@@ -60,99 +91,112 @@ fn role_name(role: AgentRole) -> &'static str {
         AgentRole::Coder => "Coder",
         AgentRole::Tester => "Tester",
         AgentRole::Reviewer => "Reviewer",
+        AgentRole::Synthesizer => "Synthesizer",
+        AgentRole::SecurityAuditor => "Security Auditor",
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, PartialEq)]
+enum Status {
+    Running,
+    Done,
+    Failed,
+}
+
 struct StageView {
     role: AgentRole,
-    status: String,
+    status: Status,
+    /// Last few lines of live streaming output (bounded).
     stream: String,
     input_tokens: u32,
     output_tokens: u32,
     cost_usd: f64,
     latency_ms: u64,
     summary: Vec<String>,
+    /// When this stage started running (for a live elapsed timer).
+    start: Option<Instant>,
 }
 
 struct TuiView {
     description: String,
     stages: Vec<StageView>,
-    log: Vec<String>,
+    /// Free-form transcript notes (revisions, failures) appended in order.
+    notes: Vec<(String, Color)>,
     finished: bool,
+    /// Advances once per render tick to animate the spinner.
+    tick: usize,
 }
 
 impl TuiView {
     fn new(description: String) -> Self {
-        let stages = vec![
-            StageView {
-                role: AgentRole::Planner,
-                status: "pending".into(),
-                stream: String::new(),
-                input_tokens: 0,
-                output_tokens: 0,
-                cost_usd: 0.0,
-                latency_ms: 0,
-                summary: Vec::new(),
-            },
-            StageView {
-                role: AgentRole::Coder,
-                status: "pending".into(),
-                stream: String::new(),
-                input_tokens: 0,
-                output_tokens: 0,
-                cost_usd: 0.0,
-                latency_ms: 0,
-                summary: Vec::new(),
-            },
-            StageView {
-                role: AgentRole::Tester,
-                status: "pending".into(),
-                stream: String::new(),
-                input_tokens: 0,
-                output_tokens: 0,
-                cost_usd: 0.0,
-                latency_ms: 0,
-                summary: Vec::new(),
-            },
-            StageView {
-                role: AgentRole::Reviewer,
-                status: "pending".into(),
-                stream: String::new(),
-                input_tokens: 0,
-                output_tokens: 0,
-                cost_usd: 0.0,
-                latency_ms: 0,
-                summary: Vec::new(),
-            },
-        ];
         Self {
             description,
-            stages,
-            log: Vec::new(),
+            // Stages are created lazily as events arrive, so arbitrary role
+            // topologies (parallel coders + Synthesizer, SecurityAuditor, …)
+            // render without a hardcoded stage list.
+            stages: Vec::new(),
+            notes: Vec::new(),
             finished: false,
+            tick: 0,
         }
     }
 
     fn stage_mut(&mut self, role: AgentRole) -> &mut StageView {
-        self.stages.iter_mut().find(|s| s.role == role).unwrap()
+        if !self.stages.iter().any(|s| s.role == role && s.status == Status::Running) {
+            // Reuse a prior view only if it's the active one; otherwise start a
+            // fresh entry so a re-run (revision round) reads as a new action.
+            if let Some(idx) = self
+                .stages
+                .iter()
+                .position(|s| s.role == role && s.status == Status::Running)
+            {
+                return &mut self.stages[idx];
+            }
+        }
+        if let Some(idx) = self
+            .stages
+            .iter()
+            .rposition(|s| s.role == role && s.status == Status::Running)
+        {
+            return &mut self.stages[idx];
+        }
+        self.stages.push(StageView {
+            role,
+            status: Status::Running,
+            stream: String::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: 0.0,
+            latency_ms: 0,
+            summary: Vec::new(),
+            start: None,
+        });
+        self.stages.last_mut().unwrap()
     }
 
     fn apply(&mut self, ev: DisplayEvent) {
         match ev {
             DisplayEvent::Banner { description } => self.description = description,
             DisplayEvent::StageStart { role } => {
-                let s = self.stage_mut(role);
-                s.status = "running".into();
-                s.stream.clear();
-                s.summary.clear();
+                // Always begin a fresh action entry so revision rounds stack.
+                self.stages.push(StageView {
+                    role,
+                    status: Status::Running,
+                    stream: String::new(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cost_usd: 0.0,
+                    latency_ms: 0,
+                    summary: Vec::new(),
+                    start: Some(Instant::now()),
+                });
             }
             DisplayEvent::StageToken { role, token } => {
                 let s = self.stage_mut(role);
                 s.stream.push_str(&token);
-                // Bound the live buffer so memory/rendering stay cheap.
-                if s.stream.len() > 4000 {
-                    let drop = s.stream.len() - 4000;
+                // Keep only the tail so memory/rendering stay cheap.
+                if s.stream.len() > 2000 {
+                    let drop = s.stream.len() - 2000;
                     s.stream.drain(..drop);
                 }
             }
@@ -165,26 +209,25 @@ impl TuiView {
                 latency_ms,
             } => {
                 let s = self.stage_mut(role);
-                s.status = "done".into();
+                s.status = Status::Done;
                 s.summary = summary;
                 s.input_tokens = input_tokens;
                 s.output_tokens = output_tokens;
                 s.cost_usd = cost_usd;
                 s.latency_ms = latency_ms;
+                s.stream.clear();
             }
             DisplayEvent::StageFailed { role, error } => {
                 let s = self.stage_mut(role);
-                s.status = "failed".into();
+                s.status = Status::Failed;
                 s.summary = vec![error];
+                s.stream.clear();
             }
             DisplayEvent::Revision { round, max, issues } => {
-                let mut line = format!("⟳ Revision {} of {} requested:", round, max);
+                self.notes
+                    .push((format!("Revision {} of {} requested", round, max), WARN));
                 for i in &issues {
-                    line.push_str(&format!("  • {}", i));
-                }
-                self.log.push(line);
-                if self.log.len() > 30 {
-                    self.log.remove(0);
+                    self.notes.push((format!("  {}", i), SUBTLE));
                 }
             }
             DisplayEvent::Final => self.finished = true,
@@ -203,6 +246,10 @@ impl TuiView {
             ms += s.latency_ms;
         }
         (in_t, out_t, cost, ms)
+    }
+
+    fn active(&self) -> Option<&StageView> {
+        self.stages.iter().find(|s| s.status == Status::Running)
     }
 }
 
@@ -244,6 +291,7 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String) {
     let mut view = TuiView::new(description);
 
     loop {
+        view.tick = view.tick.wrapping_add(1);
         let v = &view;
         if terminal.draw(|f| render(f, v)).is_err() {
             break;
@@ -251,7 +299,7 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String) {
 
         // Handle a keypress (non-blocking) — q/Esc leaves the view early; the
         // pipeline keeps running underneath.
-        if event::poll(Duration::from_millis(50)).unwrap_or(false) {
+        if event::poll(Duration::from_millis(40)).unwrap_or(false) {
             if let Ok(Event::Key(key)) = event::read() {
                 if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
                     break;
@@ -259,105 +307,284 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String) {
             }
         }
 
-        match rx.recv_timeout(Duration::from_millis(80)) {
-            Ok(ev) => view.apply(ev),
+        // ~100ms cadence keeps the spinner lively without busy-looping.
+        match rx.recv_timeout(Duration::from_millis(60)) {
+            Ok(ev) => {
+                view.apply(ev);
+                // Drain any other queued events this tick.
+                while let Ok(ev) = rx.try_recv() {
+                    view.apply(ev);
+                }
+            }
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break,
         }
     }
 
+    view.finished = true;
     let _ = terminal.draw(|f| render(f, &view));
+}
+
+/// Last non-empty line of a streaming buffer, trimmed for the transcript.
+fn last_line(s: &str) -> &str {
+    s.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim_end()
+}
+
+/// During live streaming, color any trailing diff context so an agent mid-edit
+/// shows the same green/red inline diffs as the dashboard.
+fn stream_line_style(line: &str) -> Style {
+    if line.starts_with('+') {
+        Style::default().fg(OK).bg(ADD_BG)
+    } else if line.starts_with('-') {
+        Style::default().fg(ERR).bg(DEL_BG)
+    } else {
+        Style::default().fg(SUBTLE)
+    }
+}
+
+fn fmt_tokens(n: u32) -> String {
+    if n >= 1000 {
+        format!("{:.1}k", n as f64 / 1000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Build the flowing transcript: one `⏺` action per stage, `⎿` nested results,
+/// a live spinner line for the running stage, then any notes.
+fn build_transcript(view: &TuiView) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line> = Vec::new();
+
+    for stage in &view.stages {
+        let color = role_color(stage.role);
+        let name = role_name(stage.role);
+
+        // Action header: ⏺ RoleName
+        let marker_color = match stage.status {
+            Status::Running => color,
+            Status::Done => OK,
+            Status::Failed => ERR,
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{} ", BULLET), Style::default().fg(marker_color)),
+            Span::styled(
+                name.to_string(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        match stage.status {
+            Status::Running => {
+                let tail = last_line(&stage.stream);
+                if !tail.is_empty() {
+                    let shown: String = tail.chars().take(200).collect();
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {} ", CONNECT), Style::default().fg(SUBTLE)),
+                        Span::styled(shown, stream_line_style(tail)),
+                    ]));
+                }
+            }
+            Status::Done => {
+                for (i, summ) in stage.summary.iter().enumerate() {
+                    let connector = if i == 0 { CONNECT } else { " " };
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {} ", connector), Style::default().fg(SUBTLE)),
+                        Span::styled(summ.clone(), Style::default().fg(FG)),
+                    ]));
+                }
+                let cost = if stage.cost_usd > 0.0 {
+                    format!(" · ${:.4}", stage.cost_usd)
+                } else {
+                    String::new()
+                };
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "     ↑ {} ↓ {} · {:.1}s{}",
+                        fmt_tokens(stage.input_tokens),
+                        fmt_tokens(stage.output_tokens),
+                        stage.latency_ms as f64 / 1000.0,
+                        cost
+                    ),
+                    Style::default().fg(INACTIVE),
+                )));
+            }
+            Status::Failed => {
+                for summ in &stage.summary {
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {} ", CONNECT), Style::default().fg(ERR)),
+                        Span::styled(summ.clone(), Style::default().fg(ERR)),
+                    ]));
+                }
+            }
+        }
+        lines.push(Line::from(""));
+    }
+
+    for (note, color) in &view.notes {
+        lines.push(Line::from(Span::styled(note.clone(), Style::default().fg(*color))));
+    }
+
+    lines
 }
 
 fn render(frame: &mut ratatui::Frame, view: &TuiView) {
     let size = frame.area();
-    if size.height < 8 {
+    if size.height < 6 {
         return;
     }
 
-    let n_stages = view.stages.len();
-    let mut constraints = vec![Constraint::Length(3)];
-    for _ in 0..n_stages {
-        constraints.push(Constraint::Min(3));
-    }
-    constraints.push(Constraint::Length(5));
-
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(constraints)
+        .constraints([
+            Constraint::Length(1), // header
+            Constraint::Min(3),    // transcript
+            Constraint::Length(1), // spinner / status line
+            Constraint::Length(1), // mode line
+        ])
         .split(size);
 
-    // Header
-    let (tot_in, tot_out, tot_cost, tot_ms) = view.totals();
+    // ── Header (slim, no box) ──────────────────────────────────────────────
+    let desc: String = view.description.chars().take(60).collect();
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("✻ ", Style::default().fg(BLUE)),
+            Span::styled("NIKI", Style::default().fg(FG).add_modifier(Modifier::BOLD)),
+            Span::styled("  ", Style::default()),
+            Span::styled(desc, Style::default().fg(SUBTLE)),
+        ])),
+        chunks[0],
+    );
+
+    // ── Transcript (scrolls to bottom) ─────────────────────────────────────
+    let lines = build_transcript(view);
+    let total = lines.len() as u16;
+    let view_h = chunks[1].height;
+    let scroll = total.saturating_sub(view_h);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
+        chunks[1],
+    );
+
+    // ── Spinner / live status line ─────────────────────────────────────────
+    let (tot_in, tot_out, _cost, _ms) = view.totals();
+    let spinner_line = if let Some(active) = view.active() {
+        let frame_glyph = SPINNER[view.tick % SPINNER.len()];
+        let gerund = GERUNDS[(view.tick / 8) % GERUNDS.len()];
+        let elapsed = active.start.map(|s| s.elapsed().as_secs()).unwrap_or(0);
+        Line::from(vec![
+            Span::styled(format!("{} ", frame_glyph), Style::default().fg(BLUE)),
+            Span::styled(
+                format!("{}… ", gerund),
+                Style::default().fg(FG).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(
+                    "({}s · ↓ {} · ↑ {} · esc to interrupt)",
+                    elapsed,
+                    fmt_tokens(active.input_tokens),
+                    fmt_tokens(active.output_tokens),
+                ),
+                Style::default().fg(SUBTLE),
+            ),
+        ])
+    } else if view.finished {
+        Line::from(vec![
+            Span::styled("✓ ", Style::default().fg(OK)),
+            Span::styled(
+                "Done ",
+                Style::default().fg(OK).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("· {} tokens total", fmt_tokens(tot_in + tot_out)),
+                Style::default().fg(SUBTLE),
+            ),
+        ])
+    } else {
+        Line::from(Span::styled(
+            "  idle",
+            Style::default().fg(INACTIVE),
+        ))
+    };
+    frame.render_widget(Paragraph::new(spinner_line), chunks[2]);
+
+    // ── Mode line (Claude Code style) ──────────────────────────────────────
+    let (tot_in2, tot_out2, tot_cost, _ms2) = view.totals();
     let cost_str = if tot_cost > 0.0 {
         format!(" · ${:.4}", tot_cost)
     } else {
         String::new()
     };
-    let header_text = format!(
-        "NIKI · {} · tokens {}/{} · {:.1}s{}",
-        view.description.chars().take(40).collect::<String>(),
-        tot_in,
-        tot_out,
-        tot_ms as f64 / 1000.0,
-        cost_str
-    );
     frame.render_widget(
-        Paragraph::new(header_text).style(Style::default().add_modifier(Modifier::BOLD)),
-        chunks[0],
-    );
-
-    // Stages
-    for (i, stage) in view.stages.iter().enumerate() {
-        let color = role_color(stage.role);
-        let title = format!(" {} · {} ", role_name(stage.role), stage.status);
-        let block = Block::default()
-            .title(Span::styled(title, Style::default().fg(color).add_modifier(Modifier::BOLD)))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(color));
-
-        let body = if stage.status == "running" {
-            stage.stream.clone()
-        } else if stage.summary.is_empty() {
-            String::new()
-        } else {
-            stage.summary.join("\n")
-        };
-
-        let mut lines = vec![Line::from(body)];
-        if stage.status == "done" {
-            let cost = if stage.cost_usd > 0.0 {
-                format!(" · ${:.4}", stage.cost_usd)
-            } else {
-                String::new()
-            };
-            lines.push(Line::from(Span::styled(
+        Paragraph::new(Line::from(vec![
+            Span::styled("⏵⏵ ", Style::default().fg(OK)),
+            Span::styled(
+                "niki pipeline",
+                Style::default().fg(SUBTLE),
+            ),
+            Span::styled(
                 format!(
-                    "in {} · out {} · {:.1}s{}",
-                    stage.input_tokens,
-                    stage.output_tokens,
-                    stage.latency_ms as f64 / 1000.0,
-                    cost
+                    "  ·  {} agents · {}/{} tok{}  ·  q to detach",
+                    view.stages.len(),
+                    fmt_tokens(tot_in2),
+                    fmt_tokens(tot_out2),
+                    cost_str
                 ),
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
+                Style::default().fg(INACTIVE),
+            ),
+        ])),
+        chunks[3],
+    );
+}
 
-        frame.render_widget(Paragraph::new(lines).block(block), chunks[i + 1]);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcript_includes_markers() {
+        let mut view = TuiView::new("demo".into());
+        view.apply(DisplayEvent::StageStart { role: AgentRole::Planner });
+        view.apply(DisplayEvent::StageDone {
+            role: AgentRole::Planner,
+            summary: vec!["Spec: 2 files".into()],
+            input_tokens: 1200,
+            output_tokens: 800,
+            cost_usd: 0.01,
+            latency_ms: 3400,
+        });
+        let lines = build_transcript(&view);
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(text.contains(BULLET), "expected action bullet");
+        assert!(text.contains(CONNECT), "expected nested connector");
+        assert!(text.contains("Planner"));
+        assert!(text.contains("Spec: 2 files"));
     }
 
-    // Footer log
-    let items: Vec<ListItem> = view
-        .log
-        .iter()
-        .map(|l| ListItem::new(l.clone()))
-        .collect();
-    let log_block = Block::default()
-        .title(" Activity ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(
-        List::new(items).block(log_block),
-        chunks[n_stages + 1],
-    );
+    #[test]
+    fn token_formatting() {
+        assert_eq!(fmt_tokens(999), "999");
+        assert_eq!(fmt_tokens(1500), "1.5k");
+    }
+
+    #[test]
+    fn tracks_active_stage() {
+        let mut view = TuiView::new("d".into());
+        view.apply(DisplayEvent::StageStart { role: AgentRole::Coder });
+        assert!(view.active().is_some());
+        view.apply(DisplayEvent::StageDone {
+            role: AgentRole::Coder,
+            summary: vec![],
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: 0.0,
+            latency_ms: 0,
+        });
+        assert!(view.active().is_none());
+    }
 }

@@ -12,6 +12,7 @@ use crate::display::agent_stream::AgenticDisplay;
 use crate::orchestrator::pipeline::{execute_pipeline, Task};
 use crate::orchestrator::state::{TaskRecord, TaskStatus};
 use crate::sandbox::docker::ActiveContainers;
+use crate::sandbox::SandboxBackend;
 use crate::artifacts::types::AgentRole;
 use crate::NikiError;
 
@@ -48,6 +49,15 @@ pub struct RunArgs {
     #[arg(long)]
     pub reviewer_model: Option<String>,
 
+    /// Sandbox backend: docker (container), worktree (git worktree + local process,
+    /// no Docker), or cloud (NIKI infra, beta). Overrides [docker] backend in config.
+    #[arg(long, value_enum)]
+    pub backend: Option<BackendArg>,
+
+    /// Shortcut for `--backend cloud` — run the pipeline on NIKI's cloud infra (beta).
+    #[arg(long)]
+    pub cloud: bool,
+
     /// Run the Planner only and show the spec without executing
     #[arg(long)]
     pub dry_run: bool,
@@ -66,12 +76,32 @@ pub struct RunArgs {
     pub tui: bool,
 }
 
+/// CLI spelling of the sandbox backend; maps onto [`crate::sandbox::SandboxBackend`].
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+pub enum BackendArg {
+    Docker,
+    Worktree,
+    Cloud,
+}
+
+impl From<BackendArg> for crate::sandbox::SandboxBackend {
+    fn from(b: BackendArg) -> Self {
+        match b {
+            BackendArg::Docker => crate::sandbox::SandboxBackend::Docker,
+            BackendArg::Worktree => crate::sandbox::SandboxBackend::Worktree,
+            BackendArg::Cloud => crate::sandbox::SandboxBackend::Cloud,
+        }
+    }
+}
+
 fn role_filename(role: AgentRole) -> &'static str {
     match role {
         AgentRole::Planner => "planner",
         AgentRole::Coder => "coder",
         AgentRole::Tester => "tester",
         AgentRole::Reviewer => "reviewer",
+        AgentRole::Synthesizer => "synthesizer",
+        AgentRole::SecurityAuditor => "security_auditor",
     }
 }
 
@@ -98,6 +128,36 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     if let Some(ref m) = args.reviewer_model {
         config.agents.reviewer.model = m.clone();
     }
+
+    // Resolve the sandbox backend: explicit --backend / --cloud wins, otherwise
+    // fall back to [docker] backend in config (default: docker).
+    let backend = if args.cloud {
+        SandboxBackend::Cloud
+    } else if let Some(b) = args.backend {
+        b.into()
+    } else {
+        config.docker.backend
+    };
+    config.docker.backend = backend;
+
+    // Cloud execution is a beta scaffold: the trait seam exists so the
+    // orchestrator can target NIKI infra unchanged, but the real remote executor
+    // needs infra + credentials that aren't part of a local build. Fail fast here
+    // with a clear message rather than burning Planner tokens and erroring
+    // mid-pipeline. The `NIKI_CLOUD_ENDPOINT` env var is the seam: when a future
+    // build wires up a real endpoint it can bypass this guard.
+    if matches!(backend, SandboxBackend::Cloud) && env::var("NIKI_CLOUD_ENDPOINT").is_err() {
+        eprintln!(
+            "Cloud execution (beta) is not available in this build.\n\
+             The architecture supports it — the `cloud` sandbox backend implements the same\n\
+             trait as Docker/worktree — but running agents on NIKI infrastructure requires\n\
+             infra + credentials that ship separately.\n\n\
+             To run locally without Docker, use:  niki run \"<task>\" --backend worktree"
+        );
+        std::process::exit(2);
+    }
+
+    let uses_docker = matches!(backend, SandboxBackend::Docker);
 
     let task = Task {
         id: Uuid::new_v4(),
@@ -133,25 +193,27 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         let output_dir = config.general.output_dir.clone();
         tokio::spawn(async move {
             if signal::ctrl_c().await.is_ok() {
-                eprintln!("\n Shutting down — cleaning up Docker containers...");
+                eprintln!("\n Shutting down — cleaning up...");
 
                 let ids = containers.lock().await.clone();
-                match Docker::connect_with_local_defaults() {
-                    Ok(docker) => {
-                        for id in ids {
-                            // force:true stops the container if still running, then removes it.
-                            let _ = docker
-                                .remove_container(
-                                    &id,
-                                    Some(bollard::container::RemoveContainerOptions {
-                                        force: true,
-                                        ..Default::default()
-                                    }),
-                                )
-                                .await;
+                if !ids.is_empty() {
+                    match Docker::connect_with_local_defaults() {
+                        Ok(docker) => {
+                            for id in ids {
+                                // force:true stops the container if still running, then removes it.
+                                let _ = docker
+                                    .remove_container(
+                                        &id,
+                                        Some(bollard::container::RemoveContainerOptions {
+                                            force: true,
+                                            ..Default::default()
+                                        }),
+                                    )
+                                    .await;
+                            }
                         }
+                        Err(_) => {}
                     }
-                    Err(_) => {}
                 }
 
                 // Persist a cancelled task record so status commands reflect reality.
@@ -162,7 +224,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 rec.status = TaskStatus::Cancelled;
                 let _ = rec.save_to_disk(&task_dir);
 
-                eprintln!(" Containers cleaned up. Partial results saved under ./{}/tasks/", output_dir);
+                eprintln!(" Partial results saved under ./{}/tasks/", output_dir);
                 // 130 = 128 + SIGINT(2), the conventional exit code for Ctrl+C.
                 // Lets CI/scripts distinguish an interrupt from a generic failure.
                 std::process::exit(130);
@@ -170,13 +232,20 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         });
     }
 
-    // Fail fast with a friendly message if Docker isn't reachable. The dry-run path
-    // never touches the sandbox, so it skips the daemon ping and works without Docker.
-    let docker = Docker::connect_with_local_defaults()
-        .map_err(|e| anyhow!("Docker error: {}", e))?;
-    if !args.dry_run {
-        docker.ping().await.map_err(|_| NikiError::DockerNotRunning)?;
-    }
+    // Only connect to the Docker daemon when the chosen backend needs it. The
+    // worktree and cloud backends never touch Docker, so they run without a daemon.
+    // The dry-run path also skips the daemon ping (it never creates a sandbox).
+    let docker = if uses_docker && !args.dry_run {
+        let d = Docker::connect_with_local_defaults()
+            .map_err(|e| anyhow!("Docker error: {}", e))?;
+        d.ping().await.map_err(|_| NikiError::DockerNotRunning)?;
+        Some(d)
+    } else {
+        None
+    };
+
+    // Borrow the connection for the pipeline; None for non-Docker backends.
+    let docker_ref = docker.as_ref();
 
     // Persist an initial "running" record.
     let mut record = TaskRecord::new(task.id, &task.description);
@@ -187,7 +256,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     let result = match execute_pipeline(
         &task,
         &config,
-        &docker,
+        docker_ref,
         &mut display,
         containers.clone(),
         args.dry_run,
@@ -229,11 +298,69 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         eprintln!("Warning: could not generate report: {}", e);
     }
 
+    // Generate the static HTML dashboard (diff viewer + annotations).
+    {
+        let find_artifact = |role: AgentRole| -> Option<String> {
+            result
+                .artifacts
+                .iter()
+                .find(|(r, _)| *r == role)
+                .map(|(_, j)| j.clone())
+        };
+        let review_json = find_artifact(AgentRole::Reviewer);
+        let security_json = find_artifact(AgentRole::SecurityAuditor);
+
+        let total_in: u32 = result.metrics.iter().map(|m| m.input_tokens).sum();
+        let total_out: u32 = result.metrics.iter().map(|m| m.output_tokens).sum();
+        let total_cost: f64 = result.metrics.iter().map(|m| m.cost_usd).sum();
+        let total_ms: u64 = result.metrics.iter().map(|m| m.latency_ms).sum();
+        let metrics_rows = vec![
+            ("Agents run".to_string(), result.metrics.len().to_string()),
+            ("Input tokens".to_string(), total_in.to_string()),
+            ("Output tokens".to_string(), total_out.to_string()),
+            ("Latency".to_string(), format!("{:.1}s", total_ms as f64 / 1000.0)),
+            (
+                "Est. cost".to_string(),
+                if total_cost > 0.0 {
+                    format!("${:.4}", total_cost)
+                } else {
+                    "n/a".to_string()
+                },
+            ),
+        ];
+
+        let input = crate::output::dashboard::DashboardInput {
+            task_id: &task.id.to_string(),
+            description: &task.description,
+            verdict: &format!("{:?}", result.verdict),
+            revision_rounds: result.revision_rounds,
+            final_diff: &result.final_diff,
+            review_json: review_json.as_deref(),
+            security_json: security_json.as_deref(),
+            metrics_rows,
+        };
+        if let Err(e) = crate::output::dashboard::write_dashboard(&task_dir, &input) {
+            eprintln!("Warning: could not generate dashboard: {}", e);
+        }
+    }
+
     // Generate the patch file.
     if let Err(e) =
         crate::output::patch::generate_patch(&result.final_diff, &task_dir.join("changes.patch"))
     {
         eprintln!("Failed to generate patch: {}", e);
+    }
+
+    // For non-Docker backends the change still lives inside the sandbox copy (a
+    // separate git worktree or a cloud VM), so `working_tree_diff` on the host
+    // would be empty. Apply the sandbox's diff to the host working tree first; the
+    // Docker backend already wrote through the bind mount and skips this step.
+    if !uses_docker && !result.final_diff.trim().is_empty() {
+        if let Err(e) =
+            crate::output::git::apply_diff_to_working_tree(&project_dir, &result.final_diff)
+        {
+            eprintln!("Warning: could not apply sandbox diff to host: {}", e);
+        }
     }
 
     // Create the git branch + commit (no-op when there is no diff).

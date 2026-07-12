@@ -17,25 +17,27 @@ fn env_lock() -> &'static Mutex<()> {
 /// over toml keys, and now also reads ANTHROPIC_MODEL / OPENAI_MODEL and the
 /// `*_BASE_URL` vars. Clearing them (to empty) drops that precedence so the
 /// value under test is the one that wins.
-unsafe fn clear_provider_env_vars() {
+fn clear_provider_env_vars() {
     // Use remove_var (not set to "") so a present-but-empty value can't be
     // mistaken for a real key/url/model by `apply_env_vars`.
-    std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
-    std::env::remove_var("OPENROUTER_API_KEY");
-    std::env::remove_var("NIKI_PROVIDERS_ANTHROPIC_API_KEY");
-    std::env::remove_var("ANTHROPIC_API_KEY");
-    std::env::remove_var("OPENAI_API_KEY");
-    std::env::remove_var("GOOGLE_API_KEY");
-    std::env::remove_var("ANTHROPIC_BASE_URL");
-    std::env::remove_var("OPENAI_BASE_URL");
-    std::env::remove_var("ANTHROPIC_MODEL");
-    std::env::remove_var("OPENAI_MODEL");
+    unsafe {
+        std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
+        std::env::remove_var("OPENROUTER_API_KEY");
+        std::env::remove_var("NIKI_PROVIDERS_ANTHROPIC_API_KEY");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var("OPENAI_API_KEY");
+        std::env::remove_var("GOOGLE_API_KEY");
+        std::env::remove_var("ANTHROPIC_BASE_URL");
+        std::env::remove_var("OPENAI_BASE_URL");
+        std::env::remove_var("ANTHROPIC_MODEL");
+        std::env::remove_var("OPENAI_MODEL");
+    }
 }
 
 #[test]
 fn test_config_loads_from_toml() {
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { clear_provider_env_vars() }
+    clear_provider_env_vars();
     let dir = TempDir::new().unwrap();
     let toml = r#"
 [general]
@@ -69,7 +71,7 @@ model = "claude-sonnet-4-20250514"
 fn test_config_env_var_override() {
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
     // No TOML present; only an environment variable supplies the key.
-    unsafe { clear_provider_env_vars() }
+    clear_provider_env_vars();
     unsafe { std::env::set_var("ANTHROPIC_API_KEY", "env-key-456"); }
     let dir = TempDir::new().unwrap();
 
@@ -85,7 +87,7 @@ fn test_config_env_var_override() {
 #[test]
 fn test_env_base_url_and_model() {
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { clear_provider_env_vars() }
+    clear_provider_env_vars();
     unsafe {
         std::env::set_var("ANTHROPIC_BASE_URL", "https://gw.example.com");
         std::env::set_var("ANTHROPIC_MODEL", "claude-opus-4-20250514");

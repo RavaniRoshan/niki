@@ -45,14 +45,15 @@ Ordered roughly by dependency. Items lower in the list build on ones above.
 |---|---|---|---|---|
 | 1 | **Cost & performance analytics** — real token accounting (from API usage, not estimate), latency per stage, cost per agent/task; persisted to the task record and shown in `report` | ✅ | Per-agent model recommendations; SWE-bench; quality-moat proof | S–M |
 | 2 | **User-defined agent topologies** — data-driven pipeline (a `[pipeline]` config: ordered stages, per-stage agent/model, optional skip) replacing the hardcoded flow | ✅ | Parallel coders, Security Auditor, dynamic topology, marketplace | L |
-| 3 | **Parallel coder agents + synthesis** — N Coders explore the spec; a Synthesizer merges | ⬜ | — | M–L |
-| 4 | **Security Auditor agent** — dedicated vulnerability pass before Reviewer | ⬜ | — | M |
+| 3 | **Parallel coder agents + synthesis** — N Coders explore the spec (each in its own git worktree); a Synthesizer merges | ✅ | — | M–L |
+| 4 | **Security Auditor agent** — dedicated, adversarial vulnerability pass (enabled via `[security]`) | ✅ | — | M |
 | 5 | **External source ingestion** — READMEs, linked docs, wikis, issue content into the knowledge layer (extends `index_project`, uses the currently-unused `_config` hook) | ✅ | — | M |
-| 6 | **Rich terminal TUI** — `lazygit`/`k9s`-style panels (`ratatui`), consuming existing `StageState` via an event channel | ✅ | — | L |
-| 7 | **Dashboard: diff viewer with inline Reviewer annotations** | ⬜ | — | M |
-| 8 | **Alternative sandboxing** — lightweight `git worktree` isolation as a Docker alternative | ⬜ | Cloud microVMs later | M |
-| 9 | **Cloud execution (beta)** — run agents on NIKI infra | ⬜ | Revenue tier | XL |
-| 10 | **Per-agent model recommendations** — benchmarked cheapest-config-that-wins guidance | ⬜ | Depends on #1 | M |
+| 6 | **Rich terminal TUI** — `ratatui` panels over the `DisplayEvent` channel, restyled as a **Claude-Code-like transcript** (⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line) | ✅ | — | L |
+| 7 | **Dashboard: static HTML diff viewer with inline Reviewer/Security annotations** | ✅ | — | M |
+| 8 | **Alternative sandboxing** — lightweight `git worktree` isolation + `Sandbox` trait abstraction (Docker / Worktree / Cloud backends) | ✅ | Cloud microVMs later | M |
+| 9 | **Cloud execution (beta)** — `cloud` backend implements the `Sandbox` trait (drop-in seam); gated behind `NIKI_CLOUD_ENDPOINT` until infra ships | 🟡 | Revenue tier | XL |
+| 10 | **Per-agent model recommendations** — `niki recommend` with cost/quality tradeoffs per role | ✅ | Depends on #1 | M |
+| 11 | **Claude-Code-style terminal UI** — replicate Claude Code's posture, glyphs, spinner and mode line so NIKI's multi-agent flow mirrors a sub-agent workflow | ✅ | — | M |
 
 ## Phase 3 — Full version (6+ months)
 

@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "merged": {
+      "type": "object",
+      "description": "The reconciled change, shaped like a single coder's CodeDiff.",
+      "properties": {
+        "unified_diff": { "type": "string" },
+        "files_changed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "action": {
+                "type": "string",
+                "enum": ["create", "modify", "delete"]
+              },
+              "diff": { "type": "string" },
+              "language": { "type": ["string", "null"] }
+            },
+            "required": ["path", "action", "diff"]
+          }
+        },
+        "implementation_notes": { "type": "string" },
+        "spec_adherence": { "type": "string" }
+      },
+      "required": [
+        "unified_diff",
+        "files_changed",
+        "implementation_notes",
+        "spec_adherence"
+      ]
+    },
+    "reconciliation_notes": { "type": "string" },
+    "sources_merged": { "type": "integer", "minimum": 1 }
+  },
+  "required": [
+    "merged",
+    "reconciliation_notes",
+    "sources_merged"
+  ]
+}

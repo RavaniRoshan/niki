@@ -51,6 +51,8 @@ fn role_label(role: AgentRole) -> &'static str {
         AgentRole::Coder => "Coder",
         AgentRole::Tester => "Tester",
         AgentRole::Reviewer => "Reviewer",
+        AgentRole::Synthesizer => "Synthesizer",
+        AgentRole::SecurityAuditor => "SecurityAuditor",
     }
 }
 
@@ -72,6 +74,24 @@ impl AgenticDisplay {
 
     pub fn is_tty(&self) -> bool {
         self.is_tty
+    }
+
+    /// Create a cheap independent instance of the display that forwards events to the
+    /// same TUI render thread (if active). Used when running agents concurrently
+    /// (parallel coders): each concurrent task owns its own `AgenticDisplay` so
+    /// its streaming/state bookkeeping never contends, while all events still land
+    /// on the single visible TUI.
+    pub fn fork(&self) -> Self {
+        Self {
+            theme: self.theme.clone(),
+            term: Term::stdout(),
+            is_tty: self.is_tty,
+            stages: Vec::new(),
+            current_streaming_lines: 0,
+            tui: self.tui.clone(),
+            tui_thread: None,
+            current_role: None,
+        }
     }
 
     /// Enable the rich terminal TUI. Spawns the render thread; subsequent
@@ -126,6 +146,8 @@ impl AgenticDisplay {
             AgentRole::Coder => self.theme.coder.icon,
             AgentRole::Tester => self.theme.tester.icon,
             AgentRole::Reviewer => self.theme.reviewer.icon,
+            AgentRole::Synthesizer => self.theme.synthesizer.icon,
+            AgentRole::SecurityAuditor => self.theme.security_auditor.icon,
         }
     }
 
@@ -135,6 +157,8 @@ impl AgenticDisplay {
             AgentRole::Coder => self.theme.coder.name,
             AgentRole::Tester => self.theme.tester.name,
             AgentRole::Reviewer => self.theme.reviewer.name,
+            AgentRole::Synthesizer => self.theme.synthesizer.name,
+            AgentRole::SecurityAuditor => self.theme.security_auditor.name,
         }
     }
 
@@ -144,6 +168,8 @@ impl AgenticDisplay {
             AgentRole::Coder => self.theme.coder.label_style.clone(),
             AgentRole::Tester => self.theme.tester.label_style.clone(),
             AgentRole::Reviewer => self.theme.reviewer.label_style.clone(),
+            AgentRole::Synthesizer => self.theme.synthesizer.label_style.clone(),
+            AgentRole::SecurityAuditor => self.theme.security_auditor.label_style.clone(),
         }
     }
 

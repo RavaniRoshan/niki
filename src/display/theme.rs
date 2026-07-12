@@ -1,10 +1,13 @@
 use console::Style;
 
+#[derive(Clone)]
 pub struct Theme {
     pub planner: AgentTheme,
     pub coder: AgentTheme,
     pub tester: AgentTheme,
     pub reviewer: AgentTheme,
+    pub synthesizer: AgentTheme,
+    pub security_auditor: AgentTheme,
     pub border: Style,
     pub heading: Style,
     pub subtext: Style,
@@ -16,6 +19,7 @@ pub struct Theme {
     pub file_path: Style,
 }
 
+#[derive(Clone)]
 pub struct AgentTheme {
     pub name: &'static str,
     pub icon: &'static str,
@@ -55,6 +59,18 @@ impl Theme {
                 icon: "◆",
                 color: Style::new().yellow(),
                 label_style: Style::new().bold().yellow(),
+            },
+            synthesizer: AgentTheme {
+                name: "Synthesizer",
+                icon: "⧉",
+                color: Style::new().cyan(),
+                label_style: Style::new().bold().cyan(),
+            },
+            security_auditor: AgentTheme {
+                name: "Security Auditor",
+                icon: "⚷",
+                color: Style::new().red(),
+                label_style: Style::new().bold().red(),
             },
             border: Style::new().dim(),
             heading: Style::new().bold().white(),

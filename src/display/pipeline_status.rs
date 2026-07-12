@@ -6,14 +6,23 @@ pub fn update_pipeline_status(stages: &[StageState], theme: &Theme) {
     let term = console::Term::stdout();
     let mut parts = vec![];
     
-    let all_roles = [AgentRole::Planner, AgentRole::Coder, AgentRole::Tester, AgentRole::Reviewer];
-    
+    let all_roles = [
+        AgentRole::Planner,
+        AgentRole::Coder,
+        AgentRole::Tester,
+        AgentRole::Reviewer,
+        AgentRole::Synthesizer,
+        AgentRole::SecurityAuditor,
+    ];
+
     for (i, role) in all_roles.iter().enumerate() {
         let (icon, color) = match role {
             AgentRole::Planner => (theme.planner.icon, theme.planner.color.clone()),
             AgentRole::Coder => (theme.coder.icon, theme.coder.color.clone()),
             AgentRole::Tester => (theme.tester.icon, theme.tester.color.clone()),
             AgentRole::Reviewer => (theme.reviewer.icon, theme.reviewer.color.clone()),
+            AgentRole::Synthesizer => (theme.synthesizer.icon, theme.synthesizer.color.clone()),
+            AgentRole::SecurityAuditor => (theme.security_auditor.icon, theme.security_auditor.color.clone()),
         };
         
         let mut status = None;

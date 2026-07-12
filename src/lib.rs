@@ -9,6 +9,7 @@ pub mod knowledge;
 pub mod output;
 pub mod display;
 pub mod cost;
+pub mod recommend;
 
 use thiserror::Error;
 use uuid::Uuid;
@@ -41,6 +42,9 @@ pub enum NikiError {
     
     #[error("Task {0} not found")]
     TaskNotFound(Uuid),
+
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

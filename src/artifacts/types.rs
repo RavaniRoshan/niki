@@ -14,16 +14,20 @@ pub struct ArtifactEnvelope<T: Serialize> {
     pub payload: T,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentRole {
     Planner,
     Coder,
     Tester,
     Reviewer,
+    /// Merges N parallel coder diffs into a single coherent change (#3).
+    Synthesizer,
+    /// Independent security review pass (#4).
+    SecurityAuditor,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactType {
     TaskSpec,
@@ -31,6 +35,8 @@ pub enum ArtifactType {
     TestReport,
     ReviewVerdict,
     ReviewFeedback,
+    Synthesis,
+    SecurityVerdict,
 }
 
 // ── Artifact 1: TaskSpec (Planner → Coder) ──────────────────────
@@ -198,4 +204,65 @@ pub struct ReviewFeedback {
     pub guidance: String,                      // Reviewer's specific guidance for revision
     pub keep_unchanged: Vec<String>,           // Files/aspects that are fine — don't touch
     pub revision_round: u32,                   // Which round of revision this is
+}
+
+// ── Artifact 6: Synthesis (Synthesizer → merged CodeDiff) ─────────
+//
+// Produced when multiple coders run in parallel (#3). Each coder emits its own
+// CodeDiff in an isolated worktree; the Synthesizer reconciles them into the
+// single `merged` CodeDiff the rest of the pipeline (Tester → Reviewer) consumes.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Synthesis {
+    /// The reconciled change, in the same shape as a single coder's output, so
+    /// downstream stages treat it identically to a `CodeDiff`.
+    pub merged: CodeDiff,
+    /// How conflicts between the parallel coders were resolved.
+    pub reconciliation_notes: String,
+    /// Number of distinct coder branches that fed into this synthesis.
+    pub sources_merged: u32,
+}
+
+// ── Artifact 7: SecurityVerdict (SecurityAuditor → Output) ────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityVerdict {
+    pub verdict: Verdict,                      // Approved / RevisionNeeded / Rejected
+    pub overall_assessment: String,
+    pub findings: Vec<SecurityFinding>,
+    pub strengths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityFinding {
+    pub severity: SecuritySeverity,
+    pub category: SecurityCategory,
+    pub file_path: Option<String>,
+    pub line_range: Option<String>,            // e.g., "42-58"
+    pub description: String,
+    pub suggested_fix: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SecuritySeverity {
+    Critical,                                  // Exploitable now — block
+    High,
+    Medium,
+    Low,
+    Info,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityCategory {
+    Injection,
+    Authentication,
+    Authorization,
+    Cryptography,
+    SecretsExposure,
+    Dependency,
+    InputValidation,
+    SandboxEscape,
+    Other,
 }

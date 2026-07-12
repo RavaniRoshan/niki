@@ -22,6 +22,10 @@ enum Commands {
         #[command(subcommand)]
         command: niki::cli::config::ConfigCommands,
     },
+    /// Recommend per-agent models (cost/quality tradeoffs)
+    Recommend(niki::cli::recommend::RecommendArgs),
+    /// Generate/locate the static HTML dashboard for a task
+    Dashboard(niki::cli::dashboard::DashboardArgs),
 }
 
 #[tokio::main]
@@ -40,6 +44,8 @@ async fn main() -> Result<()> {
         Commands::Status(args) => niki::cli::status::handle(args).await?,
         Commands::Report(args) => niki::cli::report::handle(args).await?,
         Commands::Config { command } => niki::cli::config::handle(command).await?,
+        Commands::Recommend(args) => niki::cli::recommend::handle(args)?,
+        Commands::Dashboard(args) => niki::cli::dashboard::handle(args)?,
     }
 
     Ok(())

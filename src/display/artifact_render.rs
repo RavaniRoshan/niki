@@ -63,3 +63,34 @@ pub fn render_review_verdict_summary(verdict: &ReviewVerdict) -> Vec<String> {
     }
     lines
 }
+
+pub fn render_synthesis_summary(s: &Synthesis) -> Vec<String> {
+    vec![
+        format!(
+            "Synthesized {} coder branches → {} files changed",
+            s.sources_merged,
+            s.merged.files_changed.len()
+        ),
+        truncate(&s.reconciliation_notes, 80),
+    ]
+}
+
+pub fn render_security_verdict_summary(v: &SecurityVerdict) -> Vec<String> {
+    let mut lines = vec![match v.verdict {
+        Verdict::Approved => "Security: Passed".to_string(),
+        Verdict::RevisionNeeded => "Security: Changes requested".to_string(),
+        Verdict::Rejected => "Security: Blocked".to_string(),
+    }];
+    let critical = v.findings.iter()
+        .filter(|f| matches!(f.severity, SecuritySeverity::Critical | SecuritySeverity::High))
+        .count();
+    if critical > 0 {
+        lines.push(format!("{} critical/high findings:", critical));
+        for f in v.findings.iter()
+            .filter(|f| matches!(f.severity, SecuritySeverity::Critical | SecuritySeverity::High))
+        {
+            lines.push(format!("• {:?}: {}", f.category, f.description));
+        }
+    }
+    lines
+}

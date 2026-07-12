@@ -49,6 +49,48 @@ pub fn working_tree_diff(repo_path: &Path) -> String {
     }
 }
 
+/// Apply a unified diff (produced by the sandbox `get_diff`) to the host working
+/// tree. Used for the worktree/cloud backends, where the change lives only inside
+/// the sandbox copy and must be replayed onto the host before we commit the
+/// `niki/<id>` branch. Mirrors the Docker sandbox's `apply_patch` (git apply,
+/// with a `patch -p1` fallback) and normalizes line endings / trailing newline
+/// first so `git apply` doesn't reject the final context line.
+pub fn apply_diff_to_working_tree(repo_path: &Path, diff: &str) -> Result<()> {
+    let normalized = normalize_patch(diff);
+    let patch_path = repo_path.join(".niki-tmp.patch");
+    std::fs::write(&patch_path, &normalized)?;
+
+    let res = run_git(repo_path, &["apply", patch_path.to_str().unwrap()]);
+    let _ = std::fs::remove_file(&patch_path);
+
+    match res {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            // Fallback: patch -p1
+            let normalized = normalize_patch(diff);
+            let patch_path = repo_path.join(".niki-tmp.patch");
+            let _ = std::fs::write(&patch_path, &normalized);
+            let res = run_git(
+                repo_path,
+                &["-c", "apply.whitespace=nowarn", "apply", "-p1", "--3way", patch_path.to_str().unwrap()],
+            );
+            let _ = std::fs::remove_file(&patch_path);
+            res
+        }
+    }
+}
+
+/// Normalize a unified diff: unify CRLF→LF line endings and guarantee a trailing
+/// newline. `git apply` treats a patch ending mid-line (no final newline) as a
+/// "corrupt patch" at the last context line.
+fn normalize_patch(patch: &str) -> String {
+    let mut s = patch.replace("\r\n", "\n");
+    if !s.ends_with('\n') {
+        s.push('\n');
+    }
+    s
+}
+
 pub fn create_branch_and_commit(
     repo_path: &Path,
     branch_name: &str,
