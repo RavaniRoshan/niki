@@ -164,11 +164,39 @@ cpu_limit      = 2.0
 
 Supported providers: **Anthropic · OpenAI · Google · Ollama** — plus any OpenAI/Anthropic-compatible gateway (e.g. OpenRouter) via `base_url`.
 
+### User-defined pipeline topology
+
+By default NIKI runs a fixed **Planner → Coder → Tester → Reviewer** flow. You can replace it with your own ordered pipeline by adding a `[pipeline]` section. Each stage binds an `AgentRole` to a provider/model; set `skip = true` to drop a stage. The revision loop re-runs every non-Planner stage until a Reviewer returns a terminal verdict or `max_revision_rounds` is reached.
+
+```toml
+# Optional — omit to keep the built-in Planner → Coder → Tester → Reviewer flow
+[pipeline]
+max_revision_rounds = 3
+stages = [
+  { role = "planner",  provider = "anthropic", model = "claude-sonnet-4-20250514" },
+  { role = "coder",    provider = "anthropic", model = "claude-sonnet-4-20250514" },
+  { role = "tester",   provider = "openai",    model = "gpt-4o-mini" },
+  { role = "reviewer", provider = "anthropic", model = "claude-sonnet-4-20250514" },
+  # { role = "tester", provider = "openai", model = "gpt-4o-mini", skip = true },
+]
+```
+
+### External source ingestion
+
+Beyond the repo itself, NIKI can pull extra context into every agent's prompt via `[knowledge]`. Project doc files are matched by glob; URLs are fetched at run time (best-effort — a failed fetch is skipped, not fatal). Each source is truncated to `max_source_chars` so a long wiki page can't blow up the prompt.
+
+```toml
+[knowledge]
+doc_globs = ["docs/**/*.md", "README.md"]   # extra project docs to include
+urls      = ["https://example.com/architecture.md"]  # external docs/wikis/issues
+max_source_chars = 8000                     # truncation cap per source
+```
+
 ## CLI Reference
 
 | Command | Description |
 |---|---|
-| `niki run <description>` | Run the full pipeline on a task. Key flags: `--project`, `--branch`, `--max-rounds`, `--dry-run`, `--quiet`, `--verbose`, `--<agent>-model`. |
+| `niki run <description>` | Run the full pipeline on a task. Key flags: `--project`, `--branch`, `--max-rounds`, `--dry-run`, `--quiet`, `--verbose`, `--tui`, `--<agent>-model`. |
 | `niki status` | Show the current/most recent task — status, branch, verdict, revisions. Accepts `--project`. |
 | `niki report [id]` | Print a completed task's report. Accepts a full UUID **or a unique short prefix**; `--project`. |
 | `niki config` | Manage configuration. |
@@ -195,11 +223,25 @@ docker/            # sandbox image (Dockerfile) + scripts/
 
 ## Roadmap
 
-- [ ] Multi-round revision-loop hardening & metrics
-- [ ] Broader language / toolchain presets in the sandbox image
-- [ ] Richer diff-review UX in `niki report`
-- [ ] Cost / token accounting per task
-- [ ] Parallel multi-file agent execution
+### v2 (next)
+- [ ] **Parallel coder agents + synthesis** — multiple Coders explore the spec independently; a Synthesizer picks or merges the best result.
+- [x] **User-defined agent topologies** — configure your own ordered pipeline in `[pipeline]` (which agents, in what order, with what models, optional skip).
+- [x] **External source ingestion** — pull in project doc globs and external URLs (READMEs, docs, wikis, issues) as agent context via `[knowledge]`.
+- [x] **Rich terminal TUI** — `lazygit`/`k9s`-style panels for agent status, live streams, and artifact flow (`niki run --tui`).
+- [ ] **Dashboard: diff viewer with inline Reviewer annotations**.
+- [x] **Cost & performance analytics** — real token usage (from provider APIs), latency, and cost per agent/task, persisted to each run.
+- [ ] **External source ingestion** — pull in linked docs, READMEs, wikis, and issue content for agent context.
+- [ ] **Alternative sandboxing** — lightweight `git worktree` isolation as a Docker alternative.
+- [ ] **Cloud execution (beta)** — run agents on NIKI's infra for heavier parallelism.
+- [ ] **Per-agent model recommendations** — benchmarked, cheapest config that still beats a single agent.
+- [ ] **Security Auditor agent** — dedicated vulnerability review before the Reviewer.
+
+### Full version (later)
+- [ ] Living memory · pipeline marketplace · dynamic topology · visual pipeline builder
+- [ ] Cloud (production) · adversarial debate mode · Team tier · Anthropic partnership
+- [ ] Architect agent · Enterprise licensing · general-purpose domain expansion · Company Brain spin-out
+
+See [`ROADMAP.md`](ROADMAP.md) for the full phased plan and decision traceability.
 
 ## Contributing
 

@@ -5,7 +5,7 @@ use std::pin::Pin;
 use reqwest::Client;
 use serde_json::json;
 use crate::config::ProviderConfig;
-use super::provider::{CompletionRequest, CompletionResponse, LlmProvider, TokenUsage};
+use super::provider::{CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage};
 
 pub struct OllamaProvider {
     config: ProviderConfig,
@@ -75,7 +75,7 @@ impl LlmProvider for OllamaProvider {
         })
     }
 
-    async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
+    async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
         let base_url = self.config.base_url.as_deref().unwrap_or("http://localhost:11434");
         let url = format!("{}/api/chat", base_url.trim_end_matches('/'));
 
@@ -134,9 +134,17 @@ impl LlmProvider for OllamaProvider {
                             }
                             
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
-                                if let Some(text) = json["message"]["content"].as_str() {
+                                if json["done"].as_bool().unwrap_or(false) {
+                                    // Final chunk carries real token counts.
+                                    if tx.send(Ok(StreamChunk::Usage(TokenUsage {
+                                        input_tokens: json["prompt_eval_count"].as_u64().unwrap_or(0) as u32,
+                                        output_tokens: json["eval_count"].as_u64().unwrap_or(0) as u32,
+                                    }))).is_err() {
+                                        return;
+                                    }
+                                } else if let Some(text) = json["message"]["content"].as_str() {
                                     if !text.is_empty() {
-                                        if tx.send(Ok(text.to_string())).is_err() {
+                                        if tx.send(Ok(StreamChunk::Text(text.to_string()))).is_err() {
                                             return;
                                         }
                                     }

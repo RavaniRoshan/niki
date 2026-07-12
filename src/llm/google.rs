@@ -5,7 +5,7 @@ use std::pin::Pin;
 use reqwest::Client;
 use serde_json::json;
 use crate::config::ProviderConfig;
-use super::provider::{CompletionRequest, CompletionResponse, LlmProvider, TokenUsage};
+use super::provider::{CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage};
 
 pub struct GoogleProvider {
     config: ProviderConfig,
@@ -71,7 +71,7 @@ impl LlmProvider for GoogleProvider {
         })
     }
 
-    async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
+    async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
         let api_key = self.config.api_key.as_ref().unwrap();
         
         let url = format!(
@@ -127,12 +127,20 @@ impl LlmProvider for GoogleProvider {
                                     continue;
                                 }
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                                    if let Some(usage) = json["usageMetadata"].as_object() {
+                                        if tx.send(Ok(StreamChunk::Usage(TokenUsage {
+                                            input_tokens: usage["promptTokenCount"].as_u64().unwrap_or(0) as u32,
+                                            output_tokens: usage["candidatesTokenCount"].as_u64().unwrap_or(0) as u32,
+                                        }))).is_err() {
+                                            return;
+                                        }
+                                    }
                                     if let Some(candidates) = json["candidates"].as_array() {
                                         if let Some(candidate) = candidates.get(0) {
                                             if let Some(parts) = candidate["content"]["parts"].as_array() {
                                                 if let Some(part) = parts.get(0) {
                                                     if let Some(text) = part["text"].as_str() {
-                                                        if tx.send(Ok(text.to_string())).is_err() {
+                                                        if tx.send(Ok(StreamChunk::Text(text.to_string()))).is_err() {
                                                             return;
                                                         }
                                                     }

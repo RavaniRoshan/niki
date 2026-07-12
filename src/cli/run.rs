@@ -59,6 +59,11 @@ pub struct RunArgs {
     /// Show full agent reasoning (not just summaries)
     #[arg(long)]
     pub verbose: bool,
+
+    /// Render a rich terminal TUI (panels per agent stage) instead of the
+    /// inline streaming view. Requires a TTY; ignored when piped.
+    #[arg(long)]
+    pub tui: bool,
 }
 
 fn role_filename(role: AgentRole) -> &'static str {
@@ -101,6 +106,12 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     };
 
     let mut display = AgenticDisplay::new();
+
+    // Opt-in rich TUI. Must be enabled before any display call so the banner
+    // and subsequent events are routed to the render thread.
+    if args.tui {
+        display.enable_tui(task.description.clone());
+    }
 
     if !args.quiet {
         display.show_banner(&task, &config);
@@ -152,7 +163,9 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 let _ = rec.save_to_disk(&task_dir);
 
                 eprintln!(" Containers cleaned up. Partial results saved under ./{}/tasks/", output_dir);
-                std::process::exit(1);
+                // 130 = 128 + SIGINT(2), the conventional exit code for Ctrl+C.
+                // Lets CI/scripts distinguish an interrupt from a generic failure.
+                std::process::exit(130);
             }
         });
     }
@@ -188,6 +201,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 error: e.to_string(),
             };
             let _ = rec.save_to_disk(&task_dir);
+            display.finish_tui();
             return Err(e);
         }
     };
@@ -237,6 +251,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     record.branch = Some(branch_name.clone());
     record.verdict = Some(format!("{:?}", result.verdict));
     record.revision_rounds = result.revision_rounds;
+    record.add_metrics(&result.metrics);
     if let Err(e) = record.save_to_disk(&task_dir) {
         eprintln!("Warning: could not save final task state: {}", e);
     }
@@ -244,6 +259,10 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     if !args.quiet {
         display.show_completion(&result, &branch_name, &task_dir);
     }
+
+    // Tear down the TUI (if active): this joins the render thread, which
+    // restores the terminal before any further output.
+    display.finish_tui();
 
     Ok(())
 }

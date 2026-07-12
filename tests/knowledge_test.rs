@@ -3,8 +3,8 @@ use niki::knowledge::indexer::index_project;
 use std::fs;
 use tempfile::TempDir;
 
-#[test]
-fn test_knowledge_indexes_project_files() {
+#[tokio::test]
+async fn test_knowledge_indexes_project_files() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("index.js"), "console.log('hi');").unwrap();
     fs::write(
@@ -13,7 +13,9 @@ fn test_knowledge_indexes_project_files() {
     )
     .unwrap();
 
-    let knowledge = index_project(dir.path(), &NikiConfig::default()).expect("index project");
+    let knowledge = index_project(dir.path(), &NikiConfig::default())
+        .await
+        .expect("index project");
 
     let rendered = knowledge.render();
     assert!(rendered.contains("index.js"), "file tree should list index.js");

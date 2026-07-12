@@ -5,7 +5,7 @@ use std::pin::Pin;
 use reqwest::Client;
 use serde_json::json;
 use crate::config::ProviderConfig;
-use super::provider::{CompletionRequest, CompletionResponse, LlmProvider, TokenUsage};
+use super::provider::{CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage};
 
 pub struct OpenAiProvider {
     config: ProviderConfig,
@@ -70,7 +70,7 @@ impl LlmProvider for OpenAiProvider {
         })
     }
 
-    async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
+    async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
         let api_key = self.config.api_key.as_ref().unwrap();
         let url = self.config.base_url.as_deref().unwrap_or("https://api.openai.com/v1/chat/completions");
 
@@ -88,7 +88,10 @@ impl LlmProvider for OpenAiProvider {
                     "content": request.user_message
                 }
             ],
-            "stream": true
+            "stream": true,
+            "stream_options": {
+                "include_usage": true
+            }
         });
 
         let resp = self.client.post(url)
@@ -105,12 +108,12 @@ impl LlmProvider for OpenAiProvider {
         }
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        
+
         tokio::spawn(async move {
             use futures::StreamExt;
             let mut stream = resp.bytes_stream();
             let mut buffer = String::new();
-            
+
             while let Some(chunk_res) = stream.next().await {
                 match chunk_res {
                     Ok(bytes) => {
@@ -118,7 +121,7 @@ impl LlmProvider for OpenAiProvider {
                         while let Some(pos) = buffer.find('\n') {
                             let line = buffer[..pos].to_string();
                             buffer = buffer[pos+1..].to_string();
-                            
+
                             let line = line.trim();
                             if line.starts_with("data: ") {
                                 let data = &line[6..];
@@ -126,10 +129,18 @@ impl LlmProvider for OpenAiProvider {
                                     continue;
                                 }
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                                    if let Some(choices) = json["choices"].as_array() {
+                                    if let Some(usage) = json["usage"].as_object() {
+                                        // Final usage chunk (choices is empty / absent).
+                                        if tx.send(Ok(StreamChunk::Usage(TokenUsage {
+                                            input_tokens: usage["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+                                            output_tokens: usage["completion_tokens"].as_u64().unwrap_or(0) as u32,
+                                        }))).is_err() {
+                                            return;
+                                        }
+                                    } else if let Some(choices) = json["choices"].as_array() {
                                         if let Some(choice) = choices.get(0) {
                                             if let Some(text) = choice["delta"]["content"].as_str() {
-                                                if tx.send(Ok(text.to_string())).is_err() {
+                                                if tx.send(Ok(StreamChunk::Text(text.to_string()))).is_err() {
                                                     return;
                                                 }
                                             }

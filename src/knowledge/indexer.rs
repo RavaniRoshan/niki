@@ -4,6 +4,7 @@ use std::fs;
 use walkdir::WalkDir;
 use git2::Repository;
 use std::collections::HashSet;
+use crate::config::NikiConfig;
 
 pub struct ProjectKnowledge {
     pub file_tree: String,
@@ -12,6 +13,13 @@ pub struct ProjectKnowledge {
     pub git_recent_commits: Vec<CommitSummary>,
     pub skills_files: Vec<SkillsFile>,
     pub project_size: ProjectSize,
+    /// Extra context pulled from project doc globs and external URLs.
+    pub external_sources: Vec<ExternalSource>,
+}
+
+pub struct ExternalSource {
+    pub title: String,
+    pub content: String,
 }
 
 pub struct PackageInfo {
@@ -71,11 +79,22 @@ impl ProjectKnowledge {
             }
         }
 
+        if !self.external_sources.is_empty() {
+            output.push_str("## External Sources\n");
+            for src in &self.external_sources {
+                // Bound each source so a long doc/wiki doesn't blow up the prompt.
+                let preview: String = src.content.chars().take(4000).collect();
+                output.push_str(&format!("### {}\n{}\n\n", src.title, preview));
+            }
+        }
+
         output
     }
 }
 
-pub fn index_project(path: &Path, _config: &crate::config::NikiConfig) -> Result<ProjectKnowledge> {
+/// Index the project and (optionally) ingest extra context from doc globs and
+/// external URLs configured under `[knowledge]`.
+pub async fn index_project(path: &Path, config: &NikiConfig) -> Result<ProjectKnowledge> {
     let mut file_count = 0;
     let mut languages = HashSet::new();
     let mut tree_lines = Vec::new();
@@ -194,6 +213,43 @@ pub fn index_project(path: &Path, _config: &crate::config::NikiConfig) -> Result
         ProjectSize::Large
     };
 
+    // --- External source ingestion ([knowledge] config) ---
+    let mut external_sources = Vec::new();
+
+    // 1. Project doc files matched by glob.
+    for pattern in &config.knowledge.doc_globs {
+        let full = path.join(pattern);
+        if let Ok(paths) = glob::glob(&full.to_string_lossy()) {
+            for entry in paths.flatten() {
+                if entry.is_file() {
+                    if let Ok(content) = fs::read_to_string(&entry) {
+                        let content: String = content
+                            .chars()
+                            .take(config.knowledge.max_source_chars)
+                            .collect();
+                        external_sources.push(ExternalSource {
+                            title: entry.to_string_lossy().to_string(),
+                            content,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. External URLs (READMEs, linked docs, wikis, issues) — best effort.
+    for url in &config.knowledge.urls {
+        match fetch_url(url, config.knowledge.max_source_chars).await {
+            Ok(content) => external_sources.push(ExternalSource {
+                title: url.clone(),
+                content,
+            }),
+            Err(e) => {
+                eprintln!("Warning: could not fetch knowledge source {}: {}", url, e);
+            }
+        }
+    }
+
     Ok(ProjectKnowledge {
         file_tree: tree_lines.join("\n"),
         detected_languages: languages.into_iter().map(|s| s.to_string()).collect(),
@@ -201,5 +257,16 @@ pub fn index_project(path: &Path, _config: &crate::config::NikiConfig) -> Result
         git_recent_commits,
         skills_files,
         project_size,
+        external_sources,
     })
+}
+
+/// Fetch a URL's body text, truncated to `max_chars`. Network errors surface to
+/// the caller so `index_project` can decide to skip rather than fail the run.
+async fn fetch_url(url: &str, max_chars: usize) -> Result<String> {
+    let client = reqwest::Client::new();
+    let resp = client.get(url).send().await?;
+    let text = resp.text().await?;
+    let truncated: String = text.chars().take(max_chars).collect();
+    Ok(truncated)
 }

@@ -23,6 +23,20 @@ pub fn render_completion(
             "[{}] [NIKI] Task complete — Branch: {} | Verdict: {} | Revisions: {}",
             ts, branch, verdict, result.revision_rounds
         );
+
+        let (total_in, total_out, total_cost, total_ms) = cost_totals(result);
+        if total_cost > 0.0 {
+            println!(
+                "[{}] [NIKI] Cost: ${:.4} | Tokens in/out: {}/{} | Latency: {:.1}s",
+                ts, total_cost, total_in, total_out, total_ms as f64 / 1000.0
+            );
+        } else {
+            println!(
+                "[{}] [NIKI] Tokens in/out: {}/{} | Latency: {:.1}s",
+                ts, total_in, total_out, total_ms as f64 / 1000.0
+            );
+        }
+
         println!(
             "[{}] [NIKI] Patch: {} | Report: {}",
             ts,
@@ -84,6 +98,28 @@ pub fn render_completion(
         theme.subtext.apply_to("Report:"),
         task_dir.join("report.md").display()
     ));
+
+    let (total_in, total_out, total_cost, total_ms) = cost_totals(result);
+    if total_cost > 0.0 {
+        let _ = term.write_line(&format!(
+            "   {} ${:.4} across {} agent(s) · {} in / {} out · {:.1}s",
+            theme.subtext.apply_to("Cost:"),
+            total_cost,
+            result.metrics.len(),
+            total_in,
+            total_out,
+            total_ms as f64 / 1000.0
+        ));
+    } else if !result.metrics.is_empty() {
+        let _ = term.write_line(&format!(
+            "   {} {} in / {} out · {:.1}s (cost n/a for model)",
+            theme.subtext.apply_to("Tokens:"),
+            total_in,
+            total_out,
+            total_ms as f64 / 1000.0
+        ));
+    }
+
     let _ = term.write_line("");
     let _ = term.write_line(&format!(
         "   {} git checkout {}",
@@ -91,6 +127,21 @@ pub fn render_completion(
         branch
     ));
     let _ = term.write_line("");
+}
+
+/// Sum token/cost/latency across all recorded stages.
+fn cost_totals(result: &PipelineResult) -> (u32, u32, f64, u64) {
+    let mut total_in = 0u32;
+    let mut total_out = 0u32;
+    let mut total_cost = 0.0f64;
+    let mut total_ms = 0u64;
+    for m in &result.metrics {
+        total_in += m.input_tokens;
+        total_out += m.output_tokens;
+        total_cost += m.cost_usd;
+        total_ms += m.latency_ms;
+    }
+    (total_in, total_out, total_cost, total_ms)
 }
 
 pub fn render_failure(error: &NikiError, _state: &PipelineState, theme: &Theme, is_tty: bool) {

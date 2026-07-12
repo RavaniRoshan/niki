@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use minijinja::Environment;
-use crate::llm::provider::{LlmProvider, CompletionRequest};
+use crate::llm::provider::{LlmProvider, CompletionRequest, StreamChunk, TokenUsage};
 use crate::artifacts::types::AgentRole;
 use crate::artifacts::validate::validate_artifact;
 use std::fs;
@@ -18,7 +18,7 @@ pub async fn run_agent(
     context: minijinja::Value,
     schema_path: &str,
     display: &mut crate::display::agent_stream::AgenticDisplay,
-) -> Result<(String, u32)> {
+) -> Result<(String, TokenUsage)> {
     let mut env = Environment::new();
     let template_path = crate::resolve_asset(&format!("prompts/{}", template_name));
     let template_content = fs::read_to_string(&template_path)
@@ -50,15 +50,25 @@ pub async fn run_agent(
     use futures::StreamExt;
     let mut stream = llm.stream(request).await?;
     let mut full_content = String::new();
-    let mut token_count = 0; // naive estimation for prototype
-    
+    // Real usage is reported by the provider in a trailing Usage chunk. If the
+    // stream ends without one (e.g. a gateway that omits usage), we fall back
+    // to a char-based estimate so a token count is always present.
+    let mut usage: Option<TokenUsage> = None;
+    let mut estimated_output_tokens: u32 = 0;
+
     while let Some(chunk_res) = stream.next().await {
         match chunk_res {
-            Ok(token) => {
+            Ok(StreamChunk::Text(token)) => {
                 full_content.push_str(&token);
-                // Rough token estimation: 1 token per ~4 chars
-                token_count += (token.len() / 4).max(1) as u32;
+                estimated_output_tokens += (token.len() / 4).max(1) as u32;
                 display.stream_token(&token);
+            }
+            Ok(StreamChunk::Usage(u)) => {
+                // Merge: anthropic/ollama may send input and output in separate
+                // chunks, so take the larger of what we've seen per field.
+                let input_tokens = u.input_tokens.max(usage.map(|x| x.input_tokens).unwrap_or(0));
+                let output_tokens = u.output_tokens.max(usage.map(|x| x.output_tokens).unwrap_or(0));
+                usage = Some(TokenUsage { input_tokens, output_tokens });
             }
             Err(e) => {
                 display.agent_failed(role, &e.to_string());
@@ -66,6 +76,12 @@ pub async fn run_agent(
             }
         }
     }
+
+    // Fall back to the estimate only when the API reported no usage at all.
+    let token_usage = usage.unwrap_or_else(|| TokenUsage {
+        input_tokens: 0,
+        output_tokens: estimated_output_tokens,
+    });
 
     let json_content = extract_json(&full_content);
 
@@ -80,7 +96,7 @@ pub async fn run_agent(
         }.into());
     }
 
-    Ok((json_content, token_count))
+    Ok((json_content, token_usage))
 }
 
 fn extract_json(text: &str) -> String {

@@ -8,6 +8,7 @@ pub mod llm;
 pub mod knowledge;
 pub mod output;
 pub mod display;
+pub mod cost;
 
 use thiserror::Error;
 use uuid::Uuid;

@@ -5,3 +5,4 @@ pub mod artifact_render;
 pub mod pipeline_status;
 pub mod diff_display;
 pub mod completion;
+pub mod tui;

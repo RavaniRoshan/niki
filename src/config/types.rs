@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use toml;
+use crate::artifacts::types::AgentRole;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NikiConfig {
@@ -15,6 +16,58 @@ pub struct NikiConfig {
     pub agents: AgentsConfig,
     #[serde(default)]
     pub docker: DockerConfig,
+    /// Optional data-driven pipeline topology. When `stages` is empty the
+    /// pipeline falls back to the classic Planner → Coder → Tester → Reviewer
+    /// wiring derived from `[agents]`.
+    #[serde(default)]
+    pub pipeline: PipelineConfig,
+    /// Optional extra context ingestion: project doc files and external URLs.
+    #[serde(default)]
+    pub knowledge: KnowledgeConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct KnowledgeConfig {
+    /// Glob patterns (relative to the project root) of extra doc files to
+    /// include as agent context (e.g. `["docs/**/*.md", "README.md"]`).
+    #[serde(default)]
+    pub doc_globs: Vec<String>,
+    /// External URLs (READMEs, linked docs, wikis, issues) fetched and included
+    /// as agent context. Fetched best-effort; a failed fetch is skipped.
+    #[serde(default)]
+    pub urls: Vec<String>,
+    /// Max characters ingested per external source, bounding context size.
+    #[serde(default = "default_max_source_chars")]
+    pub max_source_chars: usize,
+}
+
+fn default_max_source_chars() -> usize {
+    8000
+}
+
+/// A user-defined, ordered pipeline of agent stages.
+///
+/// This replaces the hardcoded flow: each stage binds an `AgentRole` to a
+/// provider/model, and may be skipped. The revision loop re-runs every stage
+/// after the Planner (in order) until a Reviewer stage returns a terminal
+/// verdict or `max_revision_rounds` is exhausted.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PipelineConfig {
+    #[serde(default)]
+    pub stages: Vec<PipelineStageConfig>,
+    /// Override for the revision loop length; falls back to `general.max_revision_rounds`.
+    #[serde(default)]
+    pub max_revision_rounds: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineStageConfig {
+    pub role: AgentRole,
+    pub provider: String,
+    pub model: String,
+    /// When true, this stage is omitted from the run.
+    #[serde(default)]
+    pub skip: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +181,21 @@ impl NikiConfig {
 
         self.agents = other.agents;
         self.docker = other.docker;
+
+        // Topology overrides are additive: only apply the parts the user set.
+        if !other.pipeline.stages.is_empty() {
+            self.pipeline.stages = other.pipeline.stages;
+        }
+        if other.pipeline.max_revision_rounds.is_some() {
+            self.pipeline.max_revision_rounds = other.pipeline.max_revision_rounds;
+        }
+
+        // Knowledge ingestion is additive: union the doc globs and URLs.
+        self.knowledge.doc_globs.extend(other.knowledge.doc_globs);
+        self.knowledge.urls.extend(other.knowledge.urls);
+        if other.knowledge.max_source_chars != default_max_source_chars() {
+            self.knowledge.max_source_chars = other.knowledge.max_source_chars;
+        }
     }
 
     fn apply_env_vars(&mut self) {

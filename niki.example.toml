@@ -40,6 +40,31 @@ model = "gpt-4o-mini"               # Cheaper model for test generation
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"         # Best reasoning for review
 
+# Optional: data-driven pipeline topology.
+# Define your own ordered list of stages instead of the built-in
+# Planner -> Coder -> Tester -> Reviewer flow. Each stage binds a role to a
+# provider/model. Omit this section (or leave `stages` empty) to use the
+# default wiring derived from [agents] above.
+#
+# [pipeline]
+# max_revision_rounds = 3
+# stages = [
+#   { role = "planner",  provider = "anthropic", model = "claude-sonnet-4-20250514" },
+#   { role = "coder",    provider = "anthropic", model = "claude-sonnet-4-20250514" },
+#   { role = "tester",   provider = "openai",    model = "gpt-4o-mini" },
+#   { role = "reviewer", provider = "anthropic", model = "claude-sonnet-4-20250514" },
+#   # Drop a stage from the run with skip = true:
+#   # { role = "tester", provider = "openai", model = "gpt-4o-mini", skip = true },
+# ]
+
+# Optional: pull extra context into the agents' prompts.
+# doc_globs matches files in the project; urls are fetched (best-effort) at run time.
+#
+# [knowledge]
+# doc_globs = ["docs/**/*.md", "README.md"]
+# urls = ["https://example.com/architecture.md"]
+# max_source_chars = 8000
+
 [docker]
 # Base image for agent containers
 base_image = "ubuntu:24.04"

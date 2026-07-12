@@ -5,7 +5,7 @@ use std::pin::Pin;
 use reqwest::Client;
 use serde_json::json;
 use crate::config::ProviderConfig;
-use super::provider::{CompletionRequest, CompletionResponse, LlmProvider, TokenUsage};
+use super::provider::{CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage};
 
 pub struct AnthropicProvider {
     config: ProviderConfig,
@@ -68,7 +68,7 @@ impl LlmProvider for AnthropicProvider {
         })
     }
 
-    async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<String>> + Send>>> {
+    async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
         let api_key = self.config.api_key.as_ref().unwrap();
         let url = self.config.base_url.as_deref().unwrap_or("https://api.anthropic.com/v1/messages");
 
@@ -124,7 +124,27 @@ impl LlmProvider for AnthropicProvider {
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
                                     if json["type"] == "content_block_delta" {
                                         if let Some(text) = json["delta"]["text"].as_str() {
-                                            if tx.send(Ok(text.to_string())).is_err() {
+                                            if tx.send(Ok(StreamChunk::Text(text.to_string()))).is_err() {
+                                                return;
+                                            }
+                                        }
+                                    } else if json["type"] == "message_start" {
+                                        // input_tokens are known up front
+                                        if let Some(input) = json["message"]["usage"]["input_tokens"].as_u64() {
+                                            if tx.send(Ok(StreamChunk::Usage(TokenUsage {
+                                                input_tokens: input as u32,
+                                                output_tokens: 0,
+                                            }))).is_err() {
+                                                return;
+                                            }
+                                        }
+                                    } else if json["type"] == "message_delta" {
+                                        // output_tokens (and possibly the final input_tokens) arrive here
+                                        if let Some(output) = json["usage"]["output_tokens"].as_u64() {
+                                            if tx.send(Ok(StreamChunk::Usage(TokenUsage {
+                                                input_tokens: 0,
+                                                output_tokens: output as u32,
+                                            }))).is_err() {
                                                 return;
                                             }
                                         }
