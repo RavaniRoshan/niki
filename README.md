@@ -133,6 +133,8 @@ niki report <id>                      # full report, or a unique short prefix
 
 NIKI reads `niki.toml` from the project root. Keys can also come from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) — **env vars take precedence, so secrets never have to be committed.**
 
+Provider `base_url` and `model` likewise follow standard conventions and can be set from the environment, overriding `niki.toml`: `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL` and `OPENAI_BASE_URL` / `OPENAI_MODEL`. A `base_url` is a host/base (e.g. `https://api.anthropic.com` or `https://api.openai.com/v1`) — the per-provider endpoint path is appended automatically, and an explicit full URL is left untouched.
+
 ```toml
 [general]
 max_revision_rounds = 3        # Reviewer → Coder feedback loops before forced completion

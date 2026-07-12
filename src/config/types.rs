@@ -92,7 +92,7 @@ pub struct ProviderConfig {
     pub default_model: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentsConfig {
     #[serde(default = "default_anthropic_agent")]
     pub planner: AgentConfig,
@@ -102,6 +102,17 @@ pub struct AgentsConfig {
     pub tester: AgentConfig,
     #[serde(default = "default_anthropic_agent")]
     pub reviewer: AgentConfig,
+}
+
+impl Default for AgentsConfig {
+    fn default() -> Self {
+        Self {
+            planner: default_anthropic_agent(),
+            coder: default_anthropic_agent(),
+            tester: default_openai_agent(),
+            reviewer: default_anthropic_agent(),
+        }
+    }
 }
 
 fn default_anthropic_agent() -> AgentConfig {
@@ -220,9 +231,11 @@ impl NikiConfig {
         }
 
         if let Ok(key) = std::env::var("NIKI_PROVIDERS_ANTHROPIC_API_KEY") {
-            if let Some(p) = self.providers.get_mut("anthropic") {
-                if p.api_key.is_none() {
-                    p.api_key = Some(key);
+            if !key.is_empty() {
+                if let Some(p) = self.providers.get_mut("anthropic") {
+                    if p.api_key.is_none() {
+                        p.api_key = Some(key);
+                    }
                 }
             }
         }
@@ -246,6 +259,64 @@ impl NikiConfig {
                     p.api_key = Some(key);
                 }
             }
+        }
+
+        // Standard base-URL overrides (SDK convention: a host/base, not the full
+        // endpoint — the provider appends the path). Env takes precedence over
+        // whatever is in niki.toml.
+        if let Ok(base) = std::env::var("ANTHROPIC_BASE_URL") {
+            if !base.is_empty() {
+                if let Some(p) = self.providers.get_mut("anthropic") {
+                    p.base_url = Some(base.trim_end_matches('/').to_string());
+                }
+            }
+        }
+        if let Ok(base) = std::env::var("OPENAI_BASE_URL") {
+            if !base.is_empty() {
+                if let Some(p) = self.providers.get_mut("openai") {
+                    p.base_url = Some(base.trim_end_matches('/').to_string());
+                }
+            }
+        }
+
+        // Standard model overrides. Applied to agents still using the provider's
+        // built-in default, so an explicit per-agent model in niki.toml is respected.
+        if let Ok(model) = std::env::var("ANTHROPIC_MODEL") {
+            if !model.is_empty() {
+                if let Some(p) = self.providers.get_mut("anthropic") {
+                    p.default_model = model.clone();
+                }
+                apply_env_model_to_agents(&mut self.agents, "anthropic", &model);
+            }
+        }
+        if let Ok(model) = std::env::var("OPENAI_MODEL") {
+            if !model.is_empty() {
+                if let Some(p) = self.providers.get_mut("openai") {
+                    p.default_model = model.clone();
+                }
+                apply_env_model_to_agents(&mut self.agents, "openai", &model);
+            }
+        }
+    }
+}
+
+/// Override an agent's model with an env-provided model when that agent is bound
+/// to `provider` and is still using the provider's built-in default. Agents with
+/// an explicit model set in niki.toml are left untouched.
+fn apply_env_model_to_agents(agents: &mut AgentsConfig, provider: &str, model: &str) {
+    let default_model = if provider == "anthropic" {
+        "claude-sonnet-4-20250514"
+    } else {
+        "gpt-4o-mini"
+    };
+    for a in [
+        &mut agents.planner,
+        &mut agents.coder,
+        &mut agents.tester,
+        &mut agents.reviewer,
+    ] {
+        if a.provider == provider && a.model == default_model {
+            a.model = model.to_string();
         }
     }
 }

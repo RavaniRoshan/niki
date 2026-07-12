@@ -7,6 +7,21 @@ use serde_json::json;
 use crate::config::ProviderConfig;
 use super::provider::{CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage};
 
+/// Resolve a base URL to the OpenAI chat-completions endpoint. `base_url`
+/// follows the standard SDK convention (a base such as `https://api.openai.com/v1`),
+/// with `/chat/completions` appended. A full endpoint is left untouched so an
+/// explicit `base_url` is never double-suffixed.
+fn openai_endpoint(base: &str) -> String {
+    let b = base.trim_end_matches('/');
+    if b.ends_with("/v1/chat/completions") || b.ends_with("/chat/completions") {
+        b.to_string()
+    } else if b.ends_with("/v1") {
+        format!("{b}/chat/completions")
+    } else {
+        format!("{b}/v1/chat/completions")
+    }
+}
+
 pub struct OpenAiProvider {
     config: ProviderConfig,
     client: Client,
@@ -26,7 +41,12 @@ impl OpenAiProvider {
 impl LlmProvider for OpenAiProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse> {
         let api_key = self.config.api_key.as_ref().unwrap();
-        let url = self.config.base_url.as_deref().unwrap_or("https://api.openai.com/v1/chat/completions");
+        let url = openai_endpoint(
+            self.config
+                .base_url
+                .as_deref()
+                .unwrap_or("https://api.openai.com/v1"),
+        );
 
         let payload = json!({
             "model": request.model,
@@ -72,7 +92,12 @@ impl LlmProvider for OpenAiProvider {
 
     async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
         let api_key = self.config.api_key.as_ref().unwrap();
-        let url = self.config.base_url.as_deref().unwrap_or("https://api.openai.com/v1/chat/completions");
+        let url = openai_endpoint(
+            self.config
+                .base_url
+                .as_deref()
+                .unwrap_or("https://api.openai.com/v1"),
+        );
 
         let payload = json!({
             "model": request.model,
@@ -163,5 +188,46 @@ impl LlmProvider for OpenAiProvider {
 
     fn provider_name(&self) -> &str {
         "openai"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::openai_endpoint;
+
+    #[test]
+    fn appends_standard_path_to_v1_base() {
+        assert_eq!(
+            openai_endpoint("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn appends_v1_chat_completions_to_host_base() {
+        assert_eq!(
+            openai_endpoint("https://api.openai.com"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn leaves_full_endpoint_untouched() {
+        assert_eq!(
+            openai_endpoint("https://gw.example.com/v1/chat/completions"),
+            "https://gw.example.com/v1/chat/completions"
+        );
+        assert_eq!(
+            openai_endpoint("https://gw.example.com/chat/completions"),
+            "https://gw.example.com/chat/completions"
+        );
+    }
+
+    #[test]
+    fn trims_trailing_slash() {
+        assert_eq!(
+            openai_endpoint("https://api.openai.com/v1/"),
+            "https://api.openai.com/v1/chat/completions"
+        );
     }
 }

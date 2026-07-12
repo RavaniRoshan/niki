@@ -8,12 +8,13 @@ output_dir = ".niki"
 
 [providers.anthropic]
 api_key = "sk-ant-..."               # Or set ANTHROPIC_API_KEY env var
-default_model = "claude-sonnet-4-20250514"
+# base_url = "https://api.anthropic.com"  # Host/base for compatible APIs (or set ANTHROPIC_BASE_URL)
+default_model = "claude-sonnet-4-20250514"  # Or set ANTHROPIC_MODEL env var
 
 [providers.openai]
 api_key = "sk-..."                    # Or set OPENAI_API_KEY env var
-base_url = "https://api.openai.com/v1"  # Override for compatible APIs
-default_model = "gpt-4o"
+base_url = "https://api.openai.com/v1"  # Host/base for compatible APIs (or set OPENAI_BASE_URL)
+default_model = "gpt-4o"                  # Or set OPENAI_MODEL env var
 
 [providers.google]
 api_key = "AIza..."                   # Or set GOOGLE_API_KEY env var
