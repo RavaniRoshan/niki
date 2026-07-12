@@ -55,6 +55,25 @@ Ordered roughly by dependency. Items lower in the list build on ones above.
 | 10 | **Per-agent model recommendations** — `niki recommend` with cost/quality tradeoffs per role | ✅ | Depends on #1 | M |
 | 11 | **Claude-Code-style terminal UI** — replicate Claude Code's posture, glyphs, spinner and mode line so NIKI's multi-agent flow mirrors a sub-agent workflow | ✅ | — | M |
 
+### v2 — what shipped (as of this commit)
+
+The v2 phase is essentially complete: **10 of 11 items are implemented and covered by
+passing unit/integration tests**; cloud execution (#9) remains a beta scaffold.
+
+- **Cost & performance analytics** — per-agent/task token, latency, and cost metrics pulled from real provider usage and persisted to each run's record.
+- **User-defined topologies** — `[pipeline]` replaces the hardcoded flow with an ordered, per-stage provider/model list (optional `skip`).
+- **Parallel coders + synthesis** — `[parallel]` runs N Coders in isolated git worktrees; a Synthesizer reconciles their diffs.
+- **Security Auditor** — `[security]` injects a dedicated adversarial review pass after the Reviewer.
+- **External source ingestion** — `[knowledge]` pulls project doc globs and external URLs into agent context.
+- **Rich terminal TUI / Claude-Code-style UI** — `--tui` renders a Claude-Code-like transcript (⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line).
+- **Dashboard** — `niki dashboard` produces a static HTML diff viewer with inline Reviewer/Security annotations.
+- **Alternative sandboxing** — a `Sandbox` trait with Docker, git-worktree, and cloud backends (`--backend`).
+- **Per-agent recommendations** — `niki recommend` reports cost/quality tradeoffs per role.
+
+> **Cloud execution (#9)** is a *drop-in seam*, not a working backend yet: `CloudSandbox`
+> implements the `Sandbox` trait but is gated behind `NIKI_CLOUD_ENDPOINT` and fails fast
+> until infra ships.
+
 ## Phase 3 — Full version (6+ months)
 
 Living memory · pipeline marketplace · dynamic agent topology · visual pipeline builder ·

@@ -196,13 +196,43 @@ urls      = ["https://example.com/architecture.md"]  # external docs/wikis/issue
 max_source_chars = 8000                     # truncation cap per source
 ```
 
+### Parallel coders + synthesis
+
+Enable N Coder agents that explore the spec independently — each isolated in its own git worktree — and let a Synthesizer reconcile their diffs into one change. The default `coder_count` is 2.
+
+```toml
+[parallel]
+enabled     = true
+coder_count = 2     # number of concurrent Coders
+```
+
+### Security audit pass
+
+Add a dedicated, adversarial vulnerability review after the Reviewer. Its verdict is recorded as an artifact but does not gate the revision loop by default.
+
+```toml
+[security]
+enabled = true
+```
+
+### Sandbox backends
+
+NIKI defaults to Docker, but the same `Sandbox` trait is implemented by a git-worktree backend (no Docker daemon required) and a cloud backend (beta). Choose at runtime:
+
+```bash
+niki run "..." --backend worktree   # git worktree + local process, no Docker
+niki run "..." --backend cloud      # NIKI infra (beta; needs NIKI_CLOUD_ENDPOINT)
+```
+
 ## CLI Reference
 
 | Command | Description |
 |---|---|
-| `niki run <description>` | Run the full pipeline on a task. Key flags: `--project`, `--branch`, `--max-rounds`, `--dry-run`, `--quiet`, `--verbose`, `--tui`, `--<agent>-model`. |
+| `niki run <description>` | Run the full pipeline on a task. Key flags: `--project`, `--branch`, `--max-rounds`, `--backend`, `--cloud`, `--dry-run`, `--quiet`, `--verbose`, `--tui`, `--<agent>-model`. |
 | `niki status` | Show the current/most recent task — status, branch, verdict, revisions. Accepts `--project`. |
 | `niki report [id]` | Print a completed task's report. Accepts a full UUID **or a unique short prefix**; `--project`. |
+| `niki recommend` | Print per-agent model recommendations with cost/quality tradeoffs (depends on cost analytics). |
+| `niki dashboard [id]` | Generate or locate the static HTML dashboard (diff viewer + Reviewer/Security annotations) for a task. |
 | `niki config` | Manage configuration. |
 
 Run `niki <command> --help` for the full flag list.
@@ -213,7 +243,7 @@ Run `niki <command> --help` for the full flag list.
 src/
 ├── agents/        # Planner, Coder, Tester, Reviewer
 ├── orchestrator/  # pipeline sequencing + task state
-├── sandbox/       # Docker container lifecycle & exec
+├── sandbox/       # Sandbox trait: Docker / git-worktree / cloud backends
 ├── llm/           # provider clients (anthropic, openai, google, ollama)
 ├── output/        # git branch/commit, patch, report generation
 ├── artifacts/     # typed artifacts + JSON-schema validation
@@ -227,18 +257,18 @@ docker/            # sandbox image (Dockerfile) + scripts/
 
 ## Roadmap
 
-### v2 (next)
-- [ ] **Parallel coder agents + synthesis** — multiple Coders explore the spec independently; a Synthesizer picks or merges the best result.
-- [x] **User-defined agent topologies** — configure your own ordered pipeline in `[pipeline]` (which agents, in what order, with what models, optional skip).
-- [x] **External source ingestion** — pull in project doc globs and external URLs (READMEs, docs, wikis, issues) as agent context via `[knowledge]`.
-- [x] **Rich terminal TUI** — `lazygit`/`k9s`-style panels for agent status, live streams, and artifact flow (`niki run --tui`).
-- [ ] **Dashboard: diff viewer with inline Reviewer annotations**.
-- [x] **Cost & performance analytics** — real token usage (from provider APIs), latency, and cost per agent/task, persisted to each run.
-- [ ] **External source ingestion** — pull in linked docs, READMEs, wikis, and issue content for agent context.
-- [ ] **Alternative sandboxing** — lightweight `git worktree` isolation as a Docker alternative.
-- [ ] **Cloud execution (beta)** — run agents on NIKI's infra for heavier parallelism.
-- [ ] **Per-agent model recommendations** — benchmarked, cheapest config that still beats a single agent.
-- [ ] **Security Auditor agent** — dedicated vulnerability review before the Reviewer.
+### v2 (shipped)
+- [x] **Cost & performance analytics** — real token usage from provider APIs, latency, and cost per agent/task, persisted to each run.
+- [x] **User-defined agent topologies** — your own ordered `[pipeline]` (agents, order, models, optional skip).
+- [x] **Parallel coder agents + synthesis** — N Coders explore the spec in isolated worktrees; a Synthesizer merges the best result (`[parallel]`).
+- [x] **Security Auditor agent** — dedicated adversarial vulnerability pass (`[security]`) after the Reviewer.
+- [x] **External source ingestion** — project doc globs + external URLs as agent context via `[knowledge]`.
+- [x] **Rich terminal TUI** — `ratatui` panels, restyled as a Claude-Code-like transcript (`niki run --tui`).
+- [x] **Dashboard** — static HTML diff viewer with inline Reviewer/Security annotations (`niki dashboard`).
+- [x] **Alternative sandboxing** — `git worktree` isolation + a `Sandbox` trait (Docker / Worktree / Cloud backends).
+- [ ] **Cloud execution (beta)** — the `cloud` backend is a drop-in seam gated behind `NIKI_CLOUD_ENDPOINT`; full infra ships later.
+- [x] **Per-agent model recommendations** — `niki recommend` with cost/quality tradeoffs per role.
+- [x] **Claude-Code-style terminal UI** — ⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line.
 
 ### Full version (later)
 - [ ] Living memory · pipeline marketplace · dynamic topology · visual pipeline builder
