@@ -67,8 +67,12 @@ model = "claude-sonnet-4-20250514"         # Best reasoning for review
 # max_source_chars = 8000
 
 [docker]
-# Base image for agent containers
-base_image = "ubuntu:24.04"
+# Base image for agent containers. This must be the pre-baked image built from
+# docker/Dockerfile (Wolfi/Chainguard base with git/node/npm/python3 bundled):
+#   docker build -t niki-sandbox:24.04 -f docker/Dockerfile .
+# A bare upstream image (e.g. ubuntu:24.04) lacks those tools and fails the
+# sandbox's tool check at runtime.
+base_image = "niki-sandbox:24.04"
 # Additional packages to install in agent containers
 extra_packages = ["nodejs", "npm", "python3"]
 # Memory limit per container

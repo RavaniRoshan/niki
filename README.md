@@ -114,7 +114,7 @@ git clone https://github.com/RavaniRoshan/niki.git
 cd niki
 cargo build --release
 
-# 2 · Build the sandbox image (git, node, npm, python3 pre-baked)
+# 2 · Build the sandbox image (Wolfi/Chainguard base, git/node/npm/python3 pre-baked)
 docker build -t niki-sandbox:24.04 -f docker/Dockerfile .
 
 # 3 · Configure — copy the example and add a key

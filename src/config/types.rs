@@ -146,7 +146,7 @@ pub struct DockerConfig {
 impl Default for DockerConfig {
     fn default() -> Self {
         Self {
-            base_image: "ubuntu:24.04".to_string(),
+            base_image: "niki-sandbox:24.04".to_string(),
             extra_packages: vec!["nodejs".into(), "npm".into(), "python3".into()],
             memory_limit: "2g".to_string(),
             cpu_limit: 2.0,

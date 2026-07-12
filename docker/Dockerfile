@@ -6,9 +6,11 @@
 #
 #   docker build -t niki-sandbox:24.04 -f docker/Dockerfile .
 #
-FROM ubuntu:24.04
-
-ENV DEBIAN_FRONTEND=noninteractive
+# Base image: Wolfi (Chainguard) — a minimal, glibc-based, low-CVE base. For
+# reproducible production builds pin a digest, e.g.
+#   FROM cgr.dev/chainguard/wolfi-base@sha256:<digest>
+# (the tag below always tracks latest).
+FROM cgr.dev/chainguard/wolfi-base:latest
 
 COPY scripts/sandbox-bootstrap.sh /tmp/sandbox-bootstrap.sh
 RUN chmod +x /tmp/sandbox-bootstrap.sh && /tmp/sandbox-bootstrap.sh
