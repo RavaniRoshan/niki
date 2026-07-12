@@ -216,20 +216,19 @@ impl NikiConfig {
         self.providers.entry("openai".to_string()).or_default();
         self.providers.entry("google".to_string()).or_default();
 
-        // Prefer live gateway credentials (ANTHROPIC_AUTH_TOKEN / OPENROUTER_API_KEY)
-        // over any key hardcoded in niki.toml, which may be stale/revoked.
-        if let Some(p) = self.providers.get_mut("anthropic") {
-            if let Ok(token) = std::env::var("ANTHROPIC_AUTH_TOKEN") {
-                if !token.is_empty() {
-                    p.api_key = Some(token);
-                }
-            } else if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
-                if !key.is_empty() {
+        // Standard provider keys take precedence, so a vanilla `ANTHROPIC_API_KEY`
+        // (or `OPENAI_API_KEY`) always wins. Gateway-style tokens
+        // (ANTHROPIC_AUTH_TOKEN / OPENROUTER_API_KEY) are only fallbacks. This keeps
+        // NIKI standard and BYOK: users supply their own OpenAI/Anthropic (or any
+        // compatible) key via env or `niki.toml`, and nothing is tied to a specific
+        // gateway.
+        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+            if !key.is_empty() {
+                if let Some(p) = self.providers.get_mut("anthropic") {
                     p.api_key = Some(key);
                 }
             }
         }
-
         if let Ok(key) = std::env::var("NIKI_PROVIDERS_ANTHROPIC_API_KEY") {
             if !key.is_empty() {
                 if let Some(p) = self.providers.get_mut("anthropic") {
@@ -239,10 +238,16 @@ impl NikiConfig {
                 }
             }
         }
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            if let Some(p) = self.providers.get_mut("anthropic") {
-                if p.api_key.is_none() {
-                    p.api_key = Some(key);
+        if let Some(p) = self.providers.get_mut("anthropic") {
+            if p.api_key.is_none() {
+                if let Ok(token) = std::env::var("ANTHROPIC_AUTH_TOKEN") {
+                    if !token.is_empty() {
+                        p.api_key = Some(token);
+                    }
+                } else if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
+                    if !key.is_empty() {
+                        p.api_key = Some(key);
+                    }
                 }
             }
         }

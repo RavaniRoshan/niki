@@ -135,6 +135,8 @@ NIKI reads `niki.toml` from the project root. Keys can also come from environmen
 
 Provider `base_url` and `model` likewise follow standard conventions and can be set from the environment, overriding `niki.toml`: `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL` and `OPENAI_BASE_URL` / `OPENAI_MODEL`. A `base_url` is a host/base (e.g. `https://api.anthropic.com` or `https://api.openai.com/v1`) — the per-provider endpoint path is appended automatically, and an explicit full URL is left untouched.
 
+NIKI ships with **no bundled gateway** — by default it talks to the official Anthropic, OpenAI, and Google endpoints, and you bring your own API key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_API_KEY`, or a per-provider key in `niki.toml`). A standard key always takes precedence over any gateway token. Point `base_url` at any OpenAI/Anthropic-compatible endpoint if you prefer a different provider.
+
 ```toml
 [general]
 max_revision_rounds = 3        # Reviewer → Coder feedback loops before forced completion
