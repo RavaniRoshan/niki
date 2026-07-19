@@ -7,7 +7,7 @@
 
 <div align="center">
 
-<img src="assets/logo.svg" alt="NIKI — hermetic multi-agent coding pipeline" width="480">
+
 
 <br>
 
