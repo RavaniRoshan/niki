@@ -7,7 +7,8 @@
 
 <div align="center">
 
-**Niki**
+<img width="1677" height="703" alt="image" src="https://github.com/user-attachments/assets/a5ae438c-ffa9-4459-a649-96e9a07042c6" />
+
 
 <br>
 
