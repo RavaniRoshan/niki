@@ -26,6 +26,8 @@ enum Commands {
     Recommend(niki::cli::recommend::RecommendArgs),
     /// Generate/locate the static HTML dashboard for a task
     Dashboard(niki::cli::dashboard::DashboardArgs),
+    /// Run the NIKI-vs-baseline evaluation harness on a seeded-defect dataset
+    Eval(niki::cli::eval::EvalArgs),
 }
 
 #[tokio::main]
@@ -46,6 +48,7 @@ async fn main() -> Result<()> {
         Commands::Config { command } => niki::cli::config::handle(command).await?,
         Commands::Recommend(args) => niki::cli::recommend::handle(args)?,
         Commands::Dashboard(args) => niki::cli::dashboard::handle(args)?,
+        Commands::Eval(args) => niki::cli::eval::handle(args).await?,
     }
 
     Ok(())

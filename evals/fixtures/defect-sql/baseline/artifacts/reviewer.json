@@ -1,0 +1,9 @@
+{
+  "verdict": "approved",
+  "overall_assessment": "Looks good. The login endpoint works as described and handles the happy path.",
+  "quality_scores": { "correctness": 8, "code_quality": 8, "test_coverage": 7, "spec_adherence": 9 },
+  "issues": [],
+  "strengths": ["Works as specified", "Clean implementation"],
+  "feedback": null,
+  "red_reconciliation": null
+}

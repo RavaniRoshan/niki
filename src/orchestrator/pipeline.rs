@@ -6,10 +6,12 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use crate::artifacts::types::{
-    AgentRole, CodeDiff, ReviewVerdict, SecurityVerdict, Synthesis, TaskSpec, TestReport, Verdict,
+    AgentRole, CodeDiff, IsolationRecord, RedChallenge, ReviewVerdict, SecurityVerdict, Synthesis,
+    TaskSpec, TestReport, Verdict,
 };
+use crate::safety::SafetyProof;
 use crate::config::NikiConfig;
-use crate::config::types::PipelineStageConfig;
+pub use crate::config::types::{PipelineStageConfig, TopologyMode};
 use crate::cost::compute_cost;
 use crate::display::agent_stream::AgenticDisplay;
 use crate::knowledge::indexer::index_project;
@@ -36,6 +38,16 @@ pub struct PipelineResult {
     pub artifacts: Vec<(AgentRole, String)>,
     /// Per-agent cost & latency, in execution order.
     pub metrics: Vec<StageMetric>,
+    /// Hermetic safety proof (BUILD_PLAN 1.1): proves the committed repo state
+    /// was never mutated. Populated by the CLI after the branch is committed.
+    pub safety_proof: Option<SafetyProof>,
+    /// Per-agent context-isolation records (BUILD_PLAN 2.1): proves each agent
+    /// ran as an independent LLM session that saw only published artifacts.
+    pub isolation: Vec<IsolationRecord>,
+    /// The agent topology NIKI selected for this run (BUILD_PLAN 3.2, P2.2):
+    /// `SingleAgent` (fast-path) or `MultiAgent` (full chain). Visible in the
+    /// report so the auto-selection is self-describing, not asserted.
+    pub topology: TopologyMode,
 }
 
 /// Typed output of a single pipeline stage, used for role-specific handling.
@@ -46,6 +58,7 @@ pub enum RoleOutput {
     Reviewer(ReviewVerdict),
     Synthesizer(Synthesis),
     SecurityAuditor(SecurityVerdict),
+    Red(RedChallenge),
 }
 
 /// The ordered stages to run, honoring a user-defined `[pipeline]` topology when
@@ -82,7 +95,42 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
             ));
         }
     }
+
+    // Adversarial Red/Blue verification (#1.2): inject a `Red` stage immediately
+    // BEFORE the Reviewer so the Reviewer is forced to reconcile the Red agent's
+    // independent critique. This is the structural guard against the Reviewer
+    // silently rubber-stamping the Coder (sycophantic convergence).
+    if config.red_blue.enabled {
+        if let Some(pos) = stages.iter().position(|s| s.role == AgentRole::Reviewer) {
+            if !stages.iter().any(|s| s.role == AgentRole::Red) {
+                let (provider, model) = red_blue_stage_target(config);
+                stages.insert(
+                    pos,
+                    stage(AgentRole::Red, &provider, &model),
+                );
+            }
+        }
+    }
+
     stages
+}
+
+/// Resolve the provider/model for the injected Red stage: explicit `[red_blue]`
+/// provider/model overrides win, otherwise fall back to the `[agents] red` binding.
+fn red_blue_stage_target(config: &NikiConfig) -> (String, String) {
+    let agent = &config.agents.red;
+    (
+        config
+            .red_blue
+            .provider
+            .clone()
+            .unwrap_or_else(|| agent.provider.clone()),
+        config
+            .red_blue
+            .model
+            .clone()
+            .unwrap_or_else(|| agent.model.clone()),
+    )
 }
 
 /// Resolve the provider/model for the injected SecurityAuditor stage: explicit
@@ -102,6 +150,81 @@ fn security_stage_target(config: &NikiConfig) -> (String, String) {
             .clone()
             .unwrap_or_else(|| agent.model.clone()),
     )
+}
+
+/// The published-artifact roles an agent receives as context, mirroring the
+/// `input_artifacts` each prompt is rendered with. This is the *complete* set of
+/// prior agents a role could have seen — and it is artifacts only, never reasoning.
+/// `with_red` is true when the Red/Blue pass ran (the Reviewer then also sees Red).
+fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
+    use AgentRole::*;
+    match role {
+        Planner => vec![],
+        Coder => vec![Planner],
+        Tester => vec![Planner, Coder],
+        Red => vec![Planner, Coder, Tester],
+        Reviewer => {
+            let mut v = vec![Planner, Coder, Tester];
+            if with_red {
+                v.push(Red);
+            }
+            v
+        }
+        Synthesizer => vec![Planner],
+        SecurityAuditor => {
+            let mut v = vec![Planner, Coder, Tester, Reviewer];
+            if with_red {
+                v.push(Red);
+            }
+            v
+        }
+    }
+}
+
+/// Pick the agent topology for this run (BUILD_PLAN 3.2, P2.2).
+///
+/// `Auto` (the default) decides by task shape: a bounded/sequential task — one
+/// whose `estimated_complexity` is at or below `single_agent_max_complexity` —
+/// collapses to the single-agent fast-path, while anything bigger runs the full
+/// multi-agent chain. The full chain is forced whenever the task needs an
+/// independent security audit or parallel coders, since the solo fast-path
+/// can't provide those.
+pub fn select_topology(spec: &TaskSpec, config: &NikiConfig) -> TopologyMode {
+    match config.pipeline.topology {
+        TopologyMode::MultiAgent => TopologyMode::MultiAgent,
+        TopologyMode::SingleAgent => TopologyMode::SingleAgent,
+        TopologyMode::Auto => {
+            if config.security.enabled || config.parallel.enabled {
+                return TopologyMode::MultiAgent;
+            }
+            let task_level = spec.estimated_complexity as u8;
+            let threshold = config.pipeline.single_agent_max_complexity as u8;
+            if task_level <= threshold {
+                TopologyMode::SingleAgent
+            } else {
+                TopologyMode::MultiAgent
+            }
+        }
+    }
+}
+
+/// The body stages (everything after the Planner) to run for a given topology.
+///
+/// In `SingleAgent` mode only the `Coder` runs — the Tester, Reviewer, Red and
+/// (if present) SecurityAuditor/Synthesizer stages are collapsed into the one
+/// solo Coder session, which is the whole point of the fast-path: it avoids the
+/// multi-agent token tax of re-ingesting shared context in every session.
+pub fn body_stages_for(
+    topology: TopologyMode,
+    stages: Vec<PipelineStageConfig>,
+) -> Vec<PipelineStageConfig> {
+    match topology {
+        TopologyMode::SingleAgent => stages
+            .into_iter()
+            .filter(|s| s.role == AgentRole::Coder)
+            .collect(),
+        TopologyMode::MultiAgent | TopologyMode::Auto => stages,
+    }
 }
 
 /// The toolchain the sandbox image/process is expected to pre-bake. Verified up
@@ -233,6 +356,7 @@ async fn run_parallel_coders(
                 &task_spec,
                 "",
                 "",
+                "",
                 0,
                 &knowledge,
                 &project_path,
@@ -305,6 +429,7 @@ fn role_prompt(role: AgentRole) -> (&'static str, &'static str) {
         AgentRole::Reviewer => ("reviewer.md", "schemas/review_verdict.schema.json"),
         AgentRole::Synthesizer => ("synthesizer.md", "schemas/synthesis.schema.json"),
         AgentRole::SecurityAuditor => ("security_auditor.md", "schemas/security_audit.schema.json"),
+        AgentRole::Red => ("red.md", "schemas/red_challenge.schema.json"),
     }
 }
 
@@ -322,6 +447,7 @@ async fn run_role(
     task_spec: &TaskSpec,
     coder_json: &str,
     tester_json: &str,
+    red_json: &str,
     round: u32,
     knowledge_str: &str,
     project_path: &Path,
@@ -344,7 +470,28 @@ async fn run_role(
             input_artifacts => vec![task_spec_json.clone(), coder_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
         },
-        AgentRole::Reviewer => context! {
+        AgentRole::Reviewer => {
+            // When the Red/Blue pass ran, the Reviewer must reconcile each Red
+            // challenge. We append the Red artifact as a 4th input so the
+            // Reviewer is forced to engage with the adversarial critique instead
+            // of ratifying the Coder (guards sycophantic convergence, #1.2).
+            let mut artifacts = vec![
+                task_spec_json.clone(),
+                coder_json.to_string(),
+                tester_json.to_string(),
+            ];
+            if !red_json.is_empty() {
+                artifacts.push(red_json.to_string());
+            }
+            context! {
+                input_artifacts => artifacts,
+                project_knowledge => knowledge_str.to_string(),
+            }
+        }
+        AgentRole::Red => context! {
+            // The Red agent sees the same inputs as the Reviewer (spec + diff +
+            // tests) but has never seen the Coder's reasoning, so it probes
+            // adversarially — exactly the independence the product claims.
             input_artifacts => vec![task_spec_json.clone(), coder_json.to_string(), tester_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
         },
@@ -386,6 +533,7 @@ async fn run_role(
         RoleOutput::Reviewer(v) => crate::display::artifact_render::render_review_verdict_summary(v),
         RoleOutput::Synthesizer(s) => crate::display::artifact_render::render_synthesis_summary(s),
         RoleOutput::SecurityAuditor(v) => crate::display::artifact_render::render_security_verdict_summary(v),
+        RoleOutput::Red(v) => crate::display::artifact_render::render_red_challenge_summary(v),
     };
     Ok((json, summary, output))
 }
@@ -398,6 +546,7 @@ fn parse_role(role: AgentRole, json: &str) -> Result<RoleOutput> {
         AgentRole::Reviewer => RoleOutput::Reviewer(serde_json::from_str(json)?),
         AgentRole::Synthesizer => RoleOutput::Synthesizer(serde_json::from_str(json)?),
         AgentRole::SecurityAuditor => RoleOutput::SecurityAuditor(serde_json::from_str(json)?),
+        AgentRole::Red => RoleOutput::Red(serde_json::from_str(json)?),
     })
 }
 
@@ -416,6 +565,9 @@ pub async fn execute_pipeline(
     let state = super::state::PipelineState::new(task.id);
     let mut artifacts: Vec<(AgentRole, String)> = Vec::new();
     let mut metrics: Vec<StageMetric> = Vec::new();
+    // Per-agent context-isolation records (BUILD_PLAN 2.1). Populated as each
+    // stage runs so the report can prove every agent was an independent session.
+    let mut isolation: Vec<IsolationRecord> = Vec::new();
 
     // Resolve the ordered, data-driven stage list.
     let stages = ensure_planner(resolve_stages(config), config);
@@ -444,6 +596,12 @@ pub async fn execute_pipeline(
     .await?;
     let task_spec: TaskSpec = serde_json::from_str(&planner_json)?;
     artifacts.push((AgentRole::Planner, planner_json.clone()));
+    isolation.push(IsolationRecord {
+        role: AgentRole::Planner,
+        backend: config.docker.backend,
+        context_sources: isolation_sources_for(AgentRole::Planner, config.red_blue.enabled),
+        saw_other_reasoning: false,
+    });
     let pm = metrics.last().unwrap();
     display.agent_done(
         AgentRole::Planner,
@@ -452,6 +610,11 @@ pub async fn execute_pipeline(
         pm.cost_usd,
     );
     display.update_pipeline_status();
+
+    // Decide the agent topology from the task shape (BUILD_PLAN 3.2, P2.2).
+    // The Planner has already derived `estimated_complexity`, so we can pick
+    // the fast-path (single solo Coder) or the full multi-agent chain now.
+    let topology = select_topology(&task_spec, config);
 
     // Dry-run: stop after the Planner and surface the spec without executing.
     if dry_run {
@@ -463,6 +626,9 @@ pub async fn execute_pipeline(
             revision_rounds: 0,
             artifacts,
             metrics,
+            safety_proof: None,
+            isolation,
+            topology,
         });
     }
 
@@ -511,11 +677,14 @@ pub async fn execute_pipeline(
 
     let mut coder_json = String::new();
     let mut tester_json = String::new();
+    let mut red_json = String::new();
     let mut review_feedback: Option<String> = None;
     let mut verdict = Verdict::Approved;
     let mut round = 0;
 
-    if config.parallel.enabled && config.parallel.coder_count > 1 {
+    match topology {
+        TopologyMode::MultiAgent => {
+            if config.parallel.enabled && config.parallel.coder_count > 1 {
         // ── Parallel-coder mode (#3) ────────────────────────────────────────
         // 1) Run N coders concurrently, each isolated in its own git worktree.
         let coder_stage = body_stages
@@ -538,6 +707,15 @@ pub async fn execute_pipeline(
         )
         .await?;
 
+        // Each parallel coder ran in its own git worktree — record the isolation
+        // pattern (one record represents the N independent coder sessions).
+        isolation.push(IsolationRecord {
+            role: AgentRole::Coder,
+            backend: SandboxBackend::Worktree,
+            context_sources: isolation_sources_for(AgentRole::Coder, config.red_blue.enabled),
+            saw_other_reasoning: false,
+        });
+
         // 2) Reconcile the per-coder diffs through the Synthesizer stage
         //    (injected by `resolve_stages` when parallel mode is on).
         let synth_stage = body_stages
@@ -554,6 +732,7 @@ pub async fn execute_pipeline(
             &task_spec,
             &coder_json_in,
             "",
+            "",
             0,
             &knowledge_str,
             &task.project_path,
@@ -563,6 +742,12 @@ pub async fn execute_pipeline(
         )
         .await?;
         artifacts.push((AgentRole::Synthesizer, json.clone()));
+        isolation.push(IsolationRecord {
+            role: AgentRole::Synthesizer,
+            backend: config.docker.backend,
+            context_sources: isolation_sources_for(AgentRole::Synthesizer, config.red_blue.enabled),
+            saw_other_reasoning: false,
+        });
         let m = metrics.last().unwrap();
         display.agent_done(AgentRole::Synthesizer, summary, m.usage(), m.cost_usd);
         display.update_pipeline_status();
@@ -576,7 +761,7 @@ pub async fn execute_pipeline(
             eprintln!("Warning: Failed to apply synthesis patch: {}", e);
         }
 
-        // 3) Run the remaining stages (Tester / Reviewer / SecurityAuditor)
+        // 3) Run the remaining stages (Tester / Red / Reviewer / SecurityAuditor)
         //    exactly once. In parallel mode the coders don't re-run on revision
         //    feedback, so there is no inner revision loop.
         for stage in body_stages
@@ -592,6 +777,7 @@ pub async fn execute_pipeline(
                 &task_spec,
                 &coder_json,
                 &tester_json,
+                &red_json,
                 0,
                 &knowledge_str,
                 &task.project_path,
@@ -601,6 +787,12 @@ pub async fn execute_pipeline(
             )
             .await?;
             artifacts.push((stage.role, json.clone()));
+            isolation.push(IsolationRecord {
+                role: stage.role,
+                backend: config.docker.backend,
+                context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
+                saw_other_reasoning: false,
+            });
             let m = metrics.last().unwrap();
             display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
             display.update_pipeline_status();
@@ -609,15 +801,20 @@ pub async fn execute_pipeline(
                 RoleOutput::Tester(_) => {
                     tester_json = json;
                 }
+                RoleOutput::Red(_) => {
+                    // Capture the Red critique so the downstream Reviewer (which
+                    // runs after it in this loop) must reconcile it (#1.2).
+                    red_json = json;
+                }
                 RoleOutput::Reviewer(v) => {
                     verdict = v.verdict;
                 }
                 RoleOutput::SecurityAuditor(_) => {}
-                _ => unreachable!("only Tester/Reviewer/SecurityAuditor remain"),
+                _ => unreachable!("only Tester/Red/Reviewer/SecurityAuditor remain"),
             }
         }
-    } else {
-    while round < max_rounds {
+            } else {
+            while round < max_rounds {
         for stage in &body_stages {
             let llm = provider_cache.get(&stage.provider).unwrap();
             let (json, summary, role_output) = run_role(
@@ -628,6 +825,7 @@ pub async fn execute_pipeline(
                 &task_spec,
                 &coder_json,
                 &tester_json,
+                &red_json,
                 round,
                 &knowledge_str,
                 &task.project_path,
@@ -637,6 +835,12 @@ pub async fn execute_pipeline(
             )
             .await?;
             artifacts.push((stage.role, json.clone()));
+            isolation.push(IsolationRecord {
+                role: stage.role,
+                backend: config.docker.backend,
+                context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
+                saw_other_reasoning: false,
+            });
             let m = metrics.last().unwrap();
             display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
             display.update_pipeline_status();
@@ -650,6 +854,11 @@ pub async fn execute_pipeline(
                 }
                 RoleOutput::Tester(_) => {
                     tester_json = json;
+                }
+                RoleOutput::Red(_) => {
+                    // Capture the Red critique so the Reviewer (which runs
+                    // after it in this round) must reconcile it (#1.2).
+                    red_json = json;
                 }
                 RoleOutput::Reviewer(v) => {
                     verdict = v.verdict;
@@ -687,7 +896,67 @@ pub async fn execute_pipeline(
             break;
         }
         round += 1;
-    }
+            }
+        }
+        } // close MultiAgent arm
+        TopologyMode::Auto => unreachable!(
+            "select_topology resolves Auto into MultiAgent/SingleAgent before dispatch"
+        ),
+        TopologyMode::SingleAgent => {
+            // Single-agent fast-path (BUILD_PLAN 3.2, P2.2): the Planner already
+            // derived the task shape. For bounded/sequential work we collapse
+            // Coder/Tester/Reviewer/Red into one solo Coder session, removing the
+            // 3-4 large-context re-ingestion sessions that make up the multi-agent
+            // token tax (slice 2.3). Trade-off (named in the report): there is no
+            // independent Red/Blue adversarial review on this path.
+            let coder_stage = body_stages
+                .iter()
+                .find(|s| s.role == AgentRole::Coder)
+                .expect("single-agent mode requires a Coder stage");
+            let coder_llm = provider_cache.get(&coder_stage.provider).unwrap();
+            let current_files = build_current_files(&task_spec, &task.project_path);
+            let solo_json = run_stage(
+                AgentRole::Coder,
+                &**coder_llm,
+                &coder_stage.model,
+                &coder_stage.provider,
+                "solo.md",
+                context! {
+                    task_description => task.description.clone(),
+                    project_knowledge => knowledge_str.clone(),
+                    current_files => current_files.clone(),
+                },
+                "schemas/code_diff.schema.json",
+                display,
+                &mut metrics,
+            )
+            .await?;
+            artifacts.push((AgentRole::Coder, solo_json.clone()));
+            isolation.push(IsolationRecord {
+                role: AgentRole::Coder,
+                backend: config.docker.backend,
+                context_sources: isolation_sources_for(AgentRole::Coder, config.red_blue.enabled),
+                saw_other_reasoning: false,
+            });
+            let m = metrics.last().unwrap();
+            display.agent_done(
+                AgentRole::Coder,
+                vec!["solo code diff produced".to_string()],
+                m.usage(),
+                m.cost_usd,
+            );
+            display.update_pipeline_status();
+            // The solo Coder returns a CodeDiff; apply it so the downstream diff
+            // read picks up the change.
+            coder_json = solo_json;
+            if let Ok(parsed) = serde_json::from_str::<CodeDiff>(&coder_json) {
+                if let Err(e) = sandbox.apply_patch(&parsed.unified_diff, &task.project_path).await {
+                    eprintln!("Warning: Failed to apply solo coder patch: {}", e);
+                }
+            }
+            verdict = Verdict::Approved;
+            round = 0;
+        }
     }
 
     // Read the resulting diff. For the Docker backend the patch was applied to the
@@ -709,21 +978,33 @@ pub async fn execute_pipeline(
         revision_rounds: round,
         artifacts,
         metrics,
+        safety_proof: None,
+        isolation,
+        topology,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::artifacts::types::Complexity;
     use crate::config::NikiConfig;
 
     #[test]
-    fn default_pipeline_is_four_stages() {
+    fn default_pipeline_includes_red_before_reviewer() {
+        // With Red/Blue on by default the classic wiring is now 5 stages:
+        // Planner → Coder → Tester → Red → Reviewer.
         let c = NikiConfig::default();
         let s = resolve_stages(&c);
-        assert_eq!(s.len(), 4);
+        assert_eq!(s.len(), 5);
         assert!(s.iter().any(|x| x.role == AgentRole::Planner));
         assert!(s.iter().any(|x| x.role == AgentRole::Coder));
+        assert!(s.iter().any(|x| x.role == AgentRole::Red));
+        let roles: Vec<AgentRole> = s.iter().map(|x| x.role).collect();
+        assert!(
+            roles.iter().position(|r| *r == AgentRole::Red).unwrap()
+                < roles.iter().position(|r| *r == AgentRole::Reviewer).unwrap()
+        );
     }
 
     #[test]
@@ -732,6 +1013,62 @@ mod tests {
         c.security.enabled = true;
         let s = resolve_stages(&c);
         assert!(s.iter().any(|x| x.role == AgentRole::SecurityAuditor));
+    }
+
+    #[test]
+    fn red_blue_injects_red_before_reviewer() {
+        // Red/Blue is on by default — the classic 4-stage pipeline should become
+        // Planner → Coder → Tester → Red → Reviewer.
+        let c = NikiConfig::default();
+        let s = resolve_stages(&c);
+        assert!(c.red_blue.enabled);
+        let roles: Vec<AgentRole> = s.iter().map(|x| x.role).collect();
+        let red_pos = roles.iter().position(|r| *r == AgentRole::Red).unwrap();
+        let reviewer_pos = roles.iter().position(|r| *r == AgentRole::Reviewer).unwrap();
+        assert!(red_pos < reviewer_pos, "Red must run before the Reviewer");
+    }
+
+    #[test]
+    fn red_blue_can_be_disabled() {
+        let mut c = NikiConfig::default();
+        c.red_blue.enabled = false;
+        let s = resolve_stages(&c);
+        assert!(!s.iter().any(|x| x.role == AgentRole::Red));
+    }
+
+    /// Render the reviewer prompt with and without the Red artifact to confirm
+    /// the `{% if input_artifacts | length > 3 %}` reconciliation block toggles
+    /// correctly (templates are only validated at runtime, not at compile time).
+    #[test]
+    fn reviewer_template_toggles_red_block() {
+        use minijinja::Environment;
+        let path = crate::resolve_asset("prompts/reviewer.md");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let mut env = Environment::new();
+        env.add_template("reviewer.md", &content).unwrap();
+        let tmpl = env.get_template("reviewer.md").unwrap();
+
+        let ctx3 = minijinja::context! {
+            input_artifacts => vec!["spec", "diff", "tests"],
+            project_knowledge => "",
+            artifact_schema => "{}",
+        };
+        let rendered3 = tmpl.render(ctx3).unwrap();
+        assert!(
+            !rendered3.contains("RECONCILE THIS"),
+            "Red block must be hidden when no Red artifact is present"
+        );
+
+        let ctx4 = minijinja::context! {
+            input_artifacts => vec!["spec", "diff", "tests", "red-challenge"],
+            project_knowledge => "",
+            artifact_schema => "{}",
+        };
+        let rendered4 = tmpl.render(ctx4).unwrap();
+        assert!(
+            rendered4.contains("RECONCILE THIS"),
+            "Red block must appear when the Red artifact is present"
+        );
     }
 
     #[test]
@@ -749,5 +1086,113 @@ mod tests {
         let t = required_tools(&c);
         assert!(t.iter().any(|p| p == "git"));
         assert!(t.iter().any(|p| p == "python3"));
+    }
+
+    // ── Adaptive topology (BUILD_PLAN 3.2, P2.2) ───────────────────────────
+
+    fn spec_with(c: Complexity) -> TaskSpec {
+        TaskSpec {
+            summary: String::new(),
+            approach: String::new(),
+            files_to_modify: vec![],
+            acceptance_criteria: vec![],
+            constraints: vec![],
+            estimated_complexity: c,
+        }
+    }
+
+    #[test]
+    fn select_topology_auto_low_uses_single_agent() {
+        let mut c = NikiConfig::default();
+        c.pipeline.topology = TopologyMode::Auto;
+        let spec = spec_with(Complexity::Low);
+        assert_eq!(select_topology(&spec, &c), TopologyMode::SingleAgent);
+    }
+
+    #[test]
+    fn select_topology_auto_medium_uses_multi_agent() {
+        // The default single-agent threshold is Low, so Medium breaching it
+        // routes to the full multi-agent chain.
+        let c = NikiConfig::default();
+        let spec = spec_with(Complexity::Medium);
+        assert_eq!(select_topology(&spec, &c), TopologyMode::MultiAgent);
+    }
+
+    #[test]
+    fn select_topology_auto_high_uses_multi_agent() {
+        let c = NikiConfig::default();
+        let spec = spec_with(Complexity::High);
+        assert_eq!(select_topology(&spec, &c), TopologyMode::MultiAgent);
+    }
+
+    #[test]
+    fn select_topology_auto_low_with_security_forces_multi() {
+        // A solo Coder can't run an independent Security Auditor, so security
+        // on forces the multi-agent topology even for low-complexity tasks.
+        let mut c = NikiConfig::default();
+        c.security.enabled = true;
+        let spec = spec_with(Complexity::Low);
+        assert_eq!(select_topology(&spec, &c), TopologyMode::MultiAgent);
+    }
+
+    #[test]
+    fn select_topology_auto_low_with_parallel_forces_multi() {
+        // Parallel coders need the multi-agent orchestration path.
+        let mut c = NikiConfig::default();
+        c.parallel.enabled = true;
+        c.parallel.coder_count = 2;
+        let spec = spec_with(Complexity::Low);
+        assert_eq!(select_topology(&spec, &c), TopologyMode::MultiAgent);
+    }
+
+    #[test]
+    fn select_topology_explicit_overrides_auto() {
+        let mut single = NikiConfig::default();
+        single.pipeline.topology = TopologyMode::SingleAgent;
+        // High complexity would otherwise pick multi-agent, but explicit wins.
+        assert_eq!(
+            select_topology(&spec_with(Complexity::High), &single),
+            TopologyMode::SingleAgent
+        );
+
+        let mut multi = NikiConfig::default();
+        multi.pipeline.topology = TopologyMode::MultiAgent;
+        // Low complexity would otherwise pick single-agent, but explicit wins.
+        assert_eq!(
+            select_topology(&spec_with(Complexity::Low), &multi),
+            TopologyMode::MultiAgent
+        );
+    }
+
+    #[test]
+    fn body_stages_for_single_agent_keeps_only_coder() {
+        let stages = vec![
+            PipelineStageConfig {
+                role: AgentRole::Coder,
+                provider: "a".into(),
+                model: "m".into(),
+                skip: false,
+            },
+            PipelineStageConfig {
+                role: AgentRole::Tester,
+                provider: "a".into(),
+                model: "m".into(),
+                skip: false,
+            },
+            PipelineStageConfig {
+                role: AgentRole::Reviewer,
+                provider: "a".into(),
+                model: "m".into(),
+                skip: false,
+            },
+        ];
+        // Single-agent collapses everything but the Coder.
+        let solo = body_stages_for(TopologyMode::SingleAgent, stages.clone());
+        assert_eq!(solo.len(), 1);
+        assert_eq!(solo[0].role, AgentRole::Coder);
+
+        // Multi-agent passes every body stage through unchanged.
+        let multi = body_stages_for(TopologyMode::MultiAgent, stages);
+        assert_eq!(multi.len(), 3);
     }
 }

@@ -94,3 +94,17 @@ pub fn render_security_verdict_summary(v: &SecurityVerdict) -> Vec<String> {
     }
     lines
 }
+
+pub fn render_red_challenge_summary(c: &RedChallenge) -> Vec<String> {
+    let mut lines = vec![format!(
+        "Red challenge: {} point(s) raised",
+        c.challenges.len()
+    )];
+    for p in c.challenges.iter() {
+        lines.push(format!(
+            "• [{}] {:?}/{:?} (conf {}): {}",
+            p.id, p.severity, p.category, p.confidence, truncate(&p.claim, 80)
+        ));
+    }
+    lines
+}

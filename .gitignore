@@ -1,3 +1,9 @@
 /target
 .niki/
 niki.toml
+
+# Internal strategy docs — not for the public repo
+CLOUD_BACKEND_SPEC.md
+BUILD_PLAN.md
+10x-deep-research.md
+problem-statements.md

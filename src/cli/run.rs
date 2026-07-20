@@ -102,6 +102,7 @@ fn role_filename(role: AgentRole) -> &'static str {
         AgentRole::Reviewer => "reviewer",
         AgentRole::Synthesizer => "synthesizer",
         AgentRole::SecurityAuditor => "security_auditor",
+        AgentRole::Red => "red",
     }
 }
 
@@ -253,7 +254,17 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         eprintln!("Warning: could not save task state: {}", e);
     }
 
-    let result = match execute_pipeline(
+    // Hermetic safety: fingerprint the repo before the pipeline mutates anything,
+    // so we can prove afterwards that only the new `niki/<id>` branch was added.
+    let pre_snapshot = match crate::safety::snapshot(&project_dir) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            eprintln!("Warning: could not snapshot repo for safety proof: {}", e);
+            None
+        }
+    };
+
+    let mut result = match execute_pipeline(
         &task,
         &config,
         docker_ref,
@@ -291,11 +302,6 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 eprintln!("Warning: could not save artifact {:?}: {}", role, e);
             }
         }
-    }
-
-    // Generate the markdown report.
-    if let Err(e) = crate::output::report::generate_report(&task, &config, &result) {
-        eprintln!("Warning: could not generate report: {}", e);
     }
 
     // Generate the static HTML dashboard (diff viewer + annotations).
@@ -371,6 +377,33 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         &task.id.to_string(),
     ) {
         eprintln!("Warning: git branch/commit failed: {}", e);
+    }
+
+    // Hermetic safety proof (BUILD_PLAN 1.1): with the branch now committed,
+    // verify the committed repo state is unchanged except for that one branch.
+    // Emit `safety_proof.json` next to the report and attach it to the result.
+    // Skip when there was no diff (no branch was created), so a no-op run isn't
+    // misreported as NON-HERMETIC.
+    if !result.final_diff.trim().is_empty() {
+        if let Some(pre) = &pre_snapshot {
+            match crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string()) {
+                Ok(proof) => {
+                    if let Err(e) = std::fs::write(
+                        task_dir.join("safety_proof.json"),
+                        serde_json::to_string_pretty(&proof)?,
+                    ) {
+                        eprintln!("Warning: could not write safety_proof.json: {}", e);
+                    }
+                    result.safety_proof = Some(proof);
+                }
+                Err(e) => eprintln!("Warning: could not compute safety proof: {}", e),
+            }
+        }
+    }
+
+    // Generate the markdown report (now includes the hermetic safety proof).
+    if let Err(e) = crate::output::report::generate_report(&task, &config, &result) {
+        eprintln!("Warning: could not generate report: {}", e);
     }
 
     // Persist final task record.

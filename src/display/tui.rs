@@ -82,6 +82,7 @@ fn role_color(role: AgentRole) -> Color {
         AgentRole::Reviewer => WARN,                          // amber
         AgentRole::Synthesizer => Color::Rgb(129, 200, 190),  // teal
         AgentRole::SecurityAuditor => ERR,                    // red
+        AgentRole::Red => Color::Rgb(255, 99, 132),           // adversarial red
     }
 }
 
@@ -93,6 +94,7 @@ fn role_name(role: AgentRole) -> &'static str {
         AgentRole::Reviewer => "Reviewer",
         AgentRole::Synthesizer => "Synthesizer",
         AgentRole::SecurityAuditor => "Security Auditor",
+        AgentRole::Red => "Red",
     }
 }
 

@@ -1,0 +1,30 @@
+# Evaluation dataset (BUILD_PLAN 1.3, P0.1).
+#
+# Each case seeds a known defect into a task and records the NIKI and baseline
+# agent artifacts under `fixtures/<id>/{niki,baseline}/artifacts/*.json`.
+# `niki eval` replays these offline (no API keys) so the comparison is
+# repeatable in CI; `--live` re-runs the real pipeline against live models.
+
+name = "seeded-defect-smoke"
+
+[[cases]]
+id = "defect-sql"
+description = "Add a login endpoint that validates a user's email and password"
+replay_dir = "fixtures/defect-sql"
+
+[cases.seeded_defect]
+label = "SQL injection via string-concatenated query"
+category = "security"
+keyword = "injection"
+expected_caught = true
+
+[[cases]]
+id = "defect-offbyone"
+description = "Implement a paginated list endpoint that slices a result array"
+replay_dir = "fixtures/defect-offbyone"
+
+[cases.seeded_defect]
+label = "Off-by-one in slice upper bound"
+category = "logic"
+keyword = "off-by-one"
+expected_caught = true

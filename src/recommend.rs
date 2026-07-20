@@ -59,6 +59,12 @@ pub fn recommendations() -> Vec<RoleRec> {
             cheap: ("anthropic", "claude-sonnet-4-20250514"),
             rationale: "Security findings demand the strongest reasoning; sonnet for triage.",
         },
+        RoleRec {
+            role: AgentRole::Red,
+            strong: ("anthropic", "claude-opus-4"),
+            cheap: ("anthropic", "claude-sonnet-4-20250514"),
+            rationale: "The Red agent's job is to find what stronger models miss; it defaults to strong.",
+        },
     ]
 }
 
@@ -68,7 +74,11 @@ pub fn recommendations() -> Vec<RoleRec> {
 pub fn role_prefers_strong(role: AgentRole) -> bool {
     matches!(
         role,
-        AgentRole::Reviewer | AgentRole::SecurityAuditor | AgentRole::Planner | AgentRole::Coder
+        AgentRole::Reviewer
+            | AgentRole::SecurityAuditor
+            | AgentRole::Red
+            | AgentRole::Planner
+            | AgentRole::Coder
     )
 }
 
