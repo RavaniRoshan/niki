@@ -28,6 +28,7 @@ fn role_name(role: AgentRole) -> &'static str {
         AgentRole::Reviewer => "reviewer",
         AgentRole::Synthesizer => "synthesizer",
         AgentRole::SecurityAuditor => "security_auditor",
+        AgentRole::Red => "red",
     }
 }
 

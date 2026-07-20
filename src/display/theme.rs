@@ -8,6 +8,7 @@ pub struct Theme {
     pub reviewer: AgentTheme,
     pub synthesizer: AgentTheme,
     pub security_auditor: AgentTheme,
+    pub red: AgentTheme,
     pub border: Style,
     pub heading: Style,
     pub subtext: Style,
@@ -69,6 +70,12 @@ impl Theme {
             security_auditor: AgentTheme {
                 name: "Security Auditor",
                 icon: "⚷",
+                color: Style::new().red(),
+                label_style: Style::new().bold().red(),
+            },
+            red: AgentTheme {
+                name: "Red",
+                icon: "✗",
                 color: Style::new().red(),
                 label_style: Style::new().bold().red(),
             },

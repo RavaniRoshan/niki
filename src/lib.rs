@@ -3,6 +3,7 @@ pub mod config;
 pub mod artifacts;
 pub mod agents;
 pub mod orchestrator;
+pub mod safety;
 pub mod sandbox;
 pub mod llm;
 pub mod knowledge;
@@ -10,6 +11,7 @@ pub mod output;
 pub mod display;
 pub mod cost;
 pub mod recommend;
+pub mod eval;
 
 use thiserror::Error;
 use uuid::Uuid;

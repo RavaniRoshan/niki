@@ -25,6 +25,10 @@ pub enum AgentRole {
     Synthesizer,
     /// Independent security review pass (#4).
     SecurityAuditor,
+    /// Adversarial "Red" agent (#1.2): independently probes the Coder's diff for
+    /// defects and assumptions so the Reviewer must genuinely challenge code
+    /// instead of ratifying it (guards sycophantic convergence).
+    Red,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -37,6 +41,7 @@ pub enum ArtifactType {
     ReviewFeedback,
     Synthesis,
     SecurityVerdict,
+    RedChallenge,
 }
 
 // ── Artifact 1: TaskSpec (Planner → Coder) ──────────────────────
@@ -66,9 +71,10 @@ pub enum FileAction {
     Delete,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Complexity {
+    #[default]
     Low,
     Medium,
     High,
@@ -147,6 +153,12 @@ pub struct ReviewVerdict {
     pub issues: Vec<ReviewIssue>,             // All issues found
     pub strengths: Vec<String>,               // What was done well
     pub feedback: Option<ReviewFeedback>,     // Present if verdict is RevisionNeeded
+    /// Per-challenge reconciliation against the independent Red agent's critique
+    /// (#1.2). Each entry records whether the Reviewer UPHeld or REFUTED a Red
+    /// challenge and why. Proves the Reviewer engaged with the adversarial
+    /// critique instead of rubber-stamping the Coder. Optional; absent when the
+    /// Red/Blue pass is disabled.
+    pub red_reconciliation: Option<Vec<RedReconciliation>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -184,7 +196,7 @@ pub enum IssueSeverity {
     Nit,                                      // Style/preference
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum IssueCategory {
     Bug,
@@ -265,4 +277,99 @@ pub enum SecurityCategory {
     InputValidation,
     SandboxEscape,
     Other,
+}
+
+// ── Artifact 8: RedChallenge (Red → Reviewer) ────────────────────
+//
+// Produced by the independent "Red" agent (#1.2) before the Reviewer runs.
+// The Red agent has never seen the Coder's reasoning — only the spec, the diff,
+// and the test report — so it probes the change adversarially. The Reviewer is
+// then forced to reconcile every challenge, which guards against the
+// sycophantic convergence that would otherwise make "independent review" theater.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedChallenge {
+    /// Red's overall adversarial thesis: is this change trustworthy as written?
+    pub overall_red_assessment: String,
+    /// Discrete adversarial points the Reviewer must each address.
+    pub challenges: Vec<RedPoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedPoint {
+    /// Stable id (e.g. "R1") so the Reviewer can cross-reference it.
+    pub id: String,
+    /// How serious Red believes the issue is.
+    pub severity: IssueSeverity,
+    /// What kind of problem Red is asserting.
+    pub category: IssueCategory,
+    /// The concrete claim: what Red asserts is wrong, risky, or unproven.
+    pub claim: String,
+    /// How confident Red is, 1-10.
+    pub confidence: u8,
+    /// Optional line references / reasoning behind the claim.
+    pub evidence: Option<String>,
+    /// Optional concrete way to verify or disprove the claim.
+    pub suggested_check: Option<String>,
+}
+
+/// The Reviewer's explicit disposition on a single Red challenge (#1.2).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedReconciliation {
+    /// Matches a `RedPoint.id` from the Red agent's challenge.
+    pub challenge_id: String,
+    /// Whether the Reviewer agreed with (upheld) or disagreed with (refuted) Red.
+    pub disposition: RedDisposition,
+    /// Why the Reviewer took that position.
+    pub rationale: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RedDisposition {
+    Upheld,
+    Refuted,
+}
+
+/// Per-agent proof of *context isolation* (BUILD_PLAN 2.1, P1.2).
+///
+/// NIKI's moat is not that agents run in separate containers (the sequential
+/// stages intentionally share one *execution* sandbox so the diff persists from
+/// Coder → Tester → Reviewer) — it is that each agent is an **independent LLM
+/// session** which receives only the *published output artifacts* of earlier
+/// roles, never another agent's chain-of-thought or the parent conversation.
+/// That is what stops the sycophantic convergence that context-sharing subagents
+/// (which inherit the parent's running context) suffer from.
+///
+/// `IsolationRecord` makes that property inspectable: it records exactly which
+/// roles' artifacts an agent saw, the sandbox backend it executed in, and that it
+/// never saw another agent's reasoning. The run report renders one row per agent
+/// so the claim is visible, not asserted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IsolationRecord {
+    pub role: AgentRole,
+    /// The sandbox backend the agent executed in (Docker container / git worktree / cloud).
+    pub backend: crate::sandbox::SandboxBackend,
+    /// The roles whose *published artifacts* this agent received as context.
+    /// This is the complete set of prior agents it could have "seen" — and it is
+    /// artifacts only, never reasoning.
+    pub context_sources: Vec<AgentRole>,
+    /// Always `false` by construction: an agent is never handed another agent's
+    /// intermediate reasoning, scratchpad, or the host conversation.
+    pub saw_other_reasoning: bool,
+}
+
+/// Stable on-disk filename (without extension) for a role's raw artifact, as
+/// written by the CLI (`artifacts/<name>.json`) and consumed by the eval harness
+/// replay path. Single source of truth shared with `cli/run.rs::role_filename`.
+pub fn artifact_json_name(role: AgentRole) -> &'static str {
+    match role {
+        AgentRole::Planner => "planner",
+        AgentRole::Coder => "coder",
+        AgentRole::Tester => "tester",
+        AgentRole::Reviewer => "reviewer",
+        AgentRole::Synthesizer => "synthesizer",
+        AgentRole::SecurityAuditor => "security_auditor",
+        AgentRole::Red => "red",
+    }
 }

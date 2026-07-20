@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use toml;
-use crate::artifacts::types::AgentRole;
+use crate::artifacts::types::{AgentRole, Complexity};
 use crate::sandbox::SandboxBackend;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -34,6 +34,12 @@ pub struct NikiConfig {
     /// then a Synthesizer reconciles their diffs into one change.
     #[serde(default)]
     pub parallel: ParallelConfig,
+    /// Adversarial "Red/Blue" verification (#1.2). When enabled, an independent
+    /// Red agent probes the Coder's diff before the Reviewer runs; the Reviewer
+    /// must reconcile each Red challenge (uphold or refute). This is what makes
+    /// "independent review" real instead of a rubber stamp.
+    #[serde(default)]
+    pub red_blue: RedBlueConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -92,6 +98,42 @@ impl Default for ParallelConfig {
     }
 }
 
+/// Configuration for the adversarial "Red/Blue" verification pass (#1.2).
+///
+/// When `enabled`, the pipeline injects a `Red` stage immediately before the
+/// Reviewer. The Red agent independently attacks the Coder's diff; the Reviewer
+/// must then reconcile each Red challenge (uphold → request revision, or refute
+/// → justify). This is what prevents the Reviewer from silently ratifying the
+/// Coder and is enabled by default because it is the product's core thesis:
+/// *isolated* agents that genuinely challenge each other.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedBlueConfig {
+    #[serde(default = "default_red_blue_enabled")]
+    pub enabled: bool,
+    /// Optional provider override; defaults to `[agents] red.provider`.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Optional model override; defaults to `[agents] red.model`.
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+impl Default for RedBlueConfig {
+    fn default() -> Self {
+        // Red/Blue is on by default — it is the product's core thesis (isolated
+        // agents that genuinely challenge each other, not a rubber stamp).
+        Self {
+            enabled: default_red_blue_enabled(),
+            provider: None,
+            model: None,
+        }
+    }
+}
+
+fn default_red_blue_enabled() -> bool {
+    true
+}
+
 fn default_coder_count() -> u32 {
     2
 }
@@ -100,8 +142,36 @@ fn default_max_source_chars() -> usize {
     8000
 }
 
+fn default_single_agent_max_complexity() -> Complexity {
+    // Bounded/sequential tasks (Low complexity) are the ones that don't benefit
+    // from the multi-agent chain's isolation tax, so they collapse to the
+    // single-agent fast-path by default (BUILD_PLAN 3.2).
+    Complexity::Low
+}
+
 fn default_output_dir() -> String {
     ".niki".to_string()
+}
+
+/// Which agent topology NIKI uses for a run (BUILD_PLAN 3.2, P2.2).
+///
+/// - `Auto` (default): pick by task shape — bounded/sequential tasks collapse
+///   to the single-agent fast-path; everything else runs the full multi-agent
+///   chain (which is what pays for the isolation guarantees).
+/// - `MultiAgent`: always run the full Planner → Coder → Tester → Reviewer
+///   (± Red/Blue, SecurityAuditor) chain.
+/// - `SingleAgent`: always use the fast-path (one solo Coder session after the
+///   Planner), skipping the Tester/Reviewer/Red re-ingestion tax.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TopologyMode {
+    /// Decide per task shape (estimated complexity + whether security/parallel need the full chain).
+    #[default]
+    Auto,
+    /// Always run the full multi-agent chain.
+    MultiAgent,
+    /// Always collapse to the single-agent fast-path.
+    SingleAgent,
 }
 
 /// A user-defined, ordered pipeline of agent stages.
@@ -117,6 +187,14 @@ pub struct PipelineConfig {
     /// Override for the revision loop length; falls back to `general.max_revision_rounds`.
     #[serde(default)]
     pub max_revision_rounds: Option<u32>,
+    /// Agent topology for the run (BUILD_PLAN 3.2). `Auto` lets NIKI pick by
+    /// task shape; the other variants force a topology.
+    #[serde(default)]
+    pub topology: TopologyMode,
+    /// In `Auto` mode, tasks whose `estimated_complexity` is at or below this
+    /// level collapse to the single-agent fast-path. Defaults to `Low`.
+    #[serde(default = "default_single_agent_max_complexity")]
+    pub single_agent_max_complexity: Complexity,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +246,10 @@ pub struct AgentsConfig {
     /// Independent security review pass (#4).
     #[serde(default = "default_anthropic_agent")]
     pub security_auditor: AgentConfig,
+    /// Adversarial "Red" agent (#1.2). Runs a strong model by default because its
+    /// job is to find what the Coder and Reviewer missed.
+    #[serde(default = "default_red_agent")]
+    pub red: AgentConfig,
 }
 
 impl Default for AgentsConfig {
@@ -179,7 +261,15 @@ impl Default for AgentsConfig {
             reviewer: default_anthropic_agent(),
             synthesizer: default_anthropic_agent(),
             security_auditor: default_anthropic_agent(),
+            red: default_red_agent(),
         }
+    }
+}
+
+fn default_red_agent() -> AgentConfig {
+    AgentConfig {
+        provider: "anthropic".to_string(),
+        model: "claude-opus-4".to_string(),
     }
 }
 
@@ -297,6 +387,18 @@ impl NikiConfig {
         if other.parallel.enabled {
             self.parallel.enabled = true;
             self.parallel.coder_count = other.parallel.coder_count;
+        }
+
+        // Red/Blue verification is an explicit toggle (default on, but a user
+        // can turn it off). Adopt the enabled flag and any provider/model overrides.
+        if other.red_blue.enabled {
+            self.red_blue.enabled = true;
+            if let Some(p) = other.red_blue.provider {
+                self.red_blue.provider = Some(p);
+            }
+            if let Some(m) = other.red_blue.model {
+                self.red_blue.model = Some(m);
+            }
         }
     }
 
@@ -430,6 +532,9 @@ mod tests {
         assert!(c.agents.security_auditor.provider.len() > 0);
         assert!(!c.security.enabled);
         assert_eq!(c.parallel.coder_count, 2);
+        // Red/Blue is on by default — it is the product's core thesis.
+        assert!(c.red_blue.enabled);
+        assert!(c.agents.red.provider.len() > 0);
     }
 
     #[test]
@@ -445,7 +550,14 @@ enabled = true
 enabled = true
 coder_count = 4
 
+[red_blue]
+enabled = true
+
 [agents.security_auditor]
+provider = "anthropic"
+model = "claude-opus-4"
+
+[agents.red]
 provider = "anthropic"
 model = "claude-opus-4"
 "#;
@@ -453,19 +565,22 @@ model = "claude-opus-4"
         assert!(c.security.enabled);
         assert!(c.parallel.enabled);
         assert_eq!(c.parallel.coder_count, 4);
+        assert!(c.red_blue.enabled);
         assert_eq!(c.agents.security_auditor.model, "claude-opus-4");
+        assert_eq!(c.agents.red.model, "claude-opus-4");
     }
 
     #[test]
     fn merge_toggles_override() {
         let mut base = NikiConfig::default();
         let ov: NikiConfig = toml::from_str(
-            "[security]\nenabled = true\n[parallel]\nenabled = true\ncoder_count = 3\n",
+            "[security]\nenabled = true\n[parallel]\nenabled = true\ncoder_count = 3\n[red_blue]\nenabled = true\n",
         )
         .unwrap();
         base.merge(ov);
         assert!(base.security.enabled);
         assert!(base.parallel.enabled);
         assert_eq!(base.parallel.coder_count, 3);
+        assert!(base.red_blue.enabled);
     }
 }

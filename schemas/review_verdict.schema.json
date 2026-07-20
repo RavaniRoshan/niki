@@ -42,6 +42,21 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "red_reconciliation": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "properties": {
+          "challenge_id": { "type": "string" },
+          "disposition": {
+            "type": "string",
+            "enum": ["upheld", "refuted"]
+          },
+          "rationale": { "type": "string" }
+        },
+        "required": ["challenge_id", "disposition", "rationale"]
+      }
+    },
     "feedback": {
       "type": ["object", "null"],
       "properties": {

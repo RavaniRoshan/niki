@@ -22,7 +22,7 @@ Docker sandbox and hand you a clean git branch, a diff, and a full audit trail. 
 [![Built with Rust](https://img.shields.io/badge/built_with-Rust-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Docker sandbox](https://img.shields.io/badge/sandbox-Docker-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/get-docker/)
 [![BYOK · multi-provider](https://img.shields.io/badge/LLM-BYOK_·_multi--provider-58a6ff)](#configuration)
-[![License BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-d2a8ff)](#license)
+[![License: BUSL-1.1 (source-available)](https://img.shields.io/badge/license-BUSL--1.1_·_source--available-d2a8ff)](LICENSE)
 [![Status: prototype](https://img.shields.io/badge/status-prototype-ffa657)](#roadmap)
 
 <a href="#quick-start"><b>Quick Start</b></a> ·
@@ -55,6 +55,8 @@ niki run "Add a GET /health endpoint returning { status: 'ok', uptime }" --proje
 ```
 
 Every run leaves behind a `niki/<id>` branch, a `changes.patch`, a human-readable `report.md`, and per-agent JSON artifacts — the entire decision trail is inspectable.
+
+> **Proof, not promises.** Every claim about NIKI is backed by artifacts NIKI itself produces. Read [FINDINGS.md](FINDINGS.md) — the data-backed answers to "does the Reviewer genuinely challenge?", "what's the real token cost?", and "does the moat hold vs Codex/Cursor-style isolated multi-agent?".
 
 ## About
 
@@ -284,7 +286,25 @@ Issues and PRs are welcome. Please keep `cargo build` warning-free and keep secr
 
 ## License
 
-Licensed under the **Business Source License 1.1 (BUSL-1.1)**. See [`Cargo.toml`](Cargo.toml) for the declared license; a full `LICENSE` file should accompany distribution.
+NIKI is **source-available, not open source.** It is licensed under the
+**Business Source License 1.1 (BUSL-1.1)** — see the full terms in
+[`LICENSE`](LICENSE).
+
+What that means in practice:
+
+- **You can** read the source, build it, modify it, and run it in production
+  for yourself or your organization (including with your own API keys — NIKI is
+  BYOK). Non-production use is unrestricted.
+- **You can't** offer NIKI to third parties as a competing hosted or managed
+  "NIKI-as-a-service." That carve-out (the *Additional Use Grant* in the
+  license) protects the managed-cloud offering that funds development.
+- **On the Change Date (2030-07-20)** each released version automatically
+  converts to the **Apache License 2.0** — a true open-source license.
+
+We deliberately **do not** call NIKI "open source." BUSL-1.1 restricts
+production-competitor use until the Change Date, so "open source" would be
+inaccurate; "source-available" is the honest term. If you need terms beyond the
+Additional Use Grant, a commercial license is available from the Licensor.
 
 ---
 
