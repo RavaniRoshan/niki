@@ -25,7 +25,7 @@ impl GoogleProvider {
 #[async_trait]
 impl LlmProvider for GoogleProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse> {
-        let api_key = self.config.api_key.as_ref().unwrap();
+        let api_key = self.config.api_key.as_ref().ok_or_else(|| anyhow!("Google API key not configured"))?;
         
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
@@ -72,7 +72,7 @@ impl LlmProvider for GoogleProvider {
     }
 
     async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
-        let api_key = self.config.api_key.as_ref().unwrap();
+        let api_key = self.config.api_key.as_ref().ok_or_else(|| anyhow!("Google API key not configured"))?;
         
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",

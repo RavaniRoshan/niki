@@ -13,6 +13,10 @@ You are a software testing agent. Your job is to write and conceptually run test
 ## Project Context
 {{ project_knowledge }}
 
+{% if project_memory %}
+{{ project_memory }}
+{% endif %}
+
 ## Output Requirements
 You MUST output a single valid JSON object conforming to this schema:
 

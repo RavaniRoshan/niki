@@ -196,7 +196,7 @@ pub enum IssueSeverity {
     Nit,                                      // Style/preference
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum IssueCategory {
     Bug,
@@ -206,6 +206,8 @@ pub enum IssueCategory {
     Logic,
     TestGap,
     SpecDeviation,
+    Correctness,
+    Boundary,
 }
 
 // ── Artifact 5: ReviewFeedback (Reviewer → Coder, on revision) ──

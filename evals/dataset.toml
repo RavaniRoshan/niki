@@ -5,12 +5,15 @@
 # `niki eval` replays these offline (no API keys) so the comparison is
 # repeatable in CI; `--live` re-runs the real pipeline against live models.
 
-name = "seeded-defect-smoke"
+name = "seeded-defect-comprehensive"
+
+# ── Security defects ─────────────────────────────────────────────────
 
 [[cases]]
 id = "defect-sql"
 description = "Add a login endpoint that validates a user's email and password"
 replay_dir = "fixtures/defect-sql"
+difficulty = "medium"
 
 [cases.seeded_defect]
 label = "SQL injection via string-concatenated query"
@@ -19,12 +22,271 @@ keyword = "injection"
 expected_caught = true
 
 [[cases]]
+id = "defect-path-traversal"
+description = "Add a file download endpoint that serves files from a uploads directory"
+replay_dir = "fixtures/defect-path-traversal"
+difficulty = "medium"
+
+[cases.seeded_defect]
+label = "Path traversal allowing access to files outside uploads directory"
+category = "security"
+keyword = "traversal"
+expected_caught = true
+
+[[cases]]
+id = "defect-ssrf"
+description = "Add a URL preview endpoint that fetches and returns metadata from a given URL"
+replay_dir = "fixtures/defect-ssrf"
+difficulty = "hard"
+
+[cases.seeded_defect]
+label = "Server-side request forgery via unrestricted URL fetch"
+category = "security"
+keyword = "ssrf"
+expected_caught = true
+
+[[cases]]
+id = "defect-command-injection"
+description = "Add a system info endpoint that returns hostname and OS details"
+replay_dir = "fixtures/defect-command-injection"
+difficulty = "hard"
+
+[cases.seeded_defect]
+label = "Command injection via unsanitized user input in shell command"
+category = "security"
+keyword = "command"
+expected_caught = true
+
+[[cases]]
+id = "defect-xss"
+description = "Add a comment display page that renders user-submitted text"
+replay_dir = "fixtures/defect-xss"
+difficulty = "easy"
+
+[cases.seeded_defect]
+label = "Cross-site scripting via unescaped HTML output"
+category = "security"
+keyword = "xss"
+expected_caught = true
+
+[[cases]]
+id = "defect-hardcoded-secret"
+description = "Add a configuration module that loads API credentials"
+replay_dir = "fixtures/defect-hardcoded-secret"
+difficulty = "easy"
+
+[cases.seeded_defect]
+label = "Hardcoded API key in source code"
+category = "security"
+keyword = "secret"
+expected_caught = true
+
+[[cases]]
+id = "defect-insecure-deserialization"
+description = "Add a feature to restore user sessions from stored data"
+replay_dir = "fixtures/defect-insecure-deserialization"
+difficulty = "hard"
+
+[cases.seeded_defect]
+label = "Insecure deserialization of untrusted data"
+category = "security"
+keyword = "deserialization"
+expected_caught = true
+
+[[cases]]
+id = "defect-log-injection"
+description = "Add a logging module that records user actions"
+replay_dir = "fixtures/defect-log-injection"
+difficulty = "medium"
+
+[cases.seeded_defect]
+label = "Log injection via unsanitized user input in log messages"
+category = "security"
+keyword = "log"
+expected_caught = true
+
+# ── Logic defects ────────────────────────────────────────────────────
+
+[[cases]]
 id = "defect-offbyone"
 description = "Implement a paginated list endpoint that slices a result array"
 replay_dir = "fixtures/defect-offbyone"
+difficulty = "easy"
 
 [cases.seeded_defect]
 label = "Off-by-one in slice upper bound"
 category = "logic"
 keyword = "off-by-one"
+expected_caught = true
+
+[[cases]]
+id = "defect-null-deref"
+description = "Add a user profile endpoint that returns user details by ID"
+replay_dir = "fixtures/defect-null-deref"
+difficulty = "medium"
+
+[cases.seeded_defect]
+label = "Null pointer dereference when user not found"
+category = "logic"
+keyword = "null"
+expected_caught = true
+
+[[cases]]
+id = "defect-integer-overflow"
+description = "Add a price calculation function that multiplies quantity by unit price"
+replay_dir = "fixtures/defect-integer-overflow"
+difficulty = "medium"
+
+[cases.seeded_defect]
+label = "Integer overflow in price calculation"
+category = "logic"
+keyword = "overflow"
+expected_caught = true
+
+[[cases]]
+id = "defect-race-condition"
+description = "Add a concurrent counter that tracks active users"
+replay_dir = "fixtures/defect-race-condition"
+difficulty = "hard"
+
+[cases.seeded_defect]
+label = "Race condition in concurrent counter increment"
+category = "logic"
+keyword = "race"
+expected_caught = true
+
+[[cases]]
+id = "defect-uninitialized"
+description = "Add a cache module with a get-or-insert pattern"
+replay_dir = "fixtures/defect-uninitialized"
+difficulty = "medium"
+
+[cases.seeded_defect]
+label = "Use of uninitialized variable in cache lookup"
+category = "logic"
+keyword = "uninitialized"
+expected_caught = true
+
+[[cases]]
+id = "defect-infinite-loop"
+description = "Add a retry mechanism for failed API calls"
+replay_dir = "fixtures/defect-infinite-loop"
+difficulty = "medium"
+
+[cases.seeded_defect]
+label = "Infinite loop when retry count reaches zero"
+category = "logic"
+keyword = "loop"
+expected_caught = true
+
+# ── Correctness defects ──────────────────────────────────────────────
+
+[[cases]]
+id = "defect-wrong-default"
+description = "Add a configuration module with sensible defaults"
+replay_dir = "fixtures/defect-wrong-default"
+difficulty = "easy"
+
+[cases.seeded_defect]
+label = "Incorrect default value for timeout setting"
+category = "correctness"
+keyword = "default"
+expected_caught = true
+
+[[cases]]
+id = "defect-missing-validation"
+description = "Add an email registration endpoint with input validation"
+replay_dir = "fixtures/defect-missing-validation"
+difficulty = "easy"
+
+[cases.seeded_defect]
+label = "Missing email format validation"
+category = "correctness"
+keyword = "validation"
+expected_caught = true
+
+[[cases]]
+id = "defect-wrong-comparison"
+description = "Add a temperature alert system that triggers at thresholds"
+replay_dir = "fixtures/defect-wrong-comparison"
+difficulty = "easy"
+
+[cases.seeded_defect]
+label = "Wrong comparison operator (> instead of >=)"
+category = "correctness"
+keyword = "comparison"
+expected_caught = true
+
+[[cases]]
+id = "defect-missing-error-handling"
+description = "Add a file processing pipeline with error recovery"
+replay_dir = "fixtures/defect-missing-error-handling"
+difficulty = "medium"
+
+[cases.seeded_defect]
+label = "Missing error handling for file read failure"
+category = "correctness"
+keyword = "error"
+expected_caught = true
+
+[[cases]]
+id = "defect-type-mismatch"
+description = "Add a unit conversion function for temperature values"
+replay_dir = "fixtures/defect-type-mismatch"
+difficulty = "medium"
+
+[cases.seeded_defect]
+label = "Type mismatch in temperature conversion (int vs float)"
+category = "correctness"
+keyword = "type"
+expected_caught = true
+
+[[cases]]
+id = "defect-stale-reference"
+description = "Add a caching layer with TTL-based expiration"
+replay_dir = "fixtures/defect-stale-reference"
+difficulty = "hard"
+
+[cases.seeded_defect]
+label = "Stale reference to expired cache entry"
+category = "correctness"
+keyword = "stale"
+expected_caught = true
+
+# ── Boundary / edge case defects ─────────────────────────────────────
+
+[[cases]]
+id = "defect-empty-input"
+description = "Add a string processing function that trims whitespace"
+replay_dir = "fixtures/defect-empty-input"
+difficulty = "easy"
+
+[cases.seeded_defect]
+label = "Missing empty string check causing panic"
+category = "boundary"
+keyword = "empty"
+expected_caught = true
+
+[[cases]]
+id = "defect-max-int"
+description = "Add an ID generator that increments a counter"
+replay_dir = "fixtures/defect-max-int"
+difficulty = "medium"
+
+[cases.seeded_defect]
+label = "Integer overflow at max value boundary"
+category = "boundary"
+keyword = "max"
+expected_caught = true
+
+[[cases]]
+id = "defect-negative-index"
+description = "Add an array access function with user-provided index"
+replay_dir = "fixtures/defect-negative-index"
+difficulty = "medium"
+
+[cases.seeded_defect]
+label = "Negative index causing out-of-bounds access"
+category = "boundary"
+keyword = "negative"
 expected_caught = true

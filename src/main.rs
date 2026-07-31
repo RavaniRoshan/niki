@@ -28,6 +28,8 @@ enum Commands {
     Dashboard(niki::cli::dashboard::DashboardArgs),
     /// Run the NIKI-vs-baseline evaluation harness on a seeded-defect dataset
     Eval(niki::cli::eval::EvalArgs),
+    /// View and manage agent memory (learned patterns from past runs)
+    Memory(niki::cli::memory::MemoryArgs),
 }
 
 #[tokio::main]
@@ -49,6 +51,7 @@ async fn main() -> Result<()> {
         Commands::Recommend(args) => niki::cli::recommend::handle(args)?,
         Commands::Dashboard(args) => niki::cli::dashboard::handle(args)?,
         Commands::Eval(args) => niki::cli::eval::handle(args).await?,
+        Commands::Memory(args) => niki::cli::memory::handle(args)?,
     }
 
     Ok(())

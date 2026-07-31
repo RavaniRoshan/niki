@@ -7,6 +7,7 @@ pub mod safety;
 pub mod sandbox;
 pub mod llm;
 pub mod knowledge;
+pub mod memory;
 pub mod output;
 pub mod display;
 pub mod cost;

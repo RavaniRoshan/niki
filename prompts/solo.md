@@ -10,6 +10,10 @@ Your job is to plan, implement, self-test, and self-review the change in a singl
 ## Project Context
 {{ project_knowledge }}
 
+{% if project_memory %}
+{{ project_memory }}
+{% endif %}
+
 ## Current File Contents
 The following are the EXACT current contents of the files you are asked to modify. You MUST
 preserve their existing code and produce a unified diff that edits them **in place**.

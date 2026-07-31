@@ -60,7 +60,8 @@ pub fn apply_diff_to_working_tree(repo_path: &Path, diff: &str) -> Result<()> {
     let patch_path = repo_path.join(".niki-tmp.patch");
     std::fs::write(&patch_path, &normalized)?;
 
-    let res = run_git(repo_path, &["apply", patch_path.to_str().unwrap()]);
+    let patch_str = patch_path.to_str().ok_or_else(|| anyhow::anyhow!("patch path is not valid UTF-8"))?;
+    let res = run_git(repo_path, &["apply", patch_str]);
     let _ = std::fs::remove_file(&patch_path);
 
     match res {
@@ -70,9 +71,10 @@ pub fn apply_diff_to_working_tree(repo_path: &Path, diff: &str) -> Result<()> {
             let normalized = normalize_patch(diff);
             let patch_path = repo_path.join(".niki-tmp.patch");
             let _ = std::fs::write(&patch_path, &normalized);
+            let patch_str = patch_path.to_str().ok_or_else(|| anyhow::anyhow!("patch path is not valid UTF-8"))?;
             let res = run_git(
                 repo_path,
-                &["-c", "apply.whitespace=nowarn", "apply", "-p1", "--3way", patch_path.to_str().unwrap()],
+                &["-c", "apply.whitespace=nowarn", "apply", "-p1", "--3way", patch_str],
             );
             let _ = std::fs::remove_file(&patch_path);
             res
@@ -99,7 +101,7 @@ pub fn create_branch_and_commit(
 ) -> Result<()> {
     let repo = Repository::open(repo_path)?;
     let head = repo.head()?;
-    let target = head.target().unwrap();
+    let target = head.target().ok_or_else(|| anyhow::anyhow!("HEAD is not a direct reference (detached HEAD)"))?;
     let commit = repo.find_commit(target)?;
 
     // Create a fresh branch for this task pointing at the current HEAD commit, then
@@ -131,7 +133,8 @@ pub fn create_branch_and_commit(
     }
 
     let sig = Signature::now("NIKI", "niki@localhost")?;
-    let parent = repo.find_commit(repo.head()?.target().unwrap())?;
+    let parent_target = repo.head()?.target().ok_or_else(|| anyhow::anyhow!("HEAD is not a direct reference (detached HEAD)"))?;
+    let parent = repo.find_commit(parent_target)?;
     let commit_msg = format!(
         "NIKI implementation for task {}\n\nCreated automatically by NIKI.",
         task_id

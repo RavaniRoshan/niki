@@ -417,6 +417,40 @@ impl AgenticDisplay {
         task_dir: &std::path::Path,
     ) {
         if self.tui.is_some() {
+            // Feed live data into TUI pages before showing final screen.
+            if !result.final_diff.is_empty() {
+                self.emit(DisplayEvent::DiffContent(result.final_diff.clone()));
+            }
+
+            let total_in: u32 = result.metrics.iter().map(|m| m.input_tokens).sum();
+            let total_out: u32 = result.metrics.iter().map(|m| m.output_tokens).sum();
+            let total_cost: f64 = result.metrics.iter().map(|m| m.cost_usd).sum();
+            let total_ms: u64 = result.metrics.iter().map(|m| m.latency_ms).sum();
+            let cost_json = serde_json::json!({
+                "total_input_tokens": total_in,
+                "total_output_tokens": total_out,
+                "total_cost_usd": total_cost,
+                "total_latency_ms": total_ms,
+                "agents": result.metrics.iter().map(|m| serde_json::json!({
+                    "role": format!("{:?}", m.role),
+                    "input_tokens": m.input_tokens,
+                    "output_tokens": m.output_tokens,
+                    "cost_usd": m.cost_usd,
+                    "latency_ms": m.latency_ms,
+                })).collect::<Vec<_>>(),
+            });
+            self.emit(DisplayEvent::CostJson(cost_json.to_string()));
+
+            // Find the reviewer artifact for the report page.
+            if let Some((_, json)) = result.artifacts.iter().find(|(r, _)| *r == AgentRole::Reviewer) {
+                self.emit(DisplayEvent::ReportContent(json.clone()));
+            }
+
+            let artifacts_path = task_dir.join("artifacts");
+            if artifacts_path.exists() {
+                self.emit(DisplayEvent::ArtifactsDir(artifacts_path.to_string_lossy().into_owned()));
+            }
+
             self.emit(DisplayEvent::Final);
             return;
         }

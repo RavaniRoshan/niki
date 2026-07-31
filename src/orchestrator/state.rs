@@ -68,6 +68,17 @@ pub enum TaskStatus {
     Cancelled,
 }
 
+impl std::fmt::Display for TaskStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskStatus::Running => write!(f, "Running"),
+            TaskStatus::Completed => write!(f, "Completed"),
+            TaskStatus::Failed { error } => write!(f, "Failed: {}", error),
+            TaskStatus::Cancelled => write!(f, "Cancelled"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct TaskRecord {
     pub task_id: Uuid,

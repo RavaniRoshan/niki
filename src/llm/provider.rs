@@ -22,6 +22,7 @@ pub trait LlmProvider: Send + Sync {
     fn provider_name(&self) -> &str;
 }
 
+#[derive(Clone)]
 pub struct CompletionRequest {
     pub model: String,
     pub system_prompt: String,

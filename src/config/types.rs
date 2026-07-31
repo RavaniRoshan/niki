@@ -354,7 +354,26 @@ impl NikiConfig {
         }
 
         self.agents = other.agents;
-        self.docker = other.docker;
+
+        // Only merge docker settings if the other config explicitly changed them
+        // from defaults. This preserves global backend settings when the local
+        // config doesn't set a [docker] section.
+        let default_docker = DockerConfig::default();
+        if other.docker.base_image != default_docker.base_image {
+            self.docker.base_image = other.docker.base_image;
+        }
+        if other.docker.extra_packages != default_docker.extra_packages {
+            self.docker.extra_packages = other.docker.extra_packages;
+        }
+        if other.docker.memory_limit != default_docker.memory_limit {
+            self.docker.memory_limit = other.docker.memory_limit;
+        }
+        if (other.docker.cpu_limit - default_docker.cpu_limit).abs() > f32::EPSILON {
+            self.docker.cpu_limit = other.docker.cpu_limit;
+        }
+        if other.docker.backend != default_docker.backend {
+            self.docker.backend = other.docker.backend;
+        }
 
         // Topology overrides are additive: only apply the parts the user set.
         if !other.pipeline.stages.is_empty() {
