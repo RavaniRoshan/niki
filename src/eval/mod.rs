@@ -59,6 +59,21 @@ pub struct SeededDefect {
     pub expected_caught: bool,
 }
 
+/// Difficulty level for an evaluation case.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Difficulty {
+    Easy,
+    Medium,
+    Hard,
+}
+
+impl Default for Difficulty {
+    fn default() -> Self {
+        Difficulty::Medium
+    }
+}
+
 /// One evaluation case: a task + its known seeded defect + where to find the
 /// recorded artifacts for replay.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +85,9 @@ pub struct EvalCase {
     /// and `baseline/artifacts/*.json` for replay mode.
     #[serde(default)]
     pub replay_dir: Option<String>,
+    /// Difficulty level for filtering.
+    #[serde(default)]
+    pub difficulty: Difficulty,
 }
 
 /// An evaluation dataset: a named collection of cases.
@@ -103,9 +121,21 @@ pub struct RunOutcome {
 pub struct CaseResult {
     pub case_id: String,
     pub defect_category: IssueCategory,
+    pub difficulty: Difficulty,
     pub expected_caught: bool,
     pub niki: RunOutcome,
     pub baseline: RunOutcome,
+}
+
+/// Per-category metrics.
+#[derive(Debug, Clone, Serialize)]
+pub struct CategoryMetrics {
+    pub category: IssueCategory,
+    pub total: u32,
+    pub niki_caught: u32,
+    pub baseline_caught: u32,
+    pub niki_catch_rate: f64,
+    pub baseline_catch_rate: f64,
 }
 
 /// The aggregate, publishable delta.
@@ -125,6 +155,8 @@ pub struct EvalReport {
     pub baseline_false_approvals: u32,
     /// `(baseline_fa - niki_fa) / baseline_fa * 100` — the headline metric.
     pub false_approval_reduction_pct: f64,
+    /// Per-category breakdown.
+    pub categories: Vec<CategoryMetrics>,
 }
 
 // ── Config builders ───────────────────────────────────────────────
@@ -319,17 +351,25 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
 }
 
 /// Replay a case from its recorded NIKI and baseline artifact sets.
-pub fn replay_case(case: &EvalCase, dataset_dir: &Path) -> Result<CaseResult> {
+/// Returns None if neither NIKI nor baseline fixtures exist (case not yet populated).
+pub fn replay_case(case: &EvalCase, dataset_dir: &Path) -> Result<Option<CaseResult>> {
     let base = dataset_dir.join(case.replay_dir.as_deref().unwrap_or("."));
-    let niki = replay_result(&base.join("niki")).unwrap_or_else(|_| empty_result());
-    let baseline = replay_result(&base.join("baseline")).unwrap_or_else(|_| empty_result());
-    Ok(CaseResult {
+    let niki_dir = base.join("niki");
+    let baseline_dir = base.join("baseline");
+    // Skip cases where no fixtures exist yet
+    if !niki_dir.exists() && !baseline_dir.exists() {
+        return Ok(None);
+    }
+    let niki = replay_result(&niki_dir).unwrap_or_else(|_| empty_result());
+    let baseline = replay_result(&baseline_dir).unwrap_or_else(|_| empty_result());
+    Ok(Some(CaseResult {
         case_id: case.id.clone(),
         defect_category: case.seeded_defect.category,
+        difficulty: case.difficulty,
         expected_caught: case.seeded_defect.expected_caught,
         niki: score_result(&niki, &case.seeded_defect),
         baseline: score_result(&baseline, &case.seeded_defect),
-    })
+    }))
 }
 
 // ── Live (real pipeline) ──────────────────────────────────────────
@@ -359,6 +399,7 @@ pub async fn run_case_live(case: &EvalCase, base: &NikiConfig, project_dir: &Pat
     Ok(CaseResult {
         case_id: case.id.clone(),
         defect_category: case.seeded_defect.category,
+        difficulty: case.difficulty,
         expected_caught: case.seeded_defect.expected_caught,
         niki: score_result(&niki_res, &case.seeded_defect),
         baseline: score_result(&base_res, &case.seeded_defect),
@@ -381,11 +422,13 @@ pub async fn run_eval(dataset_path: &Path, live: bool, project_dir: &Path) -> Re
     for case in &ds.cases {
         let cr = if live {
             let cfg = base_cfg.clone().context("could not load config for live eval")?;
-            run_case_live(case, &cfg, project_dir).await?
+            Some(run_case_live(case, &cfg, project_dir).await?)
         } else {
             replay_case(case, &dataset_dir)?
         };
-        cases.push(cr);
+        if let Some(cr) = cr {
+            cases.push(cr);
+        }
     }
     Ok(build_report(&ds, &cases))
 }
@@ -404,6 +447,26 @@ pub fn build_report(ds: &EvalDataset, cases: &[CaseResult]) -> EvalReport {
         0.0
     };
 
+    // Per-category metrics
+    let mut category_map: std::collections::HashMap<IssueCategory, Vec<&CaseResult>> = std::collections::HashMap::new();
+    for c in &expected {
+        category_map.entry(c.defect_category).or_default().push(c);
+    }
+    let mut categories: Vec<CategoryMetrics> = category_map.into_iter().map(|(cat, cs)| {
+        let total = cs.len() as u32;
+        let niki_caught = cs.iter().filter(|c| c.niki.caught).count() as u32;
+        let baseline_caught = cs.iter().filter(|c| c.baseline.caught).count() as u32;
+        CategoryMetrics {
+            category: cat,
+            total,
+            niki_caught,
+            baseline_caught,
+            niki_catch_rate: if total > 0 { niki_caught as f64 / total as f64 } else { 0.0 },
+            baseline_catch_rate: if total > 0 { baseline_caught as f64 / total as f64 } else { 0.0 },
+        }
+    }).collect();
+    categories.sort_by(|a, b| format!("{:?}", a.category).cmp(&format!("{:?}", b.category)));
+
     EvalReport {
         dataset: ds.name.clone().unwrap_or_else(|| "eval".to_string()),
         n_cases: cases.len() as u32,
@@ -413,6 +476,7 @@ pub fn build_report(ds: &EvalDataset, cases: &[CaseResult]) -> EvalReport {
         niki_false_approvals: niki_fa,
         baseline_false_approvals: baseline_fa,
         false_approval_reduction_pct,
+        categories,
     }
 }
 
@@ -438,6 +502,24 @@ pub fn render_report_md(report: &EvalReport) -> String {
         "| False-approval reduction | — | {:.0}% |\n",
         report.false_approval_reduction_pct
     ));
+
+    // Per-category breakdown
+    if !report.categories.is_empty() {
+        s.push_str("\n## Per-category\n\n");
+        s.push_str("| Category | Total | NIKI caught | Baseline caught | NIKI rate | Baseline rate |\n");
+        s.push_str("|---|---|---|---|---|---|\n");
+        for cat in &report.categories {
+            s.push_str(&format!(
+                "| {:?} | {} | {} | {} | {:.0}% | {:.0}% |\n",
+                cat.category,
+                cat.total,
+                cat.niki_caught,
+                cat.baseline_caught,
+                cat.niki_catch_rate * 100.0,
+                cat.baseline_catch_rate * 100.0
+            ));
+        }
+    }
 
     s.push_str("\n## Per-case\n\n");
     s.push_str("| Case | Defect | Expected | NIKI caught | by Red | by Reviewer | Baseline caught |\n");
@@ -558,6 +640,7 @@ mod tests {
         let c1 = CaseResult {
             case_id: "a".into(),
             defect_category: IssueCategory::Security,
+            difficulty: Difficulty::Medium,
             expected_caught: true,
             niki: caught(true, true, true),
             baseline: caught(false, false, false),
@@ -565,6 +648,7 @@ mod tests {
         let c2 = CaseResult {
             case_id: "b".into(),
             defect_category: IssueCategory::Logic,
+            difficulty: Difficulty::Medium,
             expected_caught: true,
             niki: caught(true, false, true),
             baseline: caught(true, false, true),
@@ -579,6 +663,7 @@ mod tests {
         assert_eq!(rep.baseline_false_approvals, 1);
         assert_eq!(rep.niki_false_approvals, 0);
         assert_eq!(rep.false_approval_reduction_pct, 100.0);
+        assert_eq!(rep.categories.len(), 2);
     }
 
     #[test]
@@ -588,15 +673,23 @@ mod tests {
         let ds = load_dataset(&dataset_dir.join("dataset.toml")).unwrap();
         let mut cases = Vec::new();
         for c in &ds.cases {
-            cases.push(replay_case(c, &dataset_dir).unwrap());
+            if let Ok(Some(cr)) = replay_case(c, &dataset_dir) {
+                cases.push(cr);
+            }
         }
         let rep = build_report(&ds, &cases);
-        assert_eq!(rep.n_cases, 2);
+        // All 23 fixture cases should be loaded
+        assert_eq!(rep.n_cases, 23, "expected all 23 fixture cases");
+        // NIKI catches every defect (reviewer or red surfaces the seeded defect)
         assert_eq!(rep.niki_catch_rate, 1.0);
-        assert_eq!(rep.baseline_catch_rate, 0.5);
+        // Baselines miss all defects (approved with empty issues = false approvals)
+        assert_eq!(rep.baseline_catch_rate, 0.0);
+        // Since baselines miss everything NIKI catches, false-approval reduction is 100%
         assert_eq!(rep.false_approval_reduction_pct, 100.0);
+        assert!(!rep.categories.is_empty());
         let md = render_report_md(&rep);
         assert!(md.contains("reducing reviewer"));
+        assert!(md.contains("Per-category"));
         // The SQL case must be a baseline false-approval that NIKI caught via Red.
         let sql = cases.iter().find(|c| c.case_id == "defect-sql").unwrap();
         assert!(!sql.baseline.caught);

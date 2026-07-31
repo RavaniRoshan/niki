@@ -43,6 +43,9 @@ syntect = "5"
 # Rich terminal TUI
 ratatui = "0.29"
 
+# ASCII art font rendering for logo
+figlet-rs = "1.0"
+
 # UUID generation (for task IDs)
 uuid = { version = "1", features = ["serde", "v4"] }
 

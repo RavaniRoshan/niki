@@ -40,7 +40,7 @@ impl OpenAiProvider {
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse> {
-        let api_key = self.config.api_key.as_ref().unwrap();
+        let api_key = self.config.api_key.as_ref().ok_or_else(|| anyhow!("OpenAI API key not configured"))?;
         let url = openai_endpoint(
             self.config
                 .base_url
@@ -91,7 +91,7 @@ impl LlmProvider for OpenAiProvider {
     }
 
     async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
-        let api_key = self.config.api_key.as_ref().unwrap();
+        let api_key = self.config.api_key.as_ref().ok_or_else(|| anyhow!("OpenAI API key not configured"))?;
         let url = openai_endpoint(
             self.config
                 .base_url

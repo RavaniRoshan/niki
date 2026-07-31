@@ -458,17 +458,22 @@ async fn run_role(
     let task_spec_json = serde_json::to_string_pretty(task_spec)?;
     let (template, schema) = role_prompt(role);
 
+    // Load role-specific memory for prompt injection
+    let memory_str = crate::memory::render_memory_for_prompt(project_path, role, 10);
+
     let ctx = match role {
         AgentRole::Coder => context! {
             input_artifacts => vec![task_spec_json.clone()],
             revision_context => review_feedback.cloned(),
             revision_round => round,
             project_knowledge => knowledge_str.to_string(),
+            project_memory => memory_str,
             current_files => build_current_files(task_spec, project_path),
         },
         AgentRole::Tester => context! {
             input_artifacts => vec![task_spec_json.clone(), coder_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
+            project_memory => memory_str,
         },
         AgentRole::Reviewer => {
             // When the Red/Blue pass ran, the Reviewer must reconcile each Red
@@ -486,6 +491,7 @@ async fn run_role(
             context! {
                 input_artifacts => artifacts,
                 project_knowledge => knowledge_str.to_string(),
+                project_memory => memory_str,
             }
         }
         AgentRole::Red => context! {
@@ -494,16 +500,19 @@ async fn run_role(
             // adversarially — exactly the independence the product claims.
             input_artifacts => vec![task_spec_json.clone(), coder_json.to_string(), tester_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
+            project_memory => memory_str,
         },
         AgentRole::Synthesizer => context! {
             // In the parallel-coder flow (#3) `coder_json` carries every coder
             // diff concatenated; the Synthesizer reconciles them into one change.
             input_artifacts => vec![task_spec_json.clone(), coder_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
+            project_memory => memory_str,
         },
         AgentRole::SecurityAuditor => context! {
             input_artifacts => vec![task_spec_json.clone(), coder_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
+            project_memory => memory_str,
         },
         AgentRole::Planner => {
             // Should never happen — the Planner is run separately. Keep the
@@ -588,6 +597,7 @@ pub async fn execute_pipeline(
         context! {
             task_description => task.description.clone(),
             project_knowledge => knowledge_str.clone(),
+            project_memory => crate::memory::render_memory_for_prompt(&task.project_path, AgentRole::Planner, 10),
         },
         "schemas/task_spec.schema.json",
         display,
@@ -602,7 +612,7 @@ pub async fn execute_pipeline(
         context_sources: isolation_sources_for(AgentRole::Planner, config.red_blue.enabled),
         saw_other_reasoning: false,
     });
-    let pm = metrics.last().unwrap();
+    let pm = metrics.last().unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
     display.agent_done(
         AgentRole::Planner,
         crate::display::artifact_render::render_task_spec_summary(&task_spec),
@@ -693,7 +703,8 @@ pub async fn execute_pipeline(
             .expect("parallel mode requires a Coder stage");
         let per_coder = run_parallel_coders(
             config.parallel.coder_count,
-            provider_cache.get(&coder_stage.provider).unwrap().clone(),
+            provider_cache.get(&coder_stage.provider)
+                .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found in cache", coder_stage.provider))?.clone(),
             &coder_stage.model,
             &coder_stage.provider,
             &task_spec,
@@ -722,7 +733,8 @@ pub async fn execute_pipeline(
             .iter()
             .find(|s| s.role == AgentRole::Synthesizer)
             .expect("parallel mode requires a Synthesizer stage");
-        let synth_llm = provider_cache.get(&synth_stage.provider).unwrap();
+        let synth_llm = provider_cache.get(&synth_stage.provider)
+            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found in cache", synth_stage.provider))?;
         let coder_json_in = serde_json::to_string(&per_coder)?;
         let (json, summary, role_output) = run_role(
             AgentRole::Synthesizer,
@@ -748,7 +760,7 @@ pub async fn execute_pipeline(
             context_sources: isolation_sources_for(AgentRole::Synthesizer, config.red_blue.enabled),
             saw_other_reasoning: false,
         });
-        let m = metrics.last().unwrap();
+        let m = metrics.last().unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
         display.agent_done(AgentRole::Synthesizer, summary, m.usage(), m.cost_usd);
         display.update_pipeline_status();
 
@@ -768,7 +780,8 @@ pub async fn execute_pipeline(
             .iter()
             .filter(|s| s.role != AgentRole::Coder && s.role != AgentRole::Synthesizer)
         {
-            let llm = provider_cache.get(&stage.provider).unwrap();
+            let llm = provider_cache.get(&stage.provider)
+                .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found in cache", stage.provider))?;
             let (json, summary, role_output) = run_role(
                 stage.role,
                 &**llm,
@@ -793,7 +806,7 @@ pub async fn execute_pipeline(
                 context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
                 saw_other_reasoning: false,
             });
-            let m = metrics.last().unwrap();
+            let m = metrics.last().unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
             display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
             display.update_pipeline_status();
 
@@ -816,7 +829,8 @@ pub async fn execute_pipeline(
             } else {
             while round < max_rounds {
         for stage in &body_stages {
-            let llm = provider_cache.get(&stage.provider).unwrap();
+            let llm = provider_cache.get(&stage.provider)
+                .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found in cache", stage.provider))?;
             let (json, summary, role_output) = run_role(
                 stage.role,
                 &**llm,
@@ -841,7 +855,7 @@ pub async fn execute_pipeline(
                 context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
                 saw_other_reasoning: false,
             });
-            let m = metrics.last().unwrap();
+            let m = metrics.last().unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
             display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
             display.update_pipeline_status();
 
@@ -913,7 +927,8 @@ pub async fn execute_pipeline(
                 .iter()
                 .find(|s| s.role == AgentRole::Coder)
                 .expect("single-agent mode requires a Coder stage");
-            let coder_llm = provider_cache.get(&coder_stage.provider).unwrap();
+            let coder_llm = provider_cache.get(&coder_stage.provider)
+                .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found in cache", coder_stage.provider))?;
             let current_files = build_current_files(&task_spec, &task.project_path);
             let solo_json = run_stage(
                 AgentRole::Coder,
@@ -924,6 +939,7 @@ pub async fn execute_pipeline(
                 context! {
                     task_description => task.description.clone(),
                     project_knowledge => knowledge_str.clone(),
+                    project_memory => crate::memory::render_memory_for_prompt(&task.project_path, AgentRole::Coder, 10),
                     current_files => current_files.clone(),
                 },
                 "schemas/code_diff.schema.json",
@@ -938,7 +954,7 @@ pub async fn execute_pipeline(
                 context_sources: isolation_sources_for(AgentRole::Coder, config.red_blue.enabled),
                 saw_other_reasoning: false,
             });
-            let m = metrics.last().unwrap();
+            let m = metrics.last().unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
             display.agent_done(
                 AgentRole::Coder,
                 vec!["solo code diff produced".to_string()],
@@ -970,6 +986,15 @@ pub async fn execute_pipeline(
 
     sandbox.destroy().await?;
 
+    // Extract learnings from this run and save to memory
+    extract_memory_from_artifacts(
+        &task.project_path,
+        &task.description,
+        &artifacts,
+        &verdict,
+        &state,
+    );
+
     Ok(PipelineResult {
         task_id: task.id,
         state,
@@ -982,6 +1007,61 @@ pub async fn execute_pipeline(
         isolation,
         topology,
     })
+}
+
+/// Extract learnings from completed pipeline artifacts and save to role-specific memory.
+fn extract_memory_from_artifacts(
+    project_dir: &Path,
+    task: &str,
+    artifacts: &[(AgentRole, String)],
+    verdict: &Verdict,
+    _state: &super::state::PipelineState,
+) {
+    use crate::memory::append_memory;
+
+    // 1. Planner memory: record successful decomposition patterns
+    if let Some((_, planner_json)) = artifacts.iter().find(|(r, _)| *r == AgentRole::Planner) {
+        if let Ok(spec) = serde_json::from_str::<crate::artifacts::types::TaskSpec>(planner_json) {
+            let tags = vec!["task-decomposition".into(), format!("complexity:{:?}", spec.estimated_complexity).to_lowercase()];
+            let content = format!(
+                "Task: {} → {} files to modify",
+                task.chars().take(80).collect::<String>(),
+                spec.files_to_modify.len(),
+            );
+            let _ = append_memory(project_dir, AgentRole::Planner, task, tags, content, None);
+        }
+    }
+
+    // 2. Coder memory: record revision needed patterns
+    if matches!(verdict, Verdict::RevisionNeeded) {
+        let content = "Revision was needed on this task — reviewer found issues".to_string();
+        let tags = vec!["revision-needed".into(), "error-pattern".into()];
+        let _ = append_memory(project_dir, AgentRole::Coder, task, tags, content, None);
+    }
+
+    // 3. If verdict is Approved, record success pattern for the Coder
+    if matches!(verdict, Verdict::Approved) {
+        let tags = vec!["success".into()];
+        let content = "Task completed successfully with Approved verdict".to_string();
+        let _ = append_memory(project_dir, AgentRole::Coder, task, tags, content, None);
+    }
+
+    // 4. Red agent: if it found adversarial issues, record them
+    if let Some((_, red_json)) = artifacts.iter().find(|(r, _)| *r == AgentRole::Red) {
+        if let Ok(challenge) = serde_json::from_str::<crate::artifacts::types::RedChallenge>(red_json) {
+            if !challenge.challenges.is_empty() {
+                let content = format!(
+                    "Adversarial challenges: {}",
+                    challenge.challenges.iter()
+                        .map(|c| c.claim.chars().take(100).collect::<String>())
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                );
+                let tags = vec!["adversarial-finding".into()];
+                let _ = append_memory(project_dir, AgentRole::Red, task, tags, content, None);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

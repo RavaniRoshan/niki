@@ -15,6 +15,10 @@ In the parallel-coder flow these are multiple unified diffs (one per coder). The
 ## Project Context
 {{ project_knowledge }}
 
+{% if project_memory %}
+{{ project_memory }}
+{% endif %}
+
 ## Output Requirements
 You MUST output a single valid JSON object conforming to this schema:
 

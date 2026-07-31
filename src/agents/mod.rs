@@ -4,6 +4,7 @@ use crate::llm::provider::{LlmProvider, CompletionRequest, StreamChunk, TokenUsa
 use crate::artifacts::types::AgentRole;
 use crate::artifacts::validate::validate_artifact;
 use std::fs;
+use std::time::Duration;
 
 pub mod planner;
 pub mod coder;
@@ -47,8 +48,48 @@ pub async fn run_agent(
 
     display.agent_start(role);
 
+    // Retry loop with exponential backoff for transient LLM errors.
+    const MAX_RETRIES: u32 = 3;
+    const BASE_DELAY_MS: u64 = 1000;
+    let mut last_err = None;
+
+    let mut stream = None;
+    for attempt in 0..=MAX_RETRIES {
+        match llm.stream(request.clone()).await {
+            Ok(s) => {
+                stream = Some(s);
+                break;
+            }
+            Err(e) => {
+                let err_str = e.to_string().to_lowercase();
+                let is_transient = err_str.contains("timeout")
+                    || err_str.contains("rate")
+                    || err_str.contains("429")
+                    || err_str.contains("503")
+                    || err_str.contains("overloaded")
+                    || err_str.contains("connection")
+                    || err_str.contains("network");
+
+                if is_transient && attempt < MAX_RETRIES {
+                    let delay = BASE_DELAY_MS * 2u64.pow(attempt);
+                    eprintln!(
+                        "LLM transient error (attempt {}/{}), retrying in {}ms: {}",
+                        attempt + 1, MAX_RETRIES + 1, delay, e
+                    );
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    last_err = Some(e);
+                    continue;
+                }
+                display.agent_failed(role, &e.to_string());
+                return Err(e);
+            }
+        }
+    }
+    let mut stream = stream.ok_or_else(|| {
+        last_err.unwrap_or_else(|| anyhow!("LLM stream failed after retries"))
+    })?;
+
     use futures::StreamExt;
-    let mut stream = llm.stream(request).await?;
     let mut full_content = String::new();
     // Real usage is reported by the provider in a trailing Usage chunk. If the
     // stream ends without one (e.g. a gateway that omits usage), we fall back

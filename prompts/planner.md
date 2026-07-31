@@ -6,6 +6,10 @@ You are a software planning agent. Your job is to decompose a coding task into a
 ## Project Context
 {{ project_knowledge }}
 
+{% if project_memory %}
+{{ project_memory }}
+{% endif %}
+
 ## Output Requirements
 You MUST output a single valid JSON object conforming to this schema:
 

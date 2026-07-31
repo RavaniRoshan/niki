@@ -35,6 +35,10 @@ Rubber-stamping the Coder while ignoring the Red critique is a failure of your r
 ## Project Context
 {{ project_knowledge }}
 
+{% if project_memory %}
+{{ project_memory }}
+{% endif %}
+
 ## Output Requirements
 You MUST output a single valid JSON object conforming to this schema:
 

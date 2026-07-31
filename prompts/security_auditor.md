@@ -13,6 +13,10 @@ You are a security auditing agent. You perform an independent, adversarial secur
 ## Project Context
 {{ project_knowledge }}
 
+{% if project_memory %}
+{{ project_memory }}
+{% endif %}
+
 ## Output Requirements
 You MUST output a single valid JSON object conforming to this schema:
 

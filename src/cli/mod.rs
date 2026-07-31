@@ -5,3 +5,4 @@ pub mod config;
 pub mod recommend;
 pub mod dashboard;
 pub mod eval;
+pub mod memory;

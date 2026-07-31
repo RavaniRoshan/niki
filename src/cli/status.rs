@@ -42,7 +42,7 @@ pub async fn handle(args: &StatusArgs) -> Result<()> {
         Some((dir, record)) => {
             println!("Task:       {}", record.task_id);
             println!("Description: {}", record.description);
-            println!("Status:     {:?}", record.status);
+            println!("Status:     {}", record.status);
             if let Some(branch) = &record.branch {
                 println!("Branch:     {}", branch);
             }
