@@ -1,6 +1,18 @@
 /target
 .niki/
 niki.toml
+skills-lock.json
+
+# Agent configs (local, not repo)
+.agents/
+.claude/
+
+# Untracked directories
+docs/
+examples/
+scripts/
+tests/
+evals/
 
 # Internal strategy docs — not for the public repo
 CLOUD_BACKEND_SPEC.md
