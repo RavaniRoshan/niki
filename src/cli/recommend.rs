@@ -1,8 +1,10 @@
-use anyhow::Result;
-use clap::Args;
 use crate::artifacts::types::AgentRole;
 use crate::cost::lookup_price;
-use crate::recommend::{estimate_cost, estimate_tokens, recommendations, role_prefers_strong, RoleRec};
+use crate::recommend::{
+    RoleRec, estimate_cost, estimate_tokens, recommendations, role_prefers_strong,
+};
+use anyhow::Result;
+use clap::Args;
 
 #[derive(Args)]
 pub struct RecommendArgs {
@@ -93,6 +95,8 @@ pub fn handle(args: &RecommendArgs) -> Result<()> {
         println!();
     }
 
-    println!("Tip: set these via `[agents]` in niki.toml, or override per run with `--coder-model`, etc.");
+    println!(
+        "Tip: set these via `[agents]` in niki.toml, or override per run with `--coder-model`, etc."
+    );
     Ok(())
 }

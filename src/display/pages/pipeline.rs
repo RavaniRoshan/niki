@@ -1,12 +1,12 @@
+use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 
-use crate::display::theme;
 use super::{AppState, Page, PageId};
+use crate::display::theme;
 
 pub struct PipelinePage {
     selected_stage: usize,
@@ -29,16 +29,19 @@ impl Page for PipelinePage {
             .constraints([
                 Constraint::Length(1), // header
                 Constraint::Length(1), // mode info
-                Constraint::Min(5),   // flowchart
+                Constraint::Min(5),    // flowchart
                 Constraint::Length(3), // agent models
                 Constraint::Length(1), // footer
             ])
             .split(area);
 
         // Header
-        let header = Line::from(vec![
-            Span::styled(" pipeline", Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD)),
-        ]);
+        let header = Line::from(vec![Span::styled(
+            " pipeline",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        )]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
 
         // Mode info
@@ -52,12 +55,26 @@ impl Page for PipelinePage {
         } else {
             "off".to_string()
         };
-        let security = if state.config.security.enabled { "on" } else { "off" };
+        let security = if state.config.security.enabled {
+            "on"
+        } else {
+            "off"
+        };
         let info = Line::from(vec![
             Span::styled("  MODE ", Style::default().fg(theme::FG_DIM)),
-            Span::styled(mode, Style::default().fg(theme::FG).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                mode,
+                Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+            ),
             Span::styled("   SECURITY ", Style::default().fg(theme::FG_DIM)),
-            Span::styled(security, Style::default().fg(if state.config.security.enabled { theme::GREEN } else { theme::FG_DIM })),
+            Span::styled(
+                security,
+                Style::default().fg(if state.config.security.enabled {
+                    theme::GREEN
+                } else {
+                    theme::FG_DIM
+                }),
+            ),
             Span::styled("   PARALLEL ", Style::default().fg(theme::FG_DIM)),
             Span::styled(&parallel, Style::default().fg(theme::FG)),
         ]);
@@ -69,95 +86,153 @@ impl Page for PipelinePage {
         flow_lines.push(Line::from(vec![
             Span::styled("         task ────▶ ", Style::default().fg(theme::FG_DIM)),
             Span::styled(
-                format!("{} Planner", theme::role_glyph(crate::artifacts::types::AgentRole::Planner)),
-                Style::default().fg(theme::role_color(crate::artifacts::types::AgentRole::Planner)).add_modifier(Modifier::BOLD),
+                format!(
+                    "{} Planner",
+                    theme::role_glyph(crate::artifacts::types::AgentRole::Planner)
+                ),
+                Style::default()
+                    .fg(theme::role_color(
+                        crate::artifacts::types::AgentRole::Planner,
+                    ))
+                    .add_modifier(Modifier::BOLD),
             ),
         ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("                       │", Style::default().fg(theme::FG_DIM)),
-        ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("                  TaskSpec", Style::default().fg(theme::FG_DIM)),
-        ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("                       ▼", Style::default().fg(theme::FG_DIM)),
-        ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("              ┌────────────┐", Style::default().fg(theme::FG_DIM)),
-        ]));
+        flow_lines.push(Line::from(vec![Span::styled(
+            "                       │",
+            Style::default().fg(theme::FG_DIM),
+        )]));
+        flow_lines.push(Line::from(vec![Span::styled(
+            "                  TaskSpec",
+            Style::default().fg(theme::FG_DIM),
+        )]));
+        flow_lines.push(Line::from(vec![Span::styled(
+            "                       ▼",
+            Style::default().fg(theme::FG_DIM),
+        )]));
+        flow_lines.push(Line::from(vec![Span::styled(
+            "              ┌────────────┐",
+            Style::default().fg(theme::FG_DIM),
+        )]));
         flow_lines.push(Line::from(vec![
             Span::styled("              │", Style::default().fg(theme::FG_DIM)),
             Span::styled(
-                format!(" {} Coder ", theme::role_glyph(crate::artifacts::types::AgentRole::Coder)),
-                Style::default().fg(theme::role_color(crate::artifacts::types::AgentRole::Coder)).add_modifier(Modifier::BOLD),
+                format!(
+                    " {} Coder ",
+                    theme::role_glyph(crate::artifacts::types::AgentRole::Coder)
+                ),
+                Style::default()
+                    .fg(theme::role_color(crate::artifacts::types::AgentRole::Coder))
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("│ ──diff──▶", Style::default().fg(theme::FG_DIM)),
         ]));
+        flow_lines.push(Line::from(vec![Span::styled(
+            "              └────────────┘           ▼",
+            Style::default().fg(theme::FG_DIM),
+        )]));
+        flow_lines.push(Line::from(vec![Span::styled(
+            "                                 ┌────────────┐",
+            Style::default().fg(theme::FG_DIM),
+        )]));
         flow_lines.push(Line::from(vec![
-            Span::styled("              └────────────┘           ▼", Style::default().fg(theme::FG_DIM)),
-        ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("                                 ┌────────────┐", Style::default().fg(theme::FG_DIM)),
-        ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("                                 │", Style::default().fg(theme::FG_DIM)),
             Span::styled(
-                format!(" {} Tester ", theme::role_glyph(crate::artifacts::types::AgentRole::Tester)),
-                Style::default().fg(theme::role_color(crate::artifacts::types::AgentRole::Tester)).add_modifier(Modifier::BOLD),
+                "                                 │",
+                Style::default().fg(theme::FG_DIM),
+            ),
+            Span::styled(
+                format!(
+                    " {} Tester ",
+                    theme::role_glyph(crate::artifacts::types::AgentRole::Tester)
+                ),
+                Style::default()
+                    .fg(theme::role_color(
+                        crate::artifacts::types::AgentRole::Tester,
+                    ))
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("│ ──tests──▶", Style::default().fg(theme::FG_DIM)),
         ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("                                 └────────────┘           ▼", Style::default().fg(theme::FG_DIM)),
-        ]));
+        flow_lines.push(Line::from(vec![Span::styled(
+            "                                 └────────────┘           ▼",
+            Style::default().fg(theme::FG_DIM),
+        )]));
 
         if state.config.red_blue.enabled {
+            flow_lines.push(Line::from(vec![Span::styled(
+                "                                            ┌────────────┐",
+                Style::default().fg(theme::FG_DIM),
+            )]));
             flow_lines.push(Line::from(vec![
-                Span::styled("                                            ┌────────────┐", Style::default().fg(theme::FG_DIM)),
-            ]));
-            flow_lines.push(Line::from(vec![
-                Span::styled("                                            │", Style::default().fg(theme::FG_DIM)),
                 Span::styled(
-                    format!(" {} Red ", theme::role_glyph(crate::artifacts::types::AgentRole::Red)),
-                    Style::default().fg(theme::role_color(crate::artifacts::types::AgentRole::Red)).add_modifier(Modifier::BOLD),
+                    "                                            │",
+                    Style::default().fg(theme::FG_DIM),
+                ),
+                Span::styled(
+                    format!(
+                        " {} Red ",
+                        theme::role_glyph(crate::artifacts::types::AgentRole::Red)
+                    ),
+                    Style::default()
+                        .fg(theme::role_color(crate::artifacts::types::AgentRole::Red))
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("│ ──challenges──▶", Style::default().fg(theme::FG_DIM)),
             ]));
-            flow_lines.push(Line::from(vec![
-                Span::styled("                                            └────────────┘           ▼", Style::default().fg(theme::FG_DIM)),
-            ]));
+            flow_lines.push(Line::from(vec![Span::styled(
+                "                                            └────────────┘           ▼",
+                Style::default().fg(theme::FG_DIM),
+            )]));
         }
 
+        flow_lines.push(Line::from(vec![Span::styled(
+            "                                       ┌────────────┐",
+            Style::default().fg(theme::FG_DIM),
+        )]));
         flow_lines.push(Line::from(vec![
-            Span::styled("                                       ┌────────────┐", Style::default().fg(theme::FG_DIM)),
-        ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("                                       │", Style::default().fg(theme::FG_DIM)),
             Span::styled(
-                format!(" {} Reviewer ", theme::role_glyph(crate::artifacts::types::AgentRole::Reviewer)),
-                Style::default().fg(theme::role_color(crate::artifacts::types::AgentRole::Reviewer)).add_modifier(Modifier::BOLD),
+                "                                       │",
+                Style::default().fg(theme::FG_DIM),
+            ),
+            Span::styled(
+                format!(
+                    " {} Reviewer ",
+                    theme::role_glyph(crate::artifacts::types::AgentRole::Reviewer)
+                ),
+                Style::default()
+                    .fg(theme::role_color(
+                        crate::artifacts::types::AgentRole::Reviewer,
+                    ))
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("│", Style::default().fg(theme::FG_DIM)),
         ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("                                       └─────┬──────┘", Style::default().fg(theme::FG_DIM)),
-        ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("                                             │", Style::default().fg(theme::FG_DIM)),
-        ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("                                             ▼", Style::default().fg(theme::FG_DIM)),
-        ]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("                                       niki/<id> branch", Style::default().fg(theme::GREEN).add_modifier(Modifier::BOLD)),
-        ]));
+        flow_lines.push(Line::from(vec![Span::styled(
+            "                                       └─────┬──────┘",
+            Style::default().fg(theme::FG_DIM),
+        )]));
+        flow_lines.push(Line::from(vec![Span::styled(
+            "                                             │",
+            Style::default().fg(theme::FG_DIM),
+        )]));
+        flow_lines.push(Line::from(vec![Span::styled(
+            "                                             ▼",
+            Style::default().fg(theme::FG_DIM),
+        )]));
+        flow_lines.push(Line::from(vec![Span::styled(
+            "                                       niki/<id> branch",
+            Style::default()
+                .fg(theme::GREEN)
+                .add_modifier(Modifier::BOLD),
+        )]));
 
         let flow_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme::BORDER))
             .title(" FLOW ");
         frame.render_widget(
-            Paragraph::new(flow_lines).block(flow_block).wrap(Wrap { trim: false }),
+            Paragraph::new(flow_lines)
+                .block(flow_block)
+                .wrap(Wrap { trim: false }),
             chunks[2],
         );
 
@@ -174,36 +249,46 @@ impl Page for PipelinePage {
             &state.config.agents.tester,
             &state.config.agents.reviewer,
         ];
-        let model_lines: Vec<Line> = roles.iter().enumerate().map(|(i, role)| {
-            let selected = i == self.selected_stage;
-            let prefix = if selected { "▸" } else { " " };
-            let model_style = if selected {
-                Style::default().fg(theme::FG_BRIGHT).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme::FG)
-            };
-            let cfg = agent_configs[i];
-            Line::from(vec![
-                Span::styled(
-                    format!("{} ◈ {}   ", prefix, theme::role_name(*role)),
-                    Style::default().fg(theme::role_color(*role)).add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() }),
-                ),
-                Span::styled(format!("{}/{}", cfg.provider, cfg.model), model_style),
-            ])
-        }).collect();
+        let model_lines: Vec<Line> = roles
+            .iter()
+            .enumerate()
+            .map(|(i, role)| {
+                let selected = i == self.selected_stage;
+                let prefix = if selected { "▸" } else { " " };
+                let model_style = if selected {
+                    Style::default()
+                        .fg(theme::FG_BRIGHT)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme::FG)
+                };
+                let cfg = agent_configs[i];
+                Line::from(vec![
+                    Span::styled(
+                        format!("{} ◈ {}   ", prefix, theme::role_name(*role)),
+                        Style::default()
+                            .fg(theme::role_color(*role))
+                            .add_modifier(if selected {
+                                Modifier::BOLD
+                            } else {
+                                Modifier::empty()
+                            }),
+                    ),
+                    Span::styled(format!("{}/{}", cfg.provider, cfg.model), model_style),
+                ])
+            })
+            .collect();
         let model_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme::BORDER))
             .title(" MODELS ");
-        frame.render_widget(
-            Paragraph::new(model_lines).block(model_block),
-            chunks[3],
-        );
+        frame.render_widget(Paragraph::new(model_lines).block(model_block), chunks[3]);
 
         // Footer
-        let footer = Line::from(vec![
-            Span::styled(" [j/k] next/prev   [Esc] back", Style::default().fg(theme::FG_DIM)),
-        ]);
+        let footer = Line::from(vec![Span::styled(
+            " [j/k] next/prev   [Esc] back",
+            Style::default().fg(theme::FG_DIM),
+        )]);
         frame.render_widget(Paragraph::new(footer), chunks[4]);
     }
 

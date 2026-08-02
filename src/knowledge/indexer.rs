@@ -1,10 +1,10 @@
+use crate::config::NikiConfig;
 use anyhow::Result;
-use std::path::Path;
-use std::fs;
-use walkdir::WalkDir;
 use git2::Repository;
 use std::collections::HashSet;
-use crate::config::NikiConfig;
+use std::fs;
+use std::path::Path;
+use walkdir::WalkDir;
 
 pub struct ProjectKnowledge {
     pub file_tree: String,
@@ -59,7 +59,11 @@ impl ProjectKnowledge {
         if !self.package_info.is_empty() {
             output.push_str("## Dependencies\n");
             for pkg in &self.package_info {
-                output.push_str(&format!("{}: {}\n", pkg.manager, pkg.dependencies.join(", ")));
+                output.push_str(&format!(
+                    "{}: {}\n",
+                    pkg.manager,
+                    pkg.dependencies.join(", ")
+                ));
             }
             output.push('\n');
         }
@@ -127,7 +131,7 @@ pub async fn index_project(path: &Path, config: &NikiConfig) -> Result<ProjectKn
         let depth = rel_path.components().count();
         let indent = "  ".repeat(depth.saturating_sub(1));
         let is_dir = entry.file_type().is_dir();
-        
+
         let name = entry.file_name().to_string_lossy().to_string();
         if is_dir {
             tree_lines.push(format!("{}{}/", indent, name));
@@ -137,11 +141,21 @@ pub async fn index_project(path: &Path, config: &NikiConfig) -> Result<ProjectKn
 
             if let Some(ext) = entry.path().extension().and_then(|e| e.to_str()) {
                 match ext {
-                    "rs" => { languages.insert("Rust"); }
-                    "js" | "jsx" => { languages.insert("JavaScript"); }
-                    "ts" | "tsx" => { languages.insert("TypeScript"); }
-                    "py" => { languages.insert("Python"); }
-                    "go" => { languages.insert("Go"); }
+                    "rs" => {
+                        languages.insert("Rust");
+                    }
+                    "js" | "jsx" => {
+                        languages.insert("JavaScript");
+                    }
+                    "ts" | "tsx" => {
+                        languages.insert("TypeScript");
+                    }
+                    "py" => {
+                        languages.insert("Python");
+                    }
+                    "go" => {
+                        languages.insert("Go");
+                    }
                     _ => {}
                 }
             }

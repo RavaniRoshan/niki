@@ -1,18 +1,18 @@
+pub mod agents;
+pub mod artifacts;
 pub mod cli;
 pub mod config;
-pub mod artifacts;
-pub mod agents;
+pub mod cost;
+pub mod display;
+pub mod eval;
+pub mod knowledge;
+pub mod llm;
+pub mod memory;
 pub mod orchestrator;
+pub mod output;
+pub mod recommend;
 pub mod safety;
 pub mod sandbox;
-pub mod llm;
-pub mod knowledge;
-pub mod memory;
-pub mod output;
-pub mod display;
-pub mod cost;
-pub mod recommend;
-pub mod eval;
 
 use thiserror::Error;
 use uuid::Uuid;
@@ -21,28 +21,39 @@ use uuid::Uuid;
 pub enum NikiError {
     #[error("Configuration error: {0}")]
     Config(String),
-    
+
     #[error("Docker error: {0}")]
     Docker(#[from] bollard::errors::Error),
-    
+
     #[error("Git error: {0}")]
     Git(#[from] git2::Error),
-    
+
     #[error("LLM provider error ({provider}): {message}")]
     LlmProvider { provider: String, message: String },
-    
+
     #[error("Artifact validation failed for {agent:?}: {errors}")]
-    ArtifactValidation { agent: artifacts::types::AgentRole, errors: String },
-    
+    ArtifactValidation {
+        agent: artifacts::types::AgentRole,
+        errors: String,
+    },
+
     #[error("Agent {agent:?} failed after {retries} retries: {message}")]
-    AgentFailure { agent: artifacts::types::AgentRole, retries: u32, message: String },
-    
-    #[error("No API key configured for provider '{0}'. Set it in niki.toml or via environment variable.")]
+    AgentFailure {
+        agent: artifacts::types::AgentRole,
+        retries: u32,
+        message: String,
+    },
+
+    #[error(
+        "No API key configured for provider '{0}'. Set it in niki.toml or via environment variable."
+    )]
     MissingApiKey(String),
-    
-    #[error("No container runtime found. Start Podman (systemctl --user enable --now podman.socket) or Docker and try again.")]
+
+    #[error(
+        "No container runtime found. Start Podman (systemctl --user enable --now podman.socket) or Docker and try again."
+    )]
     DockerNotRunning,
-    
+
     #[error("Task {0} not found")]
     TaskNotFound(Uuid),
 

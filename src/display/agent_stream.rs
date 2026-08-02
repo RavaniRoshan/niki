@@ -1,8 +1,8 @@
+use crate::NikiError;
 use crate::artifacts::types::{AgentRole, ReviewIssue};
 use crate::config::NikiConfig;
 use crate::display::theme::Theme;
-use crate::display::tui::{spawn_tui, DisplayEvent};
-use crate::NikiError;
+use crate::display::tui::{DisplayEvent, spawn_tui};
 use crate::llm::provider::TokenUsage;
 use crate::orchestrator::pipeline::{PipelineResult, Task};
 use crate::orchestrator::state::PipelineState;
@@ -127,7 +127,9 @@ impl AgenticDisplay {
     fn log(&self, label: &str, msg: &str) {
         if !self.is_tty {
             let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            let _ = self.term.write_line(&format!("[{}] [{}] {}", ts, label, msg));
+            let _ = self
+                .term
+                .write_line(&format!("[{}] [{}] {}", ts, label, msg));
         }
     }
 
@@ -210,7 +212,9 @@ impl AgenticDisplay {
         );
         let _ = self.term.write_line(&header);
         let separator = " ─────────────────────────────────────────────────────────────";
-        let _ = self.term.write_line(&self.theme.border.apply_to(separator).to_string());
+        let _ = self
+            .term
+            .write_line(&self.theme.border.apply_to(separator).to_string());
         self.current_streaming_lines = 2; // header + separator
     }
 
@@ -236,7 +240,13 @@ impl AgenticDisplay {
         let _ = std::io::stdout().flush();
     }
 
-    pub fn agent_done(&mut self, role: AgentRole, summary: Vec<String>, usage: TokenUsage, cost_usd: f64) {
+    pub fn agent_done(
+        &mut self,
+        role: AgentRole,
+        summary: Vec<String>,
+        usage: TokenUsage,
+        cost_usd: f64,
+    ) {
         if self.tui.is_some() {
             let latency_ms = self
                 .stages
@@ -347,7 +357,9 @@ impl AgenticDisplay {
             self.log(role_label(role), &format!("Error: {}", error));
             return;
         }
-        let _ = self.term.write_line(&format!(" {} {}", self.theme.error.apply_to("✗"), error));
+        let _ = self
+            .term
+            .write_line(&format!(" {} {}", self.theme.error.apply_to("✗"), error));
     }
 
     pub fn revision_requested(&mut self, round: u32, max: u32, issues: &[ReviewIssue]) {
@@ -380,8 +392,14 @@ impl AgenticDisplay {
 
         let header = format!(
             " {} {}                                       {} (round {}/{})",
-            self.theme.reviewer.label_style.apply_to(self.theme.reviewer.icon),
-            self.theme.reviewer.label_style.apply_to(self.theme.reviewer.name),
+            self.theme
+                .reviewer
+                .label_style
+                .apply_to(self.theme.reviewer.icon),
+            self.theme
+                .reviewer
+                .label_style
+                .apply_to(self.theme.reviewer.name),
             self.theme.warning.apply_to("⟳ Revision needed"),
             round,
             max
@@ -442,13 +460,19 @@ impl AgenticDisplay {
             self.emit(DisplayEvent::CostJson(cost_json.to_string()));
 
             // Find the reviewer artifact for the report page.
-            if let Some((_, json)) = result.artifacts.iter().find(|(r, _)| *r == AgentRole::Reviewer) {
+            if let Some((_, json)) = result
+                .artifacts
+                .iter()
+                .find(|(r, _)| *r == AgentRole::Reviewer)
+            {
                 self.emit(DisplayEvent::ReportContent(json.clone()));
             }
 
             let artifacts_path = task_dir.join("artifacts");
             if artifacts_path.exists() {
-                self.emit(DisplayEvent::ArtifactsDir(artifacts_path.to_string_lossy().into_owned()));
+                self.emit(DisplayEvent::ArtifactsDir(
+                    artifacts_path.to_string_lossy().into_owned(),
+                ));
             }
 
             self.emit(DisplayEvent::Final);

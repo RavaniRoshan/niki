@@ -72,7 +72,9 @@ fn test_config_env_var_override() {
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
     // No TOML present; only an environment variable supplies the key.
     clear_provider_env_vars();
-    unsafe { std::env::set_var("ANTHROPIC_API_KEY", "env-key-456"); }
+    unsafe {
+        std::env::set_var("ANTHROPIC_API_KEY", "env-key-456");
+    }
     let dir = TempDir::new().unwrap();
 
     let config = NikiConfig::load(dir.path()).expect("load config");
@@ -97,12 +99,21 @@ fn test_env_base_url_and_model() {
     let dir = TempDir::new().unwrap();
     let config = NikiConfig::load(dir.path()).expect("load config");
 
-    let anthropic = config.providers.get("anthropic").expect("anthropic provider");
-    assert_eq!(anthropic.base_url.as_deref(), Some("https://gw.example.com"));
+    let anthropic = config
+        .providers
+        .get("anthropic")
+        .expect("anthropic provider");
+    assert_eq!(
+        anthropic.base_url.as_deref(),
+        Some("https://gw.example.com")
+    );
     assert_eq!(anthropic.default_model, "claude-opus-4-20250514");
 
     let openai = config.providers.get("openai").expect("openai provider");
-    assert_eq!(openai.base_url.as_deref(), Some("https://ow.example.com/v1"));
+    assert_eq!(
+        openai.base_url.as_deref(),
+        Some("https://ow.example.com/v1")
+    );
     assert_eq!(openai.default_model, "gpt-4o");
 
     // Agents still on the provider default model pick up the env model.

@@ -1,12 +1,12 @@
+use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 
-use crate::display::theme;
 use super::{AppState, Page, PageId};
+use crate::display::theme;
 
 pub struct ArtifactsPage {
     selected: usize,
@@ -14,9 +14,7 @@ pub struct ArtifactsPage {
 
 impl ArtifactsPage {
     pub fn new() -> Self {
-        Self {
-            selected: 0,
-        }
+        Self { selected: 0 }
     }
 }
 
@@ -34,14 +32,19 @@ impl Page for ArtifactsPage {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // header
-                Constraint::Min(5),   // content (split left/right)
+                Constraint::Min(5),    // content (split left/right)
                 Constraint::Length(1), // footer
             ])
             .split(area);
 
         // Header
         let header = Line::from(vec![
-            Span::styled(" artifacts", Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " artifacts",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 if state.branch_name.is_empty() {
                     String::new()
@@ -56,10 +59,7 @@ impl Page for ArtifactsPage {
         // Content split
         let content_chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(40),
-                Constraint::Percentage(60),
-            ])
+            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
             .split(chunks[1]);
 
         // File tree (left)
@@ -69,12 +69,17 @@ impl Page for ArtifactsPage {
             .title(" FILES ");
 
         let mut tree_lines: Vec<Line> = Vec::new();
-        let artifacts_dir = state.artifacts_dir.as_ref().map(|p| p.display().to_string());
+        let artifacts_dir = state
+            .artifacts_dir
+            .as_ref()
+            .map(|p| p.display().to_string());
         let dir_name = artifacts_dir.as_deref().unwrap_or(".niki/<id>/");
 
         tree_lines.push(Line::from(Span::styled(
             format!("  {}/", dir_name),
-            Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
         )));
 
         // Static file entries (representative of what NIKI produces)
@@ -115,7 +120,9 @@ impl Page for ArtifactsPage {
         }
 
         frame.render_widget(
-            Paragraph::new(tree_lines).block(tree_block).wrap(Wrap { trim: false }),
+            Paragraph::new(tree_lines)
+                .block(tree_block)
+                .wrap(Wrap { trim: false }),
             content_chunks[0],
         );
 
@@ -127,18 +134,21 @@ impl Page for ArtifactsPage {
 
         let preview_lines = if let Some(diff) = &state.diff_content {
             // Show first 50 lines of diff as preview
-            diff.lines().take(50).map(|l| {
-                let style = if l.starts_with('+') {
-                    Style::default().fg(theme::GREEN)
-                } else if l.starts_with('-') {
-                    Style::default().fg(theme::RED)
-                } else if l.starts_with("@") {
-                    Style::default().fg(theme::AMBER)
-                } else {
-                    Style::default().fg(theme::FG)
-                };
-                Line::from(Span::styled(l.to_string(), style))
-            }).collect::<Vec<_>>()
+            diff.lines()
+                .take(50)
+                .map(|l| {
+                    let style = if l.starts_with('+') {
+                        Style::default().fg(theme::GREEN)
+                    } else if l.starts_with('-') {
+                        Style::default().fg(theme::RED)
+                    } else if l.starts_with("@") {
+                        Style::default().fg(theme::AMBER)
+                    } else {
+                        Style::default().fg(theme::FG)
+                    };
+                    Line::from(Span::styled(l.to_string(), style))
+                })
+                .collect::<Vec<_>>()
         } else {
             vec![Line::from(Span::styled(
                 "  Select a file to preview",
@@ -147,14 +157,17 @@ impl Page for ArtifactsPage {
         };
 
         frame.render_widget(
-            Paragraph::new(preview_lines).block(preview_block).wrap(Wrap { trim: false }),
+            Paragraph::new(preview_lines)
+                .block(preview_block)
+                .wrap(Wrap { trim: false }),
             content_chunks[1],
         );
 
         // Footer
-        let footer = Line::from(vec![
-            Span::styled(" [j/k] navigate   [Esc] back", Style::default().fg(theme::FG_DIM)),
-        ]);
+        let footer = Line::from(vec![Span::styled(
+            " [j/k] navigate   [Esc] back",
+            Style::default().fg(theme::FG_DIM),
+        )]);
         frame.render_widget(Paragraph::new(footer), chunks[2]);
     }
 

@@ -15,17 +15,17 @@ use std::time::Duration;
 
 use crate::artifacts::types::AgentRole;
 use crate::display::theme;
+use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{self, Event, KeyCode};
-use ratatui::crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
 use ratatui::crossterm::execute;
+use ratatui::crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Terminal;
 
 use super::modal::{self, ModalAction};
 use super::pages::{AppState, PageId, PageRouter};
@@ -33,9 +33,16 @@ use super::pages::{AppState, PageId, PageRouter};
 /// Events emitted by the pipeline/display layer for the TUI to render.
 #[derive(Debug, Clone)]
 pub enum DisplayEvent {
-    Banner { description: String },
-    StageStart { role: AgentRole },
-    StageToken { role: AgentRole, token: String },
+    Banner {
+        description: String,
+    },
+    StageStart {
+        role: AgentRole,
+    },
+    StageToken {
+        role: AgentRole,
+        token: String,
+    },
     StageDone {
         role: AgentRole,
         summary: Vec<String>,
@@ -44,8 +51,15 @@ pub enum DisplayEvent {
         cost_usd: f64,
         latency_ms: u64,
     },
-    StageFailed { role: AgentRole, error: String },
-    Revision { round: u32, max: u32, issues: Vec<String> },
+    StageFailed {
+        role: AgentRole,
+        error: String,
+    },
+    Revision {
+        round: u32,
+        max: u32,
+        issues: Vec<String>,
+    },
     /// Pipeline produced a diff — feed it to the TUI Diff page.
     DiffContent(String),
     /// Pipeline produced a review report — feed it to the TUI Verdict page.
@@ -97,11 +111,17 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String) {
         let area = f.area();
         f.render_widget(
             Paragraph::new(""),
-            Rect { x: 0, y: 0, width: area.width, height: area.height },
+            Rect {
+                x: 0,
+                y: 0,
+                width: area.width,
+                height: area.height,
+            },
         );
     });
 
-    let config = crate::config::types::NikiConfig::load(std::path::Path::new(".")).unwrap_or_default();
+    let config =
+        crate::config::types::NikiConfig::load(std::path::Path::new(".")).unwrap_or_default();
     let mut state = AppState::new(description, config, std::path::PathBuf::from("."));
     let mut router = PageRouter::new();
 
@@ -176,17 +196,16 @@ fn render(frame: &mut ratatui::Frame, state: &AppState, router: &PageRouter) {
     }
 
     // Fill background
-    let bg_block = ratatui::widgets::Block::default()
-        .style(Style::default().bg(theme::BG));
+    let bg_block = ratatui::widgets::Block::default().style(Style::default().bg(theme::BG));
     frame.render_widget(bg_block, size);
 
     // Main layout: logo area + page content + status bar
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),   // logo (6 lines + 2 padding)
-            Constraint::Min(5),      // page content
-            Constraint::Length(1),   // status bar
+            Constraint::Length(8), // logo (6 lines + 2 padding)
+            Constraint::Min(5),    // page content
+            Constraint::Length(1), // status bar
         ])
         .split(size);
 
@@ -204,7 +223,12 @@ fn render(frame: &mut ratatui::Frame, state: &AppState, router: &PageRouter) {
         String::new()
     };
     let status = Line::from(vec![
-        Span::styled(" niki ", Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " niki ",
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(
             format!(
                 "· {}/{} tok{}",
@@ -243,7 +267,9 @@ mod tests {
     fn display_event_apply() {
         let config = crate::config::types::NikiConfig::default();
         let mut state = AppState::new("test".into(), config, ".".into());
-        state.apply_event(DisplayEvent::StageStart { role: AgentRole::Planner });
+        state.apply_event(DisplayEvent::StageStart {
+            role: AgentRole::Planner,
+        });
         assert_eq!(state.stages.len(), 1);
         assert_eq!(state.stages[0].role, AgentRole::Planner);
 

@@ -1,12 +1,12 @@
+use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
-use crate::display::theme;
 use super::{AppState, Page, PageId};
+use crate::display::theme;
 
 pub struct HistoryPage {
     selected: usize,
@@ -14,9 +14,7 @@ pub struct HistoryPage {
 
 impl HistoryPage {
     pub fn new() -> Self {
-        Self {
-            selected: 0,
-        }
+        Self { selected: 0 }
     }
 }
 
@@ -34,14 +32,19 @@ impl Page for HistoryPage {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // header
-                Constraint::Min(5),   // history table
+                Constraint::Min(5),    // history table
                 Constraint::Length(1), // footer
             ])
             .split(area);
 
         // Header
         let header = Line::from(vec![
-            Span::styled(" history", Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " history",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 format!(" · {}", state.project_path.display()),
                 Style::default().fg(theme::FG_DIM),
@@ -59,10 +62,30 @@ impl Page for HistoryPage {
 
         // Header row
         table_lines.push(Line::from(vec![
-            Span::styled("  ID         ", Style::default().fg(theme::FG_DIM).add_modifier(Modifier::BOLD)),
-            Span::styled("TASK                              ", Style::default().fg(theme::FG_DIM).add_modifier(Modifier::BOLD)),
-            Span::styled("VERDICT     ", Style::default().fg(theme::FG_DIM).add_modifier(Modifier::BOLD)),
-            Span::styled("WHEN", Style::default().fg(theme::FG_DIM).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  ID         ",
+                Style::default()
+                    .fg(theme::FG_DIM)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "TASK                              ",
+                Style::default()
+                    .fg(theme::FG_DIM)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "VERDICT     ",
+                Style::default()
+                    .fg(theme::FG_DIM)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "WHEN",
+                Style::default()
+                    .fg(theme::FG_DIM)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]));
         table_lines.push(Line::from(Span::styled(
             "  ────────   ──────────────────────────────────  ──────────  ─────",
@@ -71,10 +94,34 @@ impl Page for HistoryPage {
 
         // Sample history entries (in real implementation, these would come from .niki/ directory)
         let entries = vec![
-            ("6d281d6d", "Add GET /health endpoint", "approved", "2m ago", theme::GREEN),
-            ("a91f3c02", "Refactor auth middleware", "changes", "1h ago", theme::AMBER),
-            ("4b7e9d18", "Add input validation", "failed", "3h ago", theme::RED),
-            ("2c1a8f55", "Migrate to ESM modules", "approved", "1d ago", theme::GREEN),
+            (
+                "6d281d6d",
+                "Add GET /health endpoint",
+                "approved",
+                "2m ago",
+                theme::GREEN,
+            ),
+            (
+                "a91f3c02",
+                "Refactor auth middleware",
+                "changes",
+                "1h ago",
+                theme::AMBER,
+            ),
+            (
+                "4b7e9d18",
+                "Add input validation",
+                "failed",
+                "3h ago",
+                theme::RED,
+            ),
+            (
+                "2c1a8f55",
+                "Migrate to ESM modules",
+                "approved",
+                "1d ago",
+                theme::GREEN,
+            ),
         ];
 
         for (i, (id, task, verdict, when, verdict_color)) in entries.iter().enumerate() {
@@ -86,34 +133,23 @@ impl Page for HistoryPage {
             };
 
             table_lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {:<8}  ", id),
-                    Style::default().fg(theme::BLUE),
-                ),
-                Span::styled(
-                    format!("{:<32}  ", task),
-                    style,
-                ),
+                Span::styled(format!("  {:<8}  ", id), Style::default().fg(theme::BLUE)),
+                Span::styled(format!("{:<32}  ", task), style),
                 Span::styled(
                     format!("{:<10}  ", verdict),
                     Style::default().fg(*verdict_color),
                 ),
-                Span::styled(
-                    when.to_string(),
-                    Style::default().fg(theme::FG_DIM),
-                ),
+                Span::styled(when.to_string(), Style::default().fg(theme::FG_DIM)),
             ]));
         }
 
-        frame.render_widget(
-            Paragraph::new(table_lines).block(table_block),
-            chunks[1],
-        );
+        frame.render_widget(Paragraph::new(table_lines).block(table_block), chunks[1]);
 
         // Footer
-        let footer = Line::from(vec![
-            Span::styled(" [j/k] navigate   [Esc] back", Style::default().fg(theme::FG_DIM)),
-        ]);
+        let footer = Line::from(vec![Span::styled(
+            " [j/k] navigate   [Esc] back",
+            Style::default().fg(theme::FG_DIM),
+        )]);
         frame.render_widget(Paragraph::new(footer), chunks[2]);
     }
 

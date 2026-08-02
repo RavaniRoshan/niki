@@ -115,8 +115,19 @@ mod tests {
     fn every_role_has_a_recommendation() {
         use crate::artifacts::types::AgentRole::*;
         let present: Vec<AgentRole> = recommendations().iter().map(|r| r.role).collect();
-        for role in [Planner, Coder, Tester, Reviewer, Synthesizer, SecurityAuditor] {
-            assert!(present.contains(&role), "missing recommendation for {:?}", role);
+        for role in [
+            Planner,
+            Coder,
+            Tester,
+            Reviewer,
+            Synthesizer,
+            SecurityAuditor,
+        ] {
+            assert!(
+                present.contains(&role),
+                "missing recommendation for {:?}",
+                role
+            );
         }
     }
 
@@ -132,7 +143,12 @@ mod tests {
         // Unknown/local models price as free.
         assert_eq!(estimate_cost("ollama", "llama3", 1_000_000, 1_000_000), 0.0);
         // A known model returns a positive figure.
-        let c = estimate_cost("anthropic", "claude-sonnet-4-20250514", 1_000_000, 1_000_000);
+        let c = estimate_cost(
+            "anthropic",
+            "claude-sonnet-4-20250514",
+            1_000_000,
+            1_000_000,
+        );
         assert!(c > 0.0);
     }
 }

@@ -1,18 +1,18 @@
-use anyhow::{anyhow, Result};
-use clap::Args;
-use std::path::PathBuf;
-use std::sync::Arc;
-use uuid::Uuid;
-use std::env;
-use tokio::sync::Mutex;
-use tokio::signal;
-use bollard::Docker;
 use crate::config::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
-use crate::orchestrator::pipeline::{execute_pipeline, Task};
+use crate::orchestrator::pipeline::{Task, execute_pipeline};
 use crate::orchestrator::state::{TaskRecord, TaskStatus};
-use crate::sandbox::docker::ActiveContainers;
 use crate::sandbox::SandboxBackend;
+use crate::sandbox::docker::ActiveContainers;
+use anyhow::{Result, anyhow};
+use bollard::Docker;
+use clap::Args;
+use std::env;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::signal;
+use tokio::sync::Mutex;
+use uuid::Uuid;
 
 /// Probe container runtime sockets: Podman (rootless, then rootful) → Docker.
 /// Returns the first connection that pings successfully, or an error if none work.
@@ -32,13 +32,12 @@ async fn connect_container_runtime() -> Result<Docker> {
 
     // 2. Probe known Podman and Docker socket paths in priority order.
     let uid = unsafe { libc::getuid() };
-    let runtime_dir = env::var("XDG_RUNTIME_DIR")
-        .unwrap_or_else(|_| format!("/run/user/{}", uid));
+    let runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| format!("/run/user/{}", uid));
 
     let candidates = [
-        PathBuf::from(&runtime_dir).join("podman/podman.sock"),  // rootless podman
-        PathBuf::from("/run/podman/podman.sock"),                 // rootful podman
-        PathBuf::from("/var/run/docker.sock"),                    // docker
+        PathBuf::from(&runtime_dir).join("podman/podman.sock"), // rootless podman
+        PathBuf::from("/run/podman/podman.sock"),               // rootful podman
+        PathBuf::from("/var/run/docker.sock"),                  // docker
     ];
 
     for socket in &candidates {
@@ -46,7 +45,8 @@ async fn connect_container_runtime() -> Result<Docker> {
             continue;
         }
         let addr = format!("unix://{}", socket.display());
-        if let Ok(d) = Docker::connect_with_local(addr.as_str(), 120, bollard::API_DEFAULT_VERSION) {
+        if let Ok(d) = Docker::connect_with_local(addr.as_str(), 120, bollard::API_DEFAULT_VERSION)
+        {
             if d.ping().await.is_ok() {
                 tracing::info!("Connected via {}", socket.display());
                 return Ok(d);
@@ -263,10 +263,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 }
 
                 // Persist a cancelled task record so status commands reflect reality.
-                let mut rec = TaskRecord::new(
-                    uuid::Uuid::parse_str(&task_id_str).unwrap_or_default(),
-                    "",
-                );
+                let mut rec =
+                    TaskRecord::new(uuid::Uuid::parse_str(&task_id_str).unwrap_or_default(), "");
                 rec.status = TaskStatus::Cancelled;
                 let _ = rec.save_to_disk(&task_dir);
 
@@ -282,7 +280,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // worktree and cloud backends never touch Podman/Docker, so they run without
     // a daemon. The dry-run path also skips the daemon ping (it never creates a sandbox).
     let docker = if uses_docker && !args.dry_run {
-        let d = connect_container_runtime().await
+        let d = connect_container_runtime()
+            .await
             .map_err(|e| anyhow!("Container runtime error: {}", e))?;
         Some(d)
     } else {
@@ -368,7 +367,10 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
             ("Agents run".to_string(), result.metrics.len().to_string()),
             ("Input tokens".to_string(), total_in.to_string()),
             ("Output tokens".to_string(), total_out.to_string()),
-            ("Latency".to_string(), format!("{:.1}s", total_ms as f64 / 1000.0)),
+            (
+                "Latency".to_string(),
+                format!("{:.1}s", total_ms as f64 / 1000.0),
+            ),
             (
                 "Est. cost".to_string(),
                 if total_cost > 0.0 {

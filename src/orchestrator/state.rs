@@ -1,10 +1,10 @@
+use crate::artifacts::types::{AgentRole, ArtifactEnvelope, ReviewFeedback};
+use crate::llm::provider::TokenUsage;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
-use crate::artifacts::types::{AgentRole, ReviewFeedback, ArtifactEnvelope};
-use crate::llm::provider::TokenUsage;
+use uuid::Uuid;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PipelineState {
@@ -16,12 +16,15 @@ impl PipelineState {
         Self { task_id }
     }
 
-    pub fn set_artifact<T: Serialize>(&mut self, _agent: AgentRole, _artifact: &ArtifactEnvelope<T>) -> Result<()> {
+    pub fn set_artifact<T: Serialize>(
+        &mut self,
+        _agent: AgentRole,
+        _artifact: &ArtifactEnvelope<T>,
+    ) -> Result<()> {
         Ok(())
     }
 
-    pub fn set_feedback(&mut self, _feedback: ReviewFeedback) {
-    }
+    pub fn set_feedback(&mut self, _feedback: ReviewFeedback) {}
 
     pub fn get_latest_feedback(&self) -> Option<ReviewFeedback> {
         None

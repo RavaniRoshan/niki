@@ -1,9 +1,9 @@
+use crate::artifacts::types::{AgentRole, RedChallenge, ReviewVerdict, SecurityVerdict};
+use crate::config::NikiConfig;
+use crate::orchestrator::pipeline::{PipelineResult, Task, TopologyMode};
+use crate::safety::SafetyProof;
 use anyhow::Result;
 use minijinja::{Environment, context};
-use crate::orchestrator::pipeline::{Task, PipelineResult, TopologyMode};
-use crate::config::NikiConfig;
-use crate::safety::SafetyProof;
-use crate::artifacts::types::{AgentRole, RedChallenge, ReviewVerdict, SecurityVerdict};
 use std::fs;
 
 /// Build the "## Hermetic Safety Proof" markdown section from the run's proof.
@@ -52,16 +52,17 @@ fn render_red_blue_section(result: &PipelineResult) -> String {
     // The Reviewer's reconciliation, keyed by Red challenge id.
     let mut dispositions: std::collections::HashMap<String, (String, String)> =
         std::collections::HashMap::new();
-    if let Some((_, rev_json)) = result.artifacts.iter().find(|(r, _)| *r == AgentRole::Reviewer) {
+    if let Some((_, rev_json)) = result
+        .artifacts
+        .iter()
+        .find(|(r, _)| *r == AgentRole::Reviewer)
+    {
         if let Ok(verdict) = serde_json::from_str::<ReviewVerdict>(rev_json) {
             if let Some(recon) = verdict.red_reconciliation {
                 for r in recon {
                     dispositions.insert(
                         r.challenge_id,
-                        (
-                            format!("{:?}", r.disposition),
-                            r.rationale,
-                        ),
+                        (format!("{:?}", r.disposition), r.rationale),
                     );
                 }
             }
@@ -71,7 +72,9 @@ fn render_red_blue_section(result: &PipelineResult) -> String {
     let mut out = String::from("## Adversarial Review (Red/Blue)\n\n");
     out.push_str(&format!("{}\n\n", red.overall_red_assessment));
     if red.challenges.is_empty() {
-        out.push_str("_The Red agent raised no challenges — the change withstood adversarial scrutiny._\n");
+        out.push_str(
+            "_The Red agent raised no challenges — the change withstood adversarial scrutiny._\n",
+        );
     } else {
         out.push_str("| ID | Severity | Category | Red claim | Reviewer |\n");
         out.push_str("|----|----------|---------|-----------|----------|\n");
@@ -130,7 +133,11 @@ fn render_isolation_section(result: &PipelineResult) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        let shared = if rec.saw_other_reasoning { "Yes ⚠️" } else { "No" };
+        let shared = if rec.saw_other_reasoning {
+            "Yes ⚠️"
+        } else {
+            "No"
+        };
         out.push_str(&format!(
             "| {:?} | {:?} | {} | {} |\n",
             rec.role, rec.backend, sources, shared
@@ -388,12 +395,20 @@ fn render_cost_section(result: &PipelineResult) -> String {
     };
     out.push_str(&format!(
         "| **Total** | | | **{}** | **{}** | **{:.1}s** | **{}** |\n",
-        total_in, total_out, total_ms as f64 / 1000.0, total_cost_str,
+        total_in,
+        total_out,
+        total_ms as f64 / 1000.0,
+        total_cost_str,
     ));
 
     // --- Cost transparency vs a single autonomous agent (BUILD_PLAN 2.3, P1.4) ---
     let total_tokens = total_in as u64 + total_out as u64;
-    let peak_input = result.metrics.iter().map(|m| m.input_tokens).max().unwrap_or(0);
+    let peak_input = result
+        .metrics
+        .iter()
+        .map(|m| m.input_tokens)
+        .max()
+        .unwrap_or(0);
     let baseline_tokens = peak_input as u64 + total_out as u64;
     let token_multiple = if baseline_tokens > 0 {
         total_tokens as f64 / baseline_tokens as f64
@@ -472,11 +487,7 @@ fn render_cost_section(result: &PipelineResult) -> String {
     out
 }
 
-pub fn generate_report(
-    task: &Task,
-    config: &NikiConfig,
-    result: &PipelineResult,
-) -> Result<()> {
+pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult) -> Result<()> {
     let mut env = Environment::new();
 
     let template = r#"
@@ -543,7 +554,8 @@ pub fn generate_report(
 pub fn topology_line(result: &PipelineResult) -> String {
     match result.topology {
         TopologyMode::SingleAgent => {
-            "single-agent fast-path (Planner + solo Coder; Tester/Reviewer/Red collapsed)".to_string()
+            "single-agent fast-path (Planner + solo Coder; Tester/Reviewer/Red collapsed)"
+                .to_string()
         }
         TopologyMode::MultiAgent | TopologyMode::Auto => {
             "multi-agent (Planner → Coder → Tester → Red → Reviewer)".to_string()
@@ -554,8 +566,8 @@ pub fn topology_line(result: &PipelineResult) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestrator::state::{PipelineState, StageMetric};
     use crate::artifacts::types::{AgentRole, IsolationRecord, Verdict};
+    use crate::orchestrator::state::{PipelineState, StageMetric};
     use crate::safety::SafetyProof;
     use crate::sandbox::SandboxBackend;
     use uuid::Uuid;
@@ -600,7 +612,11 @@ mod tests {
 
         // Drive the real report generator into a temp dir and read it back, so we
         // exercise the full template render path, not just the section builder.
-        let dir = std::env::temp_dir().join(format!("niki-report-test-{}-{}", std::process::id(), Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!(
+            "niki-report-test-{}-{}",
+            std::process::id(),
+            Uuid::new_v4()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let task = Task {
@@ -611,8 +627,13 @@ mod tests {
         let cfg = crate::config::NikiConfig::default();
         generate_report(&task, &cfg, &result).expect("report should render");
 
-        let report = std::fs::read_to_string(dir.join(".niki").join("tasks").join(Uuid::nil().to_string()).join("report.md"))
-            .expect("report.md should exist");
+        let report = std::fs::read_to_string(
+            dir.join(".niki")
+                .join("tasks")
+                .join(Uuid::nil().to_string())
+                .join("report.md"),
+        )
+        .expect("report.md should exist");
         assert!(report.contains("## Hermetic Safety Proof"));
         assert!(report.contains("Hermetic: working tree never mutated."));
         assert!(report.contains("PASS existing branches preserved."));
@@ -727,11 +748,7 @@ mod tests {
                 IsolationRecord {
                     role: AgentRole::Reviewer,
                     backend: SandboxBackend::Docker,
-                    context_sources: vec![
-                        AgentRole::Planner,
-                        AgentRole::Coder,
-                        AgentRole::Tester,
-                    ],
+                    context_sources: vec![AgentRole::Planner, AgentRole::Coder, AgentRole::Tester],
                     saw_other_reasoning: false,
                 },
             ],
@@ -756,7 +773,11 @@ mod tests {
     /// Drive the real `generate_report` into a temp dir and return the rendered
     /// `report.md` text, so audit-section tests exercise the full template path.
     fn generate_report_text(result: &PipelineResult) -> String {
-        let dir = std::env::temp_dir().join(format!("niki-audit-test-{}-{}", std::process::id(), Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!(
+            "niki-audit-test-{}-{}",
+            std::process::id(),
+            Uuid::new_v4()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let task = Task {
@@ -767,14 +788,21 @@ mod tests {
         let cfg = crate::config::NikiConfig::default();
         generate_report(&task, &cfg, result).expect("report should render");
         let report = std::fs::read_to_string(
-            dir.join(".niki").join("tasks").join(Uuid::nil().to_string()).join("report.md"),
+            dir.join(".niki")
+                .join("tasks")
+                .join(Uuid::nil().to_string())
+                .join("report.md"),
         )
         .expect("report.md should exist");
         let _ = std::fs::remove_dir_all(&dir);
         report
     }
 
-    fn audit_result(reviewer_json: Option<&str>, security_json: Option<&str>, diff: &str) -> PipelineResult {
+    fn audit_result(
+        reviewer_json: Option<&str>,
+        security_json: Option<&str>,
+        diff: &str,
+    ) -> PipelineResult {
         let mut artifacts: Vec<(AgentRole, String)> = vec![];
         if let Some(j) = reviewer_json {
             artifacts.push((AgentRole::Reviewer, j.to_string()));
@@ -893,10 +921,42 @@ index 3333333..4444444 100644
     fn renders_cost_vs_single_agent_with_tax_and_tester_mix() {
         // Tester mixes a cheaper model ("haiku") than the Coder ("sonnet").
         let metrics = vec![
-            StageMetric { role: AgentRole::Planner, provider: "a".into(), model: "sonnet".into(), input_tokens: 1000, output_tokens: 200, latency_ms: 1, cost_usd: 0.0100 },
-            StageMetric { role: AgentRole::Coder, provider: "a".into(), model: "sonnet".into(), input_tokens: 2000, output_tokens: 500, latency_ms: 1, cost_usd: 0.0200 },
-            StageMetric { role: AgentRole::Tester, provider: "a".into(), model: "haiku".into(), input_tokens: 3000, output_tokens: 100, latency_ms: 1, cost_usd: 0.0050 },
-            StageMetric { role: AgentRole::Reviewer, provider: "a".into(), model: "sonnet".into(), input_tokens: 1500, output_tokens: 300, latency_ms: 1, cost_usd: 0.0150 },
+            StageMetric {
+                role: AgentRole::Planner,
+                provider: "a".into(),
+                model: "sonnet".into(),
+                input_tokens: 1000,
+                output_tokens: 200,
+                latency_ms: 1,
+                cost_usd: 0.0100,
+            },
+            StageMetric {
+                role: AgentRole::Coder,
+                provider: "a".into(),
+                model: "sonnet".into(),
+                input_tokens: 2000,
+                output_tokens: 500,
+                latency_ms: 1,
+                cost_usd: 0.0200,
+            },
+            StageMetric {
+                role: AgentRole::Tester,
+                provider: "a".into(),
+                model: "haiku".into(),
+                input_tokens: 3000,
+                output_tokens: 100,
+                latency_ms: 1,
+                cost_usd: 0.0050,
+            },
+            StageMetric {
+                role: AgentRole::Reviewer,
+                provider: "a".into(),
+                model: "sonnet".into(),
+                input_tokens: 1500,
+                output_tokens: 300,
+                latency_ms: 1,
+                cost_usd: 0.0150,
+            },
         ];
         let result = cost_result(metrics);
         let section = render_cost_section(&result);
@@ -919,8 +979,24 @@ index 3333333..4444444 100644
     fn renders_cost_transparency_without_cost_shows_token_multiple() {
         // No pricing in metrics — must still show the price-independent multiple.
         let metrics = vec![
-            StageMetric { role: AgentRole::Planner, provider: "a".into(), model: "claude".into(), input_tokens: 100, output_tokens: 50, latency_ms: 1, cost_usd: 0.0 },
-            StageMetric { role: AgentRole::Coder, provider: "a".into(), model: "claude".into(), input_tokens: 200, output_tokens: 100, latency_ms: 1, cost_usd: 0.0 },
+            StageMetric {
+                role: AgentRole::Planner,
+                provider: "a".into(),
+                model: "claude".into(),
+                input_tokens: 100,
+                output_tokens: 50,
+                latency_ms: 1,
+                cost_usd: 0.0,
+            },
+            StageMetric {
+                role: AgentRole::Coder,
+                provider: "a".into(),
+                model: "claude".into(),
+                input_tokens: 200,
+                output_tokens: 100,
+                latency_ms: 1,
+                cost_usd: 0.0,
+            },
         ];
         let result = cost_result(metrics);
         let section = render_cost_section(&result);

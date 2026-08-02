@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use chrono::Utc;
 
 use crate::artifacts::types::AgentRole;
 
@@ -41,12 +41,18 @@ impl Default for RoleMemory {
 pub fn load_memory(project_dir: &Path, role: AgentRole) -> RoleMemory {
     let path = memory_path(project_dir, role);
     if !path.exists() {
-        return RoleMemory { role, entries: Vec::new() };
+        return RoleMemory {
+            role,
+            entries: Vec::new(),
+        };
     }
     fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or(RoleMemory { role, entries: Vec::new() })
+        .unwrap_or(RoleMemory {
+            role,
+            entries: Vec::new(),
+        })
 }
 
 /// Save role memory to `.niki/memory/{role}.json`.
@@ -163,7 +169,10 @@ fn memory_path(project_dir: &Path, role: AgentRole) -> PathBuf {
         AgentRole::SecurityAuditor => "security_auditor",
         AgentRole::Red => "red",
     };
-    project_dir.join(".niki").join("memory").join(format!("{}.json", role_name))
+    project_dir
+        .join(".niki")
+        .join("memory")
+        .join(format!("{}.json", role_name))
 }
 
 #[cfg(test)]
@@ -188,7 +197,8 @@ mod tests {
             vec!["error-pattern".into()],
             "Always check Option before unwrap".to_string(),
             Some("main".into()),
-        ).unwrap();
+        )
+        .unwrap();
 
         let mem = load_memory(dir, AgentRole::Coder);
         assert_eq!(mem.entries.len(), 1);
@@ -217,7 +227,8 @@ mod tests {
                 vec![],
                 format!("content {}", i),
                 None,
-            ).unwrap();
+            )
+            .unwrap();
         }
         let mem = load_memory(dir, AgentRole::Tester);
         assert_eq!(mem.entries.len(), 100);
@@ -229,8 +240,24 @@ mod tests {
     fn all_tags_collected() {
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path();
-        append_memory(dir, AgentRole::Planner, "t", vec!["convention".into()], "c".to_string(), None).unwrap();
-        append_memory(dir, AgentRole::Coder, "t", vec!["error-pattern".into()], "c".to_string(), None).unwrap();
+        append_memory(
+            dir,
+            AgentRole::Planner,
+            "t",
+            vec!["convention".into()],
+            "c".to_string(),
+            None,
+        )
+        .unwrap();
+        append_memory(
+            dir,
+            AgentRole::Coder,
+            "t",
+            vec!["error-pattern".into()],
+            "c".to_string(),
+            None,
+        )
+        .unwrap();
         let tags = get_all_tags(dir);
         assert_eq!(tags, vec!["convention", "error-pattern"]);
     }

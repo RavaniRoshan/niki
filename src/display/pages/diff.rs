@@ -1,12 +1,12 @@
+use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 
-use crate::display::theme;
 use super::{AppState, Page, PageId};
+use crate::display::theme;
 
 pub struct DiffPage {
     scroll_offset: u16,
@@ -37,14 +37,19 @@ impl Page for DiffPage {
             .constraints([
                 Constraint::Length(1), // header
                 Constraint::Length(2), // file info
-                Constraint::Min(3),   // diff content
+                Constraint::Min(3),    // diff content
                 Constraint::Length(1), // footer
             ])
             .split(area);
 
         // Header
         let header = Line::from(vec![
-            Span::styled(" diff", Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " diff",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 if state.branch_name.is_empty() {
                     String::new()
@@ -58,12 +63,25 @@ impl Page for DiffPage {
 
         // File info
         if let Some(diff) = &state.diff_content {
-            let files: Vec<&str> = diff.lines()
+            let files: Vec<&str> = diff
+                .lines()
                 .filter(|l| l.starts_with("diff --git"))
-                .map(|l| l.strip_prefix("diff --git a/").unwrap_or(l).split(" b/").next().unwrap_or(l))
+                .map(|l| {
+                    l.strip_prefix("diff --git a/")
+                        .unwrap_or(l)
+                        .split(" b/")
+                        .next()
+                        .unwrap_or(l)
+                })
                 .collect();
-            let adds: usize = diff.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++")).count();
-            let dels: usize = diff.lines().filter(|l| l.starts_with('-') && !l.starts_with("---")).count();
+            let adds: usize = diff
+                .lines()
+                .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+                .count();
+            let dels: usize = diff
+                .lines()
+                .filter(|l| l.starts_with('-') && !l.starts_with("---"))
+                .count();
 
             let info = Line::from(vec![
                 Span::styled(
@@ -93,9 +111,13 @@ impl Page for DiffPage {
             let mut lines: Vec<Line> = Vec::new();
             for line in diff.lines() {
                 let style = if line.starts_with("diff --git") || line.starts_with("index ") {
-                    Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::BLUE)
+                        .add_modifier(Modifier::BOLD)
                 } else if line.starts_with("---") || line.starts_with("+++") {
-                    Style::default().fg(theme::FG_DIM).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::FG_DIM)
+                        .add_modifier(Modifier::BOLD)
                 } else if line.starts_with("@@") {
                     Style::default().fg(theme::AMBER)
                 } else if line.starts_with('+') {
@@ -130,9 +152,10 @@ impl Page for DiffPage {
         }
 
         // Footer
-        let footer = Line::from(vec![
-            Span::styled(" [j/k] scroll   [g/G] top/bottom   [r] annotations   [Esc] back", Style::default().fg(theme::FG_DIM)),
-        ]);
+        let footer = Line::from(vec![Span::styled(
+            " [j/k] scroll   [g/G] top/bottom   [r] annotations   [Esc] back",
+            Style::default().fg(theme::FG_DIM),
+        )]);
         frame.render_widget(Paragraph::new(footer), chunks[3]);
     }
 

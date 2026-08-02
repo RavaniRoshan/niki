@@ -1,7 +1,7 @@
 //! Tests for all 10 page `handle_key()` implementations.
 
-use ratatui::crossterm::event::KeyCode;
 use niki::display::pages::{Page, PageId, PageRouter};
+use ratatui::crossterm::event::KeyCode;
 
 mod helpers;
 use helpers::*;
@@ -28,7 +28,10 @@ fn run_page_navigates_to_all_pages() {
         state.current_page = PageId::Run;
         let consumed = press(&mut router, &mut state, key_char(ch));
         assert!(consumed, "key '{ch}' should be consumed on Run page");
-        assert_eq!(state.current_page, target, "key '{ch}' should navigate to {target:?}");
+        assert_eq!(
+            state.current_page, target,
+            "key '{ch}' should navigate to {target:?}"
+        );
     }
 }
 

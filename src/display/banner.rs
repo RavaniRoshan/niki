@@ -18,10 +18,7 @@ pub fn show_banner(task: &Task, config: &NikiConfig, is_tty: bool) {
         );
         println!(
             "[{}] [NIKI] Project: {} | Models: {} / {}",
-            ts,
-            proj,
-            config.agents.planner.model,
-            config.agents.coder.model
+            ts, proj, config.agents.planner.model, config.agents.coder.model
         );
         return;
     }
@@ -88,7 +85,10 @@ pub fn show_banner(task: &Task, config: &NikiConfig, is_tty: bool) {
         w = 49 - 3 - pipeline_str.chars().count()
     );
 
-    let models = format!("Models    {} / {}", config.agents.planner.model, config.agents.coder.model);
+    let models = format!(
+        "Models    {} / {}",
+        config.agents.planner.model, config.agents.coder.model
+    );
     let models_trunc = crate::display::artifact_render::truncate(&models, 40);
     println!(
         " {}   {}{:w$}│",

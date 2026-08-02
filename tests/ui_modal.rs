@@ -1,7 +1,7 @@
 //! Modal behavior tests.
 
-use ratatui::crossterm::event::KeyCode;
 use niki::display::pages::{Modal, PageId, PageRouter};
+use ratatui::crossterm::event::KeyCode;
 
 mod helpers;
 use helpers::*;
@@ -43,7 +43,11 @@ fn error_modal_can_be_created() {
         hint: "Check network".into(),
     });
     match &state.modal {
-        Some(Modal::Error { stage, message, hint }) => {
+        Some(Modal::Error {
+            stage,
+            message,
+            hint,
+        }) => {
             assert_eq!(stage, "Coder");
             assert_eq!(message, "API timeout");
             assert_eq!(hint, "Check network");
@@ -58,7 +62,7 @@ fn error_modal_can_be_created() {
 
 #[test]
 fn confirm_modal_esc_dismisses() {
-    use niki::display::modal::{handle_modal_key, ModalAction};
+    use niki::display::modal::{ModalAction, handle_modal_key};
     let modal = Modal::Confirm {
         title: "Quit?".into(),
         message: "Are you sure?".into(),
@@ -69,7 +73,7 @@ fn confirm_modal_esc_dismisses() {
 
 #[test]
 fn confirm_modal_enter_confirms() {
-    use niki::display::modal::{handle_modal_key, ModalAction};
+    use niki::display::modal::{ModalAction, handle_modal_key};
     let modal = Modal::Confirm {
         title: "Quit?".into(),
         message: "Are you sure?".into(),
@@ -80,14 +84,23 @@ fn confirm_modal_enter_confirms() {
 
 #[test]
 fn confirm_modal_other_keys_are_none() {
-    use niki::display::modal::{handle_modal_key, ModalAction};
+    use niki::display::modal::{ModalAction, handle_modal_key};
     let modal = Modal::Confirm {
         title: "Quit?".into(),
         message: "Are you sure?".into(),
     };
-    assert!(matches!(handle_modal_key(key_char('a'), &modal), ModalAction::None));
-    assert!(matches!(handle_modal_key(key_char('r'), &modal), ModalAction::None));
-    assert!(matches!(handle_modal_key(key_char('c'), &modal), ModalAction::None));
+    assert!(matches!(
+        handle_modal_key(key_char('a'), &modal),
+        ModalAction::None
+    ));
+    assert!(matches!(
+        handle_modal_key(key_char('r'), &modal),
+        ModalAction::None
+    ));
+    assert!(matches!(
+        handle_modal_key(key_char('c'), &modal),
+        ModalAction::None
+    ));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -96,7 +109,7 @@ fn confirm_modal_other_keys_are_none() {
 
 #[test]
 fn error_modal_esc_dismisses() {
-    use niki::display::modal::{handle_modal_key, ModalAction};
+    use niki::display::modal::{ModalAction, handle_modal_key};
     let modal = Modal::Error {
         stage: "Coder".into(),
         message: "Failed".into(),
@@ -108,7 +121,7 @@ fn error_modal_esc_dismisses() {
 
 #[test]
 fn error_modal_enter_dismisses() {
-    use niki::display::modal::{handle_modal_key, ModalAction};
+    use niki::display::modal::{ModalAction, handle_modal_key};
     let modal = Modal::Error {
         stage: "Coder".into(),
         message: "Failed".into(),
@@ -120,7 +133,7 @@ fn error_modal_enter_dismisses() {
 
 #[test]
 fn error_modal_r_retries() {
-    use niki::display::modal::{handle_modal_key, ModalAction};
+    use niki::display::modal::{ModalAction, handle_modal_key};
     let modal = Modal::Error {
         stage: "Coder".into(),
         message: "Failed".into(),
@@ -132,7 +145,7 @@ fn error_modal_r_retries() {
 
 #[test]
 fn error_modal_c_opens_config() {
-    use niki::display::modal::{handle_modal_key, ModalAction};
+    use niki::display::modal::{ModalAction, handle_modal_key};
     let modal = Modal::Error {
         stage: "Coder".into(),
         message: "Failed".into(),
@@ -144,14 +157,20 @@ fn error_modal_c_opens_config() {
 
 #[test]
 fn error_modal_other_keys_are_none() {
-    use niki::display::modal::{handle_modal_key, ModalAction};
+    use niki::display::modal::{ModalAction, handle_modal_key};
     let modal = Modal::Error {
         stage: "Coder".into(),
         message: "Failed".into(),
         hint: "Retry".into(),
     };
-    assert!(matches!(handle_modal_key(key_char('a'), &modal), ModalAction::None));
-    assert!(matches!(handle_modal_key(key_char('v'), &modal), ModalAction::None));
+    assert!(matches!(
+        handle_modal_key(key_char('a'), &modal),
+        ModalAction::None
+    ));
+    assert!(matches!(
+        handle_modal_key(key_char('v'), &modal),
+        ModalAction::None
+    ));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -165,7 +184,7 @@ fn modal_dismiss_clears_modal_field() {
         title: "test".into(),
         message: "test".into(),
     });
-    use niki::display::modal::{handle_modal_key, ModalAction};
+    use niki::display::modal::{ModalAction, handle_modal_key};
     if let Some(ref modal) = state.modal {
         let action = handle_modal_key(key_code(KeyCode::Esc), modal);
         if let ModalAction::Dismiss = action {
@@ -183,7 +202,7 @@ fn modal_config_action_navigates_to_config() {
         message: "test".into(),
         hint: "test".into(),
     });
-    use niki::display::modal::{handle_modal_key, ModalAction};
+    use niki::display::modal::{ModalAction, handle_modal_key};
     let action = {
         let modal = state.modal.as_ref().unwrap();
         handle_modal_key(key_char('c'), modal)

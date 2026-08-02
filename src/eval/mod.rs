@@ -36,7 +36,7 @@ use crate::artifacts::types::{
 };
 use crate::config::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
-use crate::orchestrator::pipeline::{execute_pipeline, PipelineResult, Task, TopologyMode};
+use crate::orchestrator::pipeline::{PipelineResult, Task, TopologyMode, execute_pipeline};
 use crate::orchestrator::state::PipelineState;
 use crate::sandbox::{ActiveContainers, SandboxBackend};
 
@@ -186,8 +186,10 @@ pub fn baseline_config(base: &NikiConfig) -> NikiConfig {
 // ── Dataset loading ───────────────────────────────────────────────
 
 pub fn load_dataset(path: &Path) -> Result<EvalDataset> {
-    let content = std::fs::read_to_string(path).with_context(|| format!("reading eval dataset {}", path.display()))?;
-    let ds: EvalDataset = toml::from_str(&content).with_context(|| format!("parsing eval dataset TOML {}", path.display()))?;
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("reading eval dataset {}", path.display()))?;
+    let ds: EvalDataset = toml::from_str(&content)
+        .with_context(|| format!("parsing eval dataset TOML {}", path.display()))?;
     Ok(ds)
 }
 
@@ -241,7 +243,11 @@ pub fn score_result(result: &PipelineResult, defect: &SeededDefect) -> RunOutcom
                         .any(|i| i.category == cat && kw_match(&i.description, kw))
                 });
             // Fuzzy recall: keyword appearing in the overall assessment still counts.
-            let assess_hit = kw.as_ref().map_or(false, |k| rv.overall_assessment.to_lowercase().contains(&k.to_lowercase()));
+            let assess_hit = kw.as_ref().map_or(false, |k| {
+                rv.overall_assessment
+                    .to_lowercase()
+                    .contains(&k.to_lowercase())
+            });
             caught_by_reviewer = issue_hit || assess_hit;
         }
     }
@@ -266,9 +272,10 @@ pub fn score_result(result: &PipelineResult, defect: &SeededDefect) -> RunOutcom
                 })
                 .unwrap_or_default();
             red_upheld = upheld.len();
-            caught_by_red = rc.challenges.iter().any(|c| {
-                c.category == cat && kw_match(&c.claim, kw) && upheld.contains(&c.id)
-            });
+            caught_by_red = rc
+                .challenges
+                .iter()
+                .any(|c| c.category == cat && kw_match(&c.claim, kw) && upheld.contains(&c.id));
         }
     }
 
@@ -314,25 +321,32 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
         AgentRole::Red,
         AgentRole::Reviewer,
     ] {
-        let f = art_dir.join(format!("{}.json", crate::artifacts::types::artifact_json_name(role)));
+        let f = art_dir.join(format!(
+            "{}.json",
+            crate::artifacts::types::artifact_json_name(role)
+        ));
         if f.exists() {
-            let json = std::fs::read_to_string(&f).with_context(|| format!("reading {}", f.display()))?;
+            let json =
+                std::fs::read_to_string(&f).with_context(|| format!("reading {}", f.display()))?;
             artifacts.push((role, json));
         }
     }
     let id = Uuid::new_v4();
-    let verdict = find_artifact(&PipelineResult {
-        task_id: id,
-        state: PipelineState::new(id),
-        final_diff: String::new(),
-        verdict: Verdict::Approved,
-        revision_rounds: 1,
-        artifacts: artifacts.clone(),
-        metrics: Vec::new(),
-        safety_proof: None,
-        isolation: Vec::new(),
-        topology: TopologyMode::MultiAgent,
-    }, AgentRole::Reviewer)
+    let verdict = find_artifact(
+        &PipelineResult {
+            task_id: id,
+            state: PipelineState::new(id),
+            final_diff: String::new(),
+            verdict: Verdict::Approved,
+            revision_rounds: 1,
+            artifacts: artifacts.clone(),
+            metrics: Vec::new(),
+            safety_proof: None,
+            isolation: Vec::new(),
+            topology: TopologyMode::MultiAgent,
+        },
+        AgentRole::Reviewer,
+    )
     .and_then(|j| serde_json::from_str::<ReviewVerdict>(j).ok())
     .map(|v| v.verdict)
     .unwrap_or(Verdict::Approved);
@@ -375,7 +389,11 @@ pub fn replay_case(case: &EvalCase, dataset_dir: &Path) -> Result<Option<CaseRes
 // ── Live (real pipeline) ──────────────────────────────────────────
 
 /// Drive the real pipeline for both NIKI and baseline configs on one case.
-pub async fn run_case_live(case: &EvalCase, base: &NikiConfig, project_dir: &Path) -> Result<CaseResult> {
+pub async fn run_case_live(
+    case: &EvalCase,
+    base: &NikiConfig,
+    project_dir: &Path,
+) -> Result<CaseResult> {
     let niki_cfg = niki_config(base);
     let base_cfg = baseline_config(base);
 
@@ -387,14 +405,30 @@ pub async fn run_case_live(case: &EvalCase, base: &NikiConfig, project_dir: &Pat
         description: case.description.clone(),
         project_path: project_dir.to_path_buf(),
     };
-    let niki_res = execute_pipeline(&niki_task, &niki_cfg, None, &mut display, containers.clone(), false).await?;
+    let niki_res = execute_pipeline(
+        &niki_task,
+        &niki_cfg,
+        None,
+        &mut display,
+        containers.clone(),
+        false,
+    )
+    .await?;
 
     let base_task = Task {
         id: Uuid::new_v4(),
         description: case.description.clone(),
         project_path: project_dir.to_path_buf(),
     };
-    let base_res = execute_pipeline(&base_task, &base_cfg, None, &mut display, containers.clone(), false).await?;
+    let base_res = execute_pipeline(
+        &base_task,
+        &base_cfg,
+        None,
+        &mut display,
+        containers.clone(),
+        false,
+    )
+    .await?;
 
     Ok(CaseResult {
         case_id: case.id.clone(),
@@ -416,12 +450,18 @@ pub async fn run_eval(dataset_path: &Path, live: bool, project_dir: &Path) -> Re
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
-    let base_cfg = if live { Some(NikiConfig::load(project_dir)?) } else { None };
+    let base_cfg = if live {
+        Some(NikiConfig::load(project_dir)?)
+    } else {
+        None
+    };
 
     let mut cases = Vec::new();
     for case in &ds.cases {
         let cr = if live {
-            let cfg = base_cfg.clone().context("could not load config for live eval")?;
+            let cfg = base_cfg
+                .clone()
+                .context("could not load config for live eval")?;
             Some(run_case_live(case, &cfg, project_dir).await?)
         } else {
             replay_case(case, &dataset_dir)?
@@ -448,23 +488,35 @@ pub fn build_report(ds: &EvalDataset, cases: &[CaseResult]) -> EvalReport {
     };
 
     // Per-category metrics
-    let mut category_map: std::collections::HashMap<IssueCategory, Vec<&CaseResult>> = std::collections::HashMap::new();
+    let mut category_map: std::collections::HashMap<IssueCategory, Vec<&CaseResult>> =
+        std::collections::HashMap::new();
     for c in &expected {
         category_map.entry(c.defect_category).or_default().push(c);
     }
-    let mut categories: Vec<CategoryMetrics> = category_map.into_iter().map(|(cat, cs)| {
-        let total = cs.len() as u32;
-        let niki_caught = cs.iter().filter(|c| c.niki.caught).count() as u32;
-        let baseline_caught = cs.iter().filter(|c| c.baseline.caught).count() as u32;
-        CategoryMetrics {
-            category: cat,
-            total,
-            niki_caught,
-            baseline_caught,
-            niki_catch_rate: if total > 0 { niki_caught as f64 / total as f64 } else { 0.0 },
-            baseline_catch_rate: if total > 0 { baseline_caught as f64 / total as f64 } else { 0.0 },
-        }
-    }).collect();
+    let mut categories: Vec<CategoryMetrics> = category_map
+        .into_iter()
+        .map(|(cat, cs)| {
+            let total = cs.len() as u32;
+            let niki_caught = cs.iter().filter(|c| c.niki.caught).count() as u32;
+            let baseline_caught = cs.iter().filter(|c| c.baseline.caught).count() as u32;
+            CategoryMetrics {
+                category: cat,
+                total,
+                niki_caught,
+                baseline_caught,
+                niki_catch_rate: if total > 0 {
+                    niki_caught as f64 / total as f64
+                } else {
+                    0.0
+                },
+                baseline_catch_rate: if total > 0 {
+                    baseline_caught as f64 / total as f64
+                } else {
+                    0.0
+                },
+            }
+        })
+        .collect();
     categories.sort_by(|a, b| format!("{:?}", a.category).cmp(&format!("{:?}", b.category)));
 
     EvalReport {
@@ -483,7 +535,10 @@ pub fn build_report(ds: &EvalDataset, cases: &[CaseResult]) -> EvalReport {
 /// Render the report as Markdown for human reading / publishing.
 pub fn render_report_md(report: &EvalReport) -> String {
     let mut s = String::new();
-    s.push_str(&format!("# NIKI Evaluation Report — {}\n\n", report.dataset));
+    s.push_str(&format!(
+        "# NIKI Evaluation Report — {}\n\n",
+        report.dataset
+    ));
     s.push_str(&format!("Cases evaluated: {}\n\n", report.n_cases));
 
     s.push_str("## Summary\n\n");
@@ -506,7 +561,9 @@ pub fn render_report_md(report: &EvalReport) -> String {
     // Per-category breakdown
     if !report.categories.is_empty() {
         s.push_str("\n## Per-category\n\n");
-        s.push_str("| Category | Total | NIKI caught | Baseline caught | NIKI rate | Baseline rate |\n");
+        s.push_str(
+            "| Category | Total | NIKI caught | Baseline caught | NIKI rate | Baseline rate |\n",
+        );
         s.push_str("|---|---|---|---|---|---|\n");
         for cat in &report.categories {
             s.push_str(&format!(
@@ -522,7 +579,9 @@ pub fn render_report_md(report: &EvalReport) -> String {
     }
 
     s.push_str("\n## Per-case\n\n");
-    s.push_str("| Case | Defect | Expected | NIKI caught | by Red | by Reviewer | Baseline caught |\n");
+    s.push_str(
+        "| Case | Defect | Expected | NIKI caught | by Red | by Reviewer | Baseline caught |\n",
+    );
     s.push_str("|---|---|---|---|---|---|---|\n");
     for c in &report.cases {
         s.push_str(&format!(

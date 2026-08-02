@@ -1,7 +1,7 @@
 //! Page transition and navigation tests.
 
-use ratatui::crossterm::event::KeyCode;
 use niki::display::pages::{PageId, PageRouter};
+use ratatui::crossterm::event::KeyCode;
 
 mod helpers;
 use helpers::*;
@@ -178,7 +178,11 @@ fn all_subpages_return_to_run_via_q() {
         state.current_page = page;
         let consumed = press(&mut router, &mut state, key_char('q'));
         assert!(consumed, "{page:?} should consume 'q'");
-        assert_eq!(state.current_page, PageId::Run, "{page:?} 'q' should go to Run");
+        assert_eq!(
+            state.current_page,
+            PageId::Run,
+            "{page:?} 'q' should go to Run"
+        );
     }
 }
 

@@ -1,12 +1,12 @@
+use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
-use crate::display::theme;
 use super::pages::Modal;
+use crate::display::theme;
 
 pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
     let popup_width = 50.min(area.width - 4);
@@ -25,10 +25,12 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
     frame.render_widget(Clear, popup_area);
 
     let (title, message_str, border_color) = match modal {
-        Modal::Confirm { title, message } => {
-            (title.as_str(), message.as_str(), theme::BLUE)
-        }
-        Modal::Error { stage, message, hint } => {
+        Modal::Confirm { title, message } => (title.as_str(), message.as_str(), theme::BLUE),
+        Modal::Error {
+            stage,
+            message,
+            hint,
+        } => {
             let combined = format!("{}\n\n{}", message, hint);
             let leaked: &'static str = Box::leak(combined.into_boxed_str());
             (stage.as_str(), leaked, theme::RED)
@@ -40,7 +42,9 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
         .border_style(Style::default().fg(border_color))
         .title(Span::styled(
             format!(" {} ", title),
-            Style::default().fg(border_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(border_color)
+                .add_modifier(Modifier::BOLD),
         ));
 
     let mut lines = vec![
@@ -56,14 +60,24 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
         Modal::Confirm { .. } => {
             lines.push(Line::from(vec![
                 Span::styled("      ", Style::default()),
-                Span::styled("[Enter] confirm", Style::default().fg(theme::GREEN).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "[Enter] confirm",
+                    Style::default()
+                        .fg(theme::GREEN)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("   [Esc] cancel", Style::default().fg(theme::FG_DIM)),
             ]));
         }
         Modal::Error { .. } => {
             lines.push(Line::from(vec![
                 Span::styled("      ", Style::default()),
-                Span::styled("[r]etry", Style::default().fg(theme::AMBER).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "[r]etry",
+                    Style::default()
+                        .fg(theme::AMBER)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("   [c]onfig   ", Style::default().fg(theme::BLUE)),
                 Span::styled("[Esc] back", Style::default().fg(theme::FG_DIM)),
             ]));
