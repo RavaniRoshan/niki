@@ -12,7 +12,7 @@
 | Item | Status | Notes |
 |---|---|---|
 | Rust CLI scaffold (`run` / `status` / `report` / `config`) | ✅ | `src/cli/*`, `src/main.rs` |
-| Docker sandboxing (bollard) | ✅ | `src/sandbox/docker.rs` — create / exec / apply_patch / destroy |
+| Podman/Docker sandboxing (bollard) | ✅ | `src/sandbox/docker.rs` — create / exec / apply_patch / destroy; Podman-first socket discovery, Docker fallback |
 | 4-agent pipeline (Planner → Coder → Tester → Reviewer) | ✅ | `src/orchestrator/pipeline.rs` |
 | Artifact protocol (JSON Schema validation) | ✅ | `src/artifacts/*`, `schemas/*.json` |
 | Convergence revision loop (Reviewer → Coder, capped) | ✅ | `max_revision_rounds`, default 3 |
@@ -31,7 +31,7 @@
 | Embedded React dashboard (pipeline viz + agent inspector) | ⬜ | Needs an embedded static-file server + JSON event feed |
 | Built-in quality metrics on every run | 🟡 | Token counts are now real (from provider usage) and persisted per run; coverage/complexity capture not yet implemented |
 | Pipeline customization (YAML/JSON config) | ⬜ | Foundational for most v2 agent work — see v2 |
-| SWE-bench evaluation harness | ⬜ | Depends on real token/cost accounting |
+| SWE-bench evaluation harness | ✅ | `bench/swe-bench/` + `.github/workflows/swe-bench.yml`; hybrid eval (local generate, CI evaluate) |
 | Waitlist page | ⬜ | |
 | Private beta launch | ⬜ | |
 
@@ -50,7 +50,7 @@ Ordered roughly by dependency. Items lower in the list build on ones above.
 | 5 | **External source ingestion** — READMEs, linked docs, wikis, issue content into the knowledge layer (extends `index_project`, uses the currently-unused `_config` hook) | ✅ | — | M |
 | 6 | **Rich terminal TUI** — `ratatui` panels over the `DisplayEvent` channel, restyled as an **agentic transcript** (⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line) | ✅ | — | L |
 | 7 | **Dashboard: static HTML diff viewer with inline Reviewer/Security annotations** | ✅ | — | M |
-| 8 | **Alternative sandboxing** — lightweight `git worktree` isolation + `Sandbox` trait abstraction (Docker / Worktree / Cloud backends) | ✅ | Cloud microVMs later | M |
+| 8 | **Alternative sandboxing** — lightweight `git worktree` isolation + `Sandbox` trait abstraction (Podman/Docker / Worktree / Cloud backends) | ✅ | Cloud microVMs later | M |
 | 9 | **Cloud execution (beta)** — `cloud` backend implements the `Sandbox` trait (drop-in seam); gated behind `NIKI_CLOUD_ENDPOINT` until infra ships | 🟡 | Revenue tier | XL |
 | 10 | **Per-agent model recommendations** — `niki recommend` with cost/quality tradeoffs per role | ✅ | Depends on #1 | M |
 | 11 | **Agentic terminal UI** — replicate a sub-agent workflow's posture, glyphs, spinner and mode line so NIKI's multi-agent flow mirrors that workflow | ✅ | — | M |
@@ -67,7 +67,7 @@ passing unit/integration tests**; cloud execution (#9) remains a beta scaffold.
 - **External source ingestion** — `[knowledge]` pulls project doc globs and external URLs into agent context.
 - **Rich terminal TUI / agentic UI** — `--tui` renders an agentic transcript (⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line).
 - **Dashboard** — `niki dashboard` produces a static HTML diff viewer with inline Reviewer/Security annotations.
-- **Alternative sandboxing** — a `Sandbox` trait with Docker, git-worktree, and cloud backends (`--backend`).
+- **Alternative sandboxing** — a `Sandbox` trait with Podman/Docker, git-worktree, and cloud backends (`--backend`). Podman-first socket discovery (rootless → rootful → Docker), verified end-to-end.
 - **Per-agent recommendations** — `niki recommend` reports cost/quality tradeoffs per role.
 
 > **Cloud execution (#9)** is a *drop-in seam*, not a working backend yet: `CloudSandbox`
@@ -93,6 +93,7 @@ layer proves standalone value.*
 1. **Built-in metrics** (Phase 1/v2 #1) — coverage, complexity, review-pass rate, disagreement points.
 2. **Benchmark campaign** — SWE-bench: multi-agent (NIKI) vs. single-agent.
 3. **Real-world case studies** — blind human review, NIKI vs. Cursor.
+4. **Container runtime verification** — Podman rootless tested end-to-end: image build, container lifecycle, bind mounts, socket API compatibility. Docker remains as fallback.
 
 ---
 
