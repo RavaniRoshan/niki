@@ -1,11 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::Args;
 use std::env;
 use std::path::PathBuf;
 
 use crate::config::NikiConfig;
 use crate::orchestrator::state::TaskRecord;
-use crate::output::dashboard::{write_dashboard, DashboardInput};
+use crate::output::dashboard::{DashboardInput, write_dashboard};
 
 #[derive(Args)]
 pub struct DashboardArgs {
@@ -24,7 +24,10 @@ pub struct DashboardArgs {
 
 /// Locate the task directory: an explicit `--task` id, or the most recent task
 /// under `.niki/tasks/`.
-fn find_task_dir(tasks_dir: &std::path::Path, task: &Option<String>) -> Result<(PathBuf, TaskRecord)> {
+fn find_task_dir(
+    tasks_dir: &std::path::Path,
+    task: &Option<String>,
+) -> Result<(PathBuf, TaskRecord)> {
     if let Some(id) = task {
         let dir = tasks_dir.join(id);
         let record_path = dir.join("task.json");
@@ -82,7 +85,10 @@ pub fn handle(args: &DashboardArgs) -> Result<()> {
     let metrics_rows = vec![
         ("Agents run".to_string(), m.agent_metrics.len().to_string()),
         ("Input tokens".to_string(), m.total_input_tokens.to_string()),
-        ("Output tokens".to_string(), m.total_output_tokens.to_string()),
+        (
+            "Output tokens".to_string(),
+            m.total_output_tokens.to_string(),
+        ),
         (
             "Latency".to_string(),
             format!("{:.1}s", m.total_latency_ms as f64 / 1000.0),

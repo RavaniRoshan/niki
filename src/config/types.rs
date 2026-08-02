@@ -1,11 +1,11 @@
+use crate::artifacts::types::{AgentRole, Complexity};
+use crate::sandbox::SandboxBackend;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use toml;
-use crate::artifacts::types::{AgentRole, Complexity};
-use crate::sandbox::SandboxBackend;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NikiConfig {
@@ -321,9 +321,8 @@ impl NikiConfig {
     pub fn load(project_dir: &Path) -> Result<Self> {
         let mut config = Self::default();
 
-        let global_path = dirs::home_dir()
-            .map(|h| h.join(".config/niki/niki.toml"));
-        
+        let global_path = dirs::home_dir().map(|h| h.join(".config/niki/niki.toml"));
+
         let local_path = project_dir.join("niki.toml");
 
         if let Some(gp) = global_path {

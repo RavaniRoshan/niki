@@ -1,20 +1,20 @@
-pub mod run;
-pub mod pipeline;
 pub mod agents;
-pub mod diff;
-pub mod verdict;
-pub mod cost;
 pub mod artifacts;
-pub mod history;
 pub mod config;
+pub mod cost;
+pub mod diff;
 pub mod help;
+pub mod history;
+pub mod pipeline;
+pub mod run;
+pub mod verdict;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use ratatui::Frame;
 use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::Frame;
 
 use crate::artifacts::types::AgentRole;
 use crate::config::NikiConfig;
@@ -223,7 +223,12 @@ impl AppState {
                 self.run_state = RunState::Running;
             }
             DisplayEvent::StageToken { role, token } => {
-                if let Some(s) = self.stages.iter_mut().rev().find(|s| s.role == role && s.status == StageStatus::Running) {
+                if let Some(s) = self
+                    .stages
+                    .iter_mut()
+                    .rev()
+                    .find(|s| s.role == role && s.status == StageStatus::Running)
+                {
                     s.stream.push_str(&token);
                     s.full_transcript.push_str(&token);
                     if s.stream.len() > 2000 {
@@ -240,7 +245,12 @@ impl AppState {
                 cost_usd,
                 latency_ms,
             } => {
-                if let Some(s) = self.stages.iter_mut().rev().find(|s| s.role == role && s.status == StageStatus::Running) {
+                if let Some(s) = self
+                    .stages
+                    .iter_mut()
+                    .rev()
+                    .find(|s| s.role == role && s.status == StageStatus::Running)
+                {
                     s.status = StageStatus::Done;
                     s.summary = summary;
                     s.input_tokens = input_tokens;
@@ -251,7 +261,12 @@ impl AppState {
                 }
             }
             DisplayEvent::StageFailed { role, error } => {
-                if let Some(s) = self.stages.iter_mut().rev().find(|s| s.role == role && s.status == StageStatus::Running) {
+                if let Some(s) = self
+                    .stages
+                    .iter_mut()
+                    .rev()
+                    .find(|s| s.role == role && s.status == StageStatus::Running)
+                {
                     s.status = StageStatus::Failed;
                     s.summary = vec![error];
                     s.stream.clear();
@@ -261,10 +276,13 @@ impl AppState {
             DisplayEvent::Revision { round, max, issues } => {
                 self.revision_round = round;
                 self.max_revision_rounds = max;
-                self.notes
-                    .push((format!("Revision {} of {} requested", round, max), ratatui::style::Color::Yellow));
+                self.notes.push((
+                    format!("Revision {} of {} requested", round, max),
+                    ratatui::style::Color::Yellow,
+                ));
                 for i in &issues {
-                    self.notes.push((format!("  {}", i), ratatui::style::Color::DarkGray));
+                    self.notes
+                        .push((format!("  {}", i), ratatui::style::Color::DarkGray));
                 }
                 self.run_state = RunState::AwaitingReviewer;
             }
@@ -302,7 +320,9 @@ impl AppState {
     }
 
     pub fn active_stage(&self) -> Option<&StageInfo> {
-        self.stages.iter().find(|s| s.status == StageStatus::Running)
+        self.stages
+            .iter()
+            .find(|s| s.status == StageStatus::Running)
     }
 }
 

@@ -54,11 +54,7 @@ fn render_diff(diff: &str) -> String {
     let mut out = String::from("<pre class=\"diff\">");
     for line in diff.lines() {
         let cls = line_class(line);
-        out.push_str(&format!(
-            "<span class=\"{}\">{}</span>\n",
-            cls,
-            esc(line)
-        ));
+        out.push_str(&format!("<span class=\"{}\">{}</span>\n", cls, esc(line)));
     }
     out.push_str("</pre>");
     out

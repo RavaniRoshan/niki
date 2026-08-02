@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -178,7 +178,12 @@ impl WorktreeSandbox {
     fn apply_in_worktree(wt: &Path, patch: &str) -> Result<()> {
         let p = wt.join(".niki-tmp.patch");
         std::fs::write(&p, patch)?;
-        let res = Command::new("git").arg("-C").arg(wt).arg("apply").arg(&p).status();
+        let res = Command::new("git")
+            .arg("-C")
+            .arg(wt)
+            .arg("apply")
+            .arg(&p)
+            .status();
         let _ = std::fs::remove_file(&p);
 
         match res {

@@ -1,12 +1,12 @@
+use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
-use crate::display::theme;
 use super::{AppState, Page, PageId, StageStatus};
+use crate::display::theme;
 
 pub struct RunPage {
     scroll_offset: u16,
@@ -35,7 +35,7 @@ impl Page for RunPage {
             .constraints([
                 Constraint::Length(3), // task card
                 Constraint::Length(1), // command line
-                Constraint::Min(4),   // pipeline output
+                Constraint::Min(4),    // pipeline output
                 Constraint::Length(1), // separator
                 Constraint::Length(2), // results + working tree
                 Constraint::Length(1), // footer
@@ -47,7 +47,7 @@ impl Page for RunPage {
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Length(1), // accent bar
-                Constraint::Min(1),   // content
+                Constraint::Min(1),    // content
             ])
             .split(chunks[0]);
 
@@ -72,17 +72,18 @@ impl Page for RunPage {
         let mut title_spans = vec![
             Span::styled(
                 "Build ",
-                Style::default().fg(theme::FG_BRIGHT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::FG_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                truncated,
-                Style::default().fg(theme::FG),
-            ),
+            Span::styled(truncated, Style::default().fg(theme::FG)),
         ];
         if state.paused {
             title_spans.push(Span::styled(
                 "  ■ PAUSED",
-                Style::default().fg(theme::AMBER).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::AMBER)
+                    .add_modifier(Modifier::BOLD),
             ));
         }
         let title_line = Line::from(title_spans);
@@ -113,10 +114,7 @@ impl Page for RunPage {
                 format!("niki run \"{}\"", state.description),
                 Style::default().fg(theme::FG),
             ),
-            Span::styled(
-                " --project ./my-app",
-                Style::default().fg(theme::FG_DIM),
-            ),
+            Span::styled(" --project ./my-app", Style::default().fg(theme::FG_DIM)),
         ]);
         frame.render_widget(Paragraph::new(cmd_line), chunks[1]);
 
@@ -131,7 +129,11 @@ impl Page for RunPage {
             let (status_text, status_color) = match stage.status {
                 StageStatus::Running => {
                     let tail = stage.stream.lines().rev().find(|l| !l.trim().is_empty());
-                    let detail = tail.unwrap_or("working...").chars().take(60).collect::<String>();
+                    let detail = tail
+                        .unwrap_or("working...")
+                        .chars()
+                        .take(60)
+                        .collect::<String>();
                     (detail, color)
                 }
                 StageStatus::Done => {
@@ -139,7 +141,11 @@ impl Page for RunPage {
                     (summary.to_string(), theme::GREEN)
                 }
                 StageStatus::Failed => {
-                    let summary = stage.summary.first().map(|s| s.as_str()).unwrap_or("failed");
+                    let summary = stage
+                        .summary
+                        .first()
+                        .map(|s| s.as_str())
+                        .unwrap_or("failed");
                     (summary.to_string(), theme::RED)
                 }
                 StageStatus::Queued => ("queued".to_string(), theme::FG_DIM),
@@ -165,10 +171,7 @@ impl Page for RunPage {
                 && stage.status == StageStatus::Done
             {
                 pipeline_lines.push(Line::from(vec![
-                    Span::styled(
-                        "  files: ",
-                        Style::default().fg(theme::FG_DIM),
-                    ),
+                    Span::styled("  files: ", Style::default().fg(theme::FG_DIM)),
                     Span::styled(
                         "src/routes/health.ts · tests/health.test.ts",
                         Style::default().fg(theme::FG_DIM),
@@ -230,9 +233,14 @@ impl Page for RunPage {
             Span::styled("branch ", Style::default().fg(theme::FG)),
             Span::styled(
                 branch_str.clone(),
-                Style::default().fg(theme::FG_BRIGHT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::FG_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" · report.md · changes.patch", Style::default().fg(theme::FG)),
+            Span::styled(
+                " · report.md · changes.patch",
+                Style::default().fg(theme::FG),
+            ),
         ];
         frame.render_widget(Paragraph::new(Line::from(result_spans)), chunks[4]);
 
@@ -252,11 +260,26 @@ impl Page for RunPage {
 
         // ── Footer ────────────────────────────────────────────────────────
         let footer = Line::from(vec![
-            Span::styled("space ", Style::default().fg(theme::FG_BRIGHT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "space ",
+                Style::default()
+                    .fg(theme::FG_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("pause  ", Style::default().fg(theme::FG_DIM)),
-            Span::styled("j/k ", Style::default().fg(theme::FG_BRIGHT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "j/k ",
+                Style::default()
+                    .fg(theme::FG_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("scroll  ", Style::default().fg(theme::FG_DIM)),
-            Span::styled("q ", Style::default().fg(theme::FG_BRIGHT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "q ",
+                Style::default()
+                    .fg(theme::FG_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("quit", Style::default().fg(theme::FG_DIM)),
         ]);
         frame.render_widget(Paragraph::new(footer), chunks[5]);
@@ -271,14 +294,38 @@ impl Page for RunPage {
                 });
                 true
             }
-            KeyCode::Char('p') => { state.current_page = PageId::Pipeline; true }
-            KeyCode::Char('a') => { state.current_page = PageId::Agents; true }
-            KeyCode::Char('d') => { state.current_page = PageId::Diff; true }
-            KeyCode::Char('v') => { state.current_page = PageId::Verdict; true }
-            KeyCode::Char('c') => { state.current_page = PageId::Cost; true }
-            KeyCode::Char('f') => { state.current_page = PageId::Artifacts; true }
-            KeyCode::Char('h') => { state.current_page = PageId::History; true }
-            KeyCode::Char('?') => { state.current_page = PageId::Help; true }
+            KeyCode::Char('p') => {
+                state.current_page = PageId::Pipeline;
+                true
+            }
+            KeyCode::Char('a') => {
+                state.current_page = PageId::Agents;
+                true
+            }
+            KeyCode::Char('d') => {
+                state.current_page = PageId::Diff;
+                true
+            }
+            KeyCode::Char('v') => {
+                state.current_page = PageId::Verdict;
+                true
+            }
+            KeyCode::Char('c') => {
+                state.current_page = PageId::Cost;
+                true
+            }
+            KeyCode::Char('f') => {
+                state.current_page = PageId::Artifacts;
+                true
+            }
+            KeyCode::Char('h') => {
+                state.current_page = PageId::History;
+                true
+            }
+            KeyCode::Char('?') => {
+                state.current_page = PageId::Help;
+                true
+            }
             KeyCode::Char(' ') => {
                 state.paused = !state.paused;
                 true

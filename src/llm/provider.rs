@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Result};
+use crate::config::ProviderConfig;
+use anyhow::{Result, anyhow};
+use async_trait::async_trait;
 use futures::Stream;
 use std::pin::Pin;
-use crate::config::ProviderConfig;
-use async_trait::async_trait;
 
 /// A single item emitted by a streaming completion.
 ///
@@ -18,7 +18,10 @@ pub enum StreamChunk {
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse>;
-    async fn stream(&self, request: CompletionRequest) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>>;
+    async fn stream(
+        &self,
+        request: CompletionRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>>;
     fn provider_name(&self) -> &str;
 }
 

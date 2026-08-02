@@ -1,15 +1,19 @@
+use crate::artifacts::types::AgentRole;
+use crate::config::DockerConfig;
+use crate::sandbox::Sandbox;
 use anyhow::Result;
 use async_trait::async_trait;
-use bollard::{Docker, container::{CreateContainerOptions, Config, RemoveContainerOptions}, exec::{CreateExecOptions, StartExecResults}};
+use bollard::{
+    Docker,
+    container::{Config, CreateContainerOptions, RemoveContainerOptions},
+    exec::{CreateExecOptions, StartExecResults},
+};
 use futures::StreamExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use crate::artifacts::types::AgentRole;
-use crate::config::DockerConfig;
-use crate::sandbox::Sandbox;
 
 /// Shared registry of containers currently owned by an in-flight pipeline.
 /// The Ctrl+C handler drains this list to clean up dangling containers.
@@ -38,10 +42,20 @@ impl DockerSandbox {
         config: &DockerConfig,
         containers: ActiveContainers,
     ) -> Result<Self> {
-        let container_name = format!("niki-{}-{}-{:?}", task_id.to_string()[..8].to_string(), "sandbox", agent_role).to_lowercase();
+        let container_name = format!(
+            "niki-{}-{}-{:?}",
+            task_id.to_string()[..8].to_string(),
+            "sandbox",
+            agent_role
+        )
+        .to_lowercase();
         let workspace_path = PathBuf::from("/workspace");
 
-        let binds = vec![format!("{}:{}", source_repo.display(), workspace_path.display())];
+        let binds = vec![format!(
+            "{}:{}",
+            source_repo.display(),
+            workspace_path.display()
+        )];
 
         // Run the container as the host user's uid:gid so files it writes into the
         // bind-mounted project directory keep the host owner. Otherwise the container
@@ -65,7 +79,11 @@ impl DockerSandbox {
             image: Some(config.base_image.clone()),
             user: Some(user),
             tty: Some(true),
-            cmd: Some(vec!["tail".to_string(), "-f".to_string(), "/dev/null".to_string()]),
+            cmd: Some(vec![
+                "tail".to_string(),
+                "-f".to_string(),
+                "/dev/null".to_string(),
+            ]),
             host_config: Some(host_config),
             ..Default::default()
         };
@@ -73,7 +91,9 @@ impl DockerSandbox {
         // Ensure the base image exists locally before creating the container.
         Self::pull_image(docker, &config.base_image).await?;
 
-        let res = docker.create_container(Some(create_opts), container_config).await?;
+        let res = docker
+            .create_container(Some(create_opts), container_config)
+            .await?;
         docker.start_container::<String>(&res.id, None).await?;
 
         // Register so a Ctrl+C handler can tear the container down.
@@ -97,7 +117,15 @@ impl DockerSandbox {
         containers: ActiveContainers,
     ) -> Result<Self> {
         // Fallback to simple create for now. In reality, you'd use docker commit + create.
-        Self::create(docker, agent_role, Path::new("."), task_id, config, containers).await
+        Self::create(
+            docker,
+            agent_role,
+            Path::new("."),
+            task_id,
+            config,
+            containers,
+        )
+        .await
     }
 
     /// Pull the base image if it is not already present locally.
@@ -140,11 +168,16 @@ impl DockerSandbox {
             ..Default::default()
         };
 
-        let exec = self.docker.create_exec(&self.container_id, exec_opts).await?;
+        let exec = self
+            .docker
+            .create_exec(&self.container_id, exec_opts)
+            .await?;
         let mut stdout = String::new();
         let mut stderr = String::new();
 
-        if let StartExecResults::Attached { mut output, .. } = self.docker.start_exec(&exec.id, None).await? {
+        if let StartExecResults::Attached { mut output, .. } =
+            self.docker.start_exec(&exec.id, None).await?
+        {
             while let Some(Ok(msg)) = output.next().await {
                 match msg {
                     bollard::container::LogOutput::StdOut { message } => {
@@ -218,7 +251,9 @@ impl DockerSandbox {
         let normalized = Self::normalize_patch(patch);
         std::fs::write(&patch_path, normalized)?;
 
-        let res = self.exec(&["sh", "-c", "cd /workspace && git apply .niki-tmp.patch"]).await;
+        let res = self
+            .exec(&["sh", "-c", "cd /workspace && git apply .niki-tmp.patch"])
+            .await;
 
         let _ = std::fs::remove_file(&patch_path);
 
@@ -234,7 +269,12 @@ impl DockerSandbox {
                         return Ok(());
                     }
                 }
-                Err(anyhow::anyhow!("Failed to apply patch. git exit code: {}\nstdout: {}\nstderr: {}", output.exit_code, output.stdout, output.stderr))
+                Err(anyhow::anyhow!(
+                    "Failed to apply patch. git exit code: {}\nstdout: {}\nstderr: {}",
+                    output.exit_code,
+                    output.stdout,
+                    output.stderr
+                ))
             }
             Err(e) => Err(e),
         }
@@ -242,7 +282,9 @@ impl DockerSandbox {
 
     pub async fn get_diff(&self) -> Result<String> {
         // Run from /workspace so `git diff` sees the repository.
-        let output = self.exec(&["sh", "-c", "cd /workspace && git diff"]).await?;
+        let output = self
+            .exec(&["sh", "-c", "cd /workspace && git diff"])
+            .await?;
         Ok(output.stdout)
     }
 
@@ -257,7 +299,9 @@ impl DockerSandbox {
             force: true,
             ..Default::default()
         };
-        self.docker.remove_container(&self.container_id, Some(opts)).await?;
+        self.docker
+            .remove_container(&self.container_id, Some(opts))
+            .await?;
         Ok(())
     }
 }

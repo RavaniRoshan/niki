@@ -10,7 +10,7 @@ pub struct ArtifactEnvelope<T: Serialize> {
     pub agent: AgentRole,
     pub artifact_type: ArtifactType,
     pub created_at: DateTime<Utc>,
-    pub revision_round: u32,          // 0 for first pass, increments on feedback loops
+    pub revision_round: u32, // 0 for first pass, increments on feedback loops
     pub payload: T,
 }
 
@@ -48,11 +48,11 @@ pub enum ArtifactType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSpec {
-    pub summary: String,                      // One-line task description
-    pub approach: String,                     // Detailed implementation approach
-    pub files_to_modify: Vec<FileChange>,     // Files to create/modify/delete
-    pub acceptance_criteria: Vec<String>,      // Specific, testable criteria
-    pub constraints: Vec<String>,             // Things to avoid or be careful about
+    pub summary: String,                  // One-line task description
+    pub approach: String,                 // Detailed implementation approach
+    pub files_to_modify: Vec<FileChange>, // Files to create/modify/delete
+    pub acceptance_criteria: Vec<String>, // Specific, testable criteria
+    pub constraints: Vec<String>,         // Things to avoid or be careful about
     pub estimated_complexity: Complexity,
 }
 
@@ -60,7 +60,7 @@ pub struct TaskSpec {
 pub struct FileChange {
     pub path: String,
     pub action: FileAction,
-    pub description: String,                  // What changes in this file
+    pub description: String, // What changes in this file
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -84,18 +84,18 @@ pub enum Complexity {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodeDiff {
-    pub unified_diff: String,                 // Full unified diff of all changes
+    pub unified_diff: String, // Full unified diff of all changes
     pub files_changed: Vec<ChangedFile>,
-    pub implementation_notes: String,         // Coder's explanation of decisions made
-    pub spec_adherence: String,               // How the implementation maps to the spec
+    pub implementation_notes: String, // Coder's explanation of decisions made
+    pub spec_adherence: String,       // How the implementation maps to the spec
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChangedFile {
     pub path: String,
     pub action: FileAction,
-    pub diff: String,                         // Per-file unified diff
-    pub language: Option<String>,             // Detected programming language
+    pub diff: String,             // Per-file unified diff
+    pub language: Option<String>, // Detected programming language
 }
 
 // ── Artifact 3: TestReport (Tester → Reviewer) ──────────────────
@@ -105,8 +105,8 @@ pub struct TestReport {
     pub tests_written: Vec<TestCase>,
     pub test_results: TestResults,
     pub coverage_summary: Option<CoverageSummary>,
-    pub edge_cases_found: Vec<String>,        // Edge cases the Tester identified
-    pub tester_notes: String,                 // Tester's overall assessment
+    pub edge_cases_found: Vec<String>, // Edge cases the Tester identified
+    pub tester_notes: String,          // Tester's overall assessment
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,11 +148,11 @@ pub struct CoverageSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewVerdict {
     pub verdict: Verdict,
-    pub overall_assessment: String,           // Reviewer's summary judgment
+    pub overall_assessment: String, // Reviewer's summary judgment
     pub quality_scores: QualityScores,
-    pub issues: Vec<ReviewIssue>,             // All issues found
-    pub strengths: Vec<String>,               // What was done well
-    pub feedback: Option<ReviewFeedback>,     // Present if verdict is RevisionNeeded
+    pub issues: Vec<ReviewIssue>,         // All issues found
+    pub strengths: Vec<String>,           // What was done well
+    pub feedback: Option<ReviewFeedback>, // Present if verdict is RevisionNeeded
     /// Per-challenge reconciliation against the independent Red agent's critique
     /// (#1.2). Each entry records whether the Reviewer UPHeld or REFUTED a Red
     /// challenge and why. Proves the Reviewer engaged with the adversarial
@@ -166,15 +166,15 @@ pub struct ReviewVerdict {
 pub enum Verdict {
     Approved,
     RevisionNeeded,
-    Rejected,                                 // Unrepairable — escalate to human
+    Rejected, // Unrepairable — escalate to human
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QualityScores {
-    pub correctness: u8,                      // 1-10
-    pub code_quality: u8,                     // 1-10
-    pub test_coverage: u8,                    // 1-10
-    pub spec_adherence: u8,                   // 1-10
+    pub correctness: u8,    // 1-10
+    pub code_quality: u8,   // 1-10
+    pub test_coverage: u8,  // 1-10
+    pub spec_adherence: u8, // 1-10
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,7 +182,7 @@ pub struct ReviewIssue {
     pub severity: IssueSeverity,
     pub category: IssueCategory,
     pub file_path: Option<String>,
-    pub line_range: Option<String>,           // e.g., "42-58"
+    pub line_range: Option<String>, // e.g., "42-58"
     pub description: String,
     pub suggested_fix: Option<String>,
 }
@@ -190,10 +190,10 @@ pub struct ReviewIssue {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IssueSeverity {
-    Critical,                                 // Must fix before approval
-    Major,                                    // Should fix
-    Minor,                                    // Nice to fix
-    Nit,                                      // Style/preference
+    Critical, // Must fix before approval
+    Major,    // Should fix
+    Minor,    // Nice to fix
+    Nit,      // Style/preference
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -214,10 +214,10 @@ pub enum IssueCategory {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewFeedback {
-    pub critical_issues: Vec<ReviewIssue>,     // Only critical/major issues to fix
-    pub guidance: String,                      // Reviewer's specific guidance for revision
-    pub keep_unchanged: Vec<String>,           // Files/aspects that are fine — don't touch
-    pub revision_round: u32,                   // Which round of revision this is
+    pub critical_issues: Vec<ReviewIssue>, // Only critical/major issues to fix
+    pub guidance: String,                  // Reviewer's specific guidance for revision
+    pub keep_unchanged: Vec<String>,       // Files/aspects that are fine — don't touch
+    pub revision_round: u32,               // Which round of revision this is
 }
 
 // ── Artifact 6: Synthesis (Synthesizer → merged CodeDiff) ─────────
@@ -241,7 +241,7 @@ pub struct Synthesis {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityVerdict {
-    pub verdict: Verdict,                      // Approved / RevisionNeeded / Rejected
+    pub verdict: Verdict, // Approved / RevisionNeeded / Rejected
     pub overall_assessment: String,
     pub findings: Vec<SecurityFinding>,
     pub strengths: Vec<String>,
@@ -252,7 +252,7 @@ pub struct SecurityFinding {
     pub severity: SecuritySeverity,
     pub category: SecurityCategory,
     pub file_path: Option<String>,
-    pub line_range: Option<String>,            // e.g., "42-58"
+    pub line_range: Option<String>, // e.g., "42-58"
     pub description: String,
     pub suggested_fix: Option<String>,
 }
@@ -260,7 +260,7 @@ pub struct SecurityFinding {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SecuritySeverity {
-    Critical,                                  // Exploitable now — block
+    Critical, // Exploitable now — block
     High,
     Medium,
     Low,

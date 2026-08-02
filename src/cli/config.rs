@@ -13,12 +13,14 @@ pub async fn handle(command: &ConfigCommands) -> Result<()> {
         ConfigCommands::Init => {
             let example_content = include_str!("../../niki.example.toml");
             let target_path = std::env::current_dir()?.join("niki.toml");
-            
+
             if target_path.exists() {
                 println!("niki.toml already exists in the current directory.");
             } else {
                 fs::write(&target_path, example_content)?;
-                println!("Created niki.toml in the current directory. Please edit it to add your API keys.");
+                println!(
+                    "Created niki.toml in the current directory. Please edit it to add your API keys."
+                );
             }
         }
     }

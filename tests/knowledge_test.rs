@@ -18,7 +18,10 @@ async fn test_knowledge_indexes_project_files() {
         .expect("index project");
 
     let rendered = knowledge.render();
-    assert!(rendered.contains("index.js"), "file tree should list index.js");
+    assert!(
+        rendered.contains("index.js"),
+        "file tree should list index.js"
+    );
     assert!(
         rendered.contains("JavaScript"),
         "JavaScript should be detected as a language"

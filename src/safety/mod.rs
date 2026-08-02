@@ -9,7 +9,7 @@
 //! fingerprint the repo before the pipeline touches it, fingerprint it again
 //! after the branch is committed, and report which invariants held.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
@@ -53,10 +53,7 @@ pub struct SafetyProof {
 }
 
 fn git(repo: &Path, args: &[&str]) -> Result<String> {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(repo)
-        .output()?;
+    let out = Command::new("git").args(args).current_dir(repo).output()?;
     if !out.status.success() {
         return Err(anyhow!(
             "git {} failed: {}",
@@ -157,13 +154,16 @@ pub fn prove(
         }
     };
 
-    let hermetic =
-        branch_added && existing_branches_preserved && new_branch_parent_is_base;
+    let hermetic = branch_added && existing_branches_preserved && new_branch_parent_is_base;
 
     let mut details = Vec::new();
     details.push(format!(
         "{} Existing branch(es) preserved at the same commit ({} before / {} after).",
-        if existing_branches_preserved { "PASS" } else { "FAIL" },
+        if existing_branches_preserved {
+            "PASS"
+        } else {
+            "FAIL"
+        },
         pre.branches.len(),
         pre.branches.len() - removed.len()
     ));
@@ -174,7 +174,11 @@ pub fn prove(
     ));
     details.push(format!(
         "{} New branch parents your base commit `{}` (no history rewrite).",
-        if new_branch_parent_is_base { "PASS" } else { "FAIL" },
+        if new_branch_parent_is_base {
+            "PASS"
+        } else {
+            "FAIL"
+        },
         short(&pre.head_commit)
     ));
 
@@ -325,7 +329,11 @@ mod tests {
         run(&["checkout", "-q", "-b", "niki/branch2"]);
 
         let proof = prove(&pre, &dir, "niki/branch2", "test").unwrap();
-        assert!(!proof.hermetic, "expected NON-hermetic: {:?}", proof.details);
+        assert!(
+            !proof.hermetic,
+            "expected NON-hermetic: {:?}",
+            proof.details
+        );
         assert!(!proof.existing_branches_preserved);
 
         drop(guard);

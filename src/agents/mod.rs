@@ -1,15 +1,15 @@
-use anyhow::{anyhow, Result};
-use minijinja::Environment;
-use crate::llm::provider::{LlmProvider, CompletionRequest, StreamChunk, TokenUsage};
 use crate::artifacts::types::AgentRole;
 use crate::artifacts::validate::validate_artifact;
+use crate::llm::provider::{CompletionRequest, LlmProvider, StreamChunk, TokenUsage};
+use anyhow::{Result, anyhow};
+use minijinja::Environment;
 use std::fs;
 use std::time::Duration;
 
-pub mod planner;
 pub mod coder;
-pub mod tester;
+pub mod planner;
 pub mod reviewer;
+pub mod tester;
 
 pub async fn run_agent(
     role: AgentRole,
@@ -22,19 +22,32 @@ pub async fn run_agent(
 ) -> Result<(String, TokenUsage)> {
     let mut env = Environment::new();
     let template_path = crate::resolve_asset(&format!("prompts/{}", template_name));
-    let template_content = fs::read_to_string(&template_path)
-        .map_err(|e| anyhow!("Failed to read prompt template {}: {}", template_path.display(), e))?;
+    let template_content = fs::read_to_string(&template_path).map_err(|e| {
+        anyhow!(
+            "Failed to read prompt template {}: {}",
+            template_path.display(),
+            e
+        )
+    })?;
 
     let schema_path_resolved = crate::resolve_asset(schema_path);
-    let schema_content = fs::read_to_string(&schema_path_resolved)
-        .map_err(|e| anyhow!("Failed to read schema {}: {}", schema_path_resolved.display(), e))?;
+    let schema_content = fs::read_to_string(&schema_path_resolved).map_err(|e| {
+        anyhow!(
+            "Failed to read schema {}: {}",
+            schema_path_resolved.display(),
+            e
+        )
+    })?;
 
     env.add_template(template_name, &template_content)?;
     let tmpl = env.get_template(template_name)?;
 
     let mut ctx: serde_json::Value = serde_json::to_value(context)?;
     if let Some(obj) = ctx.as_object_mut() {
-        obj.insert("artifact_schema".to_string(), serde_json::Value::String(schema_content));
+        obj.insert(
+            "artifact_schema".to_string(),
+            serde_json::Value::String(schema_content),
+        );
     }
     let system_prompt = tmpl.render(ctx)?;
 
@@ -74,7 +87,10 @@ pub async fn run_agent(
                     let delay = BASE_DELAY_MS * 2u64.pow(attempt);
                     eprintln!(
                         "LLM transient error (attempt {}/{}), retrying in {}ms: {}",
-                        attempt + 1, MAX_RETRIES + 1, delay, e
+                        attempt + 1,
+                        MAX_RETRIES + 1,
+                        delay,
+                        e
                     );
                     tokio::time::sleep(Duration::from_millis(delay)).await;
                     last_err = Some(e);
@@ -85,9 +101,8 @@ pub async fn run_agent(
             }
         }
     }
-    let mut stream = stream.ok_or_else(|| {
-        last_err.unwrap_or_else(|| anyhow!("LLM stream failed after retries"))
-    })?;
+    let mut stream = stream
+        .ok_or_else(|| last_err.unwrap_or_else(|| anyhow!("LLM stream failed after retries")))?;
 
     use futures::StreamExt;
     let mut full_content = String::new();
@@ -107,9 +122,16 @@ pub async fn run_agent(
             Ok(StreamChunk::Usage(u)) => {
                 // Merge: anthropic/ollama may send input and output in separate
                 // chunks, so take the larger of what we've seen per field.
-                let input_tokens = u.input_tokens.max(usage.map(|x| x.input_tokens).unwrap_or(0));
-                let output_tokens = u.output_tokens.max(usage.map(|x| x.output_tokens).unwrap_or(0));
-                usage = Some(TokenUsage { input_tokens, output_tokens });
+                let input_tokens = u
+                    .input_tokens
+                    .max(usage.map(|x| x.input_tokens).unwrap_or(0));
+                let output_tokens = u
+                    .output_tokens
+                    .max(usage.map(|x| x.output_tokens).unwrap_or(0));
+                usage = Some(TokenUsage {
+                    input_tokens,
+                    output_tokens,
+                });
             }
             Err(e) => {
                 display.agent_failed(role, &e.to_string());
@@ -128,13 +150,17 @@ pub async fn run_agent(
 
     tracing::debug!(target: "niki::agent", role = ?role, raw_len = full_content.len(), raw = %full_content, extracted = %json_content, "agent response captured");
 
-    if let Err(e) = validate_artifact(&json_content, schema_path_resolved.to_str().unwrap_or(schema_path)) {
+    if let Err(e) = validate_artifact(
+        &json_content,
+        schema_path_resolved.to_str().unwrap_or(schema_path),
+    ) {
         let err_msg = e.to_string();
         display.agent_failed(role, &format!("Validation failed: {}", err_msg));
         return Err(crate::NikiError::ArtifactValidation {
             agent: role,
             errors: err_msg,
-        }.into());
+        }
+        .into());
     }
 
     Ok((json_content, token_usage))

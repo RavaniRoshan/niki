@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use std::path::PathBuf;
 
-use crate::memory::{load_memory, query_memory_by_tag, get_all_tags, render_memory_for_prompt};
 use crate::artifacts::types::AgentRole;
+use crate::memory::{get_all_tags, load_memory, query_memory_by_tag, render_memory_for_prompt};
 
 #[derive(Args)]
 pub struct MemoryArgs {
@@ -119,7 +119,10 @@ pub fn handle(args: &MemoryArgs) -> Result<()> {
             let r = parse_role(role)?;
             let rendered = render_memory_for_prompt(&project, r, *limit);
             if rendered.is_empty() {
-                println!("No memory entries for {:?}. Memory is populated after running `niki run`.", r);
+                println!(
+                    "No memory entries for {:?}. Memory is populated after running `niki run`.",
+                    r
+                );
             } else {
                 println!("{}", rendered);
             }
@@ -165,7 +168,10 @@ fn parse_roles(role: &Option<String>) -> Vec<AgentRole> {
         Some("security_auditor") => vec![AgentRole::SecurityAuditor],
         Some("synthesizer") => vec![AgentRole::Synthesizer],
         Some(other) => {
-            eprintln!("Unknown role: {}. Valid: planner, coder, tester, reviewer, red, security_auditor, synthesizer", other);
+            eprintln!(
+                "Unknown role: {}. Valid: planner, coder, tester, reviewer, red, security_auditor, synthesizer",
+                other
+            );
             std::process::exit(1);
         }
         None => vec![
@@ -206,5 +212,8 @@ fn memory_path(project_dir: &PathBuf, role: AgentRole) -> std::path::PathBuf {
         AgentRole::SecurityAuditor => "security_auditor",
         AgentRole::Red => "red",
     };
-    project_dir.join(".niki").join("memory").join(format!("{}.json", role_name))
+    project_dir
+        .join(".niki")
+        .join("memory")
+        .join(format!("{}.json", role_name))
 }

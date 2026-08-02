@@ -1,12 +1,12 @@
+use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 
-use crate::display::theme;
 use super::{AppState, Page, PageId};
+use crate::display::theme;
 
 fn fmt_tokens(n: u32) -> String {
     if n >= 1000 {
@@ -46,7 +46,7 @@ impl Page for CostPage {
             .constraints([
                 Constraint::Length(1), // header
                 Constraint::Length(1), // separator
-                Constraint::Min(5),   // cost table
+                Constraint::Min(5),    // cost table
                 Constraint::Length(1), // separator
                 Constraint::Length(8), // bar chart
                 Constraint::Length(1), // footer
@@ -55,7 +55,12 @@ impl Page for CostPage {
 
         // Header
         let header = Line::from(vec![
-            Span::styled(" cost", Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " cost",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 if state.branch_name.is_empty() {
                     String::new()
@@ -69,7 +74,10 @@ impl Page for CostPage {
 
         // Separator
         frame.render_widget(
-            Paragraph::new(Span::styled("  ──────────────────────────────────────────────────────────────────────", Style::default().fg(theme::BORDER))),
+            Paragraph::new(Span::styled(
+                "  ──────────────────────────────────────────────────────────────────────",
+                Style::default().fg(theme::BORDER),
+            )),
             chunks[1],
         );
 
@@ -82,11 +90,36 @@ impl Page for CostPage {
         let mut table_lines: Vec<Line> = Vec::new();
         // Header row
         table_lines.push(Line::from(vec![
-            Span::styled("  AGENT       ", Style::default().fg(theme::FG_DIM).add_modifier(Modifier::BOLD)),
-            Span::styled("MODEL                 ", Style::default().fg(theme::FG_DIM).add_modifier(Modifier::BOLD)),
-            Span::styled("TOKENS   ", Style::default().fg(theme::FG_DIM).add_modifier(Modifier::BOLD)),
-            Span::styled("COST     ", Style::default().fg(theme::FG_DIM).add_modifier(Modifier::BOLD)),
-            Span::styled("LATENCY", Style::default().fg(theme::FG_DIM).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  AGENT       ",
+                Style::default()
+                    .fg(theme::FG_DIM)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "MODEL                 ",
+                Style::default()
+                    .fg(theme::FG_DIM)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "TOKENS   ",
+                Style::default()
+                    .fg(theme::FG_DIM)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "COST     ",
+                Style::default()
+                    .fg(theme::FG_DIM)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "LATENCY",
+                Style::default()
+                    .fg(theme::FG_DIM)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]));
         table_lines.push(Line::from(Span::styled(
             "  ──────────  ────────────────────  ───────  ────────  ────────",
@@ -137,7 +170,10 @@ impl Page for CostPage {
             Style::default().fg(theme::BORDER),
         )));
         table_lines.push(Line::from(vec![
-            Span::styled("  TOTAL      ", Style::default().fg(theme::FG).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  TOTAL      ",
+                Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+            ),
             Span::styled("                     ", Style::default()),
             Span::styled(
                 format!("{:<8}", fmt_tokens(total_tokens)),
@@ -145,7 +181,9 @@ impl Page for CostPage {
             ),
             Span::styled(
                 format!("${:<7.4}", total_cost),
-                Style::default().fg(theme::GREEN).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::GREEN)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 fmt_duration(total_latency),
@@ -154,13 +192,18 @@ impl Page for CostPage {
         ]));
 
         frame.render_widget(
-            Paragraph::new(table_lines).block(table_block).wrap(Wrap { trim: false }),
+            Paragraph::new(table_lines)
+                .block(table_block)
+                .wrap(Wrap { trim: false }),
             chunks[2],
         );
 
         // Separator
         frame.render_widget(
-            Paragraph::new(Span::styled("  ──────────────────────────────────────────────────────────────────────", Style::default().fg(theme::BORDER))),
+            Paragraph::new(Span::styled(
+                "  ──────────────────────────────────────────────────────────────────────",
+                Style::default().fg(theme::BORDER),
+            )),
             chunks[3],
         );
 
@@ -171,7 +214,11 @@ impl Page for CostPage {
             .title(" PER-AGENT COST ");
 
         let mut bar_lines: Vec<Line> = Vec::new();
-        let max_cost = state.stages.iter().map(|s| s.cost_usd).fold(0.0f64, f64::max);
+        let max_cost = state
+            .stages
+            .iter()
+            .map(|s| s.cost_usd)
+            .fold(0.0f64, f64::max);
 
         for stage in &state.stages {
             let glyph = theme::role_glyph(stage.role);
@@ -199,15 +246,13 @@ impl Page for CostPage {
             ]));
         }
 
-        frame.render_widget(
-            Paragraph::new(bar_lines).block(bar_block),
-            chunks[4],
-        );
+        frame.render_widget(Paragraph::new(bar_lines).block(bar_block), chunks[4]);
 
         // Footer
-        let footer = Line::from(vec![
-            Span::styled(" [Esc] back", Style::default().fg(theme::FG_DIM)),
-        ]);
+        let footer = Line::from(vec![Span::styled(
+            " [Esc] back",
+            Style::default().fg(theme::FG_DIM),
+        )]);
         frame.render_widget(Paragraph::new(footer), chunks[5]);
     }
 

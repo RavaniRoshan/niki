@@ -1,7 +1,7 @@
 //! AppState state machine tests.
 
-use niki::display::pages::{PageId, RunState, StageStatus};
 use niki::artifacts::types::AgentRole;
+use niki::display::pages::{PageId, RunState, StageStatus};
 use niki::display::tui::DisplayEvent;
 
 mod helpers;
@@ -32,7 +32,9 @@ fn new_state_defaults() {
 #[test]
 fn stage_start_adds_stage_and_sets_running() {
     let mut state = test_state();
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Planner });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Planner,
+    });
     assert_eq!(state.stages.len(), 1);
     assert_eq!(state.stages[0].role, AgentRole::Planner);
     assert_eq!(state.stages[0].status, StageStatus::Running);
@@ -43,9 +45,13 @@ fn stage_start_adds_stage_and_sets_running() {
 #[test]
 fn stage_start_does_not_overwrite_existing_start_time() {
     let mut state = test_state();
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Planner });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Planner,
+    });
     let first = state.start_time;
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Coder });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Coder,
+    });
     assert_eq!(state.start_time, first);
 }
 
@@ -56,9 +62,17 @@ fn stage_start_does_not_overwrite_existing_start_time() {
 #[test]
 fn stage_token_appends_to_stream() {
     let mut state = test_state();
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Planner });
-    state.apply_event(DisplayEvent::StageToken { role: AgentRole::Planner, token: "hello ".into() });
-    state.apply_event(DisplayEvent::StageToken { role: AgentRole::Planner, token: "world".into() });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Planner,
+    });
+    state.apply_event(DisplayEvent::StageToken {
+        role: AgentRole::Planner,
+        token: "hello ".into(),
+    });
+    state.apply_event(DisplayEvent::StageToken {
+        role: AgentRole::Planner,
+        token: "world".into(),
+    });
     assert_eq!(state.stages[0].stream, "hello world");
     assert_eq!(state.stages[0].full_transcript, "hello world");
 }
@@ -66,9 +80,14 @@ fn stage_token_appends_to_stream() {
 #[test]
 fn stage_token_truncates_stream_at_2000() {
     let mut state = test_state();
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Planner });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Planner,
+    });
     let big = "x".repeat(2500);
-    state.apply_event(DisplayEvent::StageToken { role: AgentRole::Planner, token: big });
+    state.apply_event(DisplayEvent::StageToken {
+        role: AgentRole::Planner,
+        token: big,
+    });
     assert!(state.stages[0].stream.len() <= 2000);
     assert_eq!(state.stages[0].full_transcript.len(), 2500);
 }
@@ -76,8 +95,13 @@ fn stage_token_truncates_stream_at_2000() {
 #[test]
 fn stage_token_ignores_unknown_role() {
     let mut state = test_state();
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Planner });
-    state.apply_event(DisplayEvent::StageToken { role: AgentRole::Coder, token: "test".into() });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Planner,
+    });
+    state.apply_event(DisplayEvent::StageToken {
+        role: AgentRole::Coder,
+        token: "test".into(),
+    });
     assert_eq!(state.stages[0].stream, "");
 }
 
@@ -88,8 +112,13 @@ fn stage_token_ignores_unknown_role() {
 #[test]
 fn stage_done_marks_done_and_clears_stream() {
     let mut state = test_state();
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Planner });
-    state.apply_event(DisplayEvent::StageToken { role: AgentRole::Planner, token: "work".into() });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Planner,
+    });
+    state.apply_event(DisplayEvent::StageToken {
+        role: AgentRole::Planner,
+        token: "work".into(),
+    });
     state.apply_event(DisplayEvent::StageDone {
         role: AgentRole::Planner,
         summary: vec!["spec created".into()],
@@ -114,7 +143,9 @@ fn stage_done_marks_done_and_clears_stream() {
 #[test]
 fn stage_failed_marks_failed_and_sets_run_state() {
     let mut state = test_state();
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Coder });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Coder,
+    });
     state.apply_event(DisplayEvent::StageFailed {
         role: AgentRole::Coder,
         error: "compilation error".into(),
@@ -162,7 +193,9 @@ fn final_sets_finished_and_awaiting_approval() {
 #[test]
 fn banner_updates_description() {
     let mut state = test_state();
-    state.apply_event(DisplayEvent::Banner { description: "new task".into() });
+    state.apply_event(DisplayEvent::Banner {
+        description: "new task".into(),
+    });
     assert_eq!(state.description, "new task");
 }
 
@@ -241,10 +274,15 @@ fn active_stage_first_running_when_multiple() {
 fn full_lifecycle_planner_to_final() {
     let mut state = test_state();
 
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Planner });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Planner,
+    });
     assert_eq!(state.run_state, RunState::Running);
 
-    state.apply_event(DisplayEvent::StageToken { role: AgentRole::Planner, token: "plan...".into() });
+    state.apply_event(DisplayEvent::StageToken {
+        role: AgentRole::Planner,
+        token: "plan...".into(),
+    });
 
     state.apply_event(DisplayEvent::StageDone {
         role: AgentRole::Planner,
@@ -255,7 +293,9 @@ fn full_lifecycle_planner_to_final() {
         latency_ms: 1500,
     });
 
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Coder });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Coder,
+    });
     state.apply_event(DisplayEvent::StageDone {
         role: AgentRole::Coder,
         summary: vec!["2 files changed".into()],
@@ -272,7 +312,9 @@ fn full_lifecycle_planner_to_final() {
     });
     assert_eq!(state.run_state, RunState::AwaitingReviewer);
 
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Tester });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Tester,
+    });
     state.apply_event(DisplayEvent::StageDone {
         role: AgentRole::Tester,
         summary: vec!["12 tests passed".into()],
@@ -282,7 +324,9 @@ fn full_lifecycle_planner_to_final() {
         latency_ms: 4000,
     });
 
-    state.apply_event(DisplayEvent::StageStart { role: AgentRole::Reviewer });
+    state.apply_event(DisplayEvent::StageStart {
+        role: AgentRole::Reviewer,
+    });
     state.apply_event(DisplayEvent::StageDone {
         role: AgentRole::Reviewer,
         summary: vec!["approved".into()],

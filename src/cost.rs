@@ -40,19 +40,85 @@ pub fn lookup_price(provider: &str, model: &str) -> Option<ModelPrice> {
     // shorter substring match.
     let table: &[(&str, ModelPrice)] = &[
         // Anthropic — Claude 4 family
-        ("claude-opus-4", ModelPrice { input_per_million: 15.0, output_per_million: 75.0 }),
-        ("claude-sonnet-4", ModelPrice { input_per_million: 3.0, output_per_million: 15.0 }),
-        ("claude-haiku-4-5", ModelPrice { input_per_million: 1.0, output_per_million: 5.0 }),
-        ("claude-haiku", ModelPrice { input_per_million: 0.80, output_per_million: 4.0 }),
+        (
+            "claude-opus-4",
+            ModelPrice {
+                input_per_million: 15.0,
+                output_per_million: 75.0,
+            },
+        ),
+        (
+            "claude-sonnet-4",
+            ModelPrice {
+                input_per_million: 3.0,
+                output_per_million: 15.0,
+            },
+        ),
+        (
+            "claude-haiku-4-5",
+            ModelPrice {
+                input_per_million: 1.0,
+                output_per_million: 5.0,
+            },
+        ),
+        (
+            "claude-haiku",
+            ModelPrice {
+                input_per_million: 0.80,
+                output_per_million: 4.0,
+            },
+        ),
         // OpenAI
-        ("gpt-4o-mini", ModelPrice { input_per_million: 0.15, output_per_million: 0.60 }),
-        ("gpt-4o", ModelPrice { input_per_million: 2.50, output_per_million: 10.0 }),
-        ("o3-mini", ModelPrice { input_per_million: 1.10, output_per_million: 4.40 }),
-        ("o1", ModelPrice { input_per_million: 15.0, output_per_million: 60.0 }),
+        (
+            "gpt-4o-mini",
+            ModelPrice {
+                input_per_million: 0.15,
+                output_per_million: 0.60,
+            },
+        ),
+        (
+            "gpt-4o",
+            ModelPrice {
+                input_per_million: 2.50,
+                output_per_million: 10.0,
+            },
+        ),
+        (
+            "o3-mini",
+            ModelPrice {
+                input_per_million: 1.10,
+                output_per_million: 4.40,
+            },
+        ),
+        (
+            "o1",
+            ModelPrice {
+                input_per_million: 15.0,
+                output_per_million: 60.0,
+            },
+        ),
         // Google
-        ("gemini-2.0-flash", ModelPrice { input_per_million: 0.10, output_per_million: 0.40 }),
-        ("gemini-1.5-pro", ModelPrice { input_per_million: 1.25, output_per_million: 5.00 }),
-        ("gemini-1.5-flash", ModelPrice { input_per_million: 0.075, output_per_million: 0.30 }),
+        (
+            "gemini-2.0-flash",
+            ModelPrice {
+                input_per_million: 0.10,
+                output_per_million: 0.40,
+            },
+        ),
+        (
+            "gemini-1.5-pro",
+            ModelPrice {
+                input_per_million: 1.25,
+                output_per_million: 5.00,
+            },
+        ),
+        (
+            "gemini-1.5-flash",
+            ModelPrice {
+                input_per_million: 0.075,
+                output_per_million: 0.30,
+            },
+        ),
     ];
 
     table
@@ -84,19 +150,42 @@ mod tests {
     #[test]
     fn local_provider_is_free() {
         assert_eq!(lookup_price("ollama", "llama3"), None);
-        assert_eq!(compute_cost("ollama", "llama3", &TokenUsage { input_tokens: 1_000_000, output_tokens: 1_000_000 }), 0.0);
+        assert_eq!(
+            compute_cost(
+                "ollama",
+                "llama3",
+                &TokenUsage {
+                    input_tokens: 1_000_000,
+                    output_tokens: 1_000_000
+                }
+            ),
+            0.0
+        );
     }
 
     #[test]
     fn unknown_model_prices_as_zero() {
-        assert_eq!(compute_cost("anthropic", "some-future-model", &TokenUsage { input_tokens: 100, output_tokens: 100 }), 0.0);
+        assert_eq!(
+            compute_cost(
+                "anthropic",
+                "some-future-model",
+                &TokenUsage {
+                    input_tokens: 100,
+                    output_tokens: 100
+                }
+            ),
+            0.0
+        );
     }
 
     #[test]
     fn sonnet_cost_math() {
         // claude-sonnet-4: $3 / 1M in, $15 / 1M out.
         let price = lookup_price("anthropic", "claude-sonnet-4-20250514").unwrap();
-        let usage = TokenUsage { input_tokens: 1_000_000, output_tokens: 1_000_000 };
+        let usage = TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+        };
         assert_eq!(price.cost(&usage), 3.0 + 15.0);
     }
 

@@ -4,13 +4,13 @@ use bollard::Docker;
 use std::path::Path;
 use uuid::Uuid;
 
+use crate::NikiError;
 use crate::artifacts::types::AgentRole;
 use crate::config::DockerConfig;
-use crate::NikiError;
 
+pub mod cloud;
 pub mod docker;
 pub mod worktree;
-pub mod cloud;
 
 pub use docker::{ActiveContainers, DockerSandbox, ExecOutput};
 

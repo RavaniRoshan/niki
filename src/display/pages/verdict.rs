@@ -1,12 +1,12 @@
+use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use ratatui::Frame;
 
-use crate::display::theme;
 use super::{AppState, Page, PageId, RunState};
+use crate::display::theme;
 
 pub struct VerdictPage {
     scroll_offset: u16,
@@ -33,14 +33,19 @@ impl Page for VerdictPage {
             .constraints([
                 Constraint::Length(1), // header
                 Constraint::Length(5), // verdict tile
-                Constraint::Min(3),   // report content
+                Constraint::Min(3),    // report content
                 Constraint::Length(1), // footer
             ])
             .split(area);
 
         // Header
         let header = Line::from(vec![
-            Span::styled(" verdict", Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " verdict",
+                Style::default()
+                    .fg(theme::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 if state.branch_name.is_empty() {
                     String::new()
@@ -70,14 +75,17 @@ impl Page for VerdictPage {
             Line::from(""),
             Line::from(Span::styled(
                 format!("   ◆  {}", verdict_text),
-                Style::default().fg(verdict_color).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(verdict_color)
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
         ];
 
         // Add scores if available
         if let Some(review_stage) = state.stages.iter().rev().find(|s| {
-            s.role == crate::artifacts::types::AgentRole::Reviewer && s.status == super::StageStatus::Done
+            s.role == crate::artifacts::types::AgentRole::Reviewer
+                && s.status == super::StageStatus::Done
         }) {
             if let Some(score_line) = review_stage.summary.first() {
                 verdict_lines.push(Line::from(Span::styled(
@@ -102,9 +110,13 @@ impl Page for VerdictPage {
             let mut lines: Vec<Line> = Vec::new();
             for line in report.lines() {
                 let style = if line.starts_with("#") {
-                    Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::BLUE)
+                        .add_modifier(Modifier::BOLD)
                 } else if line.starts_with("##") {
-                    Style::default().fg(theme::AMBER).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::AMBER)
+                        .add_modifier(Modifier::BOLD)
                 } else if line.starts_with("-") || line.starts_with("*") {
                     Style::default().fg(theme::FG)
                 } else if line.contains("$") {
@@ -137,9 +149,10 @@ impl Page for VerdictPage {
         }
 
         // Footer
-        let footer = Line::from(vec![
-            Span::styled(" [j/k] scroll   [g/G] top/bottom   [d]iff   [Esc] back", Style::default().fg(theme::FG_DIM)),
-        ]);
+        let footer = Line::from(vec![Span::styled(
+            " [j/k] scroll   [g/G] top/bottom   [d]iff   [Esc] back",
+            Style::default().fg(theme::FG_DIM),
+        )]);
         frame.render_widget(Paragraph::new(footer), chunks[3]);
     }
 

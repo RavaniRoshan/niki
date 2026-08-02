@@ -2,14 +2,14 @@
 
 use std::path::PathBuf;
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Terminal;
-use ratatui::Frame;
 
 use niki::artifacts::types::AgentRole;
 use niki::config::NikiConfig;
@@ -122,8 +122,8 @@ fn render_full_tui(frame: &mut Frame, area: Rect, state: &AppState, router: &Pag
     if area.height < 10 {
         return;
     }
-    let bg_block = ratatui::widgets::Block::default()
-        .style(Style::default().bg(niki::display::theme::BG));
+    let bg_block =
+        ratatui::widgets::Block::default().style(Style::default().bg(niki::display::theme::BG));
     frame.render_widget(bg_block, area);
 
     let chunks = Layout::default()
@@ -145,7 +145,12 @@ fn render_full_tui(frame: &mut Frame, area: Rect, state: &AppState, router: &Pag
         String::new()
     };
     let status = Line::from(vec![
-        Span::styled(" niki ", Style::default().fg(niki::display::theme::BLUE).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " niki ",
+            Style::default()
+                .fg(niki::display::theme::BLUE)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(
             format!("· {}/{} tok{}", tot_in, tot_out, cost_str),
             Style::default().fg(niki::display::theme::FG_DIM),
@@ -166,7 +171,9 @@ pub fn render_full(state: &AppState) -> Terminal<TestBackend> {
     let backend = TestBackend::new(120, 42);
     let mut terminal = Terminal::new(backend).unwrap();
     let router = PageRouter::new();
-    terminal.draw(|f| render_full_tui(f, f.area(), state, &router)).unwrap();
+    terminal
+        .draw(|f| render_full_tui(f, f.area(), state, &router))
+        .unwrap();
     terminal
 }
 

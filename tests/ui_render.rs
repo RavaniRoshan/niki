@@ -1,7 +1,7 @@
 //! Visual rendering tests.
 
-use niki::display::pages::{Modal, PageId, StageStatus};
 use niki::artifacts::types::AgentRole;
+use niki::display::pages::{Modal, PageId, StageStatus};
 
 mod helpers;
 use helpers::*;
@@ -25,7 +25,9 @@ fn logo_renders_in_buffer() {
                 break;
             }
         }
-        if has_content { break; }
+        if has_content {
+            break;
+        }
     }
     assert!(has_content, "logo area should have content");
 }
@@ -135,7 +137,9 @@ fn help_page_renders_keybindings() {
                 break;
             }
         }
-        if has_content { break; }
+        if has_content {
+            break;
+        }
     }
     assert!(has_content, "help page should have content");
 }
@@ -244,7 +248,13 @@ fn error_modal_renders_over_page() {
 #[test]
 fn status_bar_shows_tokens_when_present() {
     let mut state = test_state();
-    state.stages = vec![make_stage(AgentRole::Planner, StageStatus::Done, 1500, 2500, 0.01)];
+    state.stages = vec![make_stage(
+        AgentRole::Planner,
+        StageStatus::Done,
+        1500,
+        2500,
+        0.01,
+    )];
     let terminal = render_full(&state);
     let buf = terminal.backend().buffer();
     let last_y = buf.area.height - 1;

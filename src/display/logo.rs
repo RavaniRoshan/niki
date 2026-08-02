@@ -3,11 +3,11 @@
 //! Generated using FIGlet "big" font via the `figlet-rs` crate.
 //! Produces a bold 6-line logo that renders correctly in any monospace font.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use super::theme;
 

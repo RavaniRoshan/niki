@@ -1,8 +1,8 @@
+use crate::NikiError;
+use crate::artifacts::types::Verdict;
 use crate::display::theme::Theme;
 use crate::orchestrator::pipeline::PipelineResult;
 use crate::orchestrator::state::PipelineState;
-use crate::NikiError;
-use crate::artifacts::types::Verdict;
 use std::path::Path;
 
 pub fn render_completion(
@@ -28,12 +28,19 @@ pub fn render_completion(
         if total_cost > 0.0 {
             println!(
                 "[{}] [NIKI] Cost: ${:.4} | Tokens in/out: {}/{} | Latency: {:.1}s",
-                ts, total_cost, total_in, total_out, total_ms as f64 / 1000.0
+                ts,
+                total_cost,
+                total_in,
+                total_out,
+                total_ms as f64 / 1000.0
             );
         } else {
             println!(
                 "[{}] [NIKI] Tokens in/out: {}/{} | Latency: {:.1}s",
-                ts, total_in, total_out, total_ms as f64 / 1000.0
+                ts,
+                total_in,
+                total_out,
+                total_ms as f64 / 1000.0
             );
         }
 

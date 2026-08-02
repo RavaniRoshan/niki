@@ -9,15 +9,15 @@ use crate::artifacts::types::{
     AgentRole, CodeDiff, IsolationRecord, RedChallenge, ReviewVerdict, SecurityVerdict, Synthesis,
     TaskSpec, TestReport, Verdict,
 };
-use crate::safety::SafetyProof;
 use crate::config::NikiConfig;
 pub use crate::config::types::{PipelineStageConfig, TopologyMode};
 use crate::cost::compute_cost;
 use crate::display::agent_stream::AgenticDisplay;
 use crate::knowledge::indexer::index_project;
-use crate::llm::provider::{create_provider, LlmProvider};
+use crate::llm::provider::{LlmProvider, create_provider};
 use crate::orchestrator::state::StageMetric;
-use crate::sandbox::{ActiveContainers, create_sandbox, SandboxBackend};
+use crate::safety::SafetyProof;
+use crate::sandbox::{ActiveContainers, SandboxBackend, create_sandbox};
 
 use crate::agents::run_agent;
 use minijinja::context;
@@ -70,10 +70,26 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
         config.pipeline.stages.clone()
     } else {
         vec![
-            stage(AgentRole::Planner, &config.agents.planner.provider, &config.agents.planner.model),
-            stage(AgentRole::Coder, &config.agents.coder.provider, &config.agents.coder.model),
-            stage(AgentRole::Tester, &config.agents.tester.provider, &config.agents.tester.model),
-            stage(AgentRole::Reviewer, &config.agents.reviewer.provider, &config.agents.reviewer.model),
+            stage(
+                AgentRole::Planner,
+                &config.agents.planner.provider,
+                &config.agents.planner.model,
+            ),
+            stage(
+                AgentRole::Coder,
+                &config.agents.coder.provider,
+                &config.agents.coder.model,
+            ),
+            stage(
+                AgentRole::Tester,
+                &config.agents.tester.provider,
+                &config.agents.tester.model,
+            ),
+            stage(
+                AgentRole::Reviewer,
+                &config.agents.reviewer.provider,
+                &config.agents.reviewer.model,
+            ),
         ]
     };
 
@@ -104,10 +120,7 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
         if let Some(pos) = stages.iter().position(|s| s.role == AgentRole::Reviewer) {
             if !stages.iter().any(|s| s.role == AgentRole::Red) {
                 let (provider, model) = red_blue_stage_target(config);
-                stages.insert(
-                    pos,
-                    stage(AgentRole::Red, &provider, &model),
-                );
+                stages.insert(pos, stage(AgentRole::Red, &provider, &model));
             }
         }
     }
@@ -251,9 +264,16 @@ fn stage(role: AgentRole, provider: &str, model: &str) -> PipelineStageConfig {
 
 /// A pipeline always needs a Planner to produce the spec; inject one if the
 /// user's topology omitted it.
-fn ensure_planner(stages: Vec<PipelineStageConfig>, config: &NikiConfig) -> Vec<PipelineStageConfig> {
+fn ensure_planner(
+    stages: Vec<PipelineStageConfig>,
+    config: &NikiConfig,
+) -> Vec<PipelineStageConfig> {
     if !stages.iter().any(|s| s.role == AgentRole::Planner) {
-        let mut out = vec![stage(AgentRole::Planner, &config.agents.planner.provider, &config.agents.planner.model)];
+        let mut out = vec![stage(
+            AgentRole::Planner,
+            &config.agents.planner.provider,
+            &config.agents.planner.model,
+        )];
         out.extend(stages);
         out
     } else {
@@ -262,10 +282,9 @@ fn ensure_planner(stages: Vec<PipelineStageConfig>, config: &NikiConfig) -> Vec<
 }
 
 fn provider_for(provider: &str, config: &NikiConfig) -> Result<Box<dyn LlmProvider>> {
-    let cfg = config
-        .providers
-        .get(provider)
-        .ok_or_else(|| crate::NikiError::Config(format!("Provider '{}' not configured", provider)))?;
+    let cfg = config.providers.get(provider).ok_or_else(|| {
+        crate::NikiError::Config(format!("Provider '{}' not configured", provider))
+    })?;
     create_provider(provider, cfg)
 }
 
@@ -405,7 +424,8 @@ async fn run_stage(
     metrics: &mut Vec<StageMetric>,
 ) -> Result<String> {
     let start = Instant::now();
-    let (json, usage) = run_agent(role, llm, model, template_name, ctx, schema_path, display).await?;
+    let (json, usage) =
+        run_agent(role, llm, model, template_name, ctx, schema_path, display).await?;
     let latency_ms = start.elapsed().as_millis() as u64;
     let cost_usd = compute_cost(provider, model, &usage);
     metrics.push(StageMetric {
@@ -517,20 +537,14 @@ async fn run_role(
         AgentRole::Planner => {
             // Should never happen — the Planner is run separately. Keep the
             // match exhaustive and surface a clear error if it does.
-            return Err(crate::NikiError::Config("Planner must not run as a body stage".into()).into());
+            return Err(
+                crate::NikiError::Config("Planner must not run as a body stage".into()).into(),
+            );
         }
     };
 
     let json = run_stage(
-        role,
-        llm,
-        model,
-        provider,
-        template,
-        ctx,
-        schema,
-        display,
-        metrics,
+        role, llm, model, provider, template, ctx, schema, display, metrics,
     )
     .await?;
 
@@ -539,9 +553,13 @@ async fn run_role(
         RoleOutput::Planner(s) => crate::display::artifact_render::render_task_spec_summary(s),
         RoleOutput::Coder(d) => crate::display::artifact_render::render_code_diff_summary(d),
         RoleOutput::Tester(t) => crate::display::artifact_render::render_test_report_summary(t),
-        RoleOutput::Reviewer(v) => crate::display::artifact_render::render_review_verdict_summary(v),
+        RoleOutput::Reviewer(v) => {
+            crate::display::artifact_render::render_review_verdict_summary(v)
+        }
         RoleOutput::Synthesizer(s) => crate::display::artifact_render::render_synthesis_summary(s),
-        RoleOutput::SecurityAuditor(v) => crate::display::artifact_render::render_security_verdict_summary(v),
+        RoleOutput::SecurityAuditor(v) => {
+            crate::display::artifact_render::render_security_verdict_summary(v)
+        }
         RoleOutput::Red(v) => crate::display::artifact_render::render_red_challenge_summary(v),
     };
     Ok((json, summary, output))
@@ -612,7 +630,9 @@ pub async fn execute_pipeline(
         context_sources: isolation_sources_for(AgentRole::Planner, config.red_blue.enabled),
         saw_other_reasoning: false,
     });
-    let pm = metrics.last().unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
+    let pm = metrics
+        .last()
+        .unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
     display.agent_done(
         AgentRole::Planner,
         crate::display::artifact_render::render_task_spec_summary(&task_spec),
@@ -695,223 +715,257 @@ pub async fn execute_pipeline(
     match topology {
         TopologyMode::MultiAgent => {
             if config.parallel.enabled && config.parallel.coder_count > 1 {
-        // ── Parallel-coder mode (#3) ────────────────────────────────────────
-        // 1) Run N coders concurrently, each isolated in its own git worktree.
-        let coder_stage = body_stages
-            .iter()
-            .find(|s| s.role == AgentRole::Coder)
-            .expect("parallel mode requires a Coder stage");
-        let per_coder = run_parallel_coders(
-            config.parallel.coder_count,
-            provider_cache.get(&coder_stage.provider)
-                .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found in cache", coder_stage.provider))?.clone(),
-            &coder_stage.model,
-            &coder_stage.provider,
-            &task_spec,
-            &knowledge_str,
-            &task.project_path,
-            config,
-            containers.clone(),
-            &task.id,
-            display,
-            &mut metrics,
-        )
-        .await?;
+                // ── Parallel-coder mode (#3) ────────────────────────────────────────
+                // 1) Run N coders concurrently, each isolated in its own git worktree.
+                let coder_stage = body_stages
+                    .iter()
+                    .find(|s| s.role == AgentRole::Coder)
+                    .expect("parallel mode requires a Coder stage");
+                let per_coder = run_parallel_coders(
+                    config.parallel.coder_count,
+                    provider_cache
+                        .get(&coder_stage.provider)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "Provider '{}' not found in cache",
+                                coder_stage.provider
+                            )
+                        })?
+                        .clone(),
+                    &coder_stage.model,
+                    &coder_stage.provider,
+                    &task_spec,
+                    &knowledge_str,
+                    &task.project_path,
+                    config,
+                    containers.clone(),
+                    &task.id,
+                    display,
+                    &mut metrics,
+                )
+                .await?;
 
-        // Each parallel coder ran in its own git worktree — record the isolation
-        // pattern (one record represents the N independent coder sessions).
-        isolation.push(IsolationRecord {
-            role: AgentRole::Coder,
-            backend: SandboxBackend::Worktree,
-            context_sources: isolation_sources_for(AgentRole::Coder, config.red_blue.enabled),
-            saw_other_reasoning: false,
-        });
+                // Each parallel coder ran in its own git worktree — record the isolation
+                // pattern (one record represents the N independent coder sessions).
+                isolation.push(IsolationRecord {
+                    role: AgentRole::Coder,
+                    backend: SandboxBackend::Worktree,
+                    context_sources: isolation_sources_for(
+                        AgentRole::Coder,
+                        config.red_blue.enabled,
+                    ),
+                    saw_other_reasoning: false,
+                });
 
-        // 2) Reconcile the per-coder diffs through the Synthesizer stage
-        //    (injected by `resolve_stages` when parallel mode is on).
-        let synth_stage = body_stages
-            .iter()
-            .find(|s| s.role == AgentRole::Synthesizer)
-            .expect("parallel mode requires a Synthesizer stage");
-        let synth_llm = provider_cache.get(&synth_stage.provider)
-            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found in cache", synth_stage.provider))?;
-        let coder_json_in = serde_json::to_string(&per_coder)?;
-        let (json, summary, role_output) = run_role(
-            AgentRole::Synthesizer,
-            &**synth_llm,
-            &synth_stage.model,
-            &synth_stage.provider,
-            &task_spec,
-            &coder_json_in,
-            "",
-            "",
-            0,
-            &knowledge_str,
-            &task.project_path,
-            None,
-            display,
-            &mut metrics,
-        )
-        .await?;
-        artifacts.push((AgentRole::Synthesizer, json.clone()));
-        isolation.push(IsolationRecord {
-            role: AgentRole::Synthesizer,
-            backend: config.docker.backend,
-            context_sources: isolation_sources_for(AgentRole::Synthesizer, config.red_blue.enabled),
-            saw_other_reasoning: false,
-        });
-        let m = metrics.last().unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
-        display.agent_done(AgentRole::Synthesizer, summary, m.usage(), m.cost_usd);
-        display.update_pipeline_status();
+                // 2) Reconcile the per-coder diffs through the Synthesizer stage
+                //    (injected by `resolve_stages` when parallel mode is on).
+                let synth_stage = body_stages
+                    .iter()
+                    .find(|s| s.role == AgentRole::Synthesizer)
+                    .expect("parallel mode requires a Synthesizer stage");
+                let synth_llm = provider_cache.get(&synth_stage.provider).ok_or_else(|| {
+                    anyhow::anyhow!("Provider '{}' not found in cache", synth_stage.provider)
+                })?;
+                let coder_json_in = serde_json::to_string(&per_coder)?;
+                let (json, summary, role_output) = run_role(
+                    AgentRole::Synthesizer,
+                    &**synth_llm,
+                    &synth_stage.model,
+                    &synth_stage.provider,
+                    &task_spec,
+                    &coder_json_in,
+                    "",
+                    "",
+                    0,
+                    &knowledge_str,
+                    &task.project_path,
+                    None,
+                    display,
+                    &mut metrics,
+                )
+                .await?;
+                artifacts.push((AgentRole::Synthesizer, json.clone()));
+                isolation.push(IsolationRecord {
+                    role: AgentRole::Synthesizer,
+                    backend: config.docker.backend,
+                    context_sources: isolation_sources_for(
+                        AgentRole::Synthesizer,
+                        config.red_blue.enabled,
+                    ),
+                    saw_other_reasoning: false,
+                });
+                let m = metrics.last().unwrap_or_else(|| {
+                    unreachable!("metrics always has at least one entry after push")
+                });
+                display.agent_done(AgentRole::Synthesizer, summary, m.usage(), m.cost_usd);
+                display.update_pipeline_status();
 
-        let merged = match role_output {
-            RoleOutput::Synthesizer(s) => s.merged,
-            _ => unreachable!("synthesizer stage yields a Synthesis"),
-        };
-        coder_json = serde_json::to_string_pretty(&merged)?;
-        if let Err(e) = sandbox.apply_patch(&merged.unified_diff, &task.project_path).await {
-            eprintln!("Warning: Failed to apply synthesis patch: {}", e);
-        }
-
-        // 3) Run the remaining stages (Tester / Red / Reviewer / SecurityAuditor)
-        //    exactly once. In parallel mode the coders don't re-run on revision
-        //    feedback, so there is no inner revision loop.
-        for stage in body_stages
-            .iter()
-            .filter(|s| s.role != AgentRole::Coder && s.role != AgentRole::Synthesizer)
-        {
-            let llm = provider_cache.get(&stage.provider)
-                .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found in cache", stage.provider))?;
-            let (json, summary, role_output) = run_role(
-                stage.role,
-                &**llm,
-                &stage.model,
-                &stage.provider,
-                &task_spec,
-                &coder_json,
-                &tester_json,
-                &red_json,
-                0,
-                &knowledge_str,
-                &task.project_path,
-                None,
-                display,
-                &mut metrics,
-            )
-            .await?;
-            artifacts.push((stage.role, json.clone()));
-            isolation.push(IsolationRecord {
-                role: stage.role,
-                backend: config.docker.backend,
-                context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
-                saw_other_reasoning: false,
-            });
-            let m = metrics.last().unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
-            display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
-            display.update_pipeline_status();
-
-            match role_output {
-                RoleOutput::Tester(_) => {
-                    tester_json = json;
+                let merged = match role_output {
+                    RoleOutput::Synthesizer(s) => s.merged,
+                    _ => unreachable!("synthesizer stage yields a Synthesis"),
+                };
+                coder_json = serde_json::to_string_pretty(&merged)?;
+                if let Err(e) = sandbox
+                    .apply_patch(&merged.unified_diff, &task.project_path)
+                    .await
+                {
+                    eprintln!("Warning: Failed to apply synthesis patch: {}", e);
                 }
-                RoleOutput::Red(_) => {
-                    // Capture the Red critique so the downstream Reviewer (which
-                    // runs after it in this loop) must reconcile it (#1.2).
-                    red_json = json;
+
+                // 3) Run the remaining stages (Tester / Red / Reviewer / SecurityAuditor)
+                //    exactly once. In parallel mode the coders don't re-run on revision
+                //    feedback, so there is no inner revision loop.
+                for stage in body_stages
+                    .iter()
+                    .filter(|s| s.role != AgentRole::Coder && s.role != AgentRole::Synthesizer)
+                {
+                    let llm = provider_cache.get(&stage.provider).ok_or_else(|| {
+                        anyhow::anyhow!("Provider '{}' not found in cache", stage.provider)
+                    })?;
+                    let (json, summary, role_output) = run_role(
+                        stage.role,
+                        &**llm,
+                        &stage.model,
+                        &stage.provider,
+                        &task_spec,
+                        &coder_json,
+                        &tester_json,
+                        &red_json,
+                        0,
+                        &knowledge_str,
+                        &task.project_path,
+                        None,
+                        display,
+                        &mut metrics,
+                    )
+                    .await?;
+                    artifacts.push((stage.role, json.clone()));
+                    isolation.push(IsolationRecord {
+                        role: stage.role,
+                        backend: config.docker.backend,
+                        context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
+                        saw_other_reasoning: false,
+                    });
+                    let m = metrics.last().unwrap_or_else(|| {
+                        unreachable!("metrics always has at least one entry after push")
+                    });
+                    display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
+                    display.update_pipeline_status();
+
+                    match role_output {
+                        RoleOutput::Tester(_) => {
+                            tester_json = json;
+                        }
+                        RoleOutput::Red(_) => {
+                            // Capture the Red critique so the downstream Reviewer (which
+                            // runs after it in this loop) must reconcile it (#1.2).
+                            red_json = json;
+                        }
+                        RoleOutput::Reviewer(v) => {
+                            verdict = v.verdict;
+                        }
+                        RoleOutput::SecurityAuditor(_) => {}
+                        _ => unreachable!("only Tester/Red/Reviewer/SecurityAuditor remain"),
+                    }
                 }
-                RoleOutput::Reviewer(v) => {
-                    verdict = v.verdict;
-                }
-                RoleOutput::SecurityAuditor(_) => {}
-                _ => unreachable!("only Tester/Red/Reviewer/SecurityAuditor remain"),
-            }
-        }
             } else {
-            while round < max_rounds {
-        for stage in &body_stages {
-            let llm = provider_cache.get(&stage.provider)
-                .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found in cache", stage.provider))?;
-            let (json, summary, role_output) = run_role(
-                stage.role,
-                &**llm,
-                &stage.model,
-                &stage.provider,
-                &task_spec,
-                &coder_json,
-                &tester_json,
-                &red_json,
-                round,
-                &knowledge_str,
-                &task.project_path,
-                review_feedback.as_ref(),
-                display,
-                &mut metrics,
-            )
-            .await?;
-            artifacts.push((stage.role, json.clone()));
-            isolation.push(IsolationRecord {
-                role: stage.role,
-                backend: config.docker.backend,
-                context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
-                saw_other_reasoning: false,
-            });
-            let m = metrics.last().unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
-            display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
-            display.update_pipeline_status();
+                while round < max_rounds {
+                    for stage in &body_stages {
+                        let llm = provider_cache.get(&stage.provider).ok_or_else(|| {
+                            anyhow::anyhow!("Provider '{}' not found in cache", stage.provider)
+                        })?;
+                        let (json, summary, role_output) = run_role(
+                            stage.role,
+                            &**llm,
+                            &stage.model,
+                            &stage.provider,
+                            &task_spec,
+                            &coder_json,
+                            &tester_json,
+                            &red_json,
+                            round,
+                            &knowledge_str,
+                            &task.project_path,
+                            review_feedback.as_ref(),
+                            display,
+                            &mut metrics,
+                        )
+                        .await?;
+                        artifacts.push((stage.role, json.clone()));
+                        isolation.push(IsolationRecord {
+                            role: stage.role,
+                            backend: config.docker.backend,
+                            context_sources: isolation_sources_for(
+                                stage.role,
+                                config.red_blue.enabled,
+                            ),
+                            saw_other_reasoning: false,
+                        });
+                        let m = metrics.last().unwrap_or_else(|| {
+                            unreachable!("metrics always has at least one entry after push")
+                        });
+                        display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
+                        display.update_pipeline_status();
 
-            match role_output {
-                RoleOutput::Coder(diff) => {
-                    coder_json = json;
-                    if let Err(e) = sandbox.apply_patch(&diff.unified_diff, &task.project_path).await {
-                        eprintln!("Warning: Failed to apply coder patch: {}", e);
+                        match role_output {
+                            RoleOutput::Coder(diff) => {
+                                coder_json = json;
+                                if let Err(e) = sandbox
+                                    .apply_patch(&diff.unified_diff, &task.project_path)
+                                    .await
+                                {
+                                    eprintln!("Warning: Failed to apply coder patch: {}", e);
+                                }
+                            }
+                            RoleOutput::Tester(_) => {
+                                tester_json = json;
+                            }
+                            RoleOutput::Red(_) => {
+                                // Capture the Red critique so the Reviewer (which runs
+                                // after it in this round) must reconcile it (#1.2).
+                                red_json = json;
+                            }
+                            RoleOutput::Reviewer(v) => {
+                                verdict = v.verdict;
+                                review_feedback = match v.feedback {
+                                    Some(f) => Some(serde_json::to_string_pretty(&f)?),
+                                    None => None,
+                                };
+                            }
+                            RoleOutput::Synthesizer(s) => {
+                                // The reconciled change replaces the per-coder diffs for the
+                                // downstream Tester/Reviewer stages.
+                                coder_json = serde_json::to_string_pretty(&s.merged)?;
+                                if let Err(e) = sandbox
+                                    .apply_patch(&s.merged.unified_diff, &task.project_path)
+                                    .await
+                                {
+                                    eprintln!("Warning: Failed to apply synthesis patch: {}", e);
+                                }
+                            }
+                            RoleOutput::SecurityAuditor(v) => {
+                                // The security verdict is recorded as an artifact. By default it
+                                // does not gate the revision loop (the Reviewer owns the gate); an
+                                // explicit Rejected with no reviewer overrides to a revision.
+                                if matches!(v.verdict, Verdict::Rejected) && !has_reviewer {
+                                    verdict = Verdict::RevisionNeeded;
+                                }
+                            }
+                            RoleOutput::Planner(_) => unreachable!("planner is handled separately"),
+                        }
                     }
-                }
-                RoleOutput::Tester(_) => {
-                    tester_json = json;
-                }
-                RoleOutput::Red(_) => {
-                    // Capture the Red critique so the Reviewer (which runs
-                    // after it in this round) must reconcile it (#1.2).
-                    red_json = json;
-                }
-                RoleOutput::Reviewer(v) => {
-                    verdict = v.verdict;
-                    review_feedback = match v.feedback {
-                        Some(f) => Some(serde_json::to_string_pretty(&f)?),
-                        None => None,
-                    };
-                }
-                RoleOutput::Synthesizer(s) => {
-                    // The reconciled change replaces the per-coder diffs for the
-                    // downstream Tester/Reviewer stages.
-                    coder_json = serde_json::to_string_pretty(&s.merged)?;
-                    if let Err(e) = sandbox.apply_patch(&s.merged.unified_diff, &task.project_path).await {
-                        eprintln!("Warning: Failed to apply synthesis patch: {}", e);
-                    }
-                }
-                RoleOutput::SecurityAuditor(v) => {
-                    // The security verdict is recorded as an artifact. By default it
-                    // does not gate the revision loop (the Reviewer owns the gate); an
-                    // explicit Rejected with no reviewer overrides to a revision.
-                    if matches!(v.verdict, Verdict::Rejected) && !has_reviewer {
-                        verdict = Verdict::RevisionNeeded;
-                    }
-                }
-                RoleOutput::Planner(_) => unreachable!("planner is handled separately"),
-            }
-        }
 
-        if has_reviewer {
-            if matches!(verdict, Verdict::Approved | Verdict::Rejected) {
-                break;
+                    if has_reviewer {
+                        if matches!(verdict, Verdict::Approved | Verdict::Rejected) {
+                            break;
+                        }
+                    } else {
+                        // No reviewer to gate the loop on; one pass is enough.
+                        break;
+                    }
+                    round += 1;
+                }
             }
-        } else {
-            // No reviewer to gate the loop on; one pass is enough.
-            break;
-        }
-        round += 1;
-            }
-        }
         } // close MultiAgent arm
         TopologyMode::Auto => unreachable!(
             "select_topology resolves Auto into MultiAgent/SingleAgent before dispatch"
@@ -927,8 +981,9 @@ pub async fn execute_pipeline(
                 .iter()
                 .find(|s| s.role == AgentRole::Coder)
                 .expect("single-agent mode requires a Coder stage");
-            let coder_llm = provider_cache.get(&coder_stage.provider)
-                .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found in cache", coder_stage.provider))?;
+            let coder_llm = provider_cache.get(&coder_stage.provider).ok_or_else(|| {
+                anyhow::anyhow!("Provider '{}' not found in cache", coder_stage.provider)
+            })?;
             let current_files = build_current_files(&task_spec, &task.project_path);
             let solo_json = run_stage(
                 AgentRole::Coder,
@@ -954,7 +1009,9 @@ pub async fn execute_pipeline(
                 context_sources: isolation_sources_for(AgentRole::Coder, config.red_blue.enabled),
                 saw_other_reasoning: false,
             });
-            let m = metrics.last().unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
+            let m = metrics.last().unwrap_or_else(|| {
+                unreachable!("metrics always has at least one entry after push")
+            });
             display.agent_done(
                 AgentRole::Coder,
                 vec!["solo code diff produced".to_string()],
@@ -966,7 +1023,10 @@ pub async fn execute_pipeline(
             // read picks up the change.
             coder_json = solo_json;
             if let Ok(parsed) = serde_json::from_str::<CodeDiff>(&coder_json) {
-                if let Err(e) = sandbox.apply_patch(&parsed.unified_diff, &task.project_path).await {
+                if let Err(e) = sandbox
+                    .apply_patch(&parsed.unified_diff, &task.project_path)
+                    .await
+                {
                     eprintln!("Warning: Failed to apply solo coder patch: {}", e);
                 }
             }
@@ -1022,7 +1082,10 @@ fn extract_memory_from_artifacts(
     // 1. Planner memory: record successful decomposition patterns
     if let Some((_, planner_json)) = artifacts.iter().find(|(r, _)| *r == AgentRole::Planner) {
         if let Ok(spec) = serde_json::from_str::<crate::artifacts::types::TaskSpec>(planner_json) {
-            let tags = vec!["task-decomposition".into(), format!("complexity:{:?}", spec.estimated_complexity).to_lowercase()];
+            let tags = vec![
+                "task-decomposition".into(),
+                format!("complexity:{:?}", spec.estimated_complexity).to_lowercase(),
+            ];
             let content = format!(
                 "Task: {} → {} files to modify",
                 task.chars().take(80).collect::<String>(),
@@ -1048,11 +1111,15 @@ fn extract_memory_from_artifacts(
 
     // 4. Red agent: if it found adversarial issues, record them
     if let Some((_, red_json)) = artifacts.iter().find(|(r, _)| *r == AgentRole::Red) {
-        if let Ok(challenge) = serde_json::from_str::<crate::artifacts::types::RedChallenge>(red_json) {
+        if let Ok(challenge) =
+            serde_json::from_str::<crate::artifacts::types::RedChallenge>(red_json)
+        {
             if !challenge.challenges.is_empty() {
                 let content = format!(
                     "Adversarial challenges: {}",
-                    challenge.challenges.iter()
+                    challenge
+                        .challenges
+                        .iter()
                         .map(|c| c.claim.chars().take(100).collect::<String>())
                         .collect::<Vec<_>>()
                         .join("; ")
@@ -1083,7 +1150,10 @@ mod tests {
         let roles: Vec<AgentRole> = s.iter().map(|x| x.role).collect();
         assert!(
             roles.iter().position(|r| *r == AgentRole::Red).unwrap()
-                < roles.iter().position(|r| *r == AgentRole::Reviewer).unwrap()
+                < roles
+                    .iter()
+                    .position(|r| *r == AgentRole::Reviewer)
+                    .unwrap()
         );
     }
 
@@ -1104,7 +1174,10 @@ mod tests {
         assert!(c.red_blue.enabled);
         let roles: Vec<AgentRole> = s.iter().map(|x| x.role).collect();
         let red_pos = roles.iter().position(|r| *r == AgentRole::Red).unwrap();
-        let reviewer_pos = roles.iter().position(|r| *r == AgentRole::Reviewer).unwrap();
+        let reviewer_pos = roles
+            .iter()
+            .position(|r| *r == AgentRole::Reviewer)
+            .unwrap();
         assert!(red_pos < reviewer_pos, "Red must run before the Reviewer");
     }
 
