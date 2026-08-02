@@ -13,8 +13,53 @@ use crate::orchestrator::pipeline::{execute_pipeline, Task};
 use crate::orchestrator::state::{TaskRecord, TaskStatus};
 use crate::sandbox::docker::ActiveContainers;
 use crate::sandbox::SandboxBackend;
+
+/// Probe container runtime sockets: Podman (rootless, then rootful) → Docker.
+/// Returns the first connection that pings successfully, or an error if none work.
+#[allow(clippy::collapsible_if)]
+async fn connect_container_runtime() -> Result<Docker> {
+    // 1. Respect explicit DOCKER_HOST override if set.
+    if let Ok(host) = env::var("DOCKER_HOST") {
+        if !host.is_empty() {
+            if let Ok(d) = Docker::connect_with_local_defaults() {
+                if d.ping().await.is_ok() {
+                    tracing::info!("Connected via DOCKER_HOST={host}");
+                    return Ok(d);
+                }
+            }
+        }
+    }
+
+    // 2. Probe known Podman and Docker socket paths in priority order.
+    let uid = unsafe { libc::getuid() };
+    let runtime_dir = env::var("XDG_RUNTIME_DIR")
+        .unwrap_or_else(|_| format!("/run/user/{}", uid));
+
+    let candidates = [
+        PathBuf::from(&runtime_dir).join("podman/podman.sock"),  // rootless podman
+        PathBuf::from("/run/podman/podman.sock"),                 // rootful podman
+        PathBuf::from("/var/run/docker.sock"),                    // docker
+    ];
+
+    for socket in &candidates {
+        if !socket.exists() {
+            continue;
+        }
+        let addr = format!("unix://{}", socket.display());
+        if let Ok(d) = Docker::connect_with_local(addr.as_str(), 120, bollard::API_DEFAULT_VERSION) {
+            if d.ping().await.is_ok() {
+                tracing::info!("Connected via {}", socket.display());
+                return Ok(d);
+            }
+        }
+    }
+
+    Err(anyhow!(
+        "No container runtime found. Install and start Podman \
+         (systemctl --user enable --now podman.socket) or Docker."
+    ))
+}
 use crate::artifacts::types::AgentRole;
-use crate::NikiError;
 
 #[derive(Args)]
 pub struct RunArgs {
@@ -198,7 +243,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
 
                 let ids = containers.lock().await.clone();
                 if !ids.is_empty() {
-                    match Docker::connect_with_local_defaults() {
+                    match connect_container_runtime().await {
                         Ok(docker) => {
                             for id in ids {
                                 // force:true stops the container if still running, then removes it.
@@ -233,13 +278,12 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         });
     }
 
-    // Only connect to the Docker daemon when the chosen backend needs it. The
-    // worktree and cloud backends never touch Docker, so they run without a daemon.
-    // The dry-run path also skips the daemon ping (it never creates a sandbox).
+    // Only connect to a container runtime when the chosen backend needs it. The
+    // worktree and cloud backends never touch Podman/Docker, so they run without
+    // a daemon. The dry-run path also skips the daemon ping (it never creates a sandbox).
     let docker = if uses_docker && !args.dry_run {
-        let d = Docker::connect_with_local_defaults()
-            .map_err(|e| anyhow!("Docker error: {}", e))?;
-        d.ping().await.map_err(|_| NikiError::DockerNotRunning)?;
+        let d = connect_container_runtime().await
+            .map_err(|e| anyhow!("Container runtime error: {}", e))?;
         Some(d)
     } else {
         None

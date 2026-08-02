@@ -15,15 +15,17 @@
 **Turn a sentence into a reviewable pull request.**
 
 Four specialized LLM agents — **Planner → Coder → Tester → Reviewer** — collaborate inside a
-Docker sandbox and hand you a clean git branch, a diff, and a full audit trail. Your working tree is never touched.
+Podman or Docker sandbox and hand you a clean git branch, a diff, and a full audit trail. Your working tree is never touched.
 
 <br>
 
 [![Built with Rust](https://img.shields.io/badge/built_with-Rust-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Docker sandbox](https://img.shields.io/badge/sandbox-Docker-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/get-docker/)
+[![CI](https://github.com/RavaniRoshan/niki/actions/workflows/ci.yml/badge.svg)](https://github.com/RavaniRoshan/niki/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-220_passing-007ec6)](#testing)
+[![Sandbox](https://img.shields.io/badge/sandbox-Podman_/_Docker-2496ED?logo=podman&logoColor=white)](#sandbox)
 [![BYOK · multi-provider](https://img.shields.io/badge/LLM-BYOK_·_multi--provider-58a6ff)](#configuration)
 [![License: BUSL-1.1 (source-available)](https://img.shields.io/badge/license-BUSL--1.1_·_source--available-d2a8ff)](LICENSE)
-[![Status: prototype](https://img.shields.io/badge/status-prototype-ffa657)](#roadmap)
+[![Status: beta](https://img.shields.io/badge/status-beta-58a6ff)](#roadmap)
 
 <a href="#quick-start"><b>Quick Start</b></a> ·
 <a href="#how-it-works"><b>How it works</b></a> ·
@@ -68,7 +70,7 @@ Today's AI coding tools — Cursor, Devin — run on a **single agent** in one l
 - **Context drift** — output quality degrades as the conversation grows.
 - **The babysitting tax** — you must constantly steer, correct, and re-verify its work.
 
-NIKI takes a different path. Work is split across **independent agents that can't influence one another** — isolated at both the **filesystem** layer (each runs in its own Docker container against a copy of the repo) and the **context** layer (they share no history; they exchange only typed artifacts). Independence is the whole point: it's what removes the bias a single agent can't escape. You describe the task, the agents debate their way to a result, and you review a finished branch.
+NIKI takes a different path. Work is split across **independent agents that can't influence one another** — isolated at both the **filesystem** layer (each runs in its own Podman or Docker container against a copy of the repo) and the **context** layer (they share no history; they exchange only typed artifacts). Independence is the whole point: it's what removes the bias a single agent can't escape. You describe the task, the agents debate their way to a result, and you review a finished branch.
 
 **Who it's for** — solo developers, indie hackers, and small teams (2–5) who already use AI coding tools but are tired of the prompt-response loop, and want to delegate complex, multi-file tasks and review a polished result instead.
 
@@ -77,7 +79,7 @@ NIKI takes a different path. Work is split across **independent agents that can'
 |   |   |
 |---|---|
 | 🧩 **Multi-agent, not monolithic** | Planning, coding, testing, and review are separate agents with their own prompts and models — each does one job well, instead of one model doing everything at once. |
-| 🔒 **Hermetic by default** | All work happens in a Docker sandbox bind-mounted to a *copy* of your project. Your working tree is never mutated mid-run. |
+| 🔒 **Hermetic by default** | All work happens in a Podman or Docker sandbox bind-mounted to a *copy* of your project. Your working tree is never mutated mid-run. |
 | 🌿 **Output is a git branch** | You get `niki/<id>` with a real commit, a diff, and artifacts — reviewable like any human PR. No opaque auto-commits to `main`. |
 | 🔑 **BYOK & provider-mixing** | Bring your own keys. Give each agent a different provider/model — a strong reasoner for Planner/Reviewer, a cheap model for Tester. |
 | 🔁 **Reviewer-driven revisions** | The Reviewer can bounce work back to the Coder for up to `max_revision_rounds` before completion. |
@@ -89,7 +91,7 @@ NIKI takes a different path. Work is split across **independent agents that can'
 flowchart LR
     U([niki run &quot;task&quot;]) --> P
 
-    subgraph Sandbox [ Docker sandbox · /workspace bind-mount ]
+    subgraph Sandbox [ Podman/Docker sandbox · /workspace bind-mount ]
         direction LR
         P[◈ Planner] -->|TaskSpec| C[⟠ Coder]
         C -->|unified diff| T[◉ Tester]
@@ -109,7 +111,7 @@ flowchart LR
 
 ## Quick Start
 
-**Prerequisites:** [Rust](https://www.rust-lang.org/tools/install) (2024 edition) · [Docker](https://docs.docker.com/get-docker/) running · an API key for at least one LLM provider.
+**Prerequisites:** [Rust](https://www.rust-lang.org/tools/install) (2024 edition) · [Podman](https://podman.io/getting-started/installation) (recommended) or [Docker](https://docs.docker.com/get-docker/) running · an API key for at least one LLM provider.
 
 ```bash
 # 1 · Clone & build
@@ -118,7 +120,7 @@ cd niki
 cargo build --release
 
 # 2 · Build the sandbox image (Wolfi/Chainguard base, git/node/npm/python3 pre-baked)
-docker build -t niki-sandbox:24.04 -f docker/Dockerfile .
+podman build -t niki-sandbox:24.04 -f docker/Dockerfile .   # or: docker build ...
 
 # 3 · Configure — copy the example and add a key
 cp niki.example.toml niki.toml
@@ -220,10 +222,10 @@ enabled = true
 
 ### Sandbox backends
 
-NIKI defaults to Docker, but the same `Sandbox` trait is implemented by a git-worktree backend (no Docker daemon required) and a cloud backend (beta). Choose at runtime:
+NIKI defaults to Podman (rootless, no daemon) with a Docker fallback. The same `Sandbox` trait is also implemented by a git-worktree backend (no container runtime required) and a cloud backend (beta). Choose at runtime:
 
 ```bash
-niki run "..." --backend worktree   # git worktree + local process, no Docker
+niki run "..." --backend worktree   # git worktree + local process, no container runtime
 niki run "..." --backend cloud      # NIKI infra (beta; needs NIKI_CLOUD_ENDPOINT)
 ```
 
@@ -246,7 +248,7 @@ Run `niki <command> --help` for the full flag list.
 src/
 ├── agents/        # Planner, Coder, Tester, Reviewer
 ├── orchestrator/  # pipeline sequencing + task state
-├── sandbox/       # Sandbox trait: Docker / git-worktree / cloud backends
+├── sandbox/       # Sandbox trait: Podman/Docker / git-worktree / cloud backends
 ├── llm/           # provider clients (anthropic, openai, google, ollama)
 ├── output/        # git branch/commit, patch, report generation
 ├── artifacts/     # typed artifacts + JSON-schema validation
@@ -268,7 +270,7 @@ docker/            # sandbox image (Dockerfile) + scripts/
 - [x] **External source ingestion** — project doc globs + external URLs as agent context via `[knowledge]`.
 - [x] **Rich terminal TUI** — `ratatui` panels, restyled as an agentic transcript (`niki run --tui`).
 - [x] **Dashboard** — static HTML diff viewer with inline Reviewer/Security annotations (`niki dashboard`).
-- [x] **Alternative sandboxing** — `git worktree` isolation + a `Sandbox` trait (Docker / Worktree / Cloud backends).
+- [x] **Alternative sandboxing** — `git worktree` isolation + a `Sandbox` trait (Podman/Docker / Worktree / Cloud backends).
 - [ ] **Cloud execution (beta)** — the `cloud` backend is a drop-in seam gated behind `NIKI_CLOUD_ENDPOINT`; full infra ships later.
 - [x] **Per-agent model recommendations** — `niki recommend` with cost/quality tradeoffs per role.
 - [x] **Agentic terminal UI** — ⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line.
@@ -309,5 +311,5 @@ Additional Use Grant, a commercial license is available from the Licensor.
 ---
 
 <div align="center">
-<sub>The name <b>NIKI</b> carries personal meaning to its founder. · Built in Rust 🦀 · Runs anywhere Docker does 🐳</sub>
+<sub>The name <b>NIKI</b> carries personal meaning to its founder. · Built in Rust 🦀 · Runs anywhere Podman or Docker does 🐳</sub>
 </div>

@@ -109,9 +109,9 @@ impl Page for ConfigPage {
         }
         form_lines.push(Line::from(""));
 
-        // Docker section
+        // Sandbox section (Podman/Docker)
         form_lines.push(Line::from(Span::styled(
-            "  DOCKER",
+            "  SANDBOX",
             Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD),
         )));
         form_lines.push(Line::from(vec![

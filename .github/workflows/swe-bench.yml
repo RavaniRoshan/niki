@@ -1,0 +1,83 @@
+name: SWE-bench Eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Run identifier (e.g. niki-v0.1.0)"
+        required: true
+        type: string
+      instances:
+        description: "Comma-separated instance IDs, or 'lite' / 'verified'"
+        required: true
+        default: "lite"
+        type: string
+      model:
+        description: "LLM model name"
+        required: false
+        default: "gpt-4o"
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  evaluate:
+    name: Run SWE-bench evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build NIKI
+        run: cargo build --release
+
+      - name: Install SWE-bench harness
+        run: pip install swebench
+
+      - name: Verify Docker
+        run: docker --version && docker info | head -5
+
+      - name: Run evaluation
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          NIKI_LLM_MODEL: ${{ inputs.model }}
+        run: |
+          PREDICTIONS_DIR="bench/predictions/${{ inputs.run_id }}"
+          if [ ! -f "${PREDICTIONS_DIR}/predictions.json" ]; then
+            echo "ERROR: Predictions file not found at ${PREDICTIONS_DIR}/predictions.json"
+            echo "Generate predictions locally first, then commit to this path."
+            exit 1
+          fi
+
+          echo "Running SWE-bench harness evaluation..."
+          python -m swebench.harness.run_evaluation \
+            --predictions_path "${PREDICTIONS_DIR}/predictions.json" \
+            --swe_bench_tasks "${PREDICTIONS_DIR}/instances.jsonl" \
+            --log_dir "bench/eval-logs/${{ inputs.run_id }}" \
+            --testbed "bench/eval-testbed/${{ inputs.run_id }}" \
+            --timeout 1800
+
+      - name: Collect results
+        if: always()
+        run: |
+          REPORT="bench/eval-logs/${{ inputs.run_id }}"
+          if [ -d "$REPORT" ]; then
+            echo "=== Evaluation Report ==="
+            find "$REPORT" -name "*.json" | head -20
+            echo ""
+            echo "=== Summary ==="
+            cat "$REPORT"/results.json 2>/dev/null || echo "No results.json found"
+          fi
+
+      - name: Upload evaluation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swe-bench-results-${{ inputs.run_id }}
+          path: |
+            bench/eval-logs/${{ inputs.run_id }}/
+          retention-days: 30
