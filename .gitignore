@@ -9,9 +9,11 @@ skills-lock.json
 
 # Untracked directories
 examples/
-scripts/
-tests/
 evals/
+
+# Dev-only scripts (not shipped to users)
+scripts/generate_screenshots.py
+scripts/render_buffers.py
 
 # Internal strategy docs — not for the public repo
 CLOUD_BACKEND_SPEC.md
