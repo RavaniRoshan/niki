@@ -40,7 +40,7 @@ pub enum NikiError {
     #[error("No API key configured for provider '{0}'. Set it in niki.toml or via environment variable.")]
     MissingApiKey(String),
     
-    #[error("Docker is not running. Please start Docker and try again.")]
+    #[error("No container runtime found. Start Podman (systemctl --user enable --now podman.socket) or Docker and try again.")]
     DockerNotRunning,
     
     #[error("Task {0} not found")]

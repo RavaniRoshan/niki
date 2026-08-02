@@ -69,7 +69,8 @@ model = "claude-sonnet-4-20250514"         # Best reasoning for review
 [docker]
 # Base image for agent containers. This must be the pre-baked image built from
 # docker/Dockerfile (Wolfi/Chainguard base with git/node/npm/python3 bundled):
-#   docker build -t niki-sandbox:24.04 -f docker/Dockerfile .
+#   podman build -t niki-sandbox:24.04 -f docker/Dockerfile .
+#   (or: docker build -t niki-sandbox:24.04 -f docker/Dockerfile .)
 # A bare upstream image (e.g. ubuntu:24.04) lacks those tools and fails the
 # sandbox's tool check at runtime.
 base_image = "niki-sandbox:24.04"
@@ -79,3 +80,6 @@ extra_packages = ["nodejs", "npm", "python3"]
 memory_limit = "2g"
 # CPU limit per container
 cpu_limit = 2.0
+# Sandbox backend: "docker" (Podman/Docker, default), "worktree" (git worktree, no runtime),
+# or "cloud" (NIKI infra, beta). Override at runtime with: niki run --backend worktree
+# backend = "docker"
