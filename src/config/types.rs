@@ -381,6 +381,9 @@ impl NikiConfig {
         if other.pipeline.max_revision_rounds.is_some() {
             self.pipeline.max_revision_rounds = other.pipeline.max_revision_rounds;
         }
+        if other.pipeline.topology != TopologyMode::default() {
+            self.pipeline.topology = other.pipeline.topology;
+        }
 
         // Knowledge ingestion is additive: union the doc globs and URLs.
         self.knowledge.doc_globs.extend(other.knowledge.doc_globs);
