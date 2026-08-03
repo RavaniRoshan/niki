@@ -49,7 +49,7 @@ impl Sandbox for CloudSandbox {
     async fn get_diff(&self) -> Result<String> {
         Err(unavailable())
     }
-    async fn exec(&self, _cmd: &[&str]) -> Result<ExecOutput> {
+    async fn exec(&self, _cmd: &[&str], _role: Option<&AgentRole>) -> Result<ExecOutput> {
         Err(unavailable())
     }
     async fn destroy(&self) -> Result<()> {

@@ -112,4 +112,5 @@ pub enum ModalAction {
     Confirm,
     Retry,
     Config,
+    Skip,
 }

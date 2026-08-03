@@ -7,6 +7,7 @@ use crate::llm::provider::TokenUsage;
 use crate::orchestrator::pipeline::{PipelineResult, Task};
 use crate::orchestrator::state::PipelineState;
 use console::Term;
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -97,11 +98,11 @@ impl AgenticDisplay {
 
     /// Enable the rich terminal TUI. Spawns the render thread; subsequent
     /// display calls forward events to it instead of printing inline.
-    pub fn enable_tui(&mut self, description: String) {
+    pub fn enable_tui(&mut self, description: String, project_path: PathBuf) {
         if !self.is_tty {
             return;
         }
-        let (tx, handle) = spawn_tui(description);
+        let (tx, handle) = spawn_tui(description, project_path);
         self.tui = Some(tx);
         self.tui_thread = Some(handle);
     }

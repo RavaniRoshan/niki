@@ -9,6 +9,7 @@
 //! (channel closed, `q`/`Esc`, or panic) it restores the terminal.
 
 use std::io;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -28,6 +29,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::modal::{self, ModalAction};
+use super::onboarding::{self, OnboardingAction};
 use super::pages::{AppState, PageId, PageRouter};
 
 /// Events emitted by the pipeline/display layer for the TUI to render.
@@ -84,13 +86,13 @@ impl Drop for RestoreGuard {
 /// Spawn the TUI thread. Returns the event sender (held by `AgenticDisplay`) and
 /// the join handle. The thread exits when the sender is dropped or the user
 /// presses `q`/`Esc`.
-pub fn spawn_tui(description: String) -> (Sender<DisplayEvent>, JoinHandle<()>) {
+pub fn spawn_tui(description: String, project_path: PathBuf) -> (Sender<DisplayEvent>, JoinHandle<()>) {
     let (tx, rx) = mpsc::channel();
-    let handle = std::thread::spawn(move || run_tui(rx, description));
+    let handle = std::thread::spawn(move || run_tui(rx, description, project_path));
     (tx, handle)
 }
 
-fn run_tui(rx: Receiver<DisplayEvent>, description: String) {
+fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBuf) {
     let _guard = RestoreGuard;
 
     if enable_raw_mode().is_err() {
@@ -122,8 +124,15 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String) {
 
     let config =
         crate::config::types::NikiConfig::load(std::path::Path::new(".")).unwrap_or_default();
-    let mut state = AppState::new(description, config, std::path::PathBuf::from("."));
+    let mut state = AppState::new(description, config, project_path.clone());
+    state.onboarded = onboarding::load_state(&project_path);
+
     let mut router = PageRouter::new();
+
+    // Show onboarding modal if needed
+    if onboarding::should_show_onboarding(&project_path) {
+        state.onboarding = Some(onboarding::OnboardingModal::new());
+    }
 
     loop {
         state.tick = state.tick.wrapping_add(1);
@@ -135,22 +144,26 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String) {
         // Handle keypresses (non-blocking)
         if event::poll(Duration::from_millis(40)).unwrap_or(false) {
             if let Ok(Event::Key(key)) = event::read() {
-                // Global quit: q or Esc on any page (except modal)
-                if state.modal.is_none() {
-                    if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
-                        break;
+                // Onboarding modal takes priority
+                if let Some(ref mut onboard) = state.onboarding {
+                    match onboard.handle_key(key) {
+                        OnboardingAction::None => {}
+                        OnboardingAction::Skip | OnboardingAction::Finish => {
+                            if onboard.dont_show_again {
+                                onboarding::persist_state(&project_path);
+                                state.onboarded = true;
+                            }
+                            state.onboarding = None;
+                        }
                     }
-                }
-
-                // Modal key handling
-                if let Some(ref modal) = state.modal {
+                } else if let Some(ref modal) = state.modal {
+                    // Regular modal key handling
                     match modal::handle_modal_key(key, modal) {
                         ModalAction::Dismiss => {
                             state.modal = None;
                         }
                         ModalAction::Confirm => {
                             state.modal = None;
-                            // If confirming quit, break
                             if key.code == KeyCode::Enter {
                                 break;
                             }
@@ -162,9 +175,16 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String) {
                             state.modal = None;
                             state.current_page = PageId::Config;
                         }
+                        ModalAction::Skip => {
+                            state.modal = None;
+                        }
                         ModalAction::None => {}
                     }
                 } else {
+                    // Global quit: q or Esc on any page (except modal)
+                    if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
+                        break;
+                    }
                     // Page-specific key handling
                     router.handle_key(key, &mut state);
                 }
@@ -248,6 +268,11 @@ fn render(frame: &mut ratatui::Frame, state: &AppState, router: &PageRouter) {
     // Render modal overlay if present
     if let Some(ref modal) = state.modal {
         modal::render_modal(frame, modal, size);
+    }
+
+    // Render onboarding modal if present
+    if let Some(ref onboard) = state.onboarding {
+        onboard.render(frame, size);
     }
 }
 

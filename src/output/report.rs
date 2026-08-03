@@ -605,6 +605,7 @@ mod tests {
             new_branch: "niki/abc12345".into(),
             pre_working_tree_clean: true,
             post_working_tree_clean: true,
+            no_rebase_or_force_push: true,
             blast_radius: "Hermetic: working tree never mutated.".into(),
             details: vec!["PASS existing branches preserved.".into()],
         };
