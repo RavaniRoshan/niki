@@ -18,6 +18,7 @@ use ratatui::layout::Rect;
 
 use crate::artifacts::types::AgentRole;
 use crate::config::NikiConfig;
+use crate::display::tips::TipsBanner;
 use crate::display::tui::DisplayEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -159,7 +160,10 @@ pub struct AppState {
     pub diff_content: Option<String>,
     pub cost_json: Option<String>,
     pub modal: Option<Modal>,
+    pub onboarding: Option<crate::display::onboarding::OnboardingModal>,
+    pub onboarded: bool,
     pub start_time: Option<std::time::Instant>,
+    pub tips: TipsBanner,
 }
 
 #[derive(Debug)]
@@ -177,6 +181,8 @@ pub enum Modal {
 
 impl AppState {
     pub fn new(description: String, config: NikiConfig, project_path: PathBuf) -> Self {
+        let tips_enabled = config.ui.tips.enabled;
+        let tips_rotation = config.ui.tips.rotation_seconds;
         Self {
             current_page: PageId::Run,
             run_state: RunState::Idle,
@@ -197,7 +203,10 @@ impl AppState {
             diff_content: None,
             cost_json: None,
             modal: None,
+            onboarding: None,
+            onboarded: false,
             start_time: None,
+            tips: TipsBanner::new(tips_enabled, tips_rotation),
         }
     }
 

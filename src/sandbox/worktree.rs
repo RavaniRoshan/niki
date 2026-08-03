@@ -179,7 +179,7 @@ impl Sandbox for WorktreeSandbox {
         .map_err(|e| anyhow!("diff spawn failed: {e}"))?
     }
 
-    async fn exec(&self, cmd: &[&str]) -> Result<ExecOutput> {
+    async fn exec(&self, cmd: &[&str], _role: Option<&AgentRole>) -> Result<ExecOutput> {
         if cmd.is_empty() {
             return Err(anyhow!("empty command"));
         }

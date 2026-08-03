@@ -377,7 +377,7 @@ impl Sandbox for DockerSandbox {
     async fn get_diff(&self) -> Result<String> {
         DockerSandbox::get_diff(self).await
     }
-    async fn exec(&self, cmd: &[&str]) -> Result<ExecOutput> {
+    async fn exec(&self, cmd: &[&str], _role: Option<&AgentRole>) -> Result<ExecOutput> {
         DockerSandbox::exec(self, cmd).await
     }
     async fn destroy(&self) -> Result<()> {

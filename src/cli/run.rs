@@ -17,7 +17,7 @@ use uuid::Uuid;
 /// Probe container runtime sockets: Podman (rootless, then rootful) → Docker.
 /// Returns the first connection that pings successfully, or an error if none work.
 #[allow(clippy::collapsible_if)]
-async fn connect_container_runtime() -> Result<Docker> {
+pub(crate) async fn connect_container_runtime() -> Result<Docker> {
     // 1. Respect explicit DOCKER_HOST override if set.
     if let Ok(host) = env::var("DOCKER_HOST") {
         if !host.is_empty() {
@@ -216,7 +216,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // Opt-in rich TUI. Must be enabled before any display call so the banner
     // and subsequent events are routed to the render thread.
     if args.tui {
-        display.enable_tui(task.description.clone());
+        display.enable_tui(task.description.clone(), task.project_path.clone());
     }
 
     if !args.quiet {
@@ -432,7 +432,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // misreported as NON-HERMETIC.
     if !result.final_diff.trim().is_empty() {
         if let Some(pre) = &pre_snapshot {
-            match crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string()) {
+            match crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string(), false) {
                 Ok(proof) => {
                     if let Err(e) = std::fs::write(
                         task_dir.join("safety_proof.json"),
