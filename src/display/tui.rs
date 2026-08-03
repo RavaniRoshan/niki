@@ -68,7 +68,8 @@ pub enum DisplayEvent {
     ReportContent(String),
     /// Cost breakdown JSON — feed it to the TUI Cost page.
     CostJson(String),
-    /// Artifacts directory path — feed it to the TUI Artifacts page.
+    /// Test log content — feed it to the TUI TestLog page.
+    TestLogContent(String),
     ArtifactsDir(String),
     Final,
 }
@@ -86,7 +87,10 @@ impl Drop for RestoreGuard {
 /// Spawn the TUI thread. Returns the event sender (held by `AgenticDisplay`) and
 /// the join handle. The thread exits when the sender is dropped or the user
 /// presses `q`/`Esc`.
-pub fn spawn_tui(description: String, project_path: PathBuf) -> (Sender<DisplayEvent>, JoinHandle<()>) {
+pub fn spawn_tui(
+    description: String,
+    project_path: PathBuf,
+) -> (Sender<DisplayEvent>, JoinHandle<()>) {
     let (tx, rx) = mpsc::channel();
     let handle = std::thread::spawn(move || run_tui(rx, description, project_path));
     (tx, handle)

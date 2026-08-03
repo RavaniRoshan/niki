@@ -2,12 +2,12 @@ use anyhow::Result;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use crate::goal::state::{GoalState, GoalStatus, TaskStatus};
-use crate::config::types::NikiConfig;
-use crate::orchestrator::pipeline::{execute_pipeline, Task, PipelineResult};
 use crate::artifacts::types::Verdict;
-use crate::sandbox::docker::ActiveContainers;
+use crate::config::types::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
+use crate::goal::state::{GoalState, GoalStatus, TaskStatus};
+use crate::orchestrator::pipeline::{PipelineResult, Task, execute_pipeline};
+use crate::sandbox::docker::ActiveContainers;
 
 pub struct GoalRunner;
 
@@ -29,7 +29,9 @@ impl GoalRunner {
 
         while state.iterations < state.max_iterations {
             if let Some(halt) = Self::halt_conditions(state) {
-                state.context_summary.push_str(&format!("\nHalted: {}\n", halt));
+                state
+                    .context_summary
+                    .push_str(&format!("\nHalted: {}\n", halt));
                 break;
             }
 
@@ -64,7 +66,9 @@ impl GoalRunner {
                 display,
                 containers.clone(),
                 false,
-            ).await {
+            )
+            .await
+            {
                 Ok(result) => {
                     let gate_passed = Self::staged_evidence_gates(&result, config).await;
                     if gate_passed {
@@ -75,10 +79,9 @@ impl GoalRunner {
                         ));
                     } else {
                         state.tasks[task_idx].status = TaskStatus::Blocked;
-                        state.negative_knowledge.push(format!(
-                            "Task {} failed evidence gates",
-                            task_id
-                        ));
+                        state
+                            .negative_knowledge
+                            .push(format!("Task {} failed evidence gates", task_id));
                         state.context_summary.push_str(&format!(
                             "\n  Task {} blocked: evidence gates failed.",
                             task_id
@@ -87,14 +90,12 @@ impl GoalRunner {
                 }
                 Err(e) => {
                     state.tasks[task_idx].status = TaskStatus::Blocked;
-                    state.negative_knowledge.push(format!(
-                        "Task {} pipeline error: {}",
-                        task_id, e
-                    ));
-                    state.context_summary.push_str(&format!(
-                        "\n  Task {} error: {}",
-                        task_id, e
-                    ));
+                    state
+                        .negative_knowledge
+                        .push(format!("Task {} pipeline error: {}", task_id, e));
+                    state
+                        .context_summary
+                        .push_str(&format!("\n  Task {} error: {}", task_id, e));
                 }
             }
 
@@ -109,22 +110,25 @@ impl GoalRunner {
             if all_pass {
                 state.status = GoalStatus::Complete;
                 state.completed_at = Some(chrono::Utc::now().to_rfc3339());
-                state.context_summary.push_str("\nGoal completed: all criteria passed.\n");
+                state
+                    .context_summary
+                    .push_str("\nGoal completed: all criteria passed.\n");
             } else {
-                state.context_summary.push_str("\nAll tasks done but criteria not met.\n");
+                state
+                    .context_summary
+                    .push_str("\nAll tasks done but criteria not met.\n");
             }
         } else {
-            state.context_summary.push_str("\nGoal runner finished with remaining tasks.\n");
+            state
+                .context_summary
+                .push_str("\nGoal runner finished with remaining tasks.\n");
         }
 
         state.save()?;
         Ok(())
     }
 
-    async fn staged_evidence_gates(
-        result: &PipelineResult,
-        _config: &NikiConfig,
-    ) -> bool {
+    async fn staged_evidence_gates(result: &PipelineResult, _config: &NikiConfig) -> bool {
         if result.verdict == Verdict::Rejected {
             return false;
         }
@@ -143,8 +147,10 @@ impl GoalRunner {
                     .output();
 
                 let passed = match output {
-                    Ok(out) => out.status.success()
-                        && !String::from_utf8_lossy(&out.stdout).contains("FAIL"),
+                    Ok(out) => {
+                        out.status.success()
+                            && !String::from_utf8_lossy(&out.stdout).contains("FAIL")
+                    }
                     Err(_) => false,
                 };
 
@@ -161,10 +167,7 @@ impl GoalRunner {
             return Some("Goal is cancelled".to_string());
         }
         if state.iterations >= state.max_iterations {
-            return Some(format!(
-                "Max iterations ({}) reached",
-                state.max_iterations
-            ));
+            return Some(format!("Max iterations ({}) reached", state.max_iterations));
         }
         None
     }

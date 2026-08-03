@@ -1,7 +1,7 @@
 use anyhow::Result;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use chrono::Utc;
 
 const GOALS_DIR: &str = ".opencode/goals";
 
@@ -83,9 +83,7 @@ impl std::fmt::Display for TaskStatus {
 }
 
 pub fn goals_dir() -> std::path::PathBuf {
-    std::env::current_dir()
-        .unwrap_or_default()
-        .join(GOALS_DIR)
+    std::env::current_dir().unwrap_or_default().join(GOALS_DIR)
 }
 
 pub fn state_path(slug: &str, id: &str) -> std::path::PathBuf {
@@ -138,7 +136,10 @@ impl GoalState {
         if claims.is_empty() {
             return Ok(None);
         }
-        let latest = claims.into_iter().max_by_key(|c| c.claimed_at.clone()).ok_or_else(|| anyhow::anyhow!("No claim files found"))?;
+        let latest = claims
+            .into_iter()
+            .max_by_key(|c| c.claimed_at.clone())
+            .ok_or_else(|| anyhow::anyhow!("No claim files found"))?;
         let state = Self::load(&latest.goal_id, &latest.goal_id)?;
         Ok(Some(state))
     }

@@ -432,7 +432,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // misreported as NON-HERMETIC.
     if !result.final_diff.trim().is_empty() {
         if let Some(pre) = &pre_snapshot {
-            match crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string(), false) {
+            match crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string(), false)
+            {
                 Ok(proof) => {
                     if let Err(e) = std::fs::write(
                         task_dir.join("safety_proof.json"),

@@ -7,7 +7,6 @@ pub use config::GoalConfig;
 pub use creator::GoalCreator;
 pub use runner::GoalRunner;
 pub use state::{
-    ClaimFile, GoalState, GoalStatus, GoalCriterion, GoalTask, TaskStatus,
-    goals_dir, state_path, claim_path, create_claim, remove_claim, remove_claim_by_goal,
-    claim_files,
+    ClaimFile, GoalCriterion, GoalState, GoalStatus, GoalTask, TaskStatus, claim_files, claim_path,
+    create_claim, goals_dir, remove_claim, remove_claim_by_goal, state_path,
 };

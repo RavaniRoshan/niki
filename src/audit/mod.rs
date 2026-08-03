@@ -1,8 +1,8 @@
+use chrono::Utc;
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
-use chrono::Utc;
 
 #[derive(Serialize)]
 pub struct AuditEntry {
