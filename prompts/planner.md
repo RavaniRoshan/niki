@@ -6,6 +6,11 @@ You are a software planning agent. Your job is to decompose a coding task into a
 ## Project Context
 {{ project_knowledge }}
 
+{% if task_relevant_context %}
+## Relevant Source Files (ranked by relevance to your task)
+{{ task_relevant_context }}
+{% endif %}
+
 {% if project_memory %}
 {{ project_memory }}
 {% endif %}

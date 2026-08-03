@@ -40,6 +40,9 @@ pub struct NikiConfig {
     /// "independent review" real instead of a rubber stamp.
     #[serde(default)]
     pub red_blue: RedBlueConfig,
+    /// Goal runner configuration.
+    #[serde(default)]
+    pub goal: GoalConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -131,6 +134,49 @@ impl Default for RedBlueConfig {
 }
 
 fn default_red_blue_enabled() -> bool {
+    true
+}
+
+/// Goal runner configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoalConfig {
+    #[serde(default = "default_goal_max_iterations")]
+    pub max_iterations: u32,
+    /// Prefix for goal git branches (default: "goal").
+    #[serde(default)]
+    pub branch_prefix: String,
+    /// Directory for goal state files (relative to project root).
+    #[serde(default)]
+    pub state_dir: String,
+    /// Fail fast when parallel stages error (default: true).
+    #[serde(default = "default_goal_fail_fast")]
+    pub fail_fast: bool,
+    /// Number of retry attempts for transient LLM errors (default: 3).
+    #[serde(default)]
+    pub retry_attempts: u32,
+    /// Delay between retries in milliseconds (default: 1000).
+    #[serde(default)]
+    pub retry_delay_ms: u64,
+}
+
+impl Default for GoalConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: default_goal_max_iterations(),
+            branch_prefix: String::new(),
+            state_dir: String::new(),
+            fail_fast: default_goal_fail_fast(),
+            retry_attempts: 3,
+            retry_delay_ms: 1000,
+        }
+    }
+}
+
+fn default_goal_max_iterations() -> u32 {
+    30
+}
+
+fn default_goal_fail_fast() -> bool {
     true
 }
 
