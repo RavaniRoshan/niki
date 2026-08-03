@@ -18,6 +18,31 @@ fn run_git(repo_path: &Path, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// Extract the file paths a unified diff touches, so the task commit stages only
+/// those files (never pre-existing uncommitted user changes). Parses `+++ b/<path>`
+/// lines; paths are made repo-relative (dropping the `a/`/`b/` prefix).
+fn diff_files(diff: &str) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+    for line in diff.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("+++ ") {
+            let path = rest.trim();
+            // `+++ /dev/null` (deletions) has no b/ path.
+            if path.starts_with("b/") {
+                let p = path[2..].to_string();
+                if !files.contains(&p) {
+                    files.push(p);
+                }
+            } else if !path.starts_with('/') && !path.is_empty() {
+                if !files.contains(&path.to_string()) {
+                    files.push(path.to_string());
+                }
+            }
+        }
+    }
+    files
+}
+
 /// Capture the current working-tree diff on the host. The sandbox applies the Coder's
 /// patch to the bind-mounted project directory, so the host working tree already holds
 /// the change — we read it from there rather than from inside the container.
@@ -101,7 +126,7 @@ fn normalize_patch(patch: &str) -> String {
 pub fn create_branch_and_commit(
     repo_path: &Path,
     branch_name: &str,
-    _diff: &str,
+    diff: &str,
     task_id: &str,
 ) -> Result<()> {
     let repo = Repository::open(repo_path)?;
@@ -120,10 +145,17 @@ pub fn create_branch_and_commit(
     let _branch = repo.branch(branch_name, &commit, false)?;
     repo.set_head(format!("refs/heads/{}", branch_name).as_str())?;
 
-    // The sandbox already applied the patch to the host working tree. Stage everything,
-    // then unstage the `.niki` working directory (task artifacts) and `niki.toml`
-    // (may contain secrets) so they aren't committed to the task branch.
-    run_git(repo_path, &["add", "-A"])?;
+    // Stage ONLY the files the task's diff touches. `git add -A` would sweep in any
+    // pre-existing uncommitted user changes, contaminating the task commit.
+    let files = diff_files(diff);
+    if files.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["add", "--"];
+    for f in &files {
+        args.push(f);
+    }
+    run_git(repo_path, &args)?;
     let _ = run_git(repo_path, &["reset", ".niki"]);
     let _ = run_git(repo_path, &["reset", "niki.toml"]);
 
@@ -152,4 +184,27 @@ pub fn create_branch_and_commit(
     repo.commit(Some("HEAD"), &sig, &sig, &commit_msg, &tree, &[&parent])?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diff_files_parses_unified_diff_paths() {
+        let diff = "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,3 +1,4 @@\n";
+        assert_eq!(diff_files(diff), vec!["src/lib.rs"]);
+    }
+
+    #[test]
+    fn diff_files_skips_dev_null_and_dedupes() {
+        let diff =
+            "--- a/src/lib.rs\n+++ b/src/lib.rs\n--- /dev/null\n+++ b/README.md\n+++ b/README.md\n";
+        assert_eq!(diff_files(diff), vec!["src/lib.rs", "README.md"]);
+    }
+
+    #[test]
+    fn diff_files_empty_for_non_diff() {
+        assert!(diff_files("hello world").is_empty());
+    }
 }

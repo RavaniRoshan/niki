@@ -22,6 +22,22 @@ use crate::sandbox::{ActiveContainers, SandboxBackend, create_sandbox};
 use crate::agents::run_agent;
 use minijinja::context;
 
+/// Serialize a CodeDiff's structured edits into SEARCH/REPLACE text so the
+/// sandbox (worktree or container) can apply them to its own working copy.
+fn code_diff_to_edit_text(diff: &CodeDiff) -> String {
+    let mut out = String::new();
+    for e in &diff.edits {
+        out.push_str("<<<<<<< SEARCH\n");
+        out.push_str(&e.search);
+        out.push('\n');
+        out.push_str("=======\n");
+        out.push_str(&e.replace);
+        out.push('\n');
+        out.push_str(">>>>>>> REPLACE\n\n");
+    }
+    out
+}
+
 pub struct Task {
     pub id: Uuid,
     pub description: String,
@@ -390,7 +406,10 @@ async fn run_parallel_coders(
                 _ => unreachable!("coder stage yields a CodeDiff"),
             };
             // Apply to this coder's own worktree so `get_diff` reflects only its change.
-            if let Err(e) = sandbox.apply_patch(&diff.unified_diff, &project_path).await {
+            if let Err(e) = sandbox
+                .apply_patch(&code_diff_to_edit_text(&diff), &project_path)
+                .await
+            {
                 eprintln!("Warning: coder worktree patch failed: {}", e);
             }
             let _wt_diff = sandbox.get_diff().await?;
@@ -806,7 +825,7 @@ pub async fn execute_pipeline(
                 };
                 coder_json = serde_json::to_string_pretty(&merged)?;
                 if let Err(e) = sandbox
-                    .apply_patch(&merged.unified_diff, &task.project_path)
+                    .apply_patch(&code_diff_to_edit_text(&merged), &task.project_path)
                     .await
                 {
                     eprintln!("Warning: Failed to apply synthesis patch: {}", e);
@@ -911,7 +930,7 @@ pub async fn execute_pipeline(
                             RoleOutput::Coder(diff) => {
                                 coder_json = json;
                                 if let Err(e) = sandbox
-                                    .apply_patch(&diff.unified_diff, &task.project_path)
+                                    .apply_patch(&code_diff_to_edit_text(&diff), &task.project_path)
                                     .await
                                 {
                                     eprintln!("Warning: Failed to apply coder patch: {}", e);
@@ -937,7 +956,10 @@ pub async fn execute_pipeline(
                                 // downstream Tester/Reviewer stages.
                                 coder_json = serde_json::to_string_pretty(&s.merged)?;
                                 if let Err(e) = sandbox
-                                    .apply_patch(&s.merged.unified_diff, &task.project_path)
+                                    .apply_patch(
+                                        &code_diff_to_edit_text(&s.merged),
+                                        &task.project_path,
+                                    )
                                     .await
                                 {
                                     eprintln!("Warning: Failed to apply synthesis patch: {}", e);
@@ -1024,7 +1046,7 @@ pub async fn execute_pipeline(
             coder_json = solo_json;
             if let Ok(parsed) = serde_json::from_str::<CodeDiff>(&coder_json) {
                 if let Err(e) = sandbox
-                    .apply_patch(&parsed.unified_diff, &task.project_path)
+                    .apply_patch(&code_diff_to_edit_text(&parsed), &task.project_path)
                     .await
                 {
                     eprintln!("Warning: Failed to apply solo coder patch: {}", e);
