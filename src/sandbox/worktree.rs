@@ -108,6 +108,57 @@ impl Sandbox for WorktreeSandbox {
     }
 
     async fn apply_patch(&self, patch: &str, _host_workspace: &Path) -> Result<()> {
+        // Try edit format (SEARCH/REPLACE blocks) first
+        let edit_blocks = crate::sandbox::edit_format::parse_edit_blocks(patch);
+        if !edit_blocks.is_empty() {
+            let wt = self.worktree_path.clone();
+            return tokio::task::spawn_blocking(move || -> Result<()> {
+                let files = find_files_in_worktree(&wt)?;
+                // Track which edits matched somewhere; edits that match nothing
+                // are reported so the caller can retry with a revision.
+                let mut unmatched: Vec<usize> = (0..edit_blocks.len()).collect();
+                let mut any_applied = false;
+                for (path, content) in &files {
+                    let mut edited = content.clone();
+                    let mut file_changed = false;
+                    for (i, block) in edit_blocks.iter().enumerate() {
+                        match crate::sandbox::edit_format::apply_single_edit_block(
+                            &edited,
+                            block.search.as_str(),
+                            block.replace.as_str(),
+                        )? {
+                            Some(new_content) => {
+                                edited = new_content;
+                                unmatched.retain(|&idx| idx != i);
+                                file_changed = true;
+                            }
+                            None => {}
+                        }
+                    }
+                    if file_changed {
+                        std::fs::write(path, edited)?;
+                        any_applied = true;
+                    }
+                }
+                if !unmatched.is_empty() && !any_applied {
+                    return Err(anyhow!(
+                        "No edit block matched any file in the worktree ({} unmatched)",
+                        unmatched.len()
+                    ));
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|e| anyhow!("edit apply spawn failed: {e}"))?;
+        }
+
+        // Fall back to unified diff format. If the text isn't a diff at all
+        // (e.g. an empty edits array), treat it as a no-op rather than failing.
+        let looks_like_diff =
+            patch.contains("diff --git") || patch.contains("--- a/") || patch.contains("+++ b/");
+        if !looks_like_diff {
+            return Ok(());
+        }
         let normalized = Self::normalize_patch(patch);
         let wt = self.worktree_path.clone();
         let patch_text = normalized.clone();
@@ -205,4 +256,27 @@ impl WorktreeSandbox {
             }
         }
     }
+}
+
+/// Find all tracked files in the worktree and return their contents.
+fn find_files_in_worktree(wt: &Path) -> Result<Vec<(std::path::PathBuf, String)>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(wt)
+        .args(["ls-files", "--cached", "--exclude-standard"])
+        .output()?;
+
+    let files = String::from_utf8_lossy(&output.stdout);
+    let mut result = Vec::new();
+
+    for file in files.lines() {
+        let path = wt.join(file);
+        if path.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                result.push((path, content));
+            }
+        }
+    }
+
+    Ok(result)
 }

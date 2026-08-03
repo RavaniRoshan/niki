@@ -10,6 +10,7 @@ use crate::config::DockerConfig;
 
 pub mod cloud;
 pub mod docker;
+pub mod edit_format;
 pub mod worktree;
 
 pub use docker::{ActiveContainers, DockerSandbox, ExecOutput};

@@ -84,17 +84,22 @@ pub enum Complexity {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodeDiff {
-    pub unified_diff: String, // Full unified diff of all changes
+    pub edits: Vec<EditBlock>, // Search/replace edit blocks
     pub files_changed: Vec<ChangedFile>,
     pub implementation_notes: String, // Coder's explanation of decisions made
     pub spec_adherence: String,       // How the implementation maps to the spec
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditBlock {
+    pub search: String,
+    pub replace: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChangedFile {
     pub path: String,
     pub action: FileAction,
-    pub diff: String,             // Per-file unified diff
     pub language: Option<String>, // Detected programming language
 }
 

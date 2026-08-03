@@ -2,7 +2,17 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
-    "unified_diff": { "type": "string" },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "search": { "type": "string" },
+          "replace": { "type": "string" }
+        },
+        "required": ["search", "replace"]
+      }
+    },
     "files_changed": {
       "type": "array",
       "items": {
@@ -13,19 +23,18 @@
             "type": "string",
             "enum": ["create", "modify", "delete"]
           },
-          "diff": { "type": "string" },
           "language": {
             "type": ["string", "null"]
           }
         },
-        "required": ["path", "action", "diff"]
+        "required": ["path", "action"]
       }
     },
     "implementation_notes": { "type": "string" },
     "spec_adherence": { "type": "string" }
   },
   "required": [
-    "unified_diff",
+    "edits",
     "files_changed",
     "implementation_notes",
     "spec_adherence"

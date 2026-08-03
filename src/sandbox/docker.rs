@@ -241,6 +241,54 @@ impl DockerSandbox {
     }
 
     pub async fn apply_patch(&self, patch: &str, host_workspace: &Path) -> Result<()> {
+        // Try edit format (SEARCH/REPLACE blocks) first
+        let edit_blocks = crate::sandbox::edit_format::parse_edit_blocks(patch);
+        if !edit_blocks.is_empty() {
+            // Read all files in the workspace and apply edits
+            let files = self.list_files().await?;
+            let mut unmatched: Vec<usize> = (0..edit_blocks.len()).collect();
+            let mut any_applied = false;
+            for file_path in files {
+                let full_path = host_workspace.join(&file_path);
+                if let Ok(content) = std::fs::read_to_string(&full_path) {
+                    let mut edited = content.clone();
+                    let mut file_changed = false;
+                    for (i, block) in edit_blocks.iter().enumerate() {
+                        match crate::sandbox::edit_format::apply_single_edit_block(
+                            &edited,
+                            &block.search,
+                            &block.replace,
+                        )? {
+                            Some(new_content) => {
+                                edited = new_content;
+                                unmatched.retain(|&idx| idx != i);
+                                file_changed = true;
+                            }
+                            None => {}
+                        }
+                    }
+                    if file_changed {
+                        std::fs::write(&full_path, edited)?;
+                        any_applied = true;
+                    }
+                }
+            }
+            if !unmatched.is_empty() && !any_applied {
+                return Err(anyhow::anyhow!(
+                    "No edit block matched any file in the workspace ({} unmatched)",
+                    unmatched.len()
+                ));
+            }
+            return Ok(());
+        }
+
+        // Fall back to unified diff format. If the text isn't a diff at all
+        // (e.g. an empty edits array), treat it as a no-op rather than failing.
+        let looks_like_diff =
+            patch.contains("diff --git") || patch.contains("--- a/") || patch.contains("+++ b/");
+        if !looks_like_diff {
+            return Ok(());
+        }
         // The host workspace is bind-mounted at /workspace inside the container, so the
         // patch we write to `host_workspace` is visible there as /workspace/.niki-tmp.patch.
         // Run git from /workspace (the repo root) or it won't find the repo or the patch.
@@ -286,6 +334,18 @@ impl DockerSandbox {
             .exec(&["sh", "-c", "cd /workspace && git diff"])
             .await?;
         Ok(output.stdout)
+    }
+
+    /// List all tracked files in the workspace.
+    async fn list_files(&self) -> Result<Vec<String>> {
+        let output = self
+            .exec(&[
+                "sh",
+                "-c",
+                "cd /workspace && git ls-files --cached --exclude-standard",
+            ])
+            .await?;
+        Ok(output.stdout.lines().map(|s| s.to_string()).collect())
     }
 
     pub async fn destroy(&self) -> Result<()> {
