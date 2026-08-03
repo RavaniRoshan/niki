@@ -1,6 +1,7 @@
 pub mod config;
 pub mod dashboard;
 pub mod eval;
+pub mod goal;
 pub mod memory;
 pub mod recommend;
 pub mod report;
