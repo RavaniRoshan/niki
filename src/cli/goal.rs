@@ -3,12 +3,12 @@ use clap::{Args, Subcommand};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::goal::state::{GoalState, claim_files, create_claim, remove_claim_by_goal};
+use crate::cli::run::connect_container_runtime;
 use crate::config::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
 use crate::goal::runner::GoalRunner;
+use crate::goal::state::{GoalState, claim_files, create_claim, remove_claim_by_goal};
 use crate::sandbox::docker::ActiveContainers;
-use crate::cli::run::connect_container_runtime;
 
 #[derive(Args)]
 pub struct GoalArgs {
@@ -56,7 +56,11 @@ enum GoalCommands {
 
 pub async fn handle(args: &GoalArgs) -> Result<()> {
     match &args.command {
-        GoalCommands::New { objective, scope, max } => handle_new(objective, scope.as_deref(), *max).await,
+        GoalCommands::New {
+            objective,
+            scope,
+            max,
+        } => handle_new(objective, scope.as_deref(), *max).await,
         GoalCommands::List => handle_list(),
         GoalCommands::Status { id } => handle_status(id.as_deref()).await,
         GoalCommands::Pause => handle_pause().await,
@@ -113,9 +117,15 @@ async fn handle_new(objective: &str, scope: Option<&str>, max: u32) -> Result<()
     println!("  Scope: {}", state.scope);
     println!();
     println!("Next steps:");
-    println!("  1. Review and refine criteria in .opencode/goals/{}.json", state.slug);
+    println!(
+        "  1. Review and refine criteria in .opencode/goals/{}.json",
+        state.slug
+    );
     println!("  2. Run `niki goal status` to see progress");
-    println!("  3. Run `niki goal resume {}` to start the autonomous loop", state.id);
+    println!(
+        "  3. Run `niki goal resume {}` to start the autonomous loop",
+        state.id
+    );
 
     Ok(())
 }
@@ -133,10 +143,7 @@ fn handle_list() -> Result<()> {
         let created = state.created_at.chars().take(10).collect::<String>();
         println!(
             "  {:<8} {:<8} {:<40} {}",
-            state.id,
-            state.status,
-            state.slug,
-            created
+            state.id, state.status, state.slug, created
         );
     }
     Ok(())
@@ -151,7 +158,10 @@ async fn handle_status(id: Option<&str>) -> Result<()> {
                 println!("No active goal. Create one with `niki goal new <objective>`.");
                 return Ok(());
             }
-            let latest = claims.into_iter().max_by_key(|c| c.claimed_at.clone()).ok_or_else(|| anyhow::anyhow!("No active goal"))?;
+            let latest = claims
+                .into_iter()
+                .max_by_key(|c| c.claimed_at.clone())
+                .ok_or_else(|| anyhow::anyhow!("No active goal"))?;
             GoalState::find_by_id(&latest.goal_id)?
         }
     };
@@ -176,7 +186,11 @@ fn print_goal_status(state: &GoalState) {
     println!();
 
     let total_tasks = state.tasks.len();
-    let done_tasks = state.tasks.iter().filter(|t| t.status == crate::goal::state::TaskStatus::Done).count();
+    let done_tasks = state
+        .tasks
+        .iter()
+        .filter(|t| t.status == crate::goal::state::TaskStatus::Done)
+        .count();
     println!("Tasks: {}/{} done", done_tasks, total_tasks);
     for task in &state.tasks {
         let icon = match task.status {
@@ -190,10 +204,18 @@ fn print_goal_status(state: &GoalState) {
     println!();
 
     let total_criteria = state.criteria.len();
-    let passed = state.criteria.iter().filter(|c| c.result.as_deref() == Some("PASS")).count();
+    let passed = state
+        .criteria
+        .iter()
+        .filter(|c| c.result.as_deref() == Some("PASS"))
+        .count();
     println!("Criteria: {}/{} passed", passed, total_criteria);
     for c in &state.criteria {
-        let icon = if c.result.as_deref() == Some("PASS") { "✓" } else { " " };
+        let icon = if c.result.as_deref() == Some("PASS") {
+            "✓"
+        } else {
+            " "
+        };
         println!("  {} [{}] {}", icon, c.label, c.check);
     }
 }
@@ -204,8 +226,12 @@ async fn handle_pause() -> Result<()> {
         println!("No active goal to pause.");
         return Ok(());
     }
-    let latest = claims.into_iter().max_by_key(|c| c.claimed_at.clone()).ok_or_else(|| anyhow::anyhow!("No active goal"))?;
-    let mut state = GoalState::find_by_id(&latest.goal_id)?.ok_or_else(|| anyhow::anyhow!("Goal state not found"))?;
+    let latest = claims
+        .into_iter()
+        .max_by_key(|c| c.claimed_at.clone())
+        .ok_or_else(|| anyhow::anyhow!("No active goal"))?;
+    let mut state = GoalState::find_by_id(&latest.goal_id)?
+        .ok_or_else(|| anyhow::anyhow!("Goal state not found"))?;
     state.status = crate::goal::state::GoalStatus::Paused;
     state.save()?;
     remove_claim_by_goal(&state.id)?;
@@ -214,7 +240,8 @@ async fn handle_pause() -> Result<()> {
 }
 
 async fn handle_resume(id: &str) -> Result<()> {
-    let mut state = GoalState::find_by_id(id)?.ok_or_else(|| anyhow::anyhow!("Goal not found: {}", id))?;
+    let mut state =
+        GoalState::find_by_id(id)?.ok_or_else(|| anyhow::anyhow!("Goal not found: {}", id))?;
     if state.status != crate::goal::state::GoalStatus::Paused {
         println!("Goal {} is not paused (status: {}).", id, state.status);
         return Ok(());
@@ -223,7 +250,10 @@ async fn handle_resume(id: &str) -> Result<()> {
     state.save()?;
     let session_id = format!("goal-{}", id);
     create_claim(&session_id, &id)?;
-    println!("Goal resumed. {} iterations remaining.", state.max_iterations - state.iterations);
+    println!(
+        "Goal resumed. {} iterations remaining.",
+        state.max_iterations - state.iterations
+    );
     Ok(())
 }
 
@@ -233,12 +263,19 @@ async fn handle_cancel() -> Result<()> {
         println!("No active goal to cancel.");
         return Ok(());
     }
-    let latest = claims.into_iter().max_by_key(|c| c.claimed_at.clone()).ok_or_else(|| anyhow::anyhow!("No active goal"))?;
-    let mut state = GoalState::find_by_id(&latest.goal_id)?.ok_or_else(|| anyhow::anyhow!("Goal state not found"))?;
+    let latest = claims
+        .into_iter()
+        .max_by_key(|c| c.claimed_at.clone())
+        .ok_or_else(|| anyhow::anyhow!("No active goal"))?;
+    let mut state = GoalState::find_by_id(&latest.goal_id)?
+        .ok_or_else(|| anyhow::anyhow!("Goal state not found"))?;
     state.status = crate::goal::state::GoalStatus::Cancelled;
     state.save()?;
     remove_claim_by_goal(&state.id)?;
-    println!("Goal cancelled. State preserved at .opencode/goals/{}.json", state.slug);
+    println!(
+        "Goal cancelled. State preserved at .opencode/goals/{}.json",
+        state.slug
+    );
     Ok(())
 }
 
@@ -251,7 +288,10 @@ async fn handle_run(id: Option<&str>) -> Result<()> {
                 println!("No active goal. Create one with `niki goal new <objective>`.");
                 return Ok(());
             }
-            let latest = claims.into_iter().max_by_key(|c| c.claimed_at.clone()).ok_or_else(|| anyhow::anyhow!("No active goal"))?;
+            let latest = claims
+                .into_iter()
+                .max_by_key(|c| c.claimed_at.clone())
+                .ok_or_else(|| anyhow::anyhow!("No active goal"))?;
             GoalState::find_by_id(&latest.goal_id)?
         }
     };
@@ -259,7 +299,10 @@ async fn handle_run(id: Option<&str>) -> Result<()> {
     let mut state = state.ok_or_else(|| anyhow::anyhow!("Goal not found"))?;
 
     if state.status != crate::goal::state::GoalStatus::Active {
-        println!("Goal {} is not active (status: {}).", state.id, state.status);
+        println!(
+            "Goal {} is not active (status: {}).",
+            state.id, state.status
+        );
         return Ok(());
     }
 
@@ -272,7 +315,10 @@ async fn handle_run(id: Option<&str>) -> Result<()> {
     let docker = match connect_container_runtime().await {
         Ok(d) => Some(d),
         Err(e) => {
-            eprintln!("Warning: no container runtime available: {}. Using worktree backend.", e);
+            eprintln!(
+                "Warning: no container runtime available: {}. Using worktree backend.",
+                e
+            );
             None
         }
     };
@@ -286,8 +332,13 @@ async fn handle_run(id: Option<&str>) -> Result<()> {
     println!("Goal loop finished.");
     println!("  Status: {}", state.status);
     println!("  Iterations: {}", state.iterations);
-    println!("  Tasks completed: {}/{}", 
-        state.tasks.iter().filter(|t| t.status == crate::goal::state::TaskStatus::Done).count(),
+    println!(
+        "  Tasks completed: {}/{}",
+        state
+            .tasks
+            .iter()
+            .filter(|t| t.status == crate::goal::state::TaskStatus::Done)
+            .count(),
         state.tasks.len()
     );
 
@@ -300,8 +351,12 @@ async fn handle_check() -> Result<()> {
         println!("No active goal to check.");
         return Ok(());
     }
-    let latest = claims.into_iter().max_by_key(|c| c.claimed_at.clone()).ok_or_else(|| anyhow::anyhow!("No active goal"))?;
-    let state = GoalState::find_by_id(&latest.goal_id)?.ok_or_else(|| anyhow::anyhow!("Goal state not found"))?;
+    let latest = claims
+        .into_iter()
+        .max_by_key(|c| c.claimed_at.clone())
+        .ok_or_else(|| anyhow::anyhow!("No active goal"))?;
+    let state = GoalState::find_by_id(&latest.goal_id)?
+        .ok_or_else(|| anyhow::anyhow!("Goal state not found"))?;
 
     println!("Checking criteria for goal: {}", state.slug);
     println!();
@@ -353,7 +408,13 @@ async fn handle_check() -> Result<()> {
 
 fn slugify(text: &str) -> String {
     text.chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .split('-')
         .filter(|s| !s.is_empty())

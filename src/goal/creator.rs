@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::goal::state::{GoalState, GoalCriterion, GoalTask, GoalStatus, TaskStatus};
+use crate::goal::state::{GoalCriterion, GoalState, GoalStatus, GoalTask, TaskStatus};
 
 pub struct GoalCreator;
 
@@ -16,11 +16,7 @@ struct SurveyResult {
 }
 
 impl GoalCreator {
-    pub fn create(
-        objective: &str,
-        scope: Option<&str>,
-        max_iterations: u32,
-    ) -> Result<GoalState> {
+    pub fn create(objective: &str, scope: Option<&str>, max_iterations: u32) -> Result<GoalState> {
         let slug = slugify(objective);
         let id = generate_id();
         let branch_name = format!("goal/{}-{}", slug, id);
@@ -98,13 +94,7 @@ fn survey_codebase(scope: &str) -> SurveyResult {
 
     let todo_output = run_cmd(
         "grep",
-        &[
-            "-r",
-            "--include=*.rs",
-            "-c",
-            "TODO\\|FIXME\\|HACK",
-            scope,
-        ],
+        &["-r", "--include=*.rs", "-c", "TODO\\|FIXME\\|HACK", scope],
     );
     let todo_count: usize = todo_output
         .lines()
@@ -154,7 +144,8 @@ fn derive_criteria(objective: &str, survey: &SurveyResult) -> Vec<GoalCriterion>
     } else {
         criteria.push(GoalCriterion {
             label: "No new TODO/FIXME introduced".to_string(),
-            check: "! grep -r --include='*.rs' 'TODO\\|FIXME\\|HACK' . 2>/dev/null | grep .".to_string(),
+            check: "! grep -r --include='*.rs' 'TODO\\|FIXME\\|HACK' . 2>/dev/null | grep ."
+                .to_string(),
             must_pass: true,
             coverage_gate: false,
             result: None,
@@ -363,7 +354,13 @@ fn build_context_summary(
 
 fn slugify(text: &str) -> String {
     text.chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .split('-')
         .filter(|s| !s.is_empty())
@@ -451,10 +448,7 @@ mod tests {
             .criteria
             .iter()
             .any(|c| c.label.contains("cargo check") || c.label.contains("Tests"));
-        assert!(
-            has_user_facing,
-            "must have at least one user-facing check"
-        );
+        assert!(has_user_facing, "must have at least one user-facing check");
     }
 
     #[test]

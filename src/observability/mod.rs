@@ -1,7 +1,7 @@
+use chrono::Utc;
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
-use chrono::Utc;
 
 pub struct Span {
     pub name: String,

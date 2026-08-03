@@ -109,7 +109,12 @@ impl TipsBanner {
 
         let tip = self.current_tip();
         let line = Line::from(vec![
-            Span::styled(" 💡 ", Style::default().fg(super::theme::AMBER).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " 💡 ",
+                Style::default()
+                    .fg(super::theme::AMBER)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(tip, Style::default().fg(super::theme::FG_DIM)),
         ]);
         frame.render_widget(ratatui::widgets::Paragraph::new(line), area);
@@ -122,7 +127,11 @@ mod tests {
 
     #[test]
     fn tips_count() {
-        assert!(TIPS.len() >= 40, "Expected at least 40 tips, got {}", TIPS.len());
+        assert!(
+            TIPS.len() >= 40,
+            "Expected at least 40 tips, got {}",
+            TIPS.len()
+        );
     }
 
     #[test]

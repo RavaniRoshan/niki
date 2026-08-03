@@ -190,8 +190,7 @@ pub fn prove(
             let lower = entry.to_lowercase();
             if lower.contains("rebase") {
                 no_rebase_or_force_push = false;
-                rebase_or_force_details
-                    .push(format!("rebase detected on `{}`: {}", branch, entry));
+                rebase_or_force_details.push(format!("rebase detected on `{}`: {}", branch, entry));
             }
             if lower.contains("force push") || lower.contains("forced update") {
                 no_rebase_or_force_push = false;
@@ -414,10 +413,7 @@ mod tests {
     /// Snapshot captures reflog entries for each branch.
     #[test]
     fn snapshot_captures_reflog_entries() {
-        let dir = std::env::temp_dir().join(format!(
-            "niki-safety-reflog-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("niki-safety-reflog-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let guard = TestDir(&dir);
@@ -465,10 +461,7 @@ mod tests {
     /// Prove detects rebase in reflog and marks no_rebase_or_force_push false.
     #[test]
     fn prove_detects_rebase_in_reflog() {
-        let dir = std::env::temp_dir().join(format!(
-            "niki-safety-rebase-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("niki-safety-rebase-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let guard = TestDir(&dir);
@@ -509,8 +502,7 @@ mod tests {
         run(&["commit", "-q", "-m", "niki work"]);
 
         // The feature branch's reflog should contain a rebase entry.
-        let proof =
-            prove(&pre, &dir, "niki/test-rebase", "test", false).unwrap();
+        let proof = prove(&pre, &dir, "niki/test-rebase", "test", false).unwrap();
         assert!(
             !proof.no_rebase_or_force_push,
             "expected rebase detected in reflog"
@@ -523,10 +515,7 @@ mod tests {
     /// Strict mode returns an error when hermetic invariants are broken.
     #[test]
     fn strict_mode_fails_on_non_hermetic() {
-        let dir = std::env::temp_dir().join(format!(
-            "niki-safety-strict-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("niki-safety-strict-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let guard = TestDir(&dir);
@@ -573,10 +562,8 @@ mod tests {
     /// Strict mode succeeds when hermetic invariants hold.
     #[test]
     fn strict_mode_passes_on_hermetic() {
-        let dir = std::env::temp_dir().join(format!(
-            "niki-safety-strict-ok-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("niki-safety-strict-ok-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let guard = TestDir(&dir);

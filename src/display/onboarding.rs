@@ -41,11 +41,7 @@ impl OnboardingPage {
 
     pub fn prev(&self) -> Option<OnboardingPage> {
         let i = self.index();
-        if i == 0 {
-            None
-        } else {
-            Some(Self::ALL[i - 1])
-        }
+        if i == 0 { None } else { Some(Self::ALL[i - 1]) }
     }
 
     pub fn title(&self) -> &'static str {
@@ -186,10 +182,7 @@ impl OnboardingModal {
         let total = OnboardingPage::ALL.len();
 
         let mut nav_spans = vec![
-            Span::styled(
-                "  [←/→] prev/next",
-                Style::default().fg(theme::FG_DIM),
-            ),
+            Span::styled("  [←/→] prev/next", Style::default().fg(theme::FG_DIM)),
             Span::styled(
                 format!("   {} {}", page_idx, total),
                 Style::default().fg(theme::FG_DIM),
@@ -197,10 +190,7 @@ impl OnboardingModal {
         ];
 
         if self.dont_show_again {
-            nav_spans.push(Span::styled(
-                "   [s] on",
-                Style::default().fg(theme::GREEN),
-            ));
+            nav_spans.push(Span::styled("   [s] on", Style::default().fg(theme::GREEN)));
         } else {
             nav_spans.push(Span::styled(
                 "   [s] off",
@@ -285,30 +275,21 @@ impl OnboardingModal {
                 Span::styled("      [Esc] close/back", Style::default().fg(theme::FG)),
             ]),
             Line::from(vec![
-                Span::styled(
-                    "    [p] pipeline",
-                    Style::default().fg(theme::FG),
-                ),
+                Span::styled("    [p] pipeline", Style::default().fg(theme::FG)),
                 Span::styled(
                     "    [a] agents     [d] diff",
                     Style::default().fg(theme::FG),
                 ),
             ]),
             Line::from(vec![
-                Span::styled(
-                    "    [v] verdict",
-                    Style::default().fg(theme::FG),
-                ),
+                Span::styled("    [v] verdict", Style::default().fg(theme::FG)),
                 Span::styled(
                     "    [c] cost       [f] artifacts",
                     Style::default().fg(theme::FG),
                 ),
             ]),
             Line::from(vec![
-                Span::styled(
-                    "    [h] history",
-                    Style::default().fg(theme::FG),
-                ),
+                Span::styled("    [h] history", Style::default().fg(theme::FG)),
                 Span::styled(
                     "    [,] config     [?] help",
                     Style::default().fg(theme::FG),
@@ -326,10 +307,7 @@ impl OnboardingModal {
                     "    [Space] pause  [j/k] scroll",
                     Style::default().fg(theme::FG),
                 ),
-                Span::styled(
-                    "  [g/G] top/bottom",
-                    Style::default().fg(theme::FG),
-                ),
+                Span::styled("  [g/G] top/bottom", Style::default().fg(theme::FG)),
             ]),
         ]
     }
@@ -586,16 +564,28 @@ mod tests {
         let mut modal = OnboardingModal::new();
         assert_eq!(modal.page, OnboardingPage::Welcome);
 
-        modal.handle_key(KeyEvent::new(KeyCode::Right, ratatui::crossterm::event::KeyModifiers::NONE));
+        modal.handle_key(KeyEvent::new(
+            KeyCode::Right,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(modal.page, OnboardingPage::Shortcuts);
 
-        modal.handle_key(KeyEvent::new(KeyCode::Char('n'), ratatui::crossterm::event::KeyModifiers::NONE));
+        modal.handle_key(KeyEvent::new(
+            KeyCode::Char('n'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(modal.page, OnboardingPage::Workflow);
 
-        modal.handle_key(KeyEvent::new(KeyCode::Tab, ratatui::crossterm::event::KeyModifiers::NONE));
+        modal.handle_key(KeyEvent::new(
+            KeyCode::Tab,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(modal.page, OnboardingPage::SandboxBackends);
 
-        modal.handle_key(KeyEvent::new(KeyCode::Right, ratatui::crossterm::event::KeyModifiers::NONE));
+        modal.handle_key(KeyEvent::new(
+            KeyCode::Right,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(modal.page, OnboardingPage::Help);
         assert!(modal.is_complete());
     }
@@ -605,17 +595,26 @@ mod tests {
         let mut modal = OnboardingModal::new();
         modal.page = OnboardingPage::Workflow;
 
-        modal.handle_key(KeyEvent::new(KeyCode::Left, ratatui::crossterm::event::KeyModifiers::NONE));
+        modal.handle_key(KeyEvent::new(
+            KeyCode::Left,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(modal.page, OnboardingPage::Shortcuts);
 
-        modal.handle_key(KeyEvent::new(KeyCode::Char('p'), ratatui::crossterm::event::KeyModifiers::NONE));
+        modal.handle_key(KeyEvent::new(
+            KeyCode::Char('p'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(modal.page, OnboardingPage::Welcome);
     }
 
     #[test]
     fn modal_skip_action() {
         let mut modal = OnboardingModal::new();
-        let action = modal.handle_key(KeyEvent::new(KeyCode::Esc, ratatui::crossterm::event::KeyModifiers::NONE));
+        let action = modal.handle_key(KeyEvent::new(
+            KeyCode::Esc,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(action, OnboardingAction::Skip);
     }
 
@@ -623,7 +622,10 @@ mod tests {
     fn modal_finish_action() {
         let mut modal = OnboardingModal::new();
         modal.page = OnboardingPage::Help;
-        let action = modal.handle_key(KeyEvent::new(KeyCode::Enter, ratatui::crossterm::event::KeyModifiers::NONE));
+        let action = modal.handle_key(KeyEvent::new(
+            KeyCode::Enter,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(action, OnboardingAction::Finish);
     }
 
@@ -632,7 +634,10 @@ mod tests {
         let mut modal = OnboardingModal::new();
         assert_eq!(modal.page, OnboardingPage::Welcome);
 
-        let action = modal.handle_key(KeyEvent::new(KeyCode::Enter, ratatui::crossterm::event::KeyModifiers::NONE));
+        let action = modal.handle_key(KeyEvent::new(
+            KeyCode::Enter,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(action, OnboardingAction::None);
         assert_eq!(modal.page, OnboardingPage::Shortcuts);
     }
@@ -642,10 +647,16 @@ mod tests {
         let mut modal = OnboardingModal::new();
         assert!(modal.dont_show_again);
 
-        modal.handle_key(KeyEvent::new(KeyCode::Char('s'), ratatui::crossterm::event::KeyModifiers::NONE));
+        modal.handle_key(KeyEvent::new(
+            KeyCode::Char('s'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert!(!modal.dont_show_again);
 
-        modal.handle_key(KeyEvent::new(KeyCode::Char('s'), ratatui::crossterm::event::KeyModifiers::NONE));
+        modal.handle_key(KeyEvent::new(
+            KeyCode::Char('s'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert!(modal.dont_show_again);
     }
 
