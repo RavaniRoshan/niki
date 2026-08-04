@@ -46,3 +46,5 @@ You MUST output a single valid JSON object conforming to this schema:
    verification you did not perform.
 6. This fast-path trades away NIKI's independent adversarial Red/Blue review, so you are
    the only check on your own work. Be especially rigorous about security and edge cases.
+
+IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.

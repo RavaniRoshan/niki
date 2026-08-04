@@ -41,7 +41,7 @@ impl Page for TestLogPage {
             Span::styled(
                 " test log",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::fg_color())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -50,7 +50,7 @@ impl Page for TestLogPage {
                 } else {
                     format!(" · {}", state.branch_name)
                 },
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             ),
         ]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
@@ -67,29 +67,29 @@ impl Page for TestLogPage {
             if stripped.starts_with("test result:") {
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
-                    Span::styled(line.to_string(), Style::default().fg(theme::GREEN).add_modifier(Modifier::BOLD)),
+                    Span::styled(line.to_string(), Style::default().fg(theme::GREEN()).add_modifier(Modifier::BOLD)),
                 ]));
             } else if stripped.starts_with("running") || stripped.starts_with("Doc-tests") {
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
-                    Span::styled(line.to_string(), Style::default().fg(theme::FG_DIM)),
+                    Span::styled(line.to_string(), Style::default().fg(theme::fg_dim())),
                 ]));
             } else if stripped.starts_with("test ") && stripped.contains(" ... ok") {
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
-                    Span::styled(line.to_string(), Style::default().fg(theme::GREEN)),
+                    Span::styled(line.to_string(), Style::default().fg(theme::GREEN())),
                 ]));
             } else if stripped.starts_with("Running") || stripped.starts_with("running 0 tests") {
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
-                    Span::styled(line.to_string(), Style::default().fg(theme::AMBER)),
+                    Span::styled(line.to_string(), Style::default().fg(theme::AMBER())),
                 ]));
             } else if line.trim().is_empty() {
                 lines.push(Line::from(""));
             } else {
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
-                    Span::styled(line.to_string(), Style::default().fg(theme::FG_DIM)),
+                    Span::styled(line.to_string(), Style::default().fg(theme::fg_dim())),
                 ]));
             }
         }
@@ -101,7 +101,7 @@ impl Page for TestLogPage {
 
         let log_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border_color()))
             .title(" TEST OUTPUT ");
 
         frame.render_widget(
@@ -114,7 +114,7 @@ impl Page for TestLogPage {
 
         let footer = Line::from(vec![Span::styled(
             " [j/k] scroll   [g/G] top/bottom   [Esc] back",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[2]);
     }

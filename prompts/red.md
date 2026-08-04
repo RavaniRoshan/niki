@@ -53,3 +53,5 @@ You MUST output a single valid JSON object conforming to this schema:
 - Each `challenge.id` must be unique and stable (e.g. "R1", "R2").
 - `claim` must be a specific assertion the Reviewer can either uphold or refute.
 - `severity`/`category` use the same vocabulary as the Reviewer's issues.
+
+IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.

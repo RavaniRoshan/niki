@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use uuid::Uuid;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineState {
     pub task_id: Uuid,
 }
@@ -46,6 +46,13 @@ pub struct StageMetric {
     pub latency_ms: u64,
     /// Estimated USD cost; `0.0` when the model is not in the price table.
     pub cost_usd: f64,
+    /// Number of transient-error retry attempts the agent made (0 = no retries).
+    #[serde(default)]
+    pub retry_count: u32,
+    /// Time to first token (ms) — how long from the request until the first
+    /// text chunk arrived. `0` when unavailable.
+    #[serde(default)]
+    pub ttft_ms: u32,
 }
 
 impl StageMetric {
@@ -63,7 +70,7 @@ impl StageMetric {
 }
 
 /// Persisted record of a task's lifecycle, written to `.niki/tasks/<id>/task.json`.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TaskStatus {
     Running,
     Completed,
@@ -97,6 +104,12 @@ pub struct TaskRecord {
     pub total_output_tokens: u32,
     pub total_cost_usd: f64,
     pub total_latency_ms: u64,
+    /// Sum of all retry attempts across agents.
+    #[serde(default)]
+    pub total_retry_count: u32,
+    /// Maximum TTFT across all agents (ms).
+    #[serde(default)]
+    pub max_ttft_ms: u32,
 }
 
 impl TaskRecord {
@@ -114,6 +127,8 @@ impl TaskRecord {
             total_output_tokens: 0,
             total_cost_usd: 0.0,
             total_latency_ms: 0,
+            total_retry_count: 0,
+            max_ttft_ms: 0,
         }
     }
 
@@ -124,6 +139,10 @@ impl TaskRecord {
             self.total_output_tokens += m.output_tokens;
             self.total_cost_usd += m.cost_usd;
             self.total_latency_ms += m.latency_ms;
+            self.total_retry_count += m.retry_count;
+            if m.ttft_ms > self.max_ttft_ms {
+                self.max_ttft_ms = m.ttft_ms;
+            }
         }
         self.agent_metrics.extend(metrics.iter().cloned());
     }

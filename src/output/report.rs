@@ -588,6 +588,8 @@ mod tests {
                 output_tokens: 1,
                 latency_ms: 1,
                 cost_usd: 0.0,
+                retry_count: 0,
+                ttft_ms: 0,
             }],
             safety_proof: proof,
             isolation: vec![],
@@ -930,6 +932,8 @@ index 3333333..4444444 100644
                 output_tokens: 200,
                 latency_ms: 1,
                 cost_usd: 0.0100,
+                retry_count: 0,
+                ttft_ms: 10,
             },
             StageMetric {
                 role: AgentRole::Coder,
@@ -939,6 +943,8 @@ index 3333333..4444444 100644
                 output_tokens: 500,
                 latency_ms: 1,
                 cost_usd: 0.0200,
+                retry_count: 0,
+                ttft_ms: 12,
             },
             StageMetric {
                 role: AgentRole::Tester,
@@ -948,6 +954,8 @@ index 3333333..4444444 100644
                 output_tokens: 100,
                 latency_ms: 1,
                 cost_usd: 0.0050,
+                retry_count: 0,
+                ttft_ms: 5,
             },
             StageMetric {
                 role: AgentRole::Reviewer,
@@ -957,6 +965,8 @@ index 3333333..4444444 100644
                 output_tokens: 300,
                 latency_ms: 1,
                 cost_usd: 0.0150,
+                retry_count: 0,
+                ttft_ms: 15,
             },
         ];
         let result = cost_result(metrics);
@@ -988,6 +998,8 @@ index 3333333..4444444 100644
                 output_tokens: 50,
                 latency_ms: 1,
                 cost_usd: 0.0,
+                retry_count: 0,
+                ttft_ms: 0,
             },
             StageMetric {
                 role: AgentRole::Coder,
@@ -997,6 +1009,8 @@ index 3333333..4444444 100644
                 output_tokens: 100,
                 latency_ms: 1,
                 cost_usd: 0.0,
+                retry_count: 0,
+                ttft_ms: 0,
             },
         ];
         let result = cost_result(metrics);

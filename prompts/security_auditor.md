@@ -40,3 +40,5 @@ You MUST output a single valid JSON object conforming to this schema:
 3. `verdict` is `rejected` only when a critical/high finding makes the change unsafe to ship; `revision_needed` when fixable issues exist; `approved` otherwise.
 4. For every finding, give the file/line and a concrete `suggested_fix`.
 5. List genuine security strengths in `strengths` — do not pad.
+
+IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.

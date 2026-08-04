@@ -39,7 +39,7 @@ impl Page for HelpPage {
         let header = Line::from(vec![Span::styled(
             " help",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::fg_color())
                 .add_modifier(Modifier::BOLD),
         )]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
@@ -47,7 +47,7 @@ impl Page for HelpPage {
         // Help content - two column layout
         let help_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border_color()))
             .title(" KEY BINDINGS ");
 
         let help_lines = vec![
@@ -55,108 +55,108 @@ impl Page for HelpPage {
             Line::from(Span::styled(
                 "  GLOBAL",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
                 Span::styled(
                     "    [q] quit                        ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(
                     "  [?] this help                    ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(vec![
                 Span::styled(
                     "    [Esc] close/back                ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(
                     "                                  ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(""),
             Line::from(Span::styled(
                 "  PAGES",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
                 Span::styled(
                     "    [p] pipeline    [a] agents      ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(
                     "  [d] diff        [v] verdict      ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(vec![
                 Span::styled(
                     "    [c] cost        [f] artifacts   ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(
                     "  [h] history                      ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(""),
             Line::from(Span::styled(
                 "  RUN",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
                 Span::styled(
                     "    [Space] pause/resume stream     ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(
                     "  [g/G] top/bottom of stream      ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(vec![
                 Span::styled(
                     "    [j/k] scroll up/down            ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(
                     "                                  ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(""),
             Line::from(Span::styled(
                 "  PIPELINE / AGENTS",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
                 Span::styled(
                     "    [j/k] next/prev stage           ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(
                     "  [Tab] next agent               ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(vec![
                 Span::styled(
                     "    [Esc] back                     ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(
                     "                                  ",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
         ];
@@ -166,7 +166,7 @@ impl Page for HelpPage {
         // Footer
         let footer = Line::from(vec![Span::styled(
             " [Esc] or [?] close help",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[2]);
     }

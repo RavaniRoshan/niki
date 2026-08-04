@@ -1,5 +1,5 @@
 use super::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage,
+    CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage, redact_secrets,
 };
 use crate::config::ProviderConfig;
 use anyhow::Result;
@@ -68,7 +68,7 @@ impl LlmProvider for OllamaProvider {
             let body = resp.text().await.unwrap_or_default();
             return Err(crate::NikiError::LlmProvider {
                 provider: "ollama".into(),
-                message: format!("HTTP {}: {}", status, body),
+                message: format!("HTTP {}: {}", status, redact_secrets(&body)),
             }
             .into());
         }
@@ -139,7 +139,7 @@ impl LlmProvider for OllamaProvider {
             let body = resp.text().await.unwrap_or_default();
             return Err(crate::NikiError::LlmProvider {
                 provider: "ollama".into(),
-                message: format!("HTTP {}: {}", status, body),
+                message: format!("HTTP {}: {}", status, redact_secrets(&body)),
             }
             .into());
         }

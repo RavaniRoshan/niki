@@ -34,6 +34,9 @@ git2 = "0.20"
 # Template rendering (for agent prompts)
 minijinja = "2"
 
+# Fast random number generation
+fastrand = "2"
+
 # Terminal output
 console = "0.15"
 indicatif = "0.17"
@@ -42,6 +45,7 @@ syntect = "5"
 
 # Rich terminal TUI
 ratatui = "0.29"
+unicode-truncate = "1"
 
 # ASCII art font rendering for logo
 figlet-rs = "1.0"
@@ -74,6 +78,9 @@ libc = "0.2"
 
 # Text diffing for fuzzy edit matching
 similar = "2"
+
+# Regex for secret redaction
+regex = "1"
 
 [dev-dependencies]
 tempfile = "3"

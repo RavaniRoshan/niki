@@ -1,0 +1,66 @@
+Goal: structured-output-robustness-b3bf5a
+Status: COMPLETE
+Completed at: 2026-08-04T06:55:00+00:00
+Iterations: 7
+Budget used: 260 tests, 0 failures
+
+== DELIVERABLES ==
+
+1. src/llm/repair.rs — Deterministic JSON repair library (8 strategies)
+   - Strip markdown code fences
+   - Extract JSON from prose/thinking blocks
+   - Fix trailing commas before } or ]
+   - Convert single quotes to double quotes
+   - Escape control characters in strings
+   - Normalize Python literals (True/False/None)
+   - Close unclosed brackets/braces
+   - Strict parse fast path
+   - 11 unit tests passing
+
+2. src/llm/provider.rs — Extended LlmProvider trait
+   - supports_structured_output() -> bool
+   - request_structured(request, schema) -> Result<CompletionResponse>
+   - CompletionRequest.json_schema field
+   - OpenAI provider: native structured output via response_format.json_schema
+   - Mock provider: structured output delegation
+
+3. src/agents/errors.rs — Failure taxonomy (8 categories)
+   - EmptyResponse, Refusal, NoJson, Truncated, ValidationError, ParseError, RuleError, RunError
+   - is_retryable() method
+   - classify_failure() function
+   - validate_detailed() with field-level errors
+   - 8 unit tests passing
+
+4. src/agents/mod.rs — Phase 2 retry in run_agent
+   - Full-jitter exponential backoff
+   - Local repair (repair_json) before LLM re-prompt
+   - Re-prompt with error feedback
+   - degrade_on_invalid parameter for pipeline degradation
+   - Replaced naive extract_json with repair_json
+
+5. src/orchestrator/pipeline.rs — Pipeline degradation
+   - run_stage accepts degrade_on_invalid parameter
+   - agent_warning() display method
+   - Degraded artifacts tracked in StageMetric
+
+6. 8 JSON schemas updated with additionalProperties:false
+7. 8 prompt templates updated with JSON-only instruction
+
+== TEST COVERAGE ==
+
+Total: 260 tests, 0 failures
+- Unit tests: 163 (existing) + 11 (repair) + 8 (errors) = 182
+- Integration tests: 18 (repair_retry) + 5 (pipeline_degradation) + 6 (structured_output) + 8 (existing) + ... = 78
+- All criteria pass
+
+== CRITERIA ==
+
+[x] cargo test passes (260 tests, 0 failures)
+[x] cargo check clean (0 errors, only pre-existing goal.rs warning)
+[x] No raw LLM output logged (0 matches for tracing debug/info with content)
+[x] repair_json unit tests pass (11 tests)
+[x] Repair retry tests pass (18 tests)
+[x] Pipeline degradation tests pass (5 tests)
+[x] Structured output tests pass (6 tests)
+[x] All 8 schemas have additionalProperties:false
+[x] All 8 prompts contain JSON-only instruction

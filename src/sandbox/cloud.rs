@@ -33,6 +33,7 @@ impl CloudSandbox {
         _source_repo: &Path,
         _task_id: &Uuid,
         _config: &DockerConfig,
+        _policy: crate::config::SecurityPolicyConfig,
     ) -> Result<Self> {
         Err(unavailable())
     }

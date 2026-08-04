@@ -28,3 +28,5 @@ You MUST output a single valid JSON object conforming to this schema:
 3. Consider edge cases and error handling in your approach.
 4. Respect any project conventions described in the project context.
 5. Do NOT write any code. Only plan.
+
+IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.

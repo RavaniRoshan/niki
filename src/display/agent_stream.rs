@@ -363,6 +363,19 @@ impl AgenticDisplay {
             .write_line(&format!(" {} {}", self.theme.error.apply_to("✗"), error));
     }
 
+    pub fn agent_warning(&mut self, role: AgentRole, message: &str) {
+        self.clear_streaming_output();
+        if !self.is_tty {
+            self.log(role_label(role), &format!("Warning: {}", message));
+            return;
+        }
+        let _ = self.term.write_line(&format!(
+            " {} {}",
+            self.theme.warning.apply_to("⚠"),
+            message
+        ));
+    }
+
     pub fn revision_requested(&mut self, round: u32, max: u32, issues: &[ReviewIssue]) {
         if self.tui.is_some() {
             self.emit(DisplayEvent::Revision {

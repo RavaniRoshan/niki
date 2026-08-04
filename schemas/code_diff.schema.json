@@ -38,5 +38,6 @@
     "files_changed",
     "implementation_notes",
     "spec_adherence"
-  ]
+  ],
+  "additionalProperties": false
 }

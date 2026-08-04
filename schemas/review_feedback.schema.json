@@ -35,5 +35,6 @@
     "guidance",
     "keep_unchanged",
     "revision_round"
-  ]
+  ],
+  "additionalProperties": false
 }

@@ -101,6 +101,9 @@ pub fn check_command_policy(cmd: &[&str], policy: &SecurityPolicyConfig) -> Resu
 
 /// Create the sandbox for `backend`. `docker` is only required for the Docker
 /// backend (pass `None` for worktree/cloud).
+///
+/// `policy` is the security policy for this sandbox's agent role; commands
+/// executed via `exec` are checked against it when a role is supplied.
 pub async fn create_sandbox(
     backend: SandboxBackend,
     docker: Option<&Docker>,
@@ -108,6 +111,7 @@ pub async fn create_sandbox(
     source_repo: &Path,
     task_id: &Uuid,
     config: &DockerConfig,
+    policy: SecurityPolicyConfig,
     containers: ActiveContainers,
 ) -> Result<Box<dyn Sandbox>> {
     match backend {
@@ -116,15 +120,16 @@ pub async fn create_sandbox(
                 NikiError::Config("Docker backend selected but Docker is not available".into())
             })?;
             Ok(Box::new(
-                DockerSandbox::create(d, agent_role, source_repo, task_id, config, containers)
+                DockerSandbox::create(d, agent_role, source_repo, task_id, config, policy, containers)
                     .await?,
             ))
         }
         SandboxBackend::Worktree => Ok(Box::new(
-            worktree::WorktreeSandbox::create(agent_role, source_repo, task_id, config).await?,
+            worktree::WorktreeSandbox::create(agent_role, source_repo, task_id, config, policy)
+                .await?,
         )),
         SandboxBackend::Cloud => Ok(Box::new(
-            cloud::CloudSandbox::create(agent_role, source_repo, task_id, config).await?,
+            cloud::CloudSandbox::create(agent_role, source_repo, task_id, config, policy).await?,
         )),
     }
 }

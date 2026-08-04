@@ -115,7 +115,7 @@ fn default_global_deny_list() -> Vec<String> {
 }
 
 /// Per-role defaults for the built-in agent roles.
-pub(crate) fn default_tester_policy() -> SecurityPolicyConfig {
+pub fn default_tester_policy() -> SecurityPolicyConfig {
     SecurityPolicyConfig {
         allowed_commands: vec![
             "cargo test".to_string(),
@@ -160,7 +160,7 @@ pub(crate) fn default_tester_policy() -> SecurityPolicyConfig {
     }
 }
 
-pub(crate) fn default_coder_policy() -> SecurityPolicyConfig {
+pub fn default_coder_policy() -> SecurityPolicyConfig {
     SecurityPolicyConfig {
         allowed_commands: vec![
             "cargo test".to_string(),
@@ -203,7 +203,7 @@ pub(crate) fn default_coder_policy() -> SecurityPolicyConfig {
     }
 }
 
-pub(crate) fn default_reviewer_policy() -> SecurityPolicyConfig {
+pub fn default_reviewer_policy() -> SecurityPolicyConfig {
     SecurityPolicyConfig {
         allowed_commands: vec![
             "git diff".to_string(),
@@ -388,17 +388,53 @@ fn default_goal_fail_fast() -> bool {
     true
 }
 
+/// Theme preference for the TUI (light/dark/auto).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePreference {
+    Auto,
+    Dark,
+    Light,
+}
+
+impl Default for ThemePreference {
+    fn default() -> Self {
+        ThemePreference::Auto
+    }
+}
+
+impl ThemePreference {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "dark" => ThemePreference::Dark,
+            "light" => ThemePreference::Light,
+            _ => ThemePreference::Auto,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ThemePreference::Auto => "auto",
+            ThemePreference::Dark => "dark",
+            ThemePreference::Light => "light",
+        }
+    }
+}
+
 /// TUI display configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiConfig {
     #[serde(default)]
     pub tips: TipsConfig,
+    #[serde(default)]
+    pub theme: ThemePreference,
 }
 
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
             tips: TipsConfig::default(),
+            theme: ThemePreference::default(),
         }
     }
 }
@@ -620,9 +656,9 @@ impl NikiConfig {
 
         let local_path = project_dir.join("niki.toml");
 
-        if let Some(gp) = global_path {
+        if let Some(gp) = &global_path {
             if gp.exists() {
-                let content = fs::read_to_string(&gp)?;
+                let content = fs::read_to_string(gp)?;
                 let c: NikiConfig = toml::from_str(&content)?;
                 config.merge(c);
             }
@@ -637,6 +673,51 @@ impl NikiConfig {
         config.apply_env_vars();
 
         Ok(config)
+    }
+
+    /// Save theme preference to global config using toml::Value mutation.
+    /// Never uses toml::to_string(&NikiConfig) to avoid clobbering user config.
+    pub fn save_theme(preference: ThemePreference) -> Result<()> {
+        let global_path = dirs::home_dir()
+            .map(|h| h.join(".config/niki/niki.toml"))
+            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+
+        // Read existing or start with empty table
+        let mut root: toml::Value = if global_path.exists() {
+            let content = fs::read_to_string(&global_path)?;
+            toml::from_str(&content)?
+        } else {
+            toml::Value::Table(toml::map::Map::new())
+        };
+
+        // Ensure [ui] table exists
+        let table = root
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("Config root is not a table"))?;
+        if !table.contains_key("ui") {
+            table.insert("ui".to_string(), toml::Value::Table(toml::map::Map::new()));
+        }
+
+        let ui = table
+            .get_mut("ui")
+            .and_then(|v| v.as_table_mut())
+            .ok_or_else(|| anyhow::anyhow!("ui section is not a table"))?;
+
+        ui.insert(
+            "theme".to_string(),
+            toml::Value::String(preference.as_str().to_string()),
+        );
+
+        // Atomic write: write to temp file, then rename
+        let parent = global_path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("Config path has no parent"))?;
+        fs::create_dir_all(parent)?;
+        let tmp_path = parent.join("niki.toml.tmp");
+        fs::write(&tmp_path, toml::to_string_pretty(&root)?)?;
+        fs::rename(&tmp_path, &global_path)?;
+
+        Ok(())
     }
 
     fn merge(&mut self, other: NikiConfig) {
@@ -724,6 +805,11 @@ impl NikiConfig {
         }
         if other.ui.tips.rotation_seconds != default_tips.rotation_seconds {
             self.ui.tips.rotation_seconds = other.ui.tips.rotation_seconds;
+        }
+
+        // UI theme preference: only override if not default (Auto).
+        if other.ui.theme != ThemePreference::default() {
+            self.ui.theme = other.ui.theme;
         }
     }
 
