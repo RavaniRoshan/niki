@@ -40,6 +40,12 @@ pub struct NikiConfig {
     /// "independent review" real instead of a rubber stamp.
     #[serde(default)]
     pub red_blue: RedBlueConfig,
+    /// Goal runner configuration.
+    #[serde(default)]
+    pub goal: GoalConfig,
+    /// TUI display configuration.
+    #[serde(default)]
+    pub ui: UiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -57,13 +63,194 @@ pub struct KnowledgeConfig {
     pub max_source_chars: usize,
 }
 
+/// Per-role security policy controlling which commands an agent may execute.
+///
+/// Each role can have its own policy keyed by role name in
+/// `SecurityConfig::policies`. When a command is attempted through the sandbox,
+/// it is checked against the deny-list first; denied commands are rejected with
+/// a clear error. An empty allow-list means "allow everything not denied".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityPolicyConfig {
+    /// Exact command prefixes that are always allowed (bypasses deny-check).
+    #[serde(default)]
+    pub allowed_commands: Vec<String>,
+    /// Command prefixes that are always rejected. Checked against the first
+    /// token(s) of the command string (space-separated).
+    #[serde(default)]
+    pub denied_commands: Vec<String>,
+    /// Maximum seconds a single `exec` call may run before being killed.
+    #[serde(default = "default_max_exec_seconds")]
+    pub max_exec_seconds: u64,
+}
+
+impl Default for SecurityPolicyConfig {
+    fn default() -> Self {
+        Self {
+            allowed_commands: Vec::new(),
+            denied_commands: default_global_deny_list(),
+            max_exec_seconds: default_max_exec_seconds(),
+        }
+    }
+}
+
+fn default_max_exec_seconds() -> u64 {
+    300
+}
+
+/// Global deny-list applied to every role unless overridden.
+fn default_global_deny_list() -> Vec<String> {
+    vec![
+        "git push --force".to_string(),
+        "git push -f".to_string(),
+        "rm -rf /".to_string(),
+        "rm -rf /*".to_string(),
+        "mkfs".to_string(),
+        "dd".to_string(),
+        "curl | sh".to_string(),
+        "curl | bash".to_string(),
+        "wget | sh".to_string(),
+        "wget | bash".to_string(),
+        "--no-verify".to_string(),
+    ]
+}
+
+/// Per-role defaults for the built-in agent roles.
+pub fn default_tester_policy() -> SecurityPolicyConfig {
+    SecurityPolicyConfig {
+        allowed_commands: vec![
+            "cargo test".to_string(),
+            "npm test".to_string(),
+            "npx vitest".to_string(),
+            "npx jest".to_string(),
+            "python3 -m pytest".to_string(),
+            "go test".to_string(),
+            "cargo check".to_string(),
+            "npx tsc".to_string(),
+            "pyflakes".to_string(),
+            "python3 -m py_compile".to_string(),
+            "go build".to_string(),
+            "git diff".to_string(),
+            "git log".to_string(),
+            "git status".to_string(),
+            "ls".to_string(),
+            "cat".to_string(),
+            "head".to_string(),
+            "tail".to_string(),
+            "grep".to_string(),
+            "find".to_string(),
+            "wc".to_string(),
+        ],
+        denied_commands: vec![
+            "git push".to_string(),
+            "git commit".to_string(),
+            "git merge".to_string(),
+            "git rebase".to_string(),
+            "git checkout".to_string(),
+            "git reset".to_string(),
+            "git branch -D".to_string(),
+            "rm".to_string(),
+            "mv".to_string(),
+            "cp".to_string(),
+            "mkdir".to_string(),
+            "touch".to_string(),
+            "chmod".to_string(),
+            "chown".to_string(),
+        ],
+        max_exec_seconds: default_max_exec_seconds(),
+    }
+}
+
+pub fn default_coder_policy() -> SecurityPolicyConfig {
+    SecurityPolicyConfig {
+        allowed_commands: vec![
+            "cargo test".to_string(),
+            "cargo check".to_string(),
+            "cargo build".to_string(),
+            "npm test".to_string(),
+            "npm install".to_string(),
+            "npx vitest".to_string(),
+            "npx jest".to_string(),
+            "npx tsc".to_string(),
+            "python3 -m pytest".to_string(),
+            "python3 -m py_compile".to_string(),
+            "go test".to_string(),
+            "go build".to_string(),
+            "git diff".to_string(),
+            "git log".to_string(),
+            "git status".to_string(),
+            "git add".to_string(),
+            "git commit".to_string(),
+            "git branch".to_string(),
+            "ls".to_string(),
+            "cat".to_string(),
+            "head".to_string(),
+            "tail".to_string(),
+            "grep".to_string(),
+            "find".to_string(),
+            "wc".to_string(),
+            "mkdir".to_string(),
+            "touch".to_string(),
+            "mv".to_string(),
+            "cp".to_string(),
+            "rm".to_string(),
+        ],
+        denied_commands: vec![
+            "git push".to_string(),
+            "git push --force".to_string(),
+            "git push -f".to_string(),
+        ],
+        max_exec_seconds: default_max_exec_seconds(),
+    }
+}
+
+pub fn default_reviewer_policy() -> SecurityPolicyConfig {
+    SecurityPolicyConfig {
+        allowed_commands: vec![
+            "git diff".to_string(),
+            "git log".to_string(),
+            "git status".to_string(),
+            "git show".to_string(),
+            "git blame".to_string(),
+            "git annotate".to_string(),
+            "ls".to_string(),
+            "cat".to_string(),
+            "head".to_string(),
+            "tail".to_string(),
+            "grep".to_string(),
+            "find".to_string(),
+            "wc".to_string(),
+            "cargo check".to_string(),
+            "npx tsc".to_string(),
+            "python3 -m py_compile".to_string(),
+            "go build".to_string(),
+        ],
+        denied_commands: vec![
+            "git push".to_string(),
+            "git commit".to_string(),
+            "git merge".to_string(),
+            "git rebase".to_string(),
+            "git checkout".to_string(),
+            "git reset".to_string(),
+            "git branch -D".to_string(),
+            "rm".to_string(),
+            "mv".to_string(),
+            "cp".to_string(),
+            "mkdir".to_string(),
+            "touch".to_string(),
+            "chmod".to_string(),
+            "chown".to_string(),
+        ],
+        max_exec_seconds: default_max_exec_seconds(),
+    }
+}
+
 /// Configuration for the optional independent security audit pass (#4).
 ///
 /// When `enabled`, the pipeline injects a `SecurityAuditor` stage (driven by
 /// `provider`/`model`, defaulting to the configured `security_auditor` agent)
 /// after the Reviewer. The audit verdict is recorded as an artifact but does not
 /// gate the revision loop by default.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -73,6 +260,30 @@ pub struct SecurityConfig {
     /// Optional model override; defaults to `[agents] security_auditor.model`.
     #[serde(default)]
     pub model: Option<String>,
+    /// Per-role security policies keyed by role name (e.g. "tester", "coder").
+    /// When a role has a policy, commands executed in its sandbox are checked
+    /// against the deny-list before running.
+    #[serde(default = "default_policies")]
+    pub policies: HashMap<String, SecurityPolicyConfig>,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: None,
+            model: None,
+            policies: default_policies(),
+        }
+    }
+}
+
+fn default_policies() -> HashMap<String, SecurityPolicyConfig> {
+    let mut m = HashMap::new();
+    m.insert("tester".to_string(), default_tester_policy());
+    m.insert("coder".to_string(), default_coder_policy());
+    m.insert("reviewer".to_string(), default_reviewer_policy());
+    m
 }
 
 /// Configuration for the optional parallel-coder mode (#3).
@@ -132,6 +343,126 @@ impl Default for RedBlueConfig {
 
 fn default_red_blue_enabled() -> bool {
     true
+}
+
+/// Goal runner configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoalConfig {
+    #[serde(default = "default_goal_max_iterations")]
+    pub max_iterations: u32,
+    /// Prefix for goal git branches (default: "goal").
+    #[serde(default)]
+    pub branch_prefix: String,
+    /// Directory for goal state files (relative to project root).
+    #[serde(default)]
+    pub state_dir: String,
+    /// Fail fast when parallel stages error (default: true).
+    #[serde(default = "default_goal_fail_fast")]
+    pub fail_fast: bool,
+    /// Number of retry attempts for transient LLM errors (default: 3).
+    #[serde(default)]
+    pub retry_attempts: u32,
+    /// Delay between retries in milliseconds (default: 1000).
+    #[serde(default)]
+    pub retry_delay_ms: u64,
+}
+
+impl Default for GoalConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: default_goal_max_iterations(),
+            branch_prefix: String::new(),
+            state_dir: String::new(),
+            fail_fast: default_goal_fail_fast(),
+            retry_attempts: 3,
+            retry_delay_ms: 1000,
+        }
+    }
+}
+
+fn default_goal_max_iterations() -> u32 {
+    30
+}
+
+fn default_goal_fail_fast() -> bool {
+    true
+}
+
+/// Theme preference for the TUI (light/dark/auto).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePreference {
+    Auto,
+    Dark,
+    Light,
+}
+
+impl Default for ThemePreference {
+    fn default() -> Self {
+        ThemePreference::Auto
+    }
+}
+
+impl ThemePreference {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "dark" => ThemePreference::Dark,
+            "light" => ThemePreference::Light,
+            _ => ThemePreference::Auto,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ThemePreference::Auto => "auto",
+            ThemePreference::Dark => "dark",
+            ThemePreference::Light => "light",
+        }
+    }
+}
+
+/// TUI display configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiConfig {
+    #[serde(default)]
+    pub tips: TipsConfig,
+    #[serde(default)]
+    pub theme: ThemePreference,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            tips: TipsConfig::default(),
+            theme: ThemePreference::default(),
+        }
+    }
+}
+
+/// Tips banner configuration for the TUI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TipsConfig {
+    #[serde(default = "default_tips_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_tips_rotation_seconds")]
+    pub rotation_seconds: u64,
+}
+
+impl Default for TipsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_tips_enabled(),
+            rotation_seconds: default_tips_rotation_seconds(),
+        }
+    }
+}
+
+fn default_tips_enabled() -> bool {
+    true
+}
+
+fn default_tips_rotation_seconds() -> u64 {
+    30
 }
 
 fn default_coder_count() -> u32 {
@@ -325,9 +656,9 @@ impl NikiConfig {
 
         let local_path = project_dir.join("niki.toml");
 
-        if let Some(gp) = global_path {
+        if let Some(gp) = &global_path {
             if gp.exists() {
-                let content = fs::read_to_string(&gp)?;
+                let content = fs::read_to_string(gp)?;
                 let c: NikiConfig = toml::from_str(&content)?;
                 config.merge(c);
             }
@@ -342,6 +673,51 @@ impl NikiConfig {
         config.apply_env_vars();
 
         Ok(config)
+    }
+
+    /// Save theme preference to global config using toml::Value mutation.
+    /// Never uses toml::to_string(&NikiConfig) to avoid clobbering user config.
+    pub fn save_theme(preference: ThemePreference) -> Result<()> {
+        let global_path = dirs::home_dir()
+            .map(|h| h.join(".config/niki/niki.toml"))
+            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+
+        // Read existing or start with empty table
+        let mut root: toml::Value = if global_path.exists() {
+            let content = fs::read_to_string(&global_path)?;
+            toml::from_str(&content)?
+        } else {
+            toml::Value::Table(toml::map::Map::new())
+        };
+
+        // Ensure [ui] table exists
+        let table = root
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("Config root is not a table"))?;
+        if !table.contains_key("ui") {
+            table.insert("ui".to_string(), toml::Value::Table(toml::map::Map::new()));
+        }
+
+        let ui = table
+            .get_mut("ui")
+            .and_then(|v| v.as_table_mut())
+            .ok_or_else(|| anyhow::anyhow!("ui section is not a table"))?;
+
+        ui.insert(
+            "theme".to_string(),
+            toml::Value::String(preference.as_str().to_string()),
+        );
+
+        // Atomic write: write to temp file, then rename
+        let parent = global_path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("Config path has no parent"))?;
+        fs::create_dir_all(parent)?;
+        let tmp_path = parent.join("niki.toml.tmp");
+        fs::write(&tmp_path, toml::to_string_pretty(&root)?)?;
+        fs::rename(&tmp_path, &global_path)?;
+
+        Ok(())
     }
 
     fn merge(&mut self, other: NikiConfig) {
@@ -420,6 +796,20 @@ impl NikiConfig {
             if let Some(m) = other.red_blue.model {
                 self.red_blue.model = Some(m);
             }
+        }
+
+        // UI tips config: only override if the other config explicitly changed defaults.
+        let default_tips = TipsConfig::default();
+        if other.ui.tips.enabled != default_tips.enabled {
+            self.ui.tips.enabled = other.ui.tips.enabled;
+        }
+        if other.ui.tips.rotation_seconds != default_tips.rotation_seconds {
+            self.ui.tips.rotation_seconds = other.ui.tips.rotation_seconds;
+        }
+
+        // UI theme preference: only override if not default (Auto).
+        if other.ui.theme != ThemePreference::default() {
+            self.ui.theme = other.ui.theme;
         }
     }
 
@@ -603,5 +993,69 @@ model = "claude-opus-4"
         assert!(base.parallel.enabled);
         assert_eq!(base.parallel.coder_count, 3);
         assert!(base.red_blue.enabled);
+    }
+
+    #[test]
+    fn default_security_config_has_per_role_policies() {
+        let c = NikiConfig::default();
+        assert!(c.security.policies.contains_key("tester"));
+        assert!(c.security.policies.contains_key("coder"));
+        assert!(c.security.policies.contains_key("reviewer"));
+    }
+
+    #[test]
+    fn tester_policy_denies_write_commands() {
+        let policy = default_tester_policy();
+        // Should deny git push, git commit, rm, etc.
+        assert!(policy.denied_commands.contains(&"git push".to_string()));
+        assert!(policy.denied_commands.contains(&"git commit".to_string()));
+        assert!(policy.denied_commands.contains(&"rm".to_string()));
+        // Should allow read-only and test commands
+        assert!(policy.allowed_commands.contains(&"cargo test".to_string()));
+        assert!(policy.allowed_commands.contains(&"git diff".to_string()));
+    }
+
+    #[test]
+    fn coder_policy_allows_write_but_denies_push() {
+        let policy = default_coder_policy();
+        // Should allow write commands
+        assert!(policy.allowed_commands.contains(&"git add".to_string()));
+        assert!(policy.allowed_commands.contains(&"git commit".to_string()));
+        assert!(policy.allowed_commands.contains(&"rm".to_string()));
+        // Should deny push
+        assert!(policy.denied_commands.contains(&"git push".to_string()));
+    }
+
+    #[test]
+    fn reviewer_policy_is_read_only() {
+        let policy = default_reviewer_policy();
+        // Should deny all write commands
+        assert!(policy.denied_commands.contains(&"git push".to_string()));
+        assert!(policy.denied_commands.contains(&"git commit".to_string()));
+        assert!(policy.denied_commands.contains(&"rm".to_string()));
+        assert!(policy.denied_commands.contains(&"mv".to_string()));
+        // Should allow read-only commands
+        assert!(policy.allowed_commands.contains(&"git diff".to_string()));
+        assert!(policy.allowed_commands.contains(&"git log".to_string()));
+        assert!(policy.allowed_commands.contains(&"git show".to_string()));
+    }
+
+    #[test]
+    fn security_config_toml_round_trip() {
+        let toml = r#"
+[security]
+enabled = true
+
+[security.policies.tester]
+allowed_commands = ["cargo test", "git diff"]
+denied_commands = ["git push", "rm"]
+max_exec_seconds = 600
+"#;
+        let c: NikiConfig = toml::from_str(toml).unwrap();
+        assert!(c.security.enabled);
+        let tester = c.security.policies.get("tester").unwrap();
+        assert_eq!(tester.max_exec_seconds, 600);
+        assert_eq!(tester.allowed_commands.len(), 2);
+        assert_eq!(tester.denied_commands.len(), 2);
     }
 }

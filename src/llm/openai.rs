@@ -1,5 +1,5 @@
 use super::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage,
+    CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage, redact_secrets,
 };
 use crate::config::ProviderConfig;
 use anyhow::{Result, anyhow};
@@ -87,7 +87,7 @@ impl LlmProvider for OpenAiProvider {
             let body = resp.text().await.unwrap_or_default();
             return Err(crate::NikiError::LlmProvider {
                 provider: "openai".into(),
-                message: format!("HTTP {}: {}", status, body),
+                message: format!("HTTP {}: {}", status, redact_secrets(&body)),
             }
             .into());
         }
@@ -161,7 +161,7 @@ impl LlmProvider for OpenAiProvider {
             let body = resp.text().await.unwrap_or_default();
             return Err(crate::NikiError::LlmProvider {
                 provider: "openai".into(),
-                message: format!("HTTP {}: {}", status, body),
+                message: format!("HTTP {}: {}", status, redact_secrets(&body)),
             }
             .into());
         }
@@ -237,6 +237,88 @@ impl LlmProvider for OpenAiProvider {
 
     fn provider_name(&self) -> &str {
         "openai"
+    }
+
+    fn supports_structured_output(&self) -> bool {
+        true
+    }
+
+    async fn request_structured(
+        &self,
+        request: CompletionRequest,
+        schema: &serde_json::Value,
+    ) -> Result<CompletionResponse> {
+        let api_key = self
+            .config
+            .api_key
+            .as_ref()
+            .ok_or_else(|| anyhow!("OpenAI API key not configured"))?;
+        let url = openai_endpoint(
+            self.config
+                .base_url
+                .as_deref()
+                .unwrap_or("https://api.openai.com/v1"),
+        );
+
+        let payload = json!({
+            "model": request.model,
+            "max_tokens": request.max_tokens,
+            "temperature": request.temperature,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": request.system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": request.user_message
+                }
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_output",
+                    "schema": schema
+                }
+            }
+        });
+
+        let resp = self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("content-type", "application/json")
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(crate::NikiError::LlmProvider {
+                provider: "openai".into(),
+                message: format!("HTTP {}: {}", status, redact_secrets(&body)),
+            }
+            .into());
+        }
+
+        let data: serde_json::Value = resp.json().await?;
+        let content = data["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+
+        let input_tokens = data["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
+        let output_tokens = data["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
+
+        Ok(CompletionResponse {
+            content,
+            model: request.model,
+            usage: TokenUsage {
+                input_tokens,
+                output_tokens,
+            },
+        })
     }
 }
 

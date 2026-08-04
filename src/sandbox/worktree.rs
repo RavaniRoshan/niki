@@ -5,8 +5,8 @@ use std::process::Command;
 use uuid::Uuid;
 
 use crate::artifacts::types::AgentRole;
-use crate::config::DockerConfig;
-use crate::sandbox::{ExecOutput, Sandbox};
+use crate::config::{DockerConfig, SecurityPolicyConfig};
+use crate::sandbox::{check_command_policy, ExecOutput, Sandbox};
 
 /// Lightweight sandbox using a `git worktree` of the project plus local
 /// `std::process::Command` execution. No Docker daemon required.
@@ -19,6 +19,7 @@ pub struct WorktreeSandbox {
     pub worktree_path: PathBuf,
     pub agent_role: AgentRole,
     task_id: String,
+    policy: SecurityPolicyConfig,
 }
 
 impl WorktreeSandbox {
@@ -27,6 +28,7 @@ impl WorktreeSandbox {
         source_repo: &Path,
         task_id: &Uuid,
         _config: &DockerConfig,
+        policy: SecurityPolicyConfig,
     ) -> Result<Self> {
         let base = source_repo.join(".niki-worktrees");
         std::fs::create_dir_all(&base)?;
@@ -57,6 +59,7 @@ impl WorktreeSandbox {
                 worktree_path: wt,
                 agent_role,
                 task_id: task_id.to_string(),
+                policy,
             }),
             _ => Err(anyhow!(
                 "Failed to create git worktree at {} (is the project a git repo?)",
@@ -179,24 +182,34 @@ impl Sandbox for WorktreeSandbox {
         .map_err(|e| anyhow!("diff spawn failed: {e}"))?
     }
 
-    async fn exec(&self, cmd: &[&str]) -> Result<ExecOutput> {
+    async fn exec(&self, cmd: &[&str], role: Option<&AgentRole>) -> Result<ExecOutput> {
         if cmd.is_empty() {
             return Err(anyhow!("empty command"));
         }
+        // F1: Enforce security policy when a role is supplied.
+        if role.is_some() {
+            check_command_policy(cmd, &self.policy)?;
+        }
         let wt = self.worktree_path.clone();
         let cmd: Vec<String> = cmd.iter().map(|s| s.to_string()).collect();
-        tokio::task::spawn_blocking(move || -> Result<ExecOutput> {
-            let output = Command::new(&cmd[0])
-                .args(&cmd[1..])
-                .current_dir(&wt)
-                .output()?;
-            Ok(ExecOutput {
-                exit_code: output.status.code().unwrap_or(0) as i64,
-                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            })
-        })
+        let timeout = std::time::Duration::from_secs(self.policy.max_exec_seconds);
+        // F3: Enforce exec timeout.
+        tokio::time::timeout(
+            timeout,
+            tokio::task::spawn_blocking(move || -> Result<ExecOutput> {
+                let output = Command::new(&cmd[0])
+                    .args(&cmd[1..])
+                    .current_dir(&wt)
+                    .output()?;
+                Ok(ExecOutput {
+                    exit_code: output.status.code().unwrap_or(0) as i64,
+                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                })
+            }),
+        )
         .await
+        .map_err(|_| anyhow!("exec timed out after {}s", self.policy.max_exec_seconds))?
         .map_err(|e| anyhow!("exec spawn failed: {e}"))?
     }
 

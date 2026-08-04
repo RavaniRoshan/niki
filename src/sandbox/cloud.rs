@@ -33,6 +33,7 @@ impl CloudSandbox {
         _source_repo: &Path,
         _task_id: &Uuid,
         _config: &DockerConfig,
+        _policy: crate::config::SecurityPolicyConfig,
     ) -> Result<Self> {
         Err(unavailable())
     }
@@ -49,7 +50,7 @@ impl Sandbox for CloudSandbox {
     async fn get_diff(&self) -> Result<String> {
         Err(unavailable())
     }
-    async fn exec(&self, _cmd: &[&str]) -> Result<ExecOutput> {
+    async fn exec(&self, _cmd: &[&str], _role: Option<&AgentRole>) -> Result<ExecOutput> {
         Err(unavailable())
     }
     async fn destroy(&self) -> Result<()> {

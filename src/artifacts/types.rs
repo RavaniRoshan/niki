@@ -171,7 +171,7 @@ pub struct ReviewVerdict {
 pub enum Verdict {
     Approved,
     RevisionNeeded,
-    Rejected, // Unrepairable — escalate to human
+    Rejected,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

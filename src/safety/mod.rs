@@ -27,6 +27,8 @@ pub struct RepoSnapshot {
     pub porcelain: String,
     /// Whether the working tree was clean (no staged/unstaged changes).
     pub working_tree_clean: bool,
+    /// Last N reflog entries per branch (branch name -> list of reflog lines).
+    pub reflog_entries: HashMap<String, Vec<String>>,
 }
 
 /// The verifiable result of a hermetic run.
@@ -46,6 +48,8 @@ pub struct SafetyProof {
     pub pre_working_tree_clean: bool,
     /// Post-run working-tree cleanliness (informational).
     pub post_working_tree_clean: bool,
+    /// No rebases or force-pushes detected in reflog entries.
+    pub no_rebase_or_force_push: bool,
     /// One-line human summary of the blast radius.
     pub blast_radius: String,
     /// Bullet breakdown of each invariant, for the report.
@@ -94,12 +98,28 @@ pub fn snapshot(repo: &Path) -> Result<RepoSnapshot> {
     }
     let porcelain = git(repo, &["status", "--porcelain=v1"])?;
     let working_tree_clean = porcelain.trim().is_empty();
+
+    // Capture last N reflog entries per branch for rebase/force-push detection.
+    let mut reflog_entries: HashMap<String, Vec<String>> = HashMap::new();
+    for branch in &branches {
+        let reflog = git(repo, &["reflog", "--no-abbrev", "-n", "10", branch]);
+        if let Ok(output) = reflog {
+            let lines: Vec<String> = output
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+            reflog_entries.insert(branch.clone(), lines);
+        }
+    }
+
     Ok(RepoSnapshot {
         head_commit,
         branches,
         branch_tips,
         porcelain,
         working_tree_clean,
+        reflog_entries,
     })
 }
 
@@ -110,11 +130,13 @@ fn short(sha: &str) -> String {
 /// Verify hermeticity: compare the pre-run `snapshot` against the live repo
 /// after the branch has been created. `branch_name` is the branch NIKI was
 /// expected to add, and `task_id` is used only for the human-readable summary.
+/// When `strict` is true, any invariant failure causes an error return.
 pub fn prove(
     pre: &RepoSnapshot,
     repo: &Path,
     branch_name: &str,
     task_id: &str,
+    strict: bool,
 ) -> Result<SafetyProof> {
     let post = snapshot(repo)?;
 
@@ -154,7 +176,34 @@ pub fn prove(
         }
     };
 
-    let hermetic = branch_added && existing_branches_preserved && new_branch_parent_is_base;
+    // Check reflog entries for rebase or force-push activity.
+    let mut no_rebase_or_force_push = true;
+    let mut rebase_or_force_details = Vec::new();
+    for (branch, entries) in &post.reflog_entries {
+        if branch == branch_name {
+            continue;
+        }
+        if !pre.branches.contains(branch) {
+            continue;
+        }
+        for entry in entries {
+            let lower = entry.to_lowercase();
+            if lower.contains("rebase") {
+                no_rebase_or_force_push = false;
+                rebase_or_force_details.push(format!("rebase detected on `{}`: {}", branch, entry));
+            }
+            if lower.contains("force push") || lower.contains("forced update") {
+                no_rebase_or_force_push = false;
+                rebase_or_force_details
+                    .push(format!("force push detected on `{}`: {}", branch, entry));
+            }
+        }
+    }
+
+    let hermetic = branch_added
+        && existing_branches_preserved
+        && new_branch_parent_is_base
+        && no_rebase_or_force_push;
 
     let mut details = Vec::new();
     details.push(format!(
@@ -181,6 +230,17 @@ pub fn prove(
         },
         short(&pre.head_commit)
     ));
+    details.push(format!(
+        "{} No rebase or force-push detected in reflog.",
+        if no_rebase_or_force_push {
+            "PASS"
+        } else {
+            "FAIL"
+        }
+    ));
+    for d in &rebase_or_force_details {
+        details.push(format!("  -> {}", d));
+    }
 
     let blast_radius = if hermetic {
         format!(
@@ -198,7 +258,7 @@ pub fn prove(
         )
     };
 
-    Ok(SafetyProof {
+    let proof = SafetyProof {
         hermetic,
         branch_added,
         existing_branches_preserved,
@@ -206,9 +266,19 @@ pub fn prove(
         new_branch: branch_name.to_string(),
         pre_working_tree_clean: pre.working_tree_clean,
         post_working_tree_clean: post.working_tree_clean,
+        no_rebase_or_force_push,
         blast_radius,
         details,
-    })
+    };
+
+    if strict && !proof.hermetic {
+        return Err(anyhow!(
+            "Strict safety mode: hermetic invariants broken. {}",
+            proof.blast_radius
+        ));
+    }
+
+    Ok(proof)
 }
 
 #[cfg(test)]
@@ -232,6 +302,7 @@ mod tests {
             new_branch: "niki/abc12345".to_string(),
             pre_working_tree_clean: true,
             post_working_tree_clean: true,
+            no_rebase_or_force_push: true,
             blast_radius: "Hermetic".to_string(),
             details: vec!["PASS x".to_string()],
         };
@@ -282,7 +353,7 @@ mod tests {
         fs::write(dir.join("b.txt"), "implemented").unwrap();
         run(&["add", "b.txt"]);
         run(&["commit", "-q", "-m", "niki implementation"]);
-        let proof = prove(&pre, &dir, "niki/branch1", "test").unwrap();
+        let proof = prove(&pre, &dir, "niki/branch1", "test", false).unwrap();
         assert!(proof.hermetic, "expected hermetic: {:?}", proof.details);
         assert!(proof.existing_branches_preserved);
         assert!(proof.new_branch_parent_is_base);
@@ -328,13 +399,201 @@ mod tests {
         run(&["commit", "-q", "-m", "mutated master"]);
         run(&["checkout", "-q", "-b", "niki/branch2"]);
 
-        let proof = prove(&pre, &dir, "niki/branch2", "test").unwrap();
+        let proof = prove(&pre, &dir, "niki/branch2", "test", false).unwrap();
         assert!(
             !proof.hermetic,
             "expected NON-hermetic: {:?}",
             proof.details
         );
         assert!(!proof.existing_branches_preserved);
+
+        drop(guard);
+    }
+
+    /// Snapshot captures reflog entries for each branch.
+    #[test]
+    fn snapshot_captures_reflog_entries() {
+        let dir = std::env::temp_dir().join(format!("niki-safety-reflog-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let guard = TestDir(&dir);
+
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+        };
+
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "test@niki.local"]);
+        run(&["config", "user.name", "niki-test"]);
+        fs::write(dir.join("a.txt"), "hello").unwrap();
+        run(&["add", "a.txt"]);
+        run(&["commit", "-q", "-m", "initial"]);
+
+        // Make a second commit so there's reflog history.
+        fs::write(dir.join("a.txt"), "world").unwrap();
+        run(&["add", "a.txt"]);
+        run(&["commit", "-q", "-m", "second"]);
+
+        let pre = snapshot(&dir).unwrap();
+        assert!(
+            pre.reflog_entries.contains_key("master"),
+            "reflog should contain master branch"
+        );
+        let entries = &pre.reflog_entries["master"];
+        assert!(
+            entries.len() >= 2,
+            "expected at least 2 reflog entries, got {}",
+            entries.len()
+        );
+        assert!(
+            entries[0].contains("commit:"),
+            "reflog entry should mention commit"
+        );
+
+        drop(guard);
+    }
+
+    /// Prove detects rebase in reflog and marks no_rebase_or_force_push false.
+    #[test]
+    fn prove_detects_rebase_in_reflog() {
+        let dir = std::env::temp_dir().join(format!("niki-safety-rebase-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let guard = TestDir(&dir);
+
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+        };
+
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "test@niki.local"]);
+        run(&["config", "user.name", "niki-test"]);
+        fs::write(dir.join("a.txt"), "hello").unwrap();
+        run(&["add", "a.txt"]);
+        run(&["commit", "-q", "-m", "initial"]);
+
+        // Create a second branch to rebase.
+        run(&["checkout", "-q", "-b", "feature"]);
+        fs::write(dir.join("b.txt"), "feature").unwrap();
+        run(&["add", "b.txt"]);
+        run(&["commit", "-q", "-m", "feature commit"]);
+        run(&["checkout", "-q", "master"]);
+
+        // Simulate a rebase by rewriting history.
+        run(&["checkout", "-q", "-b", "feature-rebased"]);
+        run(&["rebase", "master"]);
+
+        let pre = snapshot(&dir).unwrap();
+
+        // Simulate NIKI adding its branch.
+        run(&["checkout", "-q", "-b", "niki/test-rebase"]);
+        fs::write(dir.join("c.txt"), "niki work").unwrap();
+        run(&["add", "c.txt"]);
+        run(&["commit", "-q", "-m", "niki work"]);
+
+        // The feature branch's reflog should contain a rebase entry.
+        let proof = prove(&pre, &dir, "niki/test-rebase", "test", false).unwrap();
+        assert!(
+            !proof.no_rebase_or_force_push,
+            "expected rebase detected in reflog"
+        );
+        assert!(!proof.hermetic, "expected NON-hermetic due to rebase");
+
+        drop(guard);
+    }
+
+    /// Strict mode returns an error when hermetic invariants are broken.
+    #[test]
+    fn strict_mode_fails_on_non_hermetic() {
+        let dir = std::env::temp_dir().join(format!("niki-safety-strict-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let guard = TestDir(&dir);
+
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+        };
+
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "test@niki.local"]);
+        run(&["config", "user.name", "niki-test"]);
+        fs::write(dir.join("a.txt"), "hello").unwrap();
+        run(&["add", "a.txt"]);
+        run(&["commit", "-q", "-m", "base"]);
+
+        let pre = snapshot(&dir).unwrap();
+
+        // Mutate master to break hermetic invariant.
+        fs::write(dir.join("a.txt"), "mutated").unwrap();
+        run(&["add", "a.txt"]);
+        run(&["commit", "-q", "-m", "mutated master"]);
+        run(&["checkout", "-q", "-b", "niki/strict-test"]);
+
+        let result = prove(&pre, &dir, "niki/strict-test", "test", true);
+        assert!(
+            result.is_err(),
+            "strict mode should return error on non-hermetic run"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Strict safety mode"),
+            "error message should mention strict safety: {}",
+            err_msg
+        );
+
+        drop(guard);
+    }
+
+    /// Strict mode succeeds when hermetic invariants hold.
+    #[test]
+    fn strict_mode_passes_on_hermetic() {
+        let dir =
+            std::env::temp_dir().join(format!("niki-safety-strict-ok-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let guard = TestDir(&dir);
+
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+        };
+
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "test@niki.local"]);
+        run(&["config", "user.name", "niki-test"]);
+        fs::write(dir.join("a.txt"), "hello").unwrap();
+        run(&["add", "a.txt"]);
+        run(&["commit", "-q", "-m", "base"]);
+
+        let pre = snapshot(&dir).unwrap();
+
+        run(&["checkout", "-q", "-b", "niki/strict-ok"]);
+        fs::write(dir.join("b.txt"), "work").unwrap();
+        run(&["add", "b.txt"]);
+        run(&["commit", "-q", "-m", "niki work"]);
+
+        let proof = prove(&pre, &dir, "niki/strict-ok", "test", true).unwrap();
+        assert!(proof.hermetic, "expected hermetic in strict mode");
+        assert!(proof.no_rebase_or_force_push);
 
         drop(guard);
     }

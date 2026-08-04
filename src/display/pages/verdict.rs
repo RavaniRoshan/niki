@@ -43,7 +43,7 @@ impl Page for VerdictPage {
             Span::styled(
                 " verdict",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::fg_color())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -52,18 +52,18 @@ impl Page for VerdictPage {
                 } else {
                     format!(" · {}", state.branch_name)
                 },
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             ),
         ]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
 
         // Verdict tile
         let (verdict_text, verdict_color) = match state.run_state {
-            RunState::AwaitingApproval => ("A P P R O V E D", theme::GREEN),
-            RunState::Failed => ("F A I L E D", theme::RED),
-            RunState::Running => ("I N   P R O G R E S S", theme::AMBER),
-            RunState::Cancelled => ("C A N C E L L E D", theme::FG_DIM),
-            _ => ("N O   V E R D I C T", theme::FG_DIM),
+            RunState::AwaitingApproval => ("A P P R O V E D", theme::GREEN()),
+            RunState::Failed => ("F A I L E D", theme::RED()),
+            RunState::Running => ("I N   P R O G R E S S", theme::AMBER()),
+            RunState::Cancelled => ("C A N C E L L E D", theme::fg_dim()),
+            _ => ("N O   V E R D I C T", theme::fg_dim()),
         };
 
         let verdict_block = Block::default()
@@ -90,7 +90,7 @@ impl Page for VerdictPage {
             if let Some(score_line) = review_stage.summary.first() {
                 verdict_lines.push(Line::from(Span::styled(
                     format!("   {}", score_line),
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 )));
             }
         }
@@ -103,7 +103,7 @@ impl Page for VerdictPage {
         // Report content
         let report_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border_color()))
             .title(" REPORT ");
 
         if let Some(report) = &state.report_content {
@@ -111,18 +111,18 @@ impl Page for VerdictPage {
             for line in report.lines() {
                 let style = if line.starts_with("#") {
                     Style::default()
-                        .fg(theme::BLUE)
+                        .fg(theme::BLUE())
                         .add_modifier(Modifier::BOLD)
                 } else if line.starts_with("##") {
                     Style::default()
-                        .fg(theme::AMBER)
+                        .fg(theme::AMBER())
                         .add_modifier(Modifier::BOLD)
                 } else if line.starts_with("-") || line.starts_with("*") {
-                    Style::default().fg(theme::FG)
+                    Style::default().fg(theme::fg_color())
                 } else if line.contains("$") {
-                    Style::default().fg(theme::GREEN)
+                    Style::default().fg(theme::GREEN())
                 } else {
-                    Style::default().fg(theme::FG)
+                    Style::default().fg(theme::fg_color())
                 };
                 lines.push(Line::from(Span::styled(line.to_string(), style)));
             }
@@ -143,7 +143,7 @@ impl Page for VerdictPage {
             frame.render_widget(
                 Paragraph::new("  Report will appear after pipeline completes")
                     .block(report_block)
-                    .style(Style::default().fg(theme::FG_DIM)),
+                    .style(Style::default().fg(theme::fg_dim())),
                 chunks[2],
             );
         }
@@ -151,7 +151,7 @@ impl Page for VerdictPage {
         // Footer
         let footer = Line::from(vec![Span::styled(
             " [j/k] scroll   [g/G] top/bottom   [d]iff   [Esc] back",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[3]);
     }

@@ -42,7 +42,7 @@ impl Page for ArtifactsPage {
             Span::styled(
                 " artifacts",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::fg_color())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -51,7 +51,7 @@ impl Page for ArtifactsPage {
                 } else {
                     format!(" · {}", state.branch_name)
                 },
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             ),
         ]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
@@ -65,7 +65,7 @@ impl Page for ArtifactsPage {
         // File tree (left)
         let tree_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border_color()))
             .title(" FILES ");
 
         let mut tree_lines: Vec<Line> = Vec::new();
@@ -78,7 +78,7 @@ impl Page for ArtifactsPage {
         tree_lines.push(Line::from(Span::styled(
             format!("  {}/", dir_name),
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::BLUE())
                 .add_modifier(Modifier::BOLD),
         )));
 
@@ -102,18 +102,18 @@ impl Page for ArtifactsPage {
         for (i, (name, desc, is_file)) in entries.iter().enumerate() {
             let is_selected = i == self.selected;
             let style = if is_selected {
-                Style::default().fg(theme::FG).add_modifier(Modifier::BOLD)
+                Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD)
             } else if *is_file {
-                Style::default().fg(theme::FG)
+                Style::default().fg(theme::fg_color())
             } else {
-                Style::default().fg(theme::BLUE)
+                Style::default().fg(theme::BLUE())
             };
 
             let mut spans = vec![Span::styled(format!("  {}", name), style)];
             if !desc.is_empty() {
                 spans.push(Span::styled(
                     format!("   ── {}", desc),
-                    Style::default().fg(theme::FG_DIM),
+                    Style::default().fg(theme::fg_dim()),
                 ));
             }
             tree_lines.push(Line::from(spans));
@@ -129,7 +129,7 @@ impl Page for ArtifactsPage {
         // Preview pane (right)
         let preview_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER_DIM))
+            .border_style(Style::default().fg(theme::border_dim()))
             .title(" PREVIEW ");
 
         let preview_lines = if let Some(diff) = &state.diff_content {
@@ -138,13 +138,13 @@ impl Page for ArtifactsPage {
                 .take(50)
                 .map(|l| {
                     let style = if l.starts_with('+') {
-                        Style::default().fg(theme::GREEN)
+                        Style::default().fg(theme::GREEN())
                     } else if l.starts_with('-') {
-                        Style::default().fg(theme::RED)
+                        Style::default().fg(theme::RED())
                     } else if l.starts_with("@") {
-                        Style::default().fg(theme::AMBER)
+                        Style::default().fg(theme::AMBER())
                     } else {
-                        Style::default().fg(theme::FG)
+                        Style::default().fg(theme::fg_color())
                     };
                     Line::from(Span::styled(l.to_string(), style))
                 })
@@ -152,7 +152,7 @@ impl Page for ArtifactsPage {
         } else {
             vec![Line::from(Span::styled(
                 "  Select a file to preview",
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             ))]
         };
 
@@ -166,7 +166,7 @@ impl Page for ArtifactsPage {
         // Footer
         let footer = Line::from(vec![Span::styled(
             " [j/k] navigate   [Esc] back",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[2]);
     }

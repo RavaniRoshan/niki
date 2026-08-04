@@ -40,5 +40,6 @@
     "merged",
     "reconciliation_notes",
     "sources_merged"
-  ]
+  ],
+  "additionalProperties": false
 }

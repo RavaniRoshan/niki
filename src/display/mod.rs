@@ -1,11 +1,14 @@
 pub mod agent_stream;
 pub mod artifact_render;
 pub mod banner;
+pub mod command_palette;
 pub mod completion;
 pub mod diff_display;
 pub mod logo;
 pub mod modal;
+pub mod onboarding;
 pub mod pages;
 pub mod pipeline_status;
 pub mod theme;
+pub mod tips;
 pub mod tui;

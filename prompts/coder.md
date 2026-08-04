@@ -59,6 +59,8 @@ replacement text
 8. Do NOT write tests — the Tester agent handles that.
 
 ## Example
+
+IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.
 If the current file contains:
 ```python
 def add(a, b):

@@ -1,13 +1,17 @@
 pub mod agents;
 pub mod artifacts;
+pub mod audit;
 pub mod cli;
 pub mod config;
 pub mod cost;
 pub mod display;
+pub mod errors;
 pub mod eval;
+pub mod goal;
 pub mod knowledge;
 pub mod llm;
 pub mod memory;
+pub mod observability;
 pub mod orchestrator;
 pub mod output;
 pub mod recommend;
