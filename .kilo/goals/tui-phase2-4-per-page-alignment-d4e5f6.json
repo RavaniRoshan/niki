@@ -1,0 +1,40 @@
+{
+  "id": "d4e5f6",
+  "slug": "tui-phase2-4-per-page-alignment-d4e5f6",
+  "objective": "Implement Phase 2-4 from full-product-redesign-plan.md: status line, pipeline card grid, history real scan, jump-to-bottom, help accordion, config focus ring, modal scrim",
+  "status": "completed",
+  "branch": "goal/tui-phase2-4-per-page-alignment-d4e5f6",
+  "scope": "src/display/pages/",
+  "scope_lock": ["src/display/tui.rs", "src/display/pages/", "src/display/modal.rs", "src/display/log.rs"],
+  "scope_flex": [],
+  "criteria": [
+    {"label": "cargo check clean", "check": "cargo check 2>&1 | grep -c 'error'", "must_pass": true},
+    {"label": "All tests pass", "check": "cargo test 2>&1 | grep 'test result:' | grep -c '0 failed'", "must_pass": true},
+    {"label": "Status line exists in tui.rs", "check": "grep -c 'fn render_status_line' src/display/tui.rs", "must_pass": true},
+    {"label": "Pipeline has card grid", "check": "grep -c 'card\\|Card' src/display/pages/pipeline.rs", "must_pass": true},
+    {"label": "Help has collapsible sections", "check": "grep -c 'collapsed\\|collapsed_section' src/display/pages/help.rs", "must_pass": true},
+    {"label": "History scans .niki dir", "check": "grep -c 'niki_dir\\|read_dir\\|.niki' src/display/pages/history.rs", "must_pass": true},
+    {"label": "Config has focus ring", "check": "grep -c 'focus_ring\\|BORDER_ACTIVE' src/display/pages/config.rs", "must_pass": true},
+    {"label": "Run has jump-to-bottom", "check": "grep -c 'jump_to_bottom\\|scroll_bottom' src/display/pages/run.rs", "must_pass": true},
+    {"label": "Modal has scrim", "check": "grep -c 'scrim\\|dim_bg' src/display/modal.rs", "must_pass": true}
+  ],
+  "tasks": [
+    {"id": 1, "desc": "Add DisplayEvent::BranchName to populate branch_name + add status line to tui.rs rendering", "status": "pending"},
+    {"id": 2, "desc": "Pipeline page: replace ASCII flowchart with responsive card grid (4→2→1 cols)", "status": "pending"},
+    {"id": 3, "desc": "History page: scan .niki/ directory for real run entries instead of hardcoded samples", "status": "pending"},
+    {"id": 4, "desc": "Run page: add jump-to-bottom + N-new floating chip", "status": "pending"},
+    {"id": 5, "desc": "TestLog page: add jump-to-bottom control", "status": "pending"},
+    {"id": 6, "desc": "Help page: convert flat list to collapsible sections (accordions)", "status": "pending"},
+    {"id": 7, "desc": "Config page: add focus ring on selected field", "status": "pending"},
+    {"id": 8, "desc": "Modal: add dim scrim overlay + accent borders", "status": "pending"},
+    {"id": 9, "desc": "Full verification: cargo check + cargo test", "status": "pending"},
+    {"id": 10, "desc": "Git commit and push", "status": "pending"}
+  ],
+  "current_task": 1,
+  "iterations": 0,
+  "budget_used": 0,
+  "max_iterations": 50,
+  "negative_knowledge": [],
+  "context_summary": "Starting Phase 2-4 implementation. Need to add DisplayEvent::BranchName, status line, pipeline cards, history scan, jump-to-bottom, help accordion, config focus, modal scrim.",
+  "created_at": "2026-08-04T13:36:48Z"
+}

@@ -24,7 +24,8 @@ use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::command_palette::CommandPalette;
@@ -72,6 +73,10 @@ pub enum DisplayEvent {
     TestLogContent(String),
     ArtifactsDir(String),
     Final,
+    /// Branch name from the pipeline (fixes the never-populated branch_name).
+    BranchName(String),
+    /// Total token/cost info for the status line.
+    StageTotals { input_tokens: u32, output_tokens: u32, cost_usd: f64, latency_ms: u64 },
 }
 
 /// Restore terminal state no matter how we leave `run_tui`.
@@ -358,6 +363,91 @@ fn detect_synchronized_output() -> bool {
     false
 }
 
+fn render_status_line(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let (in_tokens, out_tokens, cost, _) = state.totals();
+
+    let duration = state
+        .start_time
+        .map(|s| {
+            let elapsed = s.elapsed().as_secs();
+            if elapsed > 0 {
+                format!("  {}s ", format_duration(elapsed))
+            } else {
+                String::new()
+            }
+        })
+        .unwrap_or_default();
+
+    let model_info = if !state.stages.is_empty() {
+        let active_stage = state.active_stage();
+        if let Some(stage) = active_stage {
+            let cfg = match stage.role {
+                crate::artifacts::types::AgentRole::Planner => &state.config.agents.planner,
+                crate::artifacts::types::AgentRole::Coder => &state.config.agents.coder,
+                crate::artifacts::types::AgentRole::Tester => &state.config.agents.tester,
+                crate::artifacts::types::AgentRole::Reviewer => &state.config.agents.reviewer,
+                crate::artifacts::types::AgentRole::Synthesizer => &state.config.agents.synthesizer,
+                crate::artifacts::types::AgentRole::SecurityAuditor => &state.config.agents.security_auditor,
+                crate::artifacts::types::AgentRole::Red => &state.config.agents.red,
+            };
+            format!("  {} ", cfg.model)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    let branch_display = if state.branch_name.is_empty() {
+        "niki/xxxxx".to_string()
+    } else {
+        state.branch_name.clone()
+    };
+
+    let cost_display = format!("  ${:.4} ", cost);
+    let token_display = format!("  I/O {}/{} ", in_tokens, out_tokens);
+
+    let status_line = Line::from(vec![
+        Span::styled(
+            format!("  {}", branch_display),
+            Style::default()
+                .fg(theme::fg_color())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(&model_info, Style::default().fg(theme::fg_dim()),),
+        Span::styled(&token_display, Style::default().fg(theme::fg_dim()),),
+        Span::styled(&cost_display, Style::default().fg(theme::GREEN()),),
+        Span::styled(&duration, Style::default().fg(theme::fg_dim()),),
+        Span::styled(
+            " ctrl-t theme ",
+            Style::default().fg(theme::fg_dim()),
+        ),
+    ]);
+
+    let bg = theme::bg_elevated();
+    let status_block = ratatui::widgets::Block::default().style(Style::default().bg(bg));
+    frame.render_widget(status_block, area);
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new(status_line),
+        ratatui::layout::Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        },
+    );
+}
+
+fn format_duration(secs: u64) -> String {
+    if secs < 60 {
+        format!("{}s", secs)
+    } else if secs < 3600 {
+        format!("{}m{}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
 fn render(frame: &mut ratatui::Frame, state: &AppState, router: &PageRouter, command_palette: &CommandPalette) {
     let size = frame.area();
     if size.height < 10 {
@@ -368,12 +458,13 @@ fn render(frame: &mut ratatui::Frame, state: &AppState, router: &PageRouter, com
     let bg_block = ratatui::widgets::Block::default().style(Style::default().bg(theme::bg_color()));
     frame.render_widget(bg_block, size);
 
-    // Main layout: logo area + page content (no status bar — matching reference)
+    // Main layout: logo + page content + status line
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8), // logo (6 lines + 2 padding)
-            Constraint::Min(5),    // page content
+            Constraint::Length(8),       // logo (6 lines + 2 padding)
+            Constraint::Min(5),          // page content
+            Constraint::Length(1),       // status line (footer meta)
         ])
         .split(size);
 
@@ -382,6 +473,9 @@ fn render(frame: &mut ratatui::Frame, state: &AppState, router: &PageRouter, com
 
     // Render the current page in the content area
     router.render_current(frame, chunks[1], state);
+
+    // Render status line (product "footer meta")
+    render_status_line(frame, chunks[2], state);
 
     // Render modal overlay if present
     if let Some(ref modal) = state.modal {

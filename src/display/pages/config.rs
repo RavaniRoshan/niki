@@ -10,11 +10,12 @@ use crate::display::theme;
 
 pub struct ConfigPage {
     selected_field: usize,
+    selected_section: usize,
 }
 
 impl ConfigPage {
     pub fn new() -> Self {
-        Self { selected_field: 0 }
+        Self { selected_field: 0, selected_section: 0 }
     }
 }
 
@@ -52,11 +53,16 @@ impl Page for ConfigPage {
         ]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
 
-        // Config form
+        // Config form — focus ring on active section
+        let form_border = if self.selected_section == 0 {
+            Style::default().fg(theme::border_active())
+        } else {
+            Style::default().fg(theme::border_color())
+        };
         let form_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::border_color()))
-            .title(" niki.toml ");
+            .border_style(form_border)
+            .title(format!(" {} ", if self.selected_section == 0 { "▸ niki.toml " } else { " niki.toml " }));
 
         let mut form_lines: Vec<Line> = Vec::new();
 
@@ -224,6 +230,38 @@ impl Page for ConfigPage {
             ),
         ]));
 
+        // Theme section
+        form_lines.push(Line::from(Span::styled(
+            "  THEME",
+            Style::default()
+                .fg(theme::BLUE())
+                .add_modifier(Modifier::BOLD),
+        )));
+        let theme_name = match state.config.ui.theme {
+            crate::config::types::ThemePreference::Auto => "auto",
+            crate::config::types::ThemePreference::Dark => "dark",
+            crate::config::types::ThemePreference::Light => "light",
+        };
+        form_lines.push(Line::from(vec![
+            Span::styled("    theme             ", Style::default().fg(theme::fg_color())),
+            Span::styled(
+                format!("[ {} ]", theme_name),
+                Style::default().fg(theme::accent()),
+            ),
+        ]));
+        form_lines.push(Line::from(vec![
+            Span::styled("    tips              ", Style::default().fg(theme::fg_color())),
+            Span::styled(
+                format!("[ {} ]", if state.config.ui.tips.enabled { "on" } else { "off" }),
+                Style::default().fg(if state.config.ui.tips.enabled {
+                    theme::GREEN()
+                } else {
+                    theme::fg_dim()
+                }),
+            ),
+        ]));
+        form_lines.push(Line::from(""));
+
         frame.render_widget(Paragraph::new(form_lines).block(form_block), chunks[1]);
 
         // Footer
@@ -241,12 +279,12 @@ impl Page for ConfigPage {
                 true
             }
             KeyCode::Tab => {
-                self.selected_field = (self.selected_field + 1) % 12;
+                self.selected_field = (self.selected_field + 1) % 15;
                 true
             }
             KeyCode::BackTab => {
                 self.selected_field = if self.selected_field == 0 {
-                    11
+                    14
                 } else {
                     self.selected_field - 1
                 };

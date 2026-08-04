@@ -3,7 +3,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::{AppState, Page, PageId};
 use crate::display::theme;
@@ -80,164 +80,9 @@ impl Page for PipelinePage {
         ]);
         frame.render_widget(Paragraph::new(info), chunks[1]);
 
-        // Flowchart
-        let mut flow_lines: Vec<Line> = Vec::new();
-        flow_lines.push(Line::from(""));
-        flow_lines.push(Line::from(vec![
-            Span::styled("         task ────▶ ", Style::default().fg(theme::fg_dim())),
-            Span::styled(
-                format!(
-                    "{} Planner",
-                    theme::role_glyph(crate::artifacts::types::AgentRole::Planner)
-                ),
-                Style::default()
-                    .fg(theme::role_color(
-                        crate::artifacts::types::AgentRole::Planner,
-                    ))
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        flow_lines.push(Line::from(vec![Span::styled(
-            "                       │",
-            Style::default().fg(theme::fg_dim()),
-        )]));
-        flow_lines.push(Line::from(vec![Span::styled(
-            "                  TaskSpec",
-            Style::default().fg(theme::fg_dim()),
-        )]));
-        flow_lines.push(Line::from(vec![Span::styled(
-            "                       ▼",
-            Style::default().fg(theme::fg_dim()),
-        )]));
-        flow_lines.push(Line::from(vec![Span::styled(
-            "              ┌────────────┐",
-            Style::default().fg(theme::fg_dim()),
-        )]));
-        flow_lines.push(Line::from(vec![
-            Span::styled("              │", Style::default().fg(theme::fg_dim())),
-            Span::styled(
-                format!(
-                    " {} Coder ",
-                    theme::role_glyph(crate::artifacts::types::AgentRole::Coder)
-                ),
-                Style::default()
-                    .fg(theme::role_color(crate::artifacts::types::AgentRole::Coder))
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("│ ──diff──▶", Style::default().fg(theme::fg_dim())),
-        ]));
-        flow_lines.push(Line::from(vec![Span::styled(
-            "              └────────────┘           ▼",
-            Style::default().fg(theme::fg_dim()),
-        )]));
-        flow_lines.push(Line::from(vec![Span::styled(
-            "                                 ┌────────────┐",
-            Style::default().fg(theme::fg_dim()),
-        )]));
-        flow_lines.push(Line::from(vec![
-            Span::styled(
-                "                                 │",
-                Style::default().fg(theme::fg_dim()),
-            ),
-            Span::styled(
-                format!(
-                    " {} Tester ",
-                    theme::role_glyph(crate::artifacts::types::AgentRole::Tester)
-                ),
-                Style::default()
-                    .fg(theme::role_color(
-                        crate::artifacts::types::AgentRole::Tester,
-                    ))
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("│ ──tests──▶", Style::default().fg(theme::fg_dim())),
-        ]));
-        flow_lines.push(Line::from(vec![Span::styled(
-            "                                 └────────────┘           ▼",
-            Style::default().fg(theme::fg_dim()),
-        )]));
-
-        if state.config.red_blue.enabled {
-            flow_lines.push(Line::from(vec![Span::styled(
-                "                                            ┌────────────┐",
-                Style::default().fg(theme::fg_dim()),
-            )]));
-            flow_lines.push(Line::from(vec![
-                Span::styled(
-                    "                                            │",
-                    Style::default().fg(theme::fg_dim()),
-                ),
-                Span::styled(
-                    format!(
-                        " {} Red ",
-                        theme::role_glyph(crate::artifacts::types::AgentRole::Red)
-                    ),
-                    Style::default()
-                        .fg(theme::role_color(crate::artifacts::types::AgentRole::Red))
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("│ ──challenges──▶", Style::default().fg(theme::fg_dim())),
-            ]));
-            flow_lines.push(Line::from(vec![Span::styled(
-                "                                            └────────────┘           ▼",
-                Style::default().fg(theme::fg_dim()),
-            )]));
-        }
-
-        flow_lines.push(Line::from(vec![Span::styled(
-            "                                       ┌────────────┐",
-            Style::default().fg(theme::fg_dim()),
-        )]));
-        flow_lines.push(Line::from(vec![
-            Span::styled(
-                "                                       │",
-                Style::default().fg(theme::fg_dim()),
-            ),
-            Span::styled(
-                format!(
-                    " {} Reviewer ",
-                    theme::role_glyph(crate::artifacts::types::AgentRole::Reviewer)
-                ),
-                Style::default()
-                    .fg(theme::role_color(
-                        crate::artifacts::types::AgentRole::Reviewer,
-                    ))
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("│", Style::default().fg(theme::fg_dim())),
-        ]));
-        flow_lines.push(Line::from(vec![Span::styled(
-            "                                       └─────┬──────┘",
-            Style::default().fg(theme::fg_dim()),
-        )]));
-        flow_lines.push(Line::from(vec![Span::styled(
-            "                                             │",
-            Style::default().fg(theme::fg_dim()),
-        )]));
-        flow_lines.push(Line::from(vec![Span::styled(
-            "                                             ▼",
-            Style::default().fg(theme::fg_dim()),
-        )]));
-        flow_lines.push(Line::from(vec![Span::styled(
-            "                                       niki/<id> branch",
-            Style::default()
-                .fg(theme::GREEN())
-                .add_modifier(Modifier::BOLD),
-        )]));
-
-        let flow_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::border_color()))
-            .title(" FLOW ");
-        frame.render_widget(
-            Paragraph::new(flow_lines)
-                .block(flow_block)
-                .wrap(Wrap { trim: false }),
-            chunks[2],
-        );
-
-        // Agent models — highlight selected stage
-        let roles = [
+        // ── Card grid (replaces ASCII flowchart) ──────────────────────────
+        // Responsive: 4-up (>=104 cols), 2-up (>=80 cols), stacked (<80 cols)
+        let primary_roles = [
             crate::artifacts::types::AgentRole::Planner,
             crate::artifacts::types::AgentRole::Coder,
             crate::artifacts::types::AgentRole::Tester,
@@ -249,7 +94,130 @@ impl Page for PipelinePage {
             &state.config.agents.tester,
             &state.config.agents.reviewer,
         ];
-        let model_lines: Vec<Line> = roles
+
+        let role_descs = [
+            "Breaks task into structured spec before code",
+            "Implements changes in an isolated worktree",
+            "Runs test suite and reports failures",
+            "Independent verification of changes",
+        ];
+
+        let cols: usize = if area.width >= 104 {
+            4
+        } else if area.width >= 80 {
+            2
+        } else {
+            1
+        };
+
+        // Count started stages to limit selection
+        let started_roles: Vec<_> = state.stages.iter().map(|s| s.role).collect();
+        let started_count = primary_roles
+            .iter()
+            .filter(|r| started_roles.contains(r))
+            .count();
+        let max_select = started_count.max(1).min(4);
+        let selected = self.selected_stage.min(max_select - 1);
+
+        // Compute card dimensions
+        let card_gap: u16 = 2;
+        let total_gap = card_gap * (cols as u16 - 1);
+        let avail_width = area.width.saturating_sub(total_gap + 2);
+        let card_width = (avail_width / cols as u16).max(20).min(40);
+        let card_height: u16 = 5;
+        let card_gap_v: u16 = 1;
+
+        let total_cards = primary_roles.len() as u16;
+        let rows = (total_cards + cols as u16 - 1) / cols as u16;
+        let total_height = card_height * rows + card_gap_v * (rows - 1);
+        let top_pad = (chunks[2].height.saturating_sub(total_height)) / 2;
+
+        for (i, role) in primary_roles.iter().enumerate() {
+            let col = (i % cols) as u16;
+            let row = (i / cols) as u16;
+
+            let x = 1 + col * (card_width + card_gap);
+            let y = chunks[2].y + top_pad + row * (card_height + card_gap_v);
+
+            if y + card_height > chunks[2].y + chunks[2].height {
+                continue;
+            }
+
+            let card_area = Rect {
+                x,
+                y,
+                width: card_width,
+                height: card_height,
+            };
+
+            let is_selected = i == selected;
+            let stage = state.stages.iter().find(|s| s.role == *role);
+            let status_glyph = match stage {
+                Some(s) => match s.status {
+                    super::StageStatus::Running => "▶",
+                    super::StageStatus::Done => "✓",
+                    super::StageStatus::Failed => "✗",
+                    super::StageStatus::Queued => "·",
+                },
+                None => "·",
+            };
+            let status_color = match stage {
+                Some(s) => match s.status {
+                    super::StageStatus::Running => theme::warning(),
+                    super::StageStatus::Done => theme::success(),
+                    super::StageStatus::Failed => theme::error(),
+                    super::StageStatus::Queued => theme::fg_dim(),
+                },
+                None => theme::fg_dim(),
+            };
+
+            let border_style = if is_selected {
+                Style::default().fg(theme::border_active())
+            } else {
+                Style::default().fg(theme::border_color())
+            };
+
+            let glyph = theme::role_glyph(*role);
+            let name = theme::role_name(*role);
+            let role_color = theme::role_color(*role);
+            let cfg = agent_configs[i];
+            let desc = role_descs[i];
+
+            let desc_width = (card_width as usize).saturating_sub(6);
+            let truncated_desc = theme::truncate_str(desc, desc_width);
+
+            let card_lines = vec![
+                Line::from(vec![
+                    Span::styled(
+                        format!(" {} {}", glyph, name),
+                        Style::default()
+                            .fg(role_color)
+                            .add_modifier(if is_selected { Modifier::BOLD } else { Modifier::empty() }),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!(" {} {}", status_glyph, status_glyph), Style::default().fg(status_color)),
+                ]),
+                Line::from(Span::styled(format!(" {}", truncated_desc), Style::default().fg(theme::fg_dim()))),
+                Line::from(Span::styled(
+                    format!(" provider: {}", cfg.provider),
+                    Style::default().fg(theme::fg_color()),
+                )),
+            ];
+
+            let card_block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .style(Style::default().bg(theme::bg_elevated()));
+
+            frame.render_widget(
+                Paragraph::new(card_lines).block(card_block),
+                card_area,
+            );
+        }
+
+        // Agent models — highlight selected stage
+        let model_lines: Vec<Line> = primary_roles
             .iter()
             .enumerate()
             .map(|(i, role)| {
@@ -298,8 +266,22 @@ impl Page for PipelinePage {
                 state.current_page = PageId::Run;
                 true
             }
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.selected_stage = (self.selected_stage + 1).min(3);
+             KeyCode::Char('j') | KeyCode::Down => {
+                let primary_roles = [
+                    crate::artifacts::types::AgentRole::Planner,
+                    crate::artifacts::types::AgentRole::Coder,
+                    crate::artifacts::types::AgentRole::Tester,
+                    crate::artifacts::types::AgentRole::Reviewer,
+                ];
+                let started_roles: Vec<_> = state.stages.iter().map(|s| s.role).collect();
+                let started_count = primary_roles
+                    .iter()
+                    .filter(|r| started_roles.contains(r))
+                    .count();
+                let max_index = started_count.max(1).min(4) - 1;
+                if self.selected_stage < max_index {
+                    self.selected_stage += 1;
+                }
                 true
             }
             KeyCode::Char('k') | KeyCode::Up => {
