@@ -124,6 +124,11 @@ impl AgenticDisplay {
         }
     }
 
+    /// Send the branch name to the TUI for the status line.
+    pub fn set_branch_name(&self, name: &str) {
+        self.emit(DisplayEvent::BranchName(name.to_string()));
+    }
+
     /// Plain timestamped log line, used only in non-TTY (piped/CI) mode.
     fn log(&self, label: &str, msg: &str) {
         if !self.is_tty {
