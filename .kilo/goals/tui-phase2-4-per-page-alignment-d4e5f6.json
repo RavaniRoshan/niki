@@ -2,7 +2,7 @@
   "id": "d4e5f6",
   "slug": "tui-phase2-4-per-page-alignment-d4e5f6",
   "objective": "Implement Phase 2-4 from full-product-redesign-plan.md: status line, pipeline card grid, history real scan, jump-to-bottom, help accordion, config focus ring, modal scrim",
-  "status": "active",
+  "status": "completed",
   "branch": "goal/tui-phase2-4-per-page-alignment-d4e5f6",
   "scope": "src/display/pages/",
   "scope_lock": ["src/display/tui.rs", "src/display/pages/", "src/display/modal.rs", "src/display/log.rs"],
