@@ -282,6 +282,8 @@ fn palette() -> &'static Palette {
 #[inline] pub fn stone() -> Color { fg_subtle() }
 /// Text on dark backgrounds — returns fg_bright.
 #[inline] pub fn on_dark() -> Color { fg_bright() }
+/// Dimmed surface for modal scrim overlays.
+#[inline] pub fn surface_dark() -> Color { bg_deep() }
 
 // ── Backward-compat aliases (old const names → new palette fns) ─────────
 // Mechanical sweep converts theme::OLD → theme::OLD() across all files.

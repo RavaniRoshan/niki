@@ -334,6 +334,9 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         .clone()
         .unwrap_or_else(|| format!("niki/{}", &task.id.to_string()[..8]));
 
+    // Send branch name to TUI for status line display
+    display.set_branch_name(&branch_name);
+
     // Save raw agent artifacts.
     let artifacts_dir = task_dir.join("artifacts");
     if let Err(e) = std::fs::create_dir_all(&artifacts_dir) {

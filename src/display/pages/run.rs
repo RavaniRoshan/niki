@@ -10,11 +10,12 @@ use crate::display::theme;
 
 pub struct RunPage {
     scroll_offset: u16,
+    auto_scroll: bool,
 }
 
 impl RunPage {
     pub fn new() -> Self {
-        Self { scroll_offset: 0 }
+        Self { scroll_offset: 0, auto_scroll: true }
     }
 }
 
@@ -204,6 +205,33 @@ impl Page for RunPage {
             chunks[2],
         );
 
+        // Floating "N new" chip — shows when scrolled up and new content below
+        let pending = if !self.auto_scroll && scroll < max_scroll {
+            (max_scroll - scroll).min(99)
+        } else {
+            0
+        };
+        if pending > 0 {
+            let chip_x = area.width.saturating_sub(12).max(1);
+            let chip_y = chunks[2].y + chunks[2].height.saturating_sub(2);
+            let chip_area = Rect {
+                x: chip_x,
+                y: chip_y,
+                width: 10.min(area.width - chip_x),
+                height: 1,
+            };
+            let chip = Paragraph::new(Line::from(vec![
+                Span::styled(
+                    format!(" {} NEW ", pending),
+                    Style::default()
+                        .fg(theme::bg_color())
+                        .bg(theme::accent())
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            frame.render_widget(chip, chip_area);
+        }
+
         // ── Separator ─────────────────────────────────────────────────────
         let separator = Line::from(Span::styled(
             "─".repeat(area.width as usize),
@@ -281,18 +309,24 @@ impl Page for RunPage {
             }
             KeyCode::Char('g') => {
                 self.scroll_offset = 0;
+                if state.stages.iter().any(|s| s.status == StageStatus::Running) {
+                    self.auto_scroll = false;
+                }
                 true
             }
             KeyCode::Char('G') => {
                 self.scroll_offset = u16::MAX;
+                self.auto_scroll = true;
                 true
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                self.auto_scroll = false;
                 true
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.scroll_offset = self.scroll_offset.saturating_add(1);
+                self.auto_scroll = false;
                 true
             }
             _ => false,

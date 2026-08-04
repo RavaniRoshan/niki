@@ -9,6 +9,10 @@ use super::pages::Modal;
 use crate::display::theme;
 
 pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
+    // Dim scrim overlay — covers the entire screen behind the modal
+    let scrim = Block::default().style(Style::default().bg(theme::surface_dark()));
+    frame.render_widget(scrim, area);
+
     let popup_width = 50.min(area.width - 4);
     let popup_height = 10.min(area.height - 4);
     let x = (area.width - popup_width) / 2;
@@ -21,7 +25,7 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
         height: popup_height,
     };
 
-    // Clear the area behind the modal
+    // Clear the popup area (on top of scrim)
     frame.render_widget(Clear, popup_area);
 
     let (title, message_str, border_color) = match modal {
