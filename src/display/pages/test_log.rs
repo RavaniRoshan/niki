@@ -138,6 +138,7 @@ impl Page for TestLogPage {
                 true
             }
             KeyCode::Char('G') => {
+                // Jump to bottom
                 self.scroll_offset = u16::MAX;
                 true
             }
