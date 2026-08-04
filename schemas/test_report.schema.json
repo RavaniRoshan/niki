@@ -53,5 +53,6 @@
     "test_results",
     "edge_cases_found",
     "tester_notes"
-  ]
+  ],
+  "additionalProperties": false
 }

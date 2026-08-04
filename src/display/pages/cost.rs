@@ -58,7 +58,7 @@ impl Page for CostPage {
             Span::styled(
                 " cost",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::fg_color())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -67,7 +67,7 @@ impl Page for CostPage {
                 } else {
                     format!(" · {}", state.branch_name)
                 },
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             ),
         ]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
@@ -76,7 +76,7 @@ impl Page for CostPage {
         frame.render_widget(
             Paragraph::new(Span::styled(
                 "  ──────────────────────────────────────────────────────────────────────",
-                Style::default().fg(theme::BORDER),
+                Style::default().fg(theme::border_color()),
             )),
             chunks[1],
         );
@@ -84,7 +84,7 @@ impl Page for CostPage {
         // Cost table
         let table_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border_color()))
             .title(" COST BREAKDOWN ");
 
         let mut table_lines: Vec<Line> = Vec::new();
@@ -93,37 +93,37 @@ impl Page for CostPage {
             Span::styled(
                 "  AGENT       ",
                 Style::default()
-                    .fg(theme::FG_DIM)
+                    .fg(theme::fg_dim())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "MODEL                 ",
                 Style::default()
-                    .fg(theme::FG_DIM)
+                    .fg(theme::fg_dim())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "TOKENS   ",
                 Style::default()
-                    .fg(theme::FG_DIM)
+                    .fg(theme::fg_dim())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "COST     ",
                 Style::default()
-                    .fg(theme::FG_DIM)
+                    .fg(theme::fg_dim())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "LATENCY",
                 Style::default()
-                    .fg(theme::FG_DIM)
+                    .fg(theme::fg_dim())
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
         table_lines.push(Line::from(Span::styled(
             "  ──────────  ────────────────────  ───────  ────────  ────────",
-            Style::default().fg(theme::BORDER),
+            Style::default().fg(theme::border_color()),
         )));
 
         // Agent rows
@@ -147,19 +147,19 @@ impl Page for CostPage {
                 ),
                 Span::styled(
                     format!("{:<20}", "anthropic/claude-sonnet-4"),
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(
                     format!("{:<8}", fmt_tokens(tokens)),
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(
                     format!("${:<7.4}", stage.cost_usd),
-                    Style::default().fg(theme::GREEN),
+                    Style::default().fg(theme::GREEN()),
                 ),
                 Span::styled(
                     fmt_duration(stage.latency_ms),
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]));
         }
@@ -167,27 +167,27 @@ impl Page for CostPage {
         // Total row
         table_lines.push(Line::from(Span::styled(
             "  ──────────  ────────────────────  ───────  ────────  ────────",
-            Style::default().fg(theme::BORDER),
+            Style::default().fg(theme::border_color()),
         )));
         table_lines.push(Line::from(vec![
             Span::styled(
                 "  TOTAL      ",
-                Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+                Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD),
             ),
             Span::styled("                     ", Style::default()),
             Span::styled(
                 format!("{:<8}", fmt_tokens(total_tokens)),
-                Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+                Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("${:<7.4}", total_cost),
                 Style::default()
-                    .fg(theme::GREEN)
+                    .fg(theme::GREEN())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 fmt_duration(total_latency),
-                Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+                Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD),
             ),
         ]));
 
@@ -202,7 +202,7 @@ impl Page for CostPage {
         frame.render_widget(
             Paragraph::new(Span::styled(
                 "  ──────────────────────────────────────────────────────────────────────",
-                Style::default().fg(theme::BORDER),
+                Style::default().fg(theme::border_color()),
             )),
             chunks[3],
         );
@@ -210,7 +210,7 @@ impl Page for CostPage {
         // Bar chart
         let bar_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border_color()))
             .title(" PER-AGENT COST ");
 
         let mut bar_lines: Vec<Line> = Vec::new();
@@ -238,10 +238,10 @@ impl Page for CostPage {
                     Style::default().fg(color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(bar, Style::default().fg(color)),
-                Span::styled(empty, Style::default().fg(theme::FG_DIM)),
+                Span::styled(empty, Style::default().fg(theme::fg_dim())),
                 Span::styled(
                     format!(" ${:.4}", stage.cost_usd),
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]));
         }
@@ -251,7 +251,7 @@ impl Page for CostPage {
         // Footer
         let footer = Line::from(vec![Span::styled(
             " [Esc] back",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[5]);
     }

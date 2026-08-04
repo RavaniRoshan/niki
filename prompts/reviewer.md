@@ -57,3 +57,5 @@ You MUST output a single valid JSON object conforming to this schema:
 8. If all issues are minor/nit, verdict should be "approved" (minor issues go in the issues list but don't block).
 9. When a Red challenge is present, you MUST populate `red_reconciliation` with one entry
    per challenge id — upholding or refuting each with reasoning.
+
+IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.

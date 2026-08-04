@@ -7,6 +7,7 @@ use crate::llm::provider::TokenUsage;
 use crate::orchestrator::pipeline::{PipelineResult, Task};
 use crate::orchestrator::state::PipelineState;
 use console::Term;
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -97,11 +98,11 @@ impl AgenticDisplay {
 
     /// Enable the rich terminal TUI. Spawns the render thread; subsequent
     /// display calls forward events to it instead of printing inline.
-    pub fn enable_tui(&mut self, description: String) {
+    pub fn enable_tui(&mut self, description: String, project_path: PathBuf) {
         if !self.is_tty {
             return;
         }
-        let (tx, handle) = spawn_tui(description);
+        let (tx, handle) = spawn_tui(description, project_path);
         self.tui = Some(tx);
         self.tui_thread = Some(handle);
     }
@@ -360,6 +361,19 @@ impl AgenticDisplay {
         let _ = self
             .term
             .write_line(&format!(" {} {}", self.theme.error.apply_to("✗"), error));
+    }
+
+    pub fn agent_warning(&mut self, role: AgentRole, message: &str) {
+        self.clear_streaming_output();
+        if !self.is_tty {
+            self.log(role_label(role), &format!("Warning: {}", message));
+            return;
+        }
+        let _ = self.term.write_line(&format!(
+            " {} {}",
+            self.theme.warning.apply_to("⚠"),
+            message
+        ));
     }
 
     pub fn revision_requested(&mut self, round: u32, max: u32, issues: &[ReviewIssue]) {

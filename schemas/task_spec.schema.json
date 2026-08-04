@@ -39,5 +39,6 @@
     "acceptance_criteria",
     "constraints",
     "estimated_complexity"
-  ]
+  ],
+  "additionalProperties": false
 }

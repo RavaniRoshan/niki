@@ -47,5 +47,6 @@
     "verdict",
     "overall_assessment",
     "findings"
-  ]
+  ],
+  "additionalProperties": false
 }

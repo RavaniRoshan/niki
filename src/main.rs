@@ -30,6 +30,8 @@ enum Commands {
     Eval(niki::cli::eval::EvalArgs),
     /// View and manage agent memory (learned patterns from past runs)
     Memory(niki::cli::memory::MemoryArgs),
+    /// Manage persistent goals (autonomous goal runner)
+    Goal(niki::cli::goal::GoalArgs),
 }
 
 #[tokio::main]
@@ -51,6 +53,7 @@ async fn main() -> Result<()> {
         Commands::Dashboard(args) => niki::cli::dashboard::handle(args)?,
         Commands::Eval(args) => niki::cli::eval::handle(args).await?,
         Commands::Memory(args) => niki::cli::memory::handle(args)?,
+        Commands::Goal(args) => niki::cli::goal::handle(args).await?,
     }
 
     Ok(())

@@ -42,12 +42,12 @@ impl Page for ConfigPage {
             Span::styled(
                 " config",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::fg_color())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!(" · {}", state.project_path.display()),
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             ),
         ]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
@@ -55,7 +55,7 @@ impl Page for ConfigPage {
         // Config form
         let form_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border_color()))
             .title(" niki.toml ");
 
         let mut form_lines: Vec<Line> = Vec::new();
@@ -64,27 +64,27 @@ impl Page for ConfigPage {
         form_lines.push(Line::from(Span::styled(
             "  GENERAL",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::BLUE())
                 .add_modifier(Modifier::BOLD),
         )));
         form_lines.push(Line::from(vec![
             Span::styled(
                 "    max_revision_rounds    ",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             ),
             Span::styled(
                 format!("[ {} ]", state.config.general.max_revision_rounds),
-                Style::default().fg(theme::AMBER),
+                Style::default().fg(theme::AMBER()),
             ),
         ]));
         form_lines.push(Line::from(vec![
             Span::styled(
                 "    output_dir             ",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             ),
             Span::styled(
                 format!("[ {} ]", state.config.general.output_dir),
-                Style::default().fg(theme::AMBER),
+                Style::default().fg(theme::AMBER()),
             ),
         ]));
         form_lines.push(Line::from(""));
@@ -93,7 +93,7 @@ impl Page for ConfigPage {
         form_lines.push(Line::from(Span::styled(
             "  AGENTS",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::BLUE())
                 .add_modifier(Modifier::BOLD),
         )));
 
@@ -108,15 +108,15 @@ impl Page for ConfigPage {
             form_lines.push(Line::from(vec![
                 Span::styled(
                     format!("    {:<10}", name),
-                    Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+                    Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("provider [ {:<10} ]", agent.provider),
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(
                     format!("model [ {:<20} ]", agent.model),
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]));
         }
@@ -126,26 +126,26 @@ impl Page for ConfigPage {
         form_lines.push(Line::from(Span::styled(
             "  SANDBOX",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::BLUE())
                 .add_modifier(Modifier::BOLD),
         )));
         form_lines.push(Line::from(vec![
-            Span::styled("    base_image       ", Style::default().fg(theme::FG)),
+            Span::styled("    base_image       ", Style::default().fg(theme::fg_color())),
             Span::styled(
                 format!("[ {} ]", state.config.docker.base_image),
-                Style::default().fg(theme::AMBER),
+                Style::default().fg(theme::AMBER()),
             ),
         ]));
         form_lines.push(Line::from(vec![
-            Span::styled("    memory_limit     ", Style::default().fg(theme::FG)),
+            Span::styled("    memory_limit     ", Style::default().fg(theme::fg_color())),
             Span::styled(
                 format!("[ {} ]", state.config.docker.memory_limit),
-                Style::default().fg(theme::AMBER),
+                Style::default().fg(theme::AMBER()),
             ),
-            Span::styled("   cpu_limit ", Style::default().fg(theme::FG)),
+            Span::styled("   cpu_limit ", Style::default().fg(theme::fg_color())),
             Span::styled(
                 format!("[ {} ]", state.config.docker.cpu_limit),
-                Style::default().fg(theme::AMBER),
+                Style::default().fg(theme::AMBER()),
             ),
         ]));
         form_lines.push(Line::from(""));
@@ -154,14 +154,14 @@ impl Page for ConfigPage {
         form_lines.push(Line::from(Span::styled(
             "  PIPELINE",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::BLUE())
                 .add_modifier(Modifier::BOLD),
         )));
         form_lines.push(Line::from(vec![
-            Span::styled("    topology         ", Style::default().fg(theme::FG)),
+            Span::styled("    topology         ", Style::default().fg(theme::fg_color())),
             Span::styled(
                 format!("[ {:?} ]", state.config.pipeline.topology),
-                Style::default().fg(theme::AMBER),
+                Style::default().fg(theme::AMBER()),
             ),
         ]));
         form_lines.push(Line::from(""));
@@ -170,11 +170,11 @@ impl Page for ConfigPage {
         form_lines.push(Line::from(Span::styled(
             "  SECURITY",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::BLUE())
                 .add_modifier(Modifier::BOLD),
         )));
         form_lines.push(Line::from(vec![
-            Span::styled("    enabled          ", Style::default().fg(theme::FG)),
+            Span::styled("    enabled          ", Style::default().fg(theme::fg_color())),
             Span::styled(
                 format!(
                     "[ {} ]",
@@ -185,9 +185,9 @@ impl Page for ConfigPage {
                     }
                 ),
                 Style::default().fg(if state.config.security.enabled {
-                    theme::GREEN
+                    theme::GREEN()
                 } else {
-                    theme::FG_DIM
+                    theme::fg_dim()
                 }),
             ),
         ]));
@@ -197,11 +197,11 @@ impl Page for ConfigPage {
         form_lines.push(Line::from(Span::styled(
             "  PARALLEL",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::BLUE())
                 .add_modifier(Modifier::BOLD),
         )));
         form_lines.push(Line::from(vec![
-            Span::styled("    enabled          ", Style::default().fg(theme::FG)),
+            Span::styled("    enabled          ", Style::default().fg(theme::fg_color())),
             Span::styled(
                 format!(
                     "[ {} ]",
@@ -212,15 +212,15 @@ impl Page for ConfigPage {
                     }
                 ),
                 Style::default().fg(if state.config.parallel.enabled {
-                    theme::GREEN
+                    theme::GREEN()
                 } else {
-                    theme::FG_DIM
+                    theme::fg_dim()
                 }),
             ),
-            Span::styled("   coder_count ", Style::default().fg(theme::FG)),
+            Span::styled("   coder_count ", Style::default().fg(theme::fg_color())),
             Span::styled(
                 format!("[ {} ]", state.config.parallel.coder_count),
-                Style::default().fg(theme::AMBER),
+                Style::default().fg(theme::AMBER()),
             ),
         ]));
 
@@ -229,7 +229,7 @@ impl Page for ConfigPage {
         // Footer
         let footer = Line::from(vec![Span::styled(
             " [Tab] next field   [Esc] back",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[2]);
     }

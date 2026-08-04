@@ -55,7 +55,7 @@ pub fn render_logo(frame: &mut Frame, area: Rect) {
             Paragraph::new(Line::from(Span::styled(
                 padded,
                 Style::default()
-                    .fg(theme::FG_BRIGHT)
+                    .fg(super::theme::fg_color())
                     .add_modifier(Modifier::BOLD),
             ))),
             line_area,
@@ -88,7 +88,7 @@ pub fn render_logo_with_subtitle(frame: &mut Frame, area: Rect, subtitle: &str) 
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 padded,
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             ))),
             subtitle_area,
         );

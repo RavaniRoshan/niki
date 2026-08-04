@@ -31,3 +31,5 @@ You MUST output a single valid JSON object conforming to this schema:
 4. Report which tests pass and which fail based on your analysis of the diff.
 5. Identify any untested edge cases.
 6. You are analyzing the diff — simulate test execution based on the code logic.
+
+IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.

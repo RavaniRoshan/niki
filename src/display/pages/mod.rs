@@ -7,6 +7,7 @@ pub mod help;
 pub mod history;
 pub mod pipeline;
 pub mod run;
+pub mod test_log;
 pub mod verdict;
 
 use std::collections::HashMap;
@@ -18,6 +19,7 @@ use ratatui::layout::Rect;
 
 use crate::artifacts::types::AgentRole;
 use crate::config::NikiConfig;
+use crate::display::tips::TipsBanner;
 use crate::display::tui::DisplayEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -32,6 +34,7 @@ pub enum PageId {
     History,
     Config,
     Help,
+    TestLog,
 }
 
 impl PageId {
@@ -47,6 +50,7 @@ impl PageId {
             PageId::History,
             PageId::Config,
             PageId::Help,
+            PageId::TestLog,
         ]
     }
 
@@ -65,6 +69,7 @@ impl PageId {
             'h' => Some(PageId::History),
             ',' => Some(PageId::Config),
             '?' => Some(PageId::Help),
+            'l' => Some(PageId::TestLog),
             _ => None,
         }
     }
@@ -81,6 +86,7 @@ impl PageId {
             PageId::History => "history",
             PageId::Config => "config",
             PageId::Help => "help",
+            PageId::TestLog => "test_log",
         }
     }
 
@@ -96,6 +102,7 @@ impl PageId {
             PageId::History => "h",
             PageId::Config => ",",
             PageId::Help => "?",
+            PageId::TestLog => "l",
         }
     }
 }
@@ -158,8 +165,13 @@ pub struct AppState {
     pub report_content: Option<String>,
     pub diff_content: Option<String>,
     pub cost_json: Option<String>,
+    pub test_log: Option<String>,
     pub modal: Option<Modal>,
+    pub onboarding: Option<crate::display::onboarding::OnboardingModal>,
+    pub onboarded: bool,
     pub start_time: Option<std::time::Instant>,
+    pub tips: TipsBanner,
+    pub show_command_palette: bool,
 }
 
 #[derive(Debug)]
@@ -177,6 +189,8 @@ pub enum Modal {
 
 impl AppState {
     pub fn new(description: String, config: NikiConfig, project_path: PathBuf) -> Self {
+        let tips_enabled = config.ui.tips.enabled;
+        let tips_rotation = config.ui.tips.rotation_seconds;
         Self {
             current_page: PageId::Run,
             run_state: RunState::Idle,
@@ -196,8 +210,13 @@ impl AppState {
             report_content: None,
             diff_content: None,
             cost_json: None,
+            test_log: None,
             modal: None,
+            onboarding: None,
+            onboarded: false,
             start_time: None,
+            tips: TipsBanner::new(tips_enabled, tips_rotation),
+            show_command_palette: false,
         }
     }
 
@@ -295,6 +314,9 @@ impl AppState {
             DisplayEvent::CostJson(json) => {
                 self.cost_json = Some(json);
             }
+            DisplayEvent::TestLogContent(content) => {
+                self.test_log = Some(content);
+            }
             DisplayEvent::ArtifactsDir(dir) => {
                 self.artifacts_dir = Some(std::path::PathBuf::from(dir));
             }
@@ -349,6 +371,7 @@ impl PageRouter {
         pages.insert(PageId::History, Box::new(history::HistoryPage::new()));
         pages.insert(PageId::Config, Box::new(config::ConfigPage::new()));
         pages.insert(PageId::Help, Box::new(help::HelpPage::new()));
+        pages.insert(PageId::TestLog, Box::new(test_log::TestLogPage::new()));
         Self { pages }
     }
 

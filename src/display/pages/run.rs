@@ -3,9 +3,9 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Borders, Paragraph};
 
-use super::{AppState, Page, PageId, StageStatus};
+use super::{AppState, Page, StageStatus};
 use crate::display::theme;
 
 pub struct RunPage {
@@ -25,7 +25,7 @@ impl Page for RunPage {
 
     fn render(&self, frame: &mut Frame, area: Rect, state: &AppState) {
         if area.height < 8 {
-            let msg = Paragraph::new("Terminal too small").style(Style::default().fg(theme::RED));
+            let msg = Paragraph::new("Terminal too small").style(Style::default().fg(theme::RED()));
             frame.render_widget(msg, area);
             return;
         }
@@ -42,65 +42,57 @@ impl Page for RunPage {
             ])
             .split(area);
 
-        // ── Task card (left accent bar + description + tags) ──────────────
-        let task_card_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(1), // accent bar
-                Constraint::Min(1),    // content
-            ])
-            .split(chunks[0]);
+        // ── Task card (bordered box + description + tags) ──────────────────
+        // Render task card with subtle border
+        let card_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::border_color()))
+            .style(Style::default().bg(theme::bg_elevated()));
+        frame.render_widget(card_block, chunks[0]);
 
-        // Left accent bar (green vertical line)
-        let accent_bar = Paragraph::new("│").style(Style::default().fg(theme::GREEN));
-        frame.render_widget(accent_bar, task_card_chunks[0]);
-
-        // Task card content
-        let desc = &state.description;
-        let desc_width = (task_card_chunks[1].width as usize).saturating_sub(20);
-        let truncated: String = desc.chars().take(desc_width).collect();
-
+        // Task card content layout
         let card_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // title + description
                 Constraint::Length(1), // tags
             ])
-            .split(task_card_chunks[1]);
+            .margin(1)
+            .split(chunks[0]);
 
         // Title line: "Build" + description + paused indicator
+        let desc = &state.description;
+        let desc_width = (card_chunks[0].width as usize).saturating_sub(10);
+        let truncated = theme::truncate_str_ellipsis(desc, desc_width);
+
         let mut title_spans = vec![
             Span::styled(
                 "Build ",
                 Style::default()
-                    .fg(theme::FG_BRIGHT)
+                    .fg(theme::fg_color())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(truncated, Style::default().fg(theme::FG)),
+            Span::styled(truncated, Style::default().fg(theme::fg_color())),
         ];
         if state.paused {
             title_spans.push(Span::styled(
                 "  ■ PAUSED",
                 Style::default()
-                    .fg(theme::AMBER)
+                    .fg(theme::AMBER())
                     .add_modifier(Modifier::BOLD),
             ));
         }
         let title_line = Line::from(title_spans);
         frame.render_widget(Paragraph::new(title_line), card_chunks[0]);
 
-        // Tags line
-        let tags = if state.stages.is_empty() {
-            vec!["sandbox", "docker"]
-        } else {
-            vec!["sandbox", "docker"]
-        };
+        // Tags line (bordered badges)
+        let tags = vec!["sandbox", "docker"];
         let mut tag_spans = vec![Span::styled("  ", Style::default())];
         for tag in &tags {
             tag_spans.push(Span::styled(
                 format!(" {} ", tag),
                 Style::default()
-                    .fg(theme::FG_DIM)
+                    .fg(theme::fg_dim())
                     .add_modifier(Modifier::BOLD),
             ));
             tag_spans.push(Span::styled(" ", Style::default()));
@@ -109,12 +101,12 @@ impl Page for RunPage {
 
         // ── Command line ──────────────────────────────────────────────────
         let cmd_line = Line::from(vec![
-            Span::styled("$ ", Style::default().fg(theme::FG_DIM)),
+            Span::styled("$ ", Style::default().fg(theme::fg_dim())),
             Span::styled(
                 format!("niki run \"{}\"", state.description),
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             ),
-            Span::styled(" --project ./my-app", Style::default().fg(theme::FG_DIM)),
+            Span::styled(" --project ./my-app", Style::default().fg(theme::fg_dim())),
         ]);
         frame.render_widget(Paragraph::new(cmd_line), chunks[1]);
 
@@ -138,7 +130,7 @@ impl Page for RunPage {
                 }
                 StageStatus::Done => {
                     let summary = stage.summary.first().map(|s| s.as_str()).unwrap_or("done");
-                    (summary.to_string(), theme::GREEN)
+                    (summary.to_string(), theme::GREEN())
                 }
                 StageStatus::Failed => {
                     let summary = stage
@@ -146,9 +138,9 @@ impl Page for RunPage {
                         .first()
                         .map(|s| s.as_str())
                         .unwrap_or("failed");
-                    (summary.to_string(), theme::RED)
+                    (summary.to_string(), theme::RED())
                 }
-                StageStatus::Queued => ("queued".to_string(), theme::FG_DIM),
+                StageStatus::Queued => ("queued".to_string(), theme::fg_dim()),
             };
 
             pipeline_lines.push(Line::from(vec![
@@ -165,19 +157,6 @@ impl Page for RunPage {
                     Style::default().fg(status_color),
                 ),
             ]));
-
-            // Show files line for Planner stage (like reference)
-            if stage.role == crate::artifacts::types::AgentRole::Planner
-                && stage.status == StageStatus::Done
-            {
-                pipeline_lines.push(Line::from(vec![
-                    Span::styled("  files: ", Style::default().fg(theme::FG_DIM)),
-                    Span::styled(
-                        "src/routes/health.ts · tests/health.test.ts",
-                        Style::default().fg(theme::FG_DIM),
-                    ),
-                ]));
-            }
         }
 
         // Add queued roles that haven't started yet
@@ -193,15 +172,25 @@ impl Page for RunPage {
                 pipeline_lines.push(Line::from(vec![
                     Span::styled(
                         format!("{} ", theme::role_glyph(*role)),
-                        Style::default().fg(theme::FG_DIM),
+                        Style::default().fg(theme::fg_dim()),
                     ),
                     Span::styled(
                         theme::role_name(*role).to_string(),
-                        Style::default().fg(theme::FG_DIM),
+                        Style::default().fg(theme::fg_dim()),
                     ),
-                    Span::styled(" · queued", Style::default().fg(theme::FG_DIM)),
+                    Span::styled(" · queued", Style::default().fg(theme::fg_dim())),
                 ]));
             }
+        }
+
+        // Add checkmark if all primary roles completed successfully
+        let all_done = primary_roles.iter().all(|role| {
+            started_roles.contains(role) && !state.stages.iter().any(|s| s.role == *role && matches!(s.status, StageStatus::Failed))
+        });
+        if all_done && !started_roles.is_empty() {
+            pipeline_lines.push(Line::from(vec![
+                Span::styled("✓", Style::default().fg(theme::GREEN()).add_modifier(Modifier::BOLD)),
+            ]));
         }
 
         // Scroll support
@@ -218,7 +207,7 @@ impl Page for RunPage {
         // ── Separator ─────────────────────────────────────────────────────
         let separator = Line::from(Span::styled(
             "─".repeat(area.width as usize),
-            Style::default().fg(theme::BORDER_DIM),
+            Style::default().fg(theme::border_dim()),
         ));
         frame.render_widget(Paragraph::new(separator), chunks[3]);
 
@@ -230,26 +219,25 @@ impl Page for RunPage {
         };
 
         let result_spans = vec![
-            Span::styled("branch ", Style::default().fg(theme::FG)),
+            Span::styled("branch ", Style::default().fg(theme::fg_color())),
             Span::styled(
-                branch_str.clone(),
+                branch_str,
                 Style::default()
-                    .fg(theme::FG_BRIGHT)
+                    .fg(theme::fg_bright())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 " · report.md · changes.patch",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             ),
         ];
         frame.render_widget(Paragraph::new(Line::from(result_spans)), chunks[4]);
 
         // Working tree line
         let working_tree = Line::from(vec![
-            Span::styled("working tree: ", Style::default().fg(theme::FG_DIM)),
-            Span::styled("untouched", Style::default().fg(theme::GREEN)),
+            Span::styled("working tree: ", Style::default().fg(theme::fg_dim())),
+            Span::styled("untouched", Style::default().fg(theme::GREEN())),
         ]);
-        // Render working tree in the same area, offset down
         let wt_area = Rect {
             x: chunks[4].x,
             y: chunks[4].y + 1,
@@ -258,74 +246,35 @@ impl Page for RunPage {
         };
         frame.render_widget(Paragraph::new(working_tree), wt_area);
 
-        // ── Footer ────────────────────────────────────────────────────────
+        // ── Footer — only 3 keybindings (matching reference) ─────────────
         let footer = Line::from(vec![
             Span::styled(
-                "space ",
+                "tab ",
                 Style::default()
-                    .fg(theme::FG_BRIGHT)
+                    .fg(theme::fg_bright())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("pause  ", Style::default().fg(theme::FG_DIM)),
+            Span::styled("switch agent  ", Style::default().fg(theme::fg_dim())),
             Span::styled(
-                "j/k ",
+                "ctrl-p ",
                 Style::default()
-                    .fg(theme::FG_BRIGHT)
+                    .fg(theme::fg_bright())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("scroll  ", Style::default().fg(theme::FG_DIM)),
+            Span::styled("commands  ", Style::default().fg(theme::fg_dim())),
             Span::styled(
-                "q ",
+                "esc ",
                 Style::default()
-                    .fg(theme::FG_BRIGHT)
+                    .fg(theme::fg_bright())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("quit", Style::default().fg(theme::FG_DIM)),
+            Span::styled("cancel run", Style::default().fg(theme::fg_dim())),
         ]);
         frame.render_widget(Paragraph::new(footer), chunks[5]);
     }
 
     fn handle_key(&mut self, key: KeyEvent, state: &mut AppState) -> bool {
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => {
-                state.modal = Some(super::Modal::Confirm {
-                    title: "Quit NIKI?".to_string(),
-                    message: "The pipeline will continue in the background.".to_string(),
-                });
-                true
-            }
-            KeyCode::Char('p') => {
-                state.current_page = PageId::Pipeline;
-                true
-            }
-            KeyCode::Char('a') => {
-                state.current_page = PageId::Agents;
-                true
-            }
-            KeyCode::Char('d') => {
-                state.current_page = PageId::Diff;
-                true
-            }
-            KeyCode::Char('v') => {
-                state.current_page = PageId::Verdict;
-                true
-            }
-            KeyCode::Char('c') => {
-                state.current_page = PageId::Cost;
-                true
-            }
-            KeyCode::Char('f') => {
-                state.current_page = PageId::Artifacts;
-                true
-            }
-            KeyCode::Char('h') => {
-                state.current_page = PageId::History;
-                true
-            }
-            KeyCode::Char('?') => {
-                state.current_page = PageId::Help;
-                true
-            }
             KeyCode::Char(' ') => {
                 state.paused = !state.paused;
                 true

@@ -30,5 +30,6 @@
       }
     }
   },
-  "required": ["overall_red_assessment", "challenges"]
+  "required": ["overall_red_assessment", "challenges"],
+  "additionalProperties": false
 }

@@ -1,5 +1,5 @@
 use super::provider::{
-    CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage,
+    CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage, redact_secrets,
 };
 use crate::config::ProviderConfig;
 use anyhow::{Result, anyhow};
@@ -85,7 +85,7 @@ impl LlmProvider for AnthropicProvider {
             let body = resp.text().await.unwrap_or_default();
             return Err(crate::NikiError::LlmProvider {
                 provider: "anthropic".into(),
-                message: format!("HTTP {}: {}", status, body),
+                message: format!("HTTP {}: {}", status, redact_secrets(&body)),
             }
             .into());
         }
@@ -154,7 +154,7 @@ impl LlmProvider for AnthropicProvider {
             let body = resp.text().await.unwrap_or_default();
             return Err(crate::NikiError::LlmProvider {
                 provider: "anthropic".into(),
-                message: format!("HTTP {}: {}", status, body),
+                message: format!("HTTP {}: {}", status, redact_secrets(&body)),
             }
             .into());
         }

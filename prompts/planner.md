@@ -6,6 +6,11 @@ You are a software planning agent. Your job is to decompose a coding task into a
 ## Project Context
 {{ project_knowledge }}
 
+{% if task_relevant_context %}
+## Relevant Source Files (ranked by relevance to your task)
+{{ task_relevant_context }}
+{% endif %}
+
 {% if project_memory %}
 {{ project_memory }}
 {% endif %}
@@ -23,3 +28,5 @@ You MUST output a single valid JSON object conforming to this schema:
 3. Consider edge cases and error handling in your approach.
 4. Respect any project conventions described in the project context.
 5. Do NOT write any code. Only plan.
+
+IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.
