@@ -33,3 +33,5 @@ You MUST output a single valid JSON object conforming to this schema:
 4. Never introduce code that depends on a file/function another coder was supposed to create unless that creation is included in `merged`.
 5. `sources_merged` is the number of distinct coder diffs you reconciled.
 6. After synthesizing, reason about integration risk: do the merged files compile/import consistently? Call out anything the downstream Tester should focus on.
+
+IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.

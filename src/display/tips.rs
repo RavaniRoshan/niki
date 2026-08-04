@@ -112,10 +112,10 @@ impl TipsBanner {
             Span::styled(
                 " 💡 ",
                 Style::default()
-                    .fg(super::theme::AMBER)
+                    .fg(super::theme::AMBER())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(tip, Style::default().fg(super::theme::FG_DIM)),
+            Span::styled(tip, Style::default().fg(super::theme::fg_dim())),
         ]);
         frame.render_widget(ratatui::widgets::Paragraph::new(line), area);
     }

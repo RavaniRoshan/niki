@@ -42,12 +42,12 @@ impl Page for HistoryPage {
             Span::styled(
                 " history",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::fg_color())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!(" · {}", state.project_path.display()),
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             ),
         ]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
@@ -55,7 +55,7 @@ impl Page for HistoryPage {
         // History table
         let table_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border_color()))
             .title(" PAST RUNS ");
 
         let mut table_lines: Vec<Line> = Vec::new();
@@ -65,31 +65,31 @@ impl Page for HistoryPage {
             Span::styled(
                 "  ID         ",
                 Style::default()
-                    .fg(theme::FG_DIM)
+                    .fg(theme::fg_dim())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "TASK                              ",
                 Style::default()
-                    .fg(theme::FG_DIM)
+                    .fg(theme::fg_dim())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "VERDICT     ",
                 Style::default()
-                    .fg(theme::FG_DIM)
+                    .fg(theme::fg_dim())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "WHEN",
                 Style::default()
-                    .fg(theme::FG_DIM)
+                    .fg(theme::fg_dim())
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
         table_lines.push(Line::from(Span::styled(
             "  ────────   ──────────────────────────────────  ──────────  ─────",
-            Style::default().fg(theme::BORDER),
+            Style::default().fg(theme::border_color()),
         )));
 
         // Sample history entries (in real implementation, these would come from .niki/ directory)
@@ -99,47 +99,47 @@ impl Page for HistoryPage {
                 "Add GET /health endpoint",
                 "approved",
                 "2m ago",
-                theme::GREEN,
+                theme::GREEN(),
             ),
             (
                 "a91f3c02",
                 "Refactor auth middleware",
                 "changes",
                 "1h ago",
-                theme::AMBER,
+                theme::AMBER(),
             ),
             (
                 "4b7e9d18",
                 "Add input validation",
                 "failed",
                 "3h ago",
-                theme::RED,
+                theme::RED(),
             ),
             (
                 "2c1a8f55",
                 "Migrate to ESM modules",
                 "approved",
                 "1d ago",
-                theme::GREEN,
+                theme::GREEN(),
             ),
         ];
 
         for (i, (id, task, verdict, when, verdict_color)) in entries.iter().enumerate() {
             let is_selected = i == self.selected;
             let style = if is_selected {
-                Style::default().fg(theme::FG).add_modifier(Modifier::BOLD)
+                Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(theme::FG)
+                Style::default().fg(theme::fg_color())
             };
 
             table_lines.push(Line::from(vec![
-                Span::styled(format!("  {:<8}  ", id), Style::default().fg(theme::BLUE)),
+                Span::styled(format!("  {:<8}  ", id), Style::default().fg(theme::BLUE())),
                 Span::styled(format!("{:<32}  ", task), style),
                 Span::styled(
                     format!("{:<10}  ", verdict),
                     Style::default().fg(*verdict_color),
                 ),
-                Span::styled(when.to_string(), Style::default().fg(theme::FG_DIM)),
+                Span::styled(when.to_string(), Style::default().fg(theme::fg_dim())),
             ]));
         }
 
@@ -148,7 +148,7 @@ impl Page for HistoryPage {
         // Footer
         let footer = Line::from(vec![Span::styled(
             " [j/k] navigate   [Esc] back",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[2]);
     }

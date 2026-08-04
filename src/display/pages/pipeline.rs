@@ -39,7 +39,7 @@ impl Page for PipelinePage {
         let header = Line::from(vec![Span::styled(
             " pipeline",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::fg_color())
                 .add_modifier(Modifier::BOLD),
         )]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
@@ -61,22 +61,22 @@ impl Page for PipelinePage {
             "off"
         };
         let info = Line::from(vec![
-            Span::styled("  MODE ", Style::default().fg(theme::FG_DIM)),
+            Span::styled("  MODE ", Style::default().fg(theme::fg_dim())),
             Span::styled(
                 mode,
-                Style::default().fg(theme::FG).add_modifier(Modifier::BOLD),
+                Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD),
             ),
-            Span::styled("   SECURITY ", Style::default().fg(theme::FG_DIM)),
+            Span::styled("   SECURITY ", Style::default().fg(theme::fg_dim())),
             Span::styled(
                 security,
                 Style::default().fg(if state.config.security.enabled {
-                    theme::GREEN
+                    theme::GREEN()
                 } else {
-                    theme::FG_DIM
+                    theme::fg_dim()
                 }),
             ),
-            Span::styled("   PARALLEL ", Style::default().fg(theme::FG_DIM)),
-            Span::styled(&parallel, Style::default().fg(theme::FG)),
+            Span::styled("   PARALLEL ", Style::default().fg(theme::fg_dim())),
+            Span::styled(&parallel, Style::default().fg(theme::fg_color())),
         ]);
         frame.render_widget(Paragraph::new(info), chunks[1]);
 
@@ -84,7 +84,7 @@ impl Page for PipelinePage {
         let mut flow_lines: Vec<Line> = Vec::new();
         flow_lines.push(Line::from(""));
         flow_lines.push(Line::from(vec![
-            Span::styled("         task ────▶ ", Style::default().fg(theme::FG_DIM)),
+            Span::styled("         task ────▶ ", Style::default().fg(theme::fg_dim())),
             Span::styled(
                 format!(
                     "{} Planner",
@@ -99,22 +99,22 @@ impl Page for PipelinePage {
         ]));
         flow_lines.push(Line::from(vec![Span::styled(
             "                       │",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]));
         flow_lines.push(Line::from(vec![Span::styled(
             "                  TaskSpec",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]));
         flow_lines.push(Line::from(vec![Span::styled(
             "                       ▼",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]));
         flow_lines.push(Line::from(vec![Span::styled(
             "              ┌────────────┐",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]));
         flow_lines.push(Line::from(vec![
-            Span::styled("              │", Style::default().fg(theme::FG_DIM)),
+            Span::styled("              │", Style::default().fg(theme::fg_dim())),
             Span::styled(
                 format!(
                     " {} Coder ",
@@ -124,20 +124,20 @@ impl Page for PipelinePage {
                     .fg(theme::role_color(crate::artifacts::types::AgentRole::Coder))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("│ ──diff──▶", Style::default().fg(theme::FG_DIM)),
+            Span::styled("│ ──diff──▶", Style::default().fg(theme::fg_dim())),
         ]));
         flow_lines.push(Line::from(vec![Span::styled(
             "              └────────────┘           ▼",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]));
         flow_lines.push(Line::from(vec![Span::styled(
             "                                 ┌────────────┐",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]));
         flow_lines.push(Line::from(vec![
             Span::styled(
                 "                                 │",
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             ),
             Span::styled(
                 format!(
@@ -150,22 +150,22 @@ impl Page for PipelinePage {
                     ))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("│ ──tests──▶", Style::default().fg(theme::FG_DIM)),
+            Span::styled("│ ──tests──▶", Style::default().fg(theme::fg_dim())),
         ]));
         flow_lines.push(Line::from(vec![Span::styled(
             "                                 └────────────┘           ▼",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]));
 
         if state.config.red_blue.enabled {
             flow_lines.push(Line::from(vec![Span::styled(
                 "                                            ┌────────────┐",
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             )]));
             flow_lines.push(Line::from(vec![
                 Span::styled(
                     "                                            │",
-                    Style::default().fg(theme::FG_DIM),
+                    Style::default().fg(theme::fg_dim()),
                 ),
                 Span::styled(
                     format!(
@@ -176,22 +176,22 @@ impl Page for PipelinePage {
                         .fg(theme::role_color(crate::artifacts::types::AgentRole::Red))
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("│ ──challenges──▶", Style::default().fg(theme::FG_DIM)),
+                Span::styled("│ ──challenges──▶", Style::default().fg(theme::fg_dim())),
             ]));
             flow_lines.push(Line::from(vec![Span::styled(
                 "                                            └────────────┘           ▼",
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             )]));
         }
 
         flow_lines.push(Line::from(vec![Span::styled(
             "                                       ┌────────────┐",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]));
         flow_lines.push(Line::from(vec![
             Span::styled(
                 "                                       │",
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             ),
             Span::styled(
                 format!(
@@ -204,30 +204,30 @@ impl Page for PipelinePage {
                     ))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("│", Style::default().fg(theme::FG_DIM)),
+            Span::styled("│", Style::default().fg(theme::fg_dim())),
         ]));
         flow_lines.push(Line::from(vec![Span::styled(
             "                                       └─────┬──────┘",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]));
         flow_lines.push(Line::from(vec![Span::styled(
             "                                             │",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]));
         flow_lines.push(Line::from(vec![Span::styled(
             "                                             ▼",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]));
         flow_lines.push(Line::from(vec![Span::styled(
             "                                       niki/<id> branch",
             Style::default()
-                .fg(theme::GREEN)
+                .fg(theme::GREEN())
                 .add_modifier(Modifier::BOLD),
         )]));
 
         let flow_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border_color()))
             .title(" FLOW ");
         frame.render_widget(
             Paragraph::new(flow_lines)
@@ -257,10 +257,10 @@ impl Page for PipelinePage {
                 let prefix = if selected { "▸" } else { " " };
                 let model_style = if selected {
                     Style::default()
-                        .fg(theme::FG_BRIGHT)
+                        .fg(theme::fg_bright())
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(theme::FG)
+                    Style::default().fg(theme::fg_color())
                 };
                 let cfg = agent_configs[i];
                 Line::from(vec![
@@ -280,14 +280,14 @@ impl Page for PipelinePage {
             .collect();
         let model_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border_color()))
             .title(" MODELS ");
         frame.render_widget(Paragraph::new(model_lines).block(model_block), chunks[3]);
 
         // Footer
         let footer = Line::from(vec![Span::styled(
             " [j/k] next/prev   [Esc] back",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[4]);
     }

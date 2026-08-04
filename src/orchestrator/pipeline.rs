@@ -9,7 +9,7 @@ use crate::artifacts::types::{
     AgentRole, CodeDiff, IsolationRecord, RedChallenge, ReviewVerdict, SecurityVerdict, Synthesis,
     TaskSpec, TestReport, Verdict,
 };
-use crate::config::NikiConfig;
+use crate::config::{NikiConfig, SecurityPolicyConfig};
 pub use crate::config::types::{PipelineStageConfig, TopologyMode};
 use crate::cost::compute_cost;
 use crate::display::agent_stream::AgenticDisplay;
@@ -44,6 +44,7 @@ pub struct Task {
     pub project_path: PathBuf,
 }
 
+#[derive(Debug)]
 pub struct PipelineResult {
     pub task_id: Uuid,
     pub state: super::state::PipelineState,
@@ -331,6 +332,18 @@ fn build_current_files(spec: &TaskSpec, project_path: &Path) -> String {
     out
 }
 
+/// Resolve the security policy for a given agent role, falling back to the
+/// default (deny-list only) policy when no role-specific policy is configured.
+fn role_policy(role: AgentRole, config: &NikiConfig) -> SecurityPolicyConfig {
+    let key = format!("{:?}", role).to_lowercase();
+    config
+        .security
+        .policies
+        .get(&key)
+        .cloned()
+        .unwrap_or_else(|| SecurityPolicyConfig::default())
+}
+
 /// Run `count` Coder agents concurrently (#3). Each coder is isolated in its
 /// OWN git worktree sandbox so its changes can never collide with the others
 /// (docker bind-mounts would share the host dir and conflict). Each coder's
@@ -377,6 +390,7 @@ async fn run_parallel_coders(
                 &project_path,
                 &task_id,
                 &config.docker,
+                role_policy(AgentRole::Coder, &config),
                 containers,
             )
             .await?;
@@ -441,10 +455,11 @@ async fn run_stage(
     schema_path: &str,
     display: &mut AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
+    degrade_on_invalid: bool,
 ) -> Result<String> {
     let start = Instant::now();
-    let (json, usage) =
-        run_agent(role, llm, model, template_name, ctx, schema_path, display).await?;
+    let (json, usage, retry_count, ttft_ms) =
+        run_agent(role, llm, model, template_name, ctx, schema_path, display, degrade_on_invalid).await?;
     let latency_ms = start.elapsed().as_millis() as u64;
     let cost_usd = compute_cost(provider, model, &usage);
     metrics.push(StageMetric {
@@ -455,6 +470,8 @@ async fn run_stage(
         output_tokens: usage.output_tokens,
         latency_ms,
         cost_usd,
+        retry_count,
+        ttft_ms,
     });
     Ok(json)
 }
@@ -564,6 +581,7 @@ async fn run_role(
 
     let json = run_stage(
         role, llm, model, provider, template, ctx, schema, display, metrics,
+        false, // degrade_on_invalid: strict by default for body stages
     )
     .await?;
 
@@ -639,6 +657,7 @@ pub async fn execute_pipeline(
         "schemas/task_spec.schema.json",
         display,
         &mut metrics,
+        false, // Planner must not degrade — it's the pipeline entry point
     )
     .await?;
     let task_spec: TaskSpec = serde_json::from_str(&planner_json)?;
@@ -684,6 +703,7 @@ pub async fn execute_pipeline(
     // 2. Initialize Sandbox (backend chosen by config: docker / worktree / cloud)
     // `containers` is an Arc and is cloned here so the parallel-coder path below
     // can hand its own clone to each per-coder worktree sandbox.
+    let planner_policy = role_policy(AgentRole::Planner, config);
     let sandbox = create_sandbox(
         config.docker.backend,
         docker,
@@ -691,6 +711,7 @@ pub async fn execute_pipeline(
         &task.project_path,
         &task.id,
         &config.docker,
+        planner_policy,
         containers.clone(),
     )
     .await?;
@@ -1022,6 +1043,7 @@ pub async fn execute_pipeline(
                 "schemas/code_diff.schema.json",
                 display,
                 &mut metrics,
+                false, // Solo mode: strict — no degradation
             )
             .await?;
             artifacts.push((AgentRole::Coder, solo_json.clone()));

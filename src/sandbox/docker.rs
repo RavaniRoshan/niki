@@ -25,8 +25,10 @@ pub struct DockerSandbox {
     pub workspace_path: PathBuf,
     docker: Docker,
     containers: ActiveContainers,
+    policy: crate::config::SecurityPolicyConfig,
 }
 
+#[derive(Debug)]
 pub struct ExecOutput {
     pub exit_code: i64,
     pub stdout: String,
@@ -40,6 +42,7 @@ impl DockerSandbox {
         source_repo: &Path,
         task_id: &Uuid,
         config: &DockerConfig,
+        policy: crate::config::SecurityPolicyConfig,
         containers: ActiveContainers,
     ) -> Result<Self> {
         let container_name = format!(
@@ -70,8 +73,21 @@ impl DockerSandbox {
             name: container_name.as_str(),
             platform: None,
         };
+
+        // Parse resource limits from config (F2). Memory is a human string like
+        // "2g"; `bollard` expects bytes. CPU is a float like 2.0; Docker wants
+        // microcgroup-style NanoCPUs (e.g. 2.0 → 2_000_000).
+        let memory_bytes = Self::parse_memory_limit(&config.memory_limit);
+        let nanocpus = (config.cpu_limit * 1_000_000.0) as i64;
+
         let host_config = bollard::models::HostConfig {
             binds: Some(binds),
+            memory: if memory_bytes > 0 {
+                Some(memory_bytes)
+            } else {
+                None
+            },
+            nano_cpus: if nanocpus > 0 { Some(nanocpus) } else { None },
             ..Default::default()
         };
 
@@ -105,8 +121,39 @@ impl DockerSandbox {
             workspace_path,
             docker: docker.clone(),
             containers,
+            policy,
         })
     }
+
+    /// Parse a human-friendly memory limit string (e.g. "2g", "512m", "1gb")
+    /// into bytes. Returns 0 if parsing fails.
+    pub fn parse_memory_limit(s: &str) -> i64 {
+        let s = s.trim().to_lowercase();
+        let (num_str, unit) = if s.ends_with("gb") {
+            (&s[..s.len() - 2], "gb")
+        } else if s.ends_with('g') {
+            (&s[..s.len() - 1], "g")
+        } else if s.ends_with("mb") {
+            (&s[..s.len() - 2], "mb")
+        } else if s.ends_with('m') {
+            (&s[..s.len() - 1], "m")
+        } else if s.ends_with("kb") {
+            (&s[..s.len() - 2], "kb")
+        } else if s.ends_with('k') {
+            (&s[..s.len() - 1], "k")
+        } else {
+            (&s[..], "")
+        };
+        let n: f64 = num_str.parse().unwrap_or(0.0);
+        let multiplier: f64 = match unit {
+            "g" | "gb" => 1024.0 * 1024.0 * 1024.0,
+            "m" | "mb" => 1024.0 * 1024.0,
+            "k" | "kb" => 1024.0,
+            _ => 1.0,
+        };
+        (n * multiplier) as i64
+    }
+
 
     pub async fn create_from(
         docker: &Docker,
@@ -114,6 +161,7 @@ impl DockerSandbox {
         _source_sandbox: &DockerSandbox,
         task_id: &Uuid,
         config: &DockerConfig,
+        policy: crate::config::SecurityPolicyConfig,
         containers: ActiveContainers,
     ) -> Result<Self> {
         // Fallback to simple create for now. In reality, you'd use docker commit + create.
@@ -123,6 +171,7 @@ impl DockerSandbox {
             Path::new("."),
             task_id,
             config,
+            policy,
             containers,
         )
         .await
@@ -377,8 +426,16 @@ impl Sandbox for DockerSandbox {
     async fn get_diff(&self) -> Result<String> {
         DockerSandbox::get_diff(self).await
     }
-    async fn exec(&self, cmd: &[&str], _role: Option<&AgentRole>) -> Result<ExecOutput> {
-        DockerSandbox::exec(self, cmd).await
+    async fn exec(&self, cmd: &[&str], role: Option<&AgentRole>) -> Result<ExecOutput> {
+        // F1: Enforce security policy when a role is supplied.
+        if role.is_some() {
+            crate::sandbox::check_command_policy(cmd, &self.policy)?;
+        }
+        // F3: Enforce exec timeout.
+        let timeout = std::time::Duration::from_secs(self.policy.max_exec_seconds);
+        tokio::time::timeout(timeout, DockerSandbox::exec(self, cmd))
+            .await
+            .map_err(|_| anyhow::anyhow!("exec timed out after {}s", self.policy.max_exec_seconds))?
     }
     async fn destroy(&self) -> Result<()> {
         DockerSandbox::destroy(self).await

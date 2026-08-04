@@ -60,7 +60,7 @@ impl Page for AgentsPage {
         let header = Line::from(vec![Span::styled(
             " agents",
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::fg_color())
                 .add_modifier(Modifier::BOLD),
         )]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
@@ -72,9 +72,9 @@ impl Page for AgentsPage {
             .enumerate()
             .map(|(i, s)| {
                 let color = if i == self.selected_tab {
-                    theme::BORDER_ACTIVE
+                    theme::border_active()
                 } else {
-                    theme::FG_DIM
+                    theme::fg_dim()
                 };
                 Line::from(vec![Span::styled(
                     format!("{} {}", theme::role_glyph(s.role), theme::role_name(s.role)),
@@ -94,7 +94,7 @@ impl Page for AgentsPage {
                 .select(self.selected_tab)
                 .highlight_style(
                     Style::default()
-                        .fg(theme::BLUE)
+                        .fg(theme::BLUE())
                         .add_modifier(Modifier::BOLD),
                 )
                 .divider("|");
@@ -102,7 +102,7 @@ impl Page for AgentsPage {
         } else {
             frame.render_widget(
                 Paragraph::new("  No agents have started yet")
-                    .style(Style::default().fg(theme::FG_DIM)),
+                    .style(Style::default().fg(theme::fg_dim())),
                 chunks[1],
             );
         }
@@ -137,26 +137,26 @@ impl Page for AgentsPage {
                     ),
                     Style::default().fg(match stage.status {
                         StageStatus::Running => color,
-                        StageStatus::Done => theme::GREEN,
-                        StageStatus::Failed => theme::RED,
-                        StageStatus::Queued => theme::FG_DIM,
+                        StageStatus::Done => theme::GREEN(),
+                        StageStatus::Failed => theme::RED(),
+                        StageStatus::Queued => theme::fg_dim(),
                     }),
                 ),
                 Span::styled(
                     format!("· {} ", elapsed),
-                    Style::default().fg(theme::FG_DIM),
+                    Style::default().fg(theme::fg_dim()),
                 ),
                 Span::styled(
                     format!("· in:{} ", fmt_tokens(stage.input_tokens)),
-                    Style::default().fg(theme::FG_DIM),
+                    Style::default().fg(theme::fg_dim()),
                 ),
                 Span::styled(
                     format!("out:{} ", fmt_tokens(stage.output_tokens)),
-                    Style::default().fg(theme::FG_DIM),
+                    Style::default().fg(theme::fg_dim()),
                 ),
                 Span::styled(
                     format!("· ${:.4}", stage.cost_usd),
-                    Style::default().fg(theme::FG_DIM),
+                    Style::default().fg(theme::fg_dim()),
                 ),
             ]);
             frame.render_widget(Paragraph::new(meta), chunks[2]);
@@ -167,7 +167,7 @@ impl Page for AgentsPage {
         // Transcript
         let transcript_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BORDER))
+            .border_style(Style::default().fg(theme::border_color()))
             .title(" TRANSCRIPT ");
 
         if let Some(stage) = state.stages.get(self.selected_tab) {
@@ -178,13 +178,13 @@ impl Page for AgentsPage {
                 lines.push(Line::from(vec![Span::styled(
                     "  Summary:",
                     Style::default()
-                        .fg(theme::FG_DIM)
+                        .fg(theme::fg_dim())
                         .add_modifier(Modifier::BOLD),
                 )]));
                 for summ in &stage.summary {
                     lines.push(Line::from(vec![
                         Span::styled("    ", Style::default()),
-                        Span::styled(summ.clone(), Style::default().fg(theme::FG)),
+                        Span::styled(summ.clone(), Style::default().fg(theme::fg_color())),
                     ]));
                 }
                 lines.push(Line::from(""));
@@ -195,16 +195,16 @@ impl Page for AgentsPage {
                 lines.push(Line::from(vec![Span::styled(
                     "  Output:",
                     Style::default()
-                        .fg(theme::FG_DIM)
+                        .fg(theme::fg_dim())
                         .add_modifier(Modifier::BOLD),
                 )]));
                 for line in stage.full_transcript.lines() {
                     let style = if line.starts_with('+') {
-                        Style::default().fg(theme::GREEN)
+                        Style::default().fg(theme::GREEN())
                     } else if line.starts_with('-') {
-                        Style::default().fg(theme::RED)
+                        Style::default().fg(theme::RED())
                     } else {
-                        Style::default().fg(theme::FG)
+                        Style::default().fg(theme::fg_color())
                     };
                     lines.push(Line::from(vec![
                         Span::styled("    ", Style::default()),
@@ -215,7 +215,7 @@ impl Page for AgentsPage {
                 lines.push(Line::from(vec![Span::styled(
                     "  Live:",
                     Style::default()
-                        .fg(theme::FG_DIM)
+                        .fg(theme::fg_dim())
                         .add_modifier(Modifier::BOLD),
                 )]));
                 let tail: String = stage
@@ -231,18 +231,18 @@ impl Page for AgentsPage {
                 for line in tail.lines() {
                     lines.push(Line::from(vec![
                         Span::styled("    ", Style::default()),
-                        Span::styled(line.to_string(), Style::default().fg(theme::FG)),
+                        Span::styled(line.to_string(), Style::default().fg(theme::fg_color())),
                     ]));
                 }
             } else if stage.status == StageStatus::Failed {
                 lines.push(Line::from(vec![Span::styled(
                     "  Error:",
-                    Style::default().fg(theme::RED).add_modifier(Modifier::BOLD),
+                    Style::default().fg(theme::RED()).add_modifier(Modifier::BOLD),
                 )]));
                 for summ in &stage.summary {
                     lines.push(Line::from(vec![
                         Span::styled("    ", Style::default()),
-                        Span::styled(summ.clone(), Style::default().fg(theme::RED)),
+                        Span::styled(summ.clone(), Style::default().fg(theme::RED())),
                     ]));
                 }
             }
@@ -263,7 +263,7 @@ impl Page for AgentsPage {
             frame.render_widget(
                 Paragraph::new("  Select an agent tab to view transcript")
                     .block(transcript_block)
-                    .style(Style::default().fg(theme::FG_DIM)),
+                    .style(Style::default().fg(theme::fg_dim())),
                 chunks[3],
             );
         }
@@ -271,7 +271,7 @@ impl Page for AgentsPage {
         // Footer
         let footer = Line::from(vec![Span::styled(
             " [Tab/Shift+Tab] prev/next   [Esc] back",
-            Style::default().fg(theme::FG_DIM),
+            Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[4]);
     }

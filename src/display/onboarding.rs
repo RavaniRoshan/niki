@@ -139,11 +139,11 @@ impl OnboardingModal {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::BLUE))
+            .border_style(Style::default().fg(theme::BLUE()))
             .title(Span::styled(
                 format!(" {} ", self.page.title()),
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             ));
 
@@ -182,19 +182,19 @@ impl OnboardingModal {
         let total = OnboardingPage::ALL.len();
 
         let mut nav_spans = vec![
-            Span::styled("  [←/→] prev/next", Style::default().fg(theme::FG_DIM)),
+            Span::styled("  [←/→] prev/next", Style::default().fg(theme::fg_dim())),
             Span::styled(
                 format!("   {} {}", page_idx, total),
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             ),
         ];
 
         if self.dont_show_again {
-            nav_spans.push(Span::styled("   [s] on", Style::default().fg(theme::GREEN)));
+            nav_spans.push(Span::styled("   [s] on", Style::default().fg(theme::GREEN())));
         } else {
             nav_spans.push(Span::styled(
                 "   [s] off",
-                Style::default().fg(theme::AMBER),
+                Style::default().fg(theme::AMBER()),
             ));
         }
 
@@ -206,10 +206,10 @@ impl OnboardingModal {
                 Span::styled(
                     "[Enter] start",
                     Style::default()
-                        .fg(theme::GREEN)
+                        .fg(theme::GREEN())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("   [Esc] skip", Style::default().fg(theme::FG_DIM)),
+                Span::styled("   [Esc] skip", Style::default().fg(theme::fg_dim())),
             ])
         } else {
             Line::from(vec![
@@ -217,10 +217,10 @@ impl OnboardingModal {
                 Span::styled(
                     "[n] next",
                     Style::default()
-                        .fg(theme::BLUE)
+                        .fg(theme::BLUE())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("   [Esc] skip", Style::default().fg(theme::FG_DIM)),
+                Span::styled("   [Esc] skip", Style::default().fg(theme::fg_dim())),
             ])
         };
         frame.render_widget(Paragraph::new(footer), chunks[2]);
@@ -232,30 +232,30 @@ impl OnboardingModal {
             Line::from(Span::styled(
                 "  Welcome to NIKI",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "  NIKI is a hermetic multi-agent coding system.",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
                 "  It orchestrates specialized AI agents (Planner, Coder,",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
                 "  Tester, Reviewer, and more) to implement your task",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
                 "  in isolated sandboxes, then reviews the result.",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "  Press [→] or [n] to continue...",
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             )),
         ]
     }
@@ -266,48 +266,48 @@ impl OnboardingModal {
             Line::from(Span::styled(
                 "  Keyboard Shortcuts",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(vec![
-                Span::styled("    [q] quit", Style::default().fg(theme::FG)),
-                Span::styled("      [Esc] close/back", Style::default().fg(theme::FG)),
+                Span::styled("    [q] quit", Style::default().fg(theme::fg_color())),
+                Span::styled("      [Esc] close/back", Style::default().fg(theme::fg_color())),
             ]),
             Line::from(vec![
-                Span::styled("    [p] pipeline", Style::default().fg(theme::FG)),
+                Span::styled("    [p] pipeline", Style::default().fg(theme::fg_color())),
                 Span::styled(
                     "    [a] agents     [d] diff",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(vec![
-                Span::styled("    [v] verdict", Style::default().fg(theme::FG)),
+                Span::styled("    [v] verdict", Style::default().fg(theme::fg_color())),
                 Span::styled(
                     "    [c] cost       [f] artifacts",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(vec![
-                Span::styled("    [h] history", Style::default().fg(theme::FG)),
+                Span::styled("    [h] history", Style::default().fg(theme::fg_color())),
                 Span::styled(
                     "    [,] config     [?] help",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(""),
             Line::from(Span::styled(
                 "  In the Run page:",
                 Style::default()
-                    .fg(theme::CYAN)
+                    .fg(theme::CYAN())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
                 Span::styled(
                     "    [Space] pause  [j/k] scroll",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
-                Span::styled("  [g/G] top/bottom", Style::default().fg(theme::FG)),
+                Span::styled("  [g/G] top/bottom", Style::default().fg(theme::fg_color())),
             ]),
         ]
     }
@@ -318,42 +318,42 @@ impl OnboardingModal {
             Line::from(Span::styled(
                 "  How NIKI Works",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "  1. Planner analyzes your task and creates a spec",
-                Style::default().fg(theme::GREEN),
+                Style::default().fg(theme::GREEN()),
             )),
             Line::from(Span::styled(
                 "  2. Coder implements the changes in a sandbox",
-                Style::default().fg(theme::PURPLE),
+                Style::default().fg(theme::PURPLE()),
             )),
             Line::from(Span::styled(
                 "  3. Tester validates the implementation",
-                Style::default().fg(theme::GREEN),
+                Style::default().fg(theme::GREEN()),
             )),
             Line::from(Span::styled(
                 "  4. Red agent adversarially probes the diff",
-                Style::default().fg(theme::RED),
+                Style::default().fg(theme::RED()),
             )),
             Line::from(Span::styled(
                 "  5. Reviewer makes a final verdict",
-                Style::default().fg(theme::AMBER),
+                Style::default().fg(theme::AMBER()),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "  Each agent runs in an isolated sandbox.",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
                 "  If issues are found, NIKI revises automatically",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
                 "  (up to the configured max rounds).",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
         ]
     }
@@ -364,59 +364,59 @@ impl OnboardingModal {
             Line::from(Span::styled(
                 "  Sandbox Backends",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "  NIKI runs each agent in an isolated environment.",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
                 "  Three backends are available:",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(""),
             Line::from(vec![
                 Span::styled(
                     "    docker",
                     Style::default()
-                        .fg(theme::CYAN)
+                        .fg(theme::CYAN())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     "  Containerized isolation (default)",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(vec![
                 Span::styled(
                     "    worktree",
                     Style::default()
-                        .fg(theme::CYAN)
+                        .fg(theme::CYAN())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     "  Git worktree + local process (no Docker)",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(vec![
                 Span::styled(
                     "    cloud",
                     Style::default()
-                        .fg(theme::CYAN)
+                        .fg(theme::CYAN())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     "  NIKI managed infrastructure (beta)",
-                    Style::default().fg(theme::FG),
+                    Style::default().fg(theme::fg_color()),
                 ),
             ]),
             Line::from(""),
             Line::from(Span::styled(
                 "  Configure in niki.toml: [docker] backend = \"...\"",
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             )),
         ]
     }
@@ -427,38 +427,38 @@ impl OnboardingModal {
             Line::from(Span::styled(
                 "  Getting Help",
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "  During a run, press [?] at any time to view",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
                 "  the full keyboard shortcut reference.",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "  Pipeline status and agent output are shown",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
                 "  across the Run, Pipeline, and Agents pages.",
-                Style::default().fg(theme::FG),
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "  You're ready to go!",
                 Style::default()
-                    .fg(theme::GREEN)
+                    .fg(theme::GREEN())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "  Press [Enter] to start, or [Esc] to skip.",
-                Style::default().fg(theme::FG_DIM),
+                Style::default().fg(theme::fg_dim()),
             )),
         ]
     }

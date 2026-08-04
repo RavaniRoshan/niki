@@ -97,5 +97,6 @@
     "quality_scores",
     "issues",
     "strengths"
-  ]
+  ],
+  "additionalProperties": false
 }

@@ -14,6 +14,7 @@ pub struct Span {
     pub tool_output: Option<String>,
     pub tool_error: Option<String>,
     pub latency_ms: u64,
+    pub ttft_ms: u64,
     pub retry_count: u32,
     pub timestamp: String,
 }
@@ -31,6 +32,7 @@ impl Span {
             tool_output: None,
             tool_error: None,
             latency_ms: 0,
+            ttft_ms: 0,
             retry_count: 0,
             timestamp: Utc::now().to_rfc3339(),
         }
@@ -48,6 +50,7 @@ impl Span {
             "tool_output": self.tool_output,
             "tool_error": self.tool_error,
             "latency_ms": self.latency_ms,
+            "ttft_ms": self.ttft_ms,
             "retry_count": self.retry_count,
             "timestamp": self.timestamp,
         })

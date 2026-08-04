@@ -171,6 +171,7 @@ pub struct AppState {
     pub onboarded: bool,
     pub start_time: Option<std::time::Instant>,
     pub tips: TipsBanner,
+    pub show_command_palette: bool,
 }
 
 #[derive(Debug)]
@@ -215,6 +216,7 @@ impl AppState {
             onboarded: false,
             start_time: None,
             tips: TipsBanner::new(tips_enabled, tips_rotation),
+            show_command_palette: false,
         }
     }
 

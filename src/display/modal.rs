@@ -25,7 +25,7 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
     frame.render_widget(Clear, popup_area);
 
     let (title, message_str, border_color) = match modal {
-        Modal::Confirm { title, message } => (title.as_str(), message.as_str(), theme::BLUE),
+        Modal::Confirm { title, message } => (title.as_str(), message.as_str(), theme::fg_color()),
         Modal::Error {
             stage,
             message,
@@ -33,7 +33,7 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
         } => {
             let combined = format!("{}\n\n{}", message, hint);
             let leaked: &'static str = Box::leak(combined.into_boxed_str());
-            (stage.as_str(), leaked, theme::RED)
+            (stage.as_str(), leaked, theme::RED())
         }
     };
 
@@ -51,7 +51,7 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
         Line::from(""),
         Line::from(Span::styled(
             format!("  {}", message_str),
-            Style::default().fg(theme::FG),
+            Style::default().fg(theme::fg_color()),
         )),
         Line::from(""),
     ];
@@ -63,10 +63,10 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
                 Span::styled(
                     "[Enter] confirm",
                     Style::default()
-                        .fg(theme::GREEN)
+                        .fg(theme::GREEN())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("   [Esc] cancel", Style::default().fg(theme::FG_DIM)),
+                Span::styled("   [Esc] cancel", Style::default().fg(theme::fg_dim())),
             ]));
         }
         Modal::Error { .. } => {
@@ -75,11 +75,11 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
                 Span::styled(
                     "[r]etry",
                     Style::default()
-                        .fg(theme::AMBER)
+                        .fg(theme::AMBER())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("   [c]onfig   ", Style::default().fg(theme::BLUE)),
-                Span::styled("[Esc] back", Style::default().fg(theme::FG_DIM)),
+                Span::styled("   [c]onfig   ", Style::default().fg(theme::BLUE())),
+                Span::styled("[Esc] back", Style::default().fg(theme::fg_dim())),
             ]));
         }
     }
