@@ -39,6 +39,10 @@ Podman or Docker sandbox and hand you a clean git branch, a diff, and a full aud
 
 ## See it run
 
+<p align="center">
+  <img src="assets/demo.gif" alt="NIKI Demo" />
+</p>
+
 Describe a change in plain English. NIKI runs a four-stage agent pipeline in an isolated container and gives you back a branch to review — nothing lands on `main` until you say so.
 
 ```bash
