@@ -46,6 +46,21 @@ pub struct NikiConfig {
     /// TUI display configuration.
     #[serde(default)]
     pub ui: UiConfig,
+    /// Session management configuration.
+    #[serde(default)]
+    pub session: SessionConfig,
+    /// Context compaction configuration.
+    #[serde(default)]
+    pub compaction: CompactionConfig,
+    /// MCP server configurations.
+    #[serde(default)]
+    pub mcp: McpConfig,
+    /// Permission system configuration.
+    #[serde(default)]
+    pub permissions: PermissionsConfig,
+    /// AGENTS.md / project instructions configuration.
+    #[serde(default)]
+    pub instructions: InstructionsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -463,6 +478,153 @@ fn default_tips_enabled() -> bool {
 
 fn default_tips_rotation_seconds() -> u64 {
     30
+}
+
+/// Session management configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionConfig {
+    #[serde(default = "default_session_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_max_sessions")]
+    pub max_sessions: usize,
+    #[serde(default)]
+    pub auto_save: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_session_enabled(),
+            max_sessions: default_max_sessions(),
+            auto_save: true,
+        }
+    }
+}
+
+fn default_session_enabled() -> bool {
+    true
+}
+
+fn default_max_sessions() -> usize {
+    50
+}
+
+/// Context compaction configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionConfig {
+    #[serde(default = "default_compaction_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_compaction_threshold")]
+    pub threshold_pct: u8,
+    #[serde(default = "default_compaction_reserved_tokens")]
+    pub reserved_tokens: u32,
+    #[serde(default)]
+    pub auto_compact: bool,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_compaction_enabled(),
+            threshold_pct: default_compaction_threshold(),
+            reserved_tokens: default_compaction_reserved_tokens(),
+            auto_compact: true,
+        }
+    }
+}
+
+fn default_compaction_enabled() -> bool {
+    true
+}
+
+fn default_compaction_threshold() -> u8 {
+    80
+}
+
+fn default_compaction_reserved_tokens() -> u32 {
+    4096
+}
+
+/// MCP server configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct McpConfig {
+    #[serde(default)]
+    pub servers: Vec<McpServerConfigEntry>,
+    #[serde(default = "default_mcp_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_mcp_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+fn default_mcp_enabled() -> bool {
+    true
+}
+
+fn default_mcp_timeout_ms() -> u64 {
+    5000
+}
+
+/// A single MCP server configuration entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfigEntry {
+    pub name: String,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub url: Option<String>,
+    #[serde(default = "default_mcp_server_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+}
+
+fn default_mcp_server_enabled() -> bool {
+    true
+}
+
+/// Permission system configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PermissionsConfig {
+    #[serde(default)]
+    pub auto_approve: bool,
+    #[serde(default)]
+    pub rules: Vec<PermissionRuleConfig>,
+}
+
+/// A single permission rule.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionRuleConfig {
+    pub action: String,
+    pub permission: String,
+    pub pattern: Option<String>,
+}
+
+/// AGENTS.md / project instructions configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstructionsConfig {
+    #[serde(default = "default_instructions_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub paths: Vec<String>,
+    #[serde(default = "default_auto_detect_agents_md")]
+    pub auto_detect_agents_md: bool,
+}
+
+impl Default for InstructionsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_instructions_enabled(),
+            paths: Vec::new(),
+            auto_detect_agents_md: default_auto_detect_agents_md(),
+        }
+    }
+}
+
+fn default_instructions_enabled() -> bool {
+    true
+}
+
+fn default_auto_detect_agents_md() -> bool {
+    true
 }
 
 fn default_coder_count() -> u32 {
