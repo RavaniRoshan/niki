@@ -140,84 +140,84 @@ pub struct Palette {
     pub agent_cyan: Color,
 }
 
-/// Dark palette — product-site dark tokens (#121111 base).
+/// Dark palette — Midnight Teal (#0d1117 base, teal primary, amber accent).
 pub const DARK: Palette = Palette {
-    bg: Color::Rgb(0x12, 0x11, 0x11),         // #121111
-    bg_deep: Color::Rgb(0x00, 0x00, 0x00),    // #000000
-    bg_elevated: Color::Rgb(0x1f, 0x1c, 0x1c), // #1f1c1c
-    bg_highlight: Color::Rgb(0x1c, 0x1a, 0x1a), // #1c1a1a
+    bg: Color::Rgb(0x0d, 0x11, 0x17),         // #0d1117
+    bg_deep: Color::Rgb(0x01, 0x04, 0x09),    // #010409
+    bg_elevated: Color::Rgb(0x16, 0x1b, 0x22), // #161b22
+    bg_highlight: Color::Rgb(0x1c, 0x21, 0x28), // #1c2128
 
-    border: Color::Rgb(0x31, 0x30, 0x30),      // #313030
-    border_active: Color::Rgb(0x00, 0x7a, 0xff), // #007aff
-    border_dim: Color::Rgb(0x20, 0x20, 0x1f),  // #20201F
+    border: Color::Rgb(0x30, 0x36, 0x3d),      // #30363d
+    border_active: Color::Rgb(0x0d, 0x94, 0x88), // #0d9488 (teal)
+    border_dim: Color::Rgb(0x21, 0x26, 0x2d),  // #21262d
 
-    fg: Color::Rgb(0xfd, 0xfc, 0xfc),          // #fdfcfc
-    fg_dim: Color::Rgb(0xa7, 0xa4, 0xa4),      // #a7a4a4
-    fg_bright: Color::Rgb(0xff, 0xff, 0xff),    // #ffffff
-    fg_subtle: Color::Rgb(0x8b, 0x88, 0x88),   // #8b8888
+    fg: Color::Rgb(0xe6, 0xed, 0xf3),          // #e6edf3
+    fg_dim: Color::Rgb(0x8b, 0x94, 0x9e),      // #8b949e
+    fg_bright: Color::Rgb(0xf0, 0xf6, 0xfc),    // #f0f6fc
+    fg_subtle: Color::Rgb(0x6e, 0x76, 0x81),   // #6e7681
 
-    success: Color::Rgb(0x30, 0xd1, 0x58),     // #30d158
-    error: Color::Rgb(0xff, 0x3b, 0x30),       // #ff3b30
-    warning: Color::Rgb(0xff, 0x9f, 0x0a),     // #ff9f0a
-    accent: Color::Rgb(0x00, 0x7a, 0xff),      // #007aff
-    clay_orange: Color::Rgb(0xd7, 0x77, 0x57), // #d77757
-    cyan: Color::Rgb(0x08, 0x91, 0xb2),        // #0891b2
-    purple: Color::Rgb(0xaf, 0x87, 0xff),      // #af87ff
+    success: Color::Rgb(0x34, 0xd3, 0x99),     // #34d399
+    error: Color::Rgb(0xf8, 0x71, 0x71),       // #f87171
+    warning: Color::Rgb(0xfb, 0xbf, 0x24),     // #fbbf24
+    accent: Color::Rgb(0x0d, 0x94, 0x88),      // #0d9488 (teal)
+    clay_orange: Color::Rgb(0xf5, 0x9e, 0x0b), // #f59e0b (amber)
+    cyan: Color::Rgb(0x22, 0xd3, 0xee),        // #22d3ee
+    purple: Color::Rgb(0xa7, 0x8b, 0xfa),      // #a78bfa
 
-    selection_bg: Color::Rgb(0x26, 0x4f, 0x78), // #264f78
-    diff_add_bg: Color::Rgb(0x22, 0x5c, 0x2b), // #225c2b
-    diff_del_bg: Color::Rgb(0x7a, 0x29, 0x36), // #7a2936
-    diff_add_fg: Color::Rgb(0x38, 0xa6, 0x60), // #38a660
-    diff_del_fg: Color::Rgb(0xb3, 0x59, 0x6b), // #b3596b
-    diff_hunk: Color::Rgb(0xff, 0xc1, 0x07),   // #ffc107
+    selection_bg: Color::Rgb(0x0d, 0x94, 0x88), // #0d9488 (teal)
+    diff_add_bg: Color::Rgb(0x06, 0x4e, 0x3b), // #064e3b
+    diff_del_bg: Color::Rgb(0x6b, 0x1d, 0x20), // #6b1d20
+    diff_add_fg: Color::Rgb(0x34, 0xd3, 0x99), // #34d399
+    diff_del_fg: Color::Rgb(0xf8, 0x71, 0x71), // #f87171
+    diff_hunk: Color::Rgb(0xfb, 0xbf, 0x24),   // #fbbf24
 
-    agent_red: Color::Rgb(0xdc, 0x26, 0x26),   // #dc2626
-    agent_blue: Color::Rgb(0x6a, 0x9b, 0xcc),  // #6a9bcc
-    agent_green: Color::Rgb(0x16, 0xa3, 0x4a),  // #16a34a
-    agent_yellow: Color::Rgb(0xca, 0x8a, 0x04), // #ca8a04
-    agent_purple: Color::Rgb(0x82, 0x7d, 0xbd), // #827dbd
-    agent_orange: Color::Rgb(0xd9, 0x77, 0x57), // #d97757
-    agent_pink: Color::Rgb(0xc4, 0x66, 0x86),   // #c46686
-    agent_cyan: Color::Rgb(0x08, 0x91, 0xb2),   // #0891b2
+    agent_red: Color::Rgb(0xff, 0x6b, 0x6b),   // #ff6b6b (coral red)
+    agent_blue: Color::Rgb(0x38, 0xbd, 0xf8),  // #38bdf8
+    agent_green: Color::Rgb(0x34, 0xd3, 0x99),  // #34d399
+    agent_yellow: Color::Rgb(0xf5, 0x9e, 0x0b), // #f59e0b (amber)
+    agent_purple: Color::Rgb(0xa7, 0x8b, 0xfa), // #a78bfa
+    agent_orange: Color::Rgb(0xfb, 0x92, 0x3c), // #fb923c
+    agent_pink: Color::Rgb(0xf4, 0x72, 0xb6),   // #f472b6
+    agent_cyan: Color::Rgb(0x22, 0xd3, 0xee),   // #22d3ee
 };
 
-/// Light palette — product-site light tokens (#fdfcfc base).
+/// Light palette — Midnight Teal light (#f8fafc base, teal primary, amber accent).
 /// Accents darkened for sufficient contrast on light background.
 pub const LIGHT: Palette = Palette {
-    bg: Color::Rgb(0xfd, 0xfc, 0xfc),          // #fdfcfc
-    bg_deep: Color::Rgb(0x20, 0x1d, 0x1d),     // #201d1d
-    bg_elevated: Color::Rgb(0xf1, 0xee, 0xee), // #f1eeee
-    bg_highlight: Color::Rgb(0xf8, 0xf7, 0xf7), // #f8f7f7
+    bg: Color::Rgb(0xf8, 0xfa, 0xfc),          // #f8fafc
+    bg_deep: Color::Rgb(0x0f, 0x17, 0x2a),     // #0f172a
+    bg_elevated: Color::Rgb(0xff, 0xff, 0xff), // #ffffff
+    bg_highlight: Color::Rgb(0xf1, 0xf5, 0xf9), // #f1f5f9
 
-    border: Color::Rgb(0xe0, 0xde, 0xde),       // #E0DEDE
-    border_active: Color::Rgb(0x00, 0x7a, 0xff), // #007aff
-    border_dim: Color::Rgb(0xef, 0xed, 0xed),   // #EFEDED
+    border: Color::Rgb(0xcb, 0xd5, 0xe1),       // #cbd5e1
+    border_active: Color::Rgb(0x0f, 0x76, 0x6e), // #0f766e (teal)
+    border_dim: Color::Rgb(0xe2, 0xe8, 0xf0),   // #e2e8f0
 
-    fg: Color::Rgb(0x20, 0x1d, 0x1d),          // #201d1d
-    fg_dim: Color::Rgb(0x64, 0x62, 0x62),      // #646262
-    fg_bright: Color::Rgb(0x0f, 0x00, 0x00),   // #0f0000
-    fg_subtle: Color::Rgb(0x9a, 0x98, 0x98),   // #9a9898
+    fg: Color::Rgb(0x1e, 0x29, 0x3b),          // #1e293b
+    fg_dim: Color::Rgb(0x64, 0x74, 0x8b),      // #64748b
+    fg_bright: Color::Rgb(0x0f, 0x17, 0x2a),   // #0f172a
+    fg_subtle: Color::Rgb(0x94, 0xa3, 0xb8),   // #94a3b8
 
-    success: Color::Rgb(0x1e, 0x8e, 0x3e),     // #1e8e3e (darkened for light)
-    error: Color::Rgb(0xc6, 0x28, 0x28),       // #c62828 (darkened for light)
-    warning: Color::Rgb(0xa1, 0x62, 0x07),     // #a16207 (darkened for light)
-    accent: Color::Rgb(0x00, 0x7a, 0xff),      // #007aff
-    clay_orange: Color::Rgb(0xd7, 0x77, 0x57), // #d77757
-    cyan: Color::Rgb(0x0e, 0x74, 0x90),        // #0e7490 (darkened for light)
-    purple: Color::Rgb(0x6d, 0x28, 0xd9),      // #6d28d9 (darkened for light)
+    success: Color::Rgb(0x05, 0x96, 0x69),     // #059669 (darkened for light)
+    error: Color::Rgb(0xdc, 0x26, 0x28),       // #dc2628 (darkened for light)
+    warning: Color::Rgb(0xd9, 0x77, 0x06),     // #d97706 (amber)
+    accent: Color::Rgb(0x0f, 0x76, 0x6e),      // #0f766e (teal)
+    clay_orange: Color::Rgb(0xd9, 0x77, 0x06), // #d97706 (amber)
+    cyan: Color::Rgb(0x08, 0x91, 0xb2),        // #0891b2
+    purple: Color::Rgb(0x7c, 0x3a, 0xed),      // #7c3aed
 
-    selection_bg: Color::Rgb(0xdf, 0xec, 0xfc), // #dfecfc (accent 12% tint)
-    diff_add_bg: Color::Rgb(0xed, 0xf9, 0xef), // #edf9ef (success 8% tint)
-    diff_del_bg: Color::Rgb(0xfd, 0xed, 0xec), // #fdedec (error 8% tint)
-    diff_add_fg: Color::Rgb(0x1e, 0x8e, 0x3e), // #1e8e3e
-    diff_del_fg: Color::Rgb(0xc6, 0x28, 0x28), // #c62828
-    diff_hunk: Color::Rgb(0xa1, 0x62, 0x07),   // #a16207
+    selection_bg: Color::Rgb(0xcc, 0xf7, 0xf0), // #ccf7f0 (teal 8% tint)
+    diff_add_bg: Color::Rgb(0xec, 0xfd, 0xf5), // #ecfdf5 (success 8% tint)
+    diff_del_bg: Color::Rgb(0xfe, 0xf2, 0xf2), // #fef2f2 (error 8% tint)
+    diff_add_fg: Color::Rgb(0x05, 0x96, 0x69), // #059669
+    diff_del_fg: Color::Rgb(0xdc, 0x26, 0x28), // #dc2628
+    diff_hunk: Color::Rgb(0xd9, 0x77, 0x06),   // #d97706
 
-    agent_red: Color::Rgb(0xb3, 0x26, 0x1e),   // #b3261e
-    agent_blue: Color::Rgb(0x25, 0x63, 0xeb),  // #2563eb
-    agent_green: Color::Rgb(0x15, 0x80, 0x3d),  // #15803d
-    agent_yellow: Color::Rgb(0xb4, 0x53, 0x09), // #b45309
-    agent_purple: Color::Rgb(0x6d, 0x28, 0xd9), // #6d28d9
+    agent_red: Color::Rgb(0xef, 0x44, 0x44),   // #ef4444 (coral red)
+    agent_blue: Color::Rgb(0x08, 0x91, 0xb2),  // #0891b2
+    agent_green: Color::Rgb(0x05, 0x96, 0x69),  // #059669
+    agent_yellow: Color::Rgb(0xd9, 0x77, 0x06), // #d97706 (amber)
+    agent_purple: Color::Rgb(0x7c, 0x3a, 0xed), // #7c3aed
     agent_orange: Color::Rgb(0xc2, 0x41, 0x0c), // #c2410c
     agent_pink: Color::Rgb(0xbe, 0x18, 0x5d),   // #be185d
     agent_cyan: Color::Rgb(0x0e, 0x74, 0x90),   // #0e7490
@@ -231,6 +231,39 @@ fn palette() -> &'static Palette {
         _ => &DARK, // Dark + Auto fallback
     }
 }
+
+// ── New chat interface tokens (Kimi Code palette alignment) ─────────────
+
+/// Primary color — links, inline code, focused elements (alias for accent).
+#[inline] pub fn primary() -> Color { fg(palette().accent) }
+
+/// Claude brand accent — spinners, logo (alias for purple).
+#[inline] pub fn claude() -> Color { fg(palette().purple) }
+
+/// Shell mode border/prompt color.
+#[inline] pub fn shell() -> Color { fg(palette().purple) }
+
+/// User message bullet color (gold).
+#[inline] pub fn role_user() -> Color { fg(palette().agent_yellow) }
+
+/// Assistant message label color.
+#[inline] pub fn role_assistant() -> Color { fg(palette().accent) }
+
+/// System message color.
+#[inline] pub fn role_system() -> Color { fg(palette().fg_dim) }
+
+/// Prompt cursor style (reversed foreground).
+#[inline] pub fn prompt_cursor() -> Style {
+    Style::default().fg(palette().bg).bg(palette().accent)
+}
+
+/// Input box border color.
+#[inline] pub fn prompt_border() -> Color {
+    fg(palette().border_active)
+}
+
+/// Dim text (alias for fg_dim).
+#[inline] pub fn text_dim() -> Color { fg(palette().fg_dim) }
 
 // ── Mode-aware accessors (the 11 core + 6 accent surfaces) ──────────────
 
