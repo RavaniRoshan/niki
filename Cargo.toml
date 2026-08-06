@@ -79,6 +79,9 @@ libc = "0.2"
 # Text diffing for fuzzy edit matching
 similar = "2"
 
+# Markdown parsing (for chat interface)
+pulldown-cmark = "0.12"
+
 # Regex for secret redaction
 regex = "1"
 
