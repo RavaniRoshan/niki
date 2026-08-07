@@ -243,7 +243,9 @@ impl Page for AgentsPage {
             } else if stage.status == StageStatus::Failed {
                 lines.push(Line::from(vec![Span::styled(
                     "  Error:",
-                    Style::default().fg(theme::RED()).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::RED())
+                        .add_modifier(Modifier::BOLD),
                 )]));
                 for summ in &stage.summary {
                     lines.push(Line::from(vec![

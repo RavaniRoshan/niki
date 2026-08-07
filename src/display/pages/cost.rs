@@ -178,12 +178,16 @@ impl Page for CostPage {
         table_lines.push(Line::from(vec![
             Span::styled(
                 "  TOTAL      ",
-                Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::fg_color())
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("                     ", Style::default()),
             Span::styled(
                 format!("{:<8}", fmt_tokens(total_tokens)),
-                Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::fg_color())
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("${:<7.4}", total_cost),
@@ -193,7 +197,9 @@ impl Page for CostPage {
             ),
             Span::styled(
                 fmt_duration(total_latency),
-                Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::fg_color())
+                    .add_modifier(Modifier::BOLD),
             ),
         ]));
 

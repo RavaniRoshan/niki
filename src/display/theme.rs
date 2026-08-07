@@ -74,21 +74,13 @@ pub fn no_color() -> bool {
 
 /// Returns the appropriate foreground color, respecting NO_COLOR.
 fn fg(color: Color) -> Color {
-    if no_color() {
-        Color::Reset
-    } else {
-        color
-    }
+    if no_color() { Color::Reset } else { color }
 }
 
 /// Returns the appropriate background color, respecting NO_COLOR.
 /// This fixes the bg leak: under NO_COLOR, background must also be Reset.
 fn bg(color: Color) -> Color {
-    if no_color() {
-        Color::Reset
-    } else {
-        color
-    }
+    if no_color() { Color::Reset } else { color }
 }
 
 // ── Palette ─────────────────────────────────────────────────────────────
@@ -142,19 +134,19 @@ pub struct Palette {
 
 /// Dark palette — Midnight Teal (#0d1117 base, teal primary, amber accent).
 pub const DARK: Palette = Palette {
-    bg: Color::Rgb(0x0d, 0x11, 0x17),         // #0d1117
-    bg_deep: Color::Rgb(0x01, 0x04, 0x09),    // #010409
-    bg_elevated: Color::Rgb(0x16, 0x1b, 0x22), // #161b22
+    bg: Color::Rgb(0x0d, 0x11, 0x17),           // #0d1117
+    bg_deep: Color::Rgb(0x01, 0x04, 0x09),      // #010409
+    bg_elevated: Color::Rgb(0x16, 0x1b, 0x22),  // #161b22
     bg_highlight: Color::Rgb(0x1c, 0x21, 0x28), // #1c2128
 
-    border: Color::Rgb(0x30, 0x36, 0x3d),      // #30363d
+    border: Color::Rgb(0x30, 0x36, 0x3d),        // #30363d
     border_active: Color::Rgb(0x0d, 0x94, 0x88), // #0d9488 (teal)
-    border_dim: Color::Rgb(0x21, 0x26, 0x2d),  // #21262d
+    border_dim: Color::Rgb(0x21, 0x26, 0x2d),    // #21262d
 
-    fg: Color::Rgb(0xe6, 0xed, 0xf3),          // #e6edf3
-    fg_dim: Color::Rgb(0x8b, 0x94, 0x9e),      // #8b949e
-    fg_bright: Color::Rgb(0xf0, 0xf6, 0xfc),    // #f0f6fc
-    fg_subtle: Color::Rgb(0x6e, 0x76, 0x81),   // #6e7681
+    fg: Color::Rgb(0xe6, 0xed, 0xf3),        // #e6edf3
+    fg_dim: Color::Rgb(0x8b, 0x94, 0x9e),    // #8b949e
+    fg_bright: Color::Rgb(0xf0, 0xf6, 0xfc), // #f0f6fc
+    fg_subtle: Color::Rgb(0x6e, 0x76, 0x81), // #6e7681
 
     success: Color::Rgb(0x34, 0xd3, 0x99),     // #34d399
     error: Color::Rgb(0xf8, 0x71, 0x71),       // #f87171
@@ -165,62 +157,62 @@ pub const DARK: Palette = Palette {
     purple: Color::Rgb(0xa7, 0x8b, 0xfa),      // #a78bfa
 
     selection_bg: Color::Rgb(0x0d, 0x94, 0x88), // #0d9488 (teal)
-    diff_add_bg: Color::Rgb(0x06, 0x4e, 0x3b), // #064e3b
-    diff_del_bg: Color::Rgb(0x6b, 0x1d, 0x20), // #6b1d20
-    diff_add_fg: Color::Rgb(0x34, 0xd3, 0x99), // #34d399
-    diff_del_fg: Color::Rgb(0xf8, 0x71, 0x71), // #f87171
-    diff_hunk: Color::Rgb(0xfb, 0xbf, 0x24),   // #fbbf24
+    diff_add_bg: Color::Rgb(0x06, 0x4e, 0x3b),  // #064e3b
+    diff_del_bg: Color::Rgb(0x6b, 0x1d, 0x20),  // #6b1d20
+    diff_add_fg: Color::Rgb(0x34, 0xd3, 0x99),  // #34d399
+    diff_del_fg: Color::Rgb(0xf8, 0x71, 0x71),  // #f87171
+    diff_hunk: Color::Rgb(0xfb, 0xbf, 0x24),    // #fbbf24
 
-    agent_red: Color::Rgb(0xff, 0x6b, 0x6b),   // #ff6b6b (coral red)
-    agent_blue: Color::Rgb(0x38, 0xbd, 0xf8),  // #38bdf8
-    agent_green: Color::Rgb(0x34, 0xd3, 0x99),  // #34d399
+    agent_red: Color::Rgb(0xff, 0x6b, 0x6b), // #ff6b6b (coral red)
+    agent_blue: Color::Rgb(0x38, 0xbd, 0xf8), // #38bdf8
+    agent_green: Color::Rgb(0x34, 0xd3, 0x99), // #34d399
     agent_yellow: Color::Rgb(0xf5, 0x9e, 0x0b), // #f59e0b (amber)
     agent_purple: Color::Rgb(0xa7, 0x8b, 0xfa), // #a78bfa
     agent_orange: Color::Rgb(0xfb, 0x92, 0x3c), // #fb923c
-    agent_pink: Color::Rgb(0xf4, 0x72, 0xb6),   // #f472b6
-    agent_cyan: Color::Rgb(0x22, 0xd3, 0xee),   // #22d3ee
+    agent_pink: Color::Rgb(0xf4, 0x72, 0xb6), // #f472b6
+    agent_cyan: Color::Rgb(0x22, 0xd3, 0xee), // #22d3ee
 };
 
 /// Light palette — Midnight Teal light (#f8fafc base, teal primary, amber accent).
 /// Accents darkened for sufficient contrast on light background.
 pub const LIGHT: Palette = Palette {
-    bg: Color::Rgb(0xf8, 0xfa, 0xfc),          // #f8fafc
-    bg_deep: Color::Rgb(0x0f, 0x17, 0x2a),     // #0f172a
-    bg_elevated: Color::Rgb(0xff, 0xff, 0xff), // #ffffff
+    bg: Color::Rgb(0xf8, 0xfa, 0xfc),           // #f8fafc
+    bg_deep: Color::Rgb(0x0f, 0x17, 0x2a),      // #0f172a
+    bg_elevated: Color::Rgb(0xff, 0xff, 0xff),  // #ffffff
     bg_highlight: Color::Rgb(0xf1, 0xf5, 0xf9), // #f1f5f9
 
-    border: Color::Rgb(0xcb, 0xd5, 0xe1),       // #cbd5e1
+    border: Color::Rgb(0xcb, 0xd5, 0xe1),        // #cbd5e1
     border_active: Color::Rgb(0x0f, 0x76, 0x6e), // #0f766e (teal)
-    border_dim: Color::Rgb(0xe2, 0xe8, 0xf0),   // #e2e8f0
+    border_dim: Color::Rgb(0xe2, 0xe8, 0xf0),    // #e2e8f0
 
-    fg: Color::Rgb(0x1e, 0x29, 0x3b),          // #1e293b
-    fg_dim: Color::Rgb(0x64, 0x74, 0x8b),      // #64748b
-    fg_bright: Color::Rgb(0x0f, 0x17, 0x2a),   // #0f172a
-    fg_subtle: Color::Rgb(0x94, 0xa3, 0xb8),   // #94a3b8
+    fg: Color::Rgb(0x1e, 0x29, 0x3b),        // #1e293b
+    fg_dim: Color::Rgb(0x64, 0x74, 0x8b),    // #64748b
+    fg_bright: Color::Rgb(0x0f, 0x17, 0x2a), // #0f172a
+    fg_subtle: Color::Rgb(0x94, 0xa3, 0xb8), // #94a3b8
 
-    success: Color::Rgb(0x05, 0x96, 0x69),     // #059669 (darkened for light)
-    error: Color::Rgb(0xdc, 0x26, 0x28),       // #dc2628 (darkened for light)
-    warning: Color::Rgb(0xd9, 0x77, 0x06),     // #d97706 (amber)
-    accent: Color::Rgb(0x0f, 0x76, 0x6e),      // #0f766e (teal)
+    success: Color::Rgb(0x05, 0x96, 0x69), // #059669 (darkened for light)
+    error: Color::Rgb(0xdc, 0x26, 0x28),   // #dc2628 (darkened for light)
+    warning: Color::Rgb(0xd9, 0x77, 0x06), // #d97706 (amber)
+    accent: Color::Rgb(0x0f, 0x76, 0x6e),  // #0f766e (teal)
     clay_orange: Color::Rgb(0xd9, 0x77, 0x06), // #d97706 (amber)
-    cyan: Color::Rgb(0x08, 0x91, 0xb2),        // #0891b2
-    purple: Color::Rgb(0x7c, 0x3a, 0xed),      // #7c3aed
+    cyan: Color::Rgb(0x08, 0x91, 0xb2),    // #0891b2
+    purple: Color::Rgb(0x7c, 0x3a, 0xed),  // #7c3aed
 
     selection_bg: Color::Rgb(0xcc, 0xf7, 0xf0), // #ccf7f0 (teal 8% tint)
-    diff_add_bg: Color::Rgb(0xec, 0xfd, 0xf5), // #ecfdf5 (success 8% tint)
-    diff_del_bg: Color::Rgb(0xfe, 0xf2, 0xf2), // #fef2f2 (error 8% tint)
-    diff_add_fg: Color::Rgb(0x05, 0x96, 0x69), // #059669
-    diff_del_fg: Color::Rgb(0xdc, 0x26, 0x28), // #dc2628
-    diff_hunk: Color::Rgb(0xd9, 0x77, 0x06),   // #d97706
+    diff_add_bg: Color::Rgb(0xec, 0xfd, 0xf5),  // #ecfdf5 (success 8% tint)
+    diff_del_bg: Color::Rgb(0xfe, 0xf2, 0xf2),  // #fef2f2 (error 8% tint)
+    diff_add_fg: Color::Rgb(0x05, 0x96, 0x69),  // #059669
+    diff_del_fg: Color::Rgb(0xdc, 0x26, 0x28),  // #dc2628
+    diff_hunk: Color::Rgb(0xd9, 0x77, 0x06),    // #d97706
 
-    agent_red: Color::Rgb(0xef, 0x44, 0x44),   // #ef4444 (coral red)
-    agent_blue: Color::Rgb(0x08, 0x91, 0xb2),  // #0891b2
-    agent_green: Color::Rgb(0x05, 0x96, 0x69),  // #059669
+    agent_red: Color::Rgb(0xef, 0x44, 0x44), // #ef4444 (coral red)
+    agent_blue: Color::Rgb(0x08, 0x91, 0xb2), // #0891b2
+    agent_green: Color::Rgb(0x05, 0x96, 0x69), // #059669
     agent_yellow: Color::Rgb(0xd9, 0x77, 0x06), // #d97706 (amber)
     agent_purple: Color::Rgb(0x7c, 0x3a, 0xed), // #7c3aed
     agent_orange: Color::Rgb(0xc2, 0x41, 0x0c), // #c2410c
-    agent_pink: Color::Rgb(0xbe, 0x18, 0x5d),   // #be185d
-    agent_cyan: Color::Rgb(0x0e, 0x74, 0x90),   // #0e7490
+    agent_pink: Color::Rgb(0xbe, 0x18, 0x5d), // #be185d
+    agent_cyan: Color::Rgb(0x0e, 0x74, 0x90), // #0e7490
 };
 
 /// Get the current palette based on active theme mode.
@@ -235,88 +227,207 @@ fn palette() -> &'static Palette {
 // ── New chat interface tokens (Kimi Code palette alignment) ─────────────
 
 /// Primary color — links, inline code, focused elements (alias for accent).
-#[inline] pub fn primary() -> Color { fg(palette().accent) }
+#[inline]
+pub fn primary() -> Color {
+    fg(palette().accent)
+}
 
 /// Claude brand accent — spinners, logo (alias for purple).
-#[inline] pub fn claude() -> Color { fg(palette().purple) }
+#[inline]
+pub fn claude() -> Color {
+    fg(palette().purple)
+}
 
 /// Shell mode border/prompt color.
-#[inline] pub fn shell() -> Color { fg(palette().purple) }
+#[inline]
+pub fn shell() -> Color {
+    fg(palette().purple)
+}
 
 /// User message bullet color (gold).
-#[inline] pub fn role_user() -> Color { fg(palette().agent_yellow) }
+#[inline]
+pub fn role_user() -> Color {
+    fg(palette().agent_yellow)
+}
 
 /// Assistant message label color.
-#[inline] pub fn role_assistant() -> Color { fg(palette().accent) }
+#[inline]
+pub fn role_assistant() -> Color {
+    fg(palette().accent)
+}
 
 /// System message color.
-#[inline] pub fn role_system() -> Color { fg(palette().fg_dim) }
+#[inline]
+pub fn role_system() -> Color {
+    fg(palette().fg_dim)
+}
 
 /// Prompt cursor style (reversed foreground).
-#[inline] pub fn prompt_cursor() -> Style {
+#[inline]
+pub fn prompt_cursor() -> Style {
     Style::default().fg(palette().bg).bg(palette().accent)
 }
 
 /// Input box border color.
-#[inline] pub fn prompt_border() -> Color {
+#[inline]
+pub fn prompt_border() -> Color {
     fg(palette().border_active)
 }
 
 /// Dim text (alias for fg_dim).
-#[inline] pub fn text_dim() -> Color { fg(palette().fg_dim) }
+#[inline]
+pub fn text_dim() -> Color {
+    fg(palette().fg_dim)
+}
 
 // ── Mode-aware accessors (the 11 core + 6 accent surfaces) ──────────────
 
-#[inline] pub fn bg_color() -> Color { bg(palette().bg) }
-#[inline] pub fn bg_deep() -> Color { bg(palette().bg_deep) }
-#[inline] pub fn bg_elevated() -> Color { bg(palette().bg_elevated) }
-#[inline] pub fn bg_highlight() -> Color { bg(palette().bg_highlight) }
-#[inline] pub fn border_color() -> Color { fg(palette().border) }
-#[inline] pub fn border_active() -> Color { fg(palette().border_active) }
-#[inline] pub fn border_dim() -> Color { fg(palette().border_dim) }
-#[inline] pub fn fg_color() -> Color { fg(palette().fg) }
-#[inline] pub fn fg_dim() -> Color { fg(palette().fg_dim) }
-#[inline] pub fn fg_bright() -> Color { fg(palette().fg_bright) }
-#[inline] pub fn fg_subtle() -> Color { fg(palette().fg_subtle) }
+#[inline]
+pub fn bg_color() -> Color {
+    bg(palette().bg)
+}
+#[inline]
+pub fn bg_deep() -> Color {
+    bg(palette().bg_deep)
+}
+#[inline]
+pub fn bg_elevated() -> Color {
+    bg(palette().bg_elevated)
+}
+#[inline]
+pub fn bg_highlight() -> Color {
+    bg(palette().bg_highlight)
+}
+#[inline]
+pub fn border_color() -> Color {
+    fg(palette().border)
+}
+#[inline]
+pub fn border_active() -> Color {
+    fg(palette().border_active)
+}
+#[inline]
+pub fn border_dim() -> Color {
+    fg(palette().border_dim)
+}
+#[inline]
+pub fn fg_color() -> Color {
+    fg(palette().fg)
+}
+#[inline]
+pub fn fg_dim() -> Color {
+    fg(palette().fg_dim)
+}
+#[inline]
+pub fn fg_bright() -> Color {
+    fg(palette().fg_bright)
+}
+#[inline]
+pub fn fg_subtle() -> Color {
+    fg(palette().fg_subtle)
+}
 
-#[inline] pub fn success() -> Color { fg(palette().success) }
-#[inline] pub fn error() -> Color { fg(palette().error) }
-#[inline] pub fn warning() -> Color { fg(palette().warning) }
-#[inline] pub fn accent() -> Color { fg(palette().accent) }
-#[inline] pub fn selection_bg() -> Color { palette().selection_bg }
-#[inline] pub fn diff_add_bg() -> Color { palette().diff_add_bg }
-#[inline] pub fn diff_del_bg() -> Color { palette().diff_del_bg }
+#[inline]
+pub fn success() -> Color {
+    fg(palette().success)
+}
+#[inline]
+pub fn error() -> Color {
+    fg(palette().error)
+}
+#[inline]
+pub fn warning() -> Color {
+    fg(palette().warning)
+}
+#[inline]
+pub fn accent() -> Color {
+    fg(palette().accent)
+}
+#[inline]
+pub fn selection_bg() -> Color {
+    palette().selection_bg
+}
+#[inline]
+pub fn diff_add_bg() -> Color {
+    palette().diff_add_bg
+}
+#[inline]
+pub fn diff_del_bg() -> Color {
+    palette().diff_del_bg
+}
 
 // ── Product semantic aliases ────────────────────────────────────────────
 
 /// Primary text color (alias for fg_color).
-#[inline] pub fn text() -> Color { fg_color() }
+#[inline]
+pub fn text() -> Color {
+    fg_color()
+}
 /// Body text (alias for fg_color).
-#[inline] pub fn text_body() -> Color { fg_color() }
+#[inline]
+pub fn text_body() -> Color {
+    fg_color()
+}
 /// Muted text (alias for fg_dim).
-#[inline] pub fn text_muted() -> Color { fg_dim() }
+#[inline]
+pub fn text_muted() -> Color {
+    fg_dim()
+}
 /// Default border (alias for border_color).
-#[inline] pub fn border() -> Color { border_color() }
+#[inline]
+pub fn border() -> Color {
+    border_color()
+}
 /// Strong/focus border (alias for border_active).
-#[inline] pub fn border_strong() -> Color { border_active() }
+#[inline]
+pub fn border_strong() -> Color {
+    border_active()
+}
 /// Surface background (alias for bg_color).
-#[inline] pub fn surface() -> Color { bg_color() }
+#[inline]
+pub fn surface() -> Color {
+    bg_color()
+}
 /// Soft surface (alias for bg_highlight).
-#[inline] pub fn surface_soft() -> Color { bg_highlight() }
+#[inline]
+pub fn surface_soft() -> Color {
+    bg_highlight()
+}
 /// Card/elevated surface (alias for bg_elevated).
-#[inline] pub fn surface_card() -> Color { bg_elevated() }
+#[inline]
+pub fn surface_card() -> Color {
+    bg_elevated()
+}
 /// Deep ink (alias for bg_deep).
-#[inline] pub fn ink_deep() -> Color { bg_deep() }
+#[inline]
+pub fn ink_deep() -> Color {
+    bg_deep()
+}
 /// Ash/subtle text (alias for fg_subtle).
-#[inline] pub fn ash() -> Color { fg_subtle() }
+#[inline]
+pub fn ash() -> Color {
+    fg_subtle()
+}
 /// Charcoal text (alias for fg_dim).
-#[inline] pub fn charcoal() -> Color { fg_dim() }
+#[inline]
+pub fn charcoal() -> Color {
+    fg_dim()
+}
 /// Stone text (alias for fg_subtle).
-#[inline] pub fn stone() -> Color { fg_subtle() }
+#[inline]
+pub fn stone() -> Color {
+    fg_subtle()
+}
 /// Text on dark backgrounds — returns fg_bright.
-#[inline] pub fn on_dark() -> Color { fg_bright() }
+#[inline]
+pub fn on_dark() -> Color {
+    fg_bright()
+}
 /// Dimmed surface for modal scrim overlays.
-#[inline] pub fn surface_dark() -> Color { bg_deep() }
+#[inline]
+pub fn surface_dark() -> Color {
+    bg_deep()
+}
 
 // ── Backward-compat aliases (old const names → new palette fns) ─────────
 // Mechanical sweep converts theme::OLD → theme::OLD() across all files.
@@ -325,89 +436,157 @@ fn palette() -> &'static Palette {
 
 /// Background (backward-compat).
 #[allow(non_snake_case)]
-pub fn BG() -> Color { bg_color() }
+pub fn BG() -> Color {
+    bg_color()
+}
 /// Deeper background (backward-compat).
 #[allow(non_snake_case)]
-pub fn BG_DEEP() -> Color { bg_deep() }
+pub fn BG_DEEP() -> Color {
+    bg_deep()
+}
 /// Elevated surface (backward-compat).
 #[allow(non_snake_case)]
-pub fn BG_ELEVATED() -> Color { bg_elevated() }
+pub fn BG_ELEVATED() -> Color {
+    bg_elevated()
+}
 /// Highlighted surface (backward-compat).
 #[allow(non_snake_case)]
-pub fn BG_HIGHLIGHT() -> Color { bg_highlight() }
+pub fn BG_HIGHLIGHT() -> Color {
+    bg_highlight()
+}
 /// Default border (backward-compat).
 #[allow(non_snake_case)]
-pub fn BORDER() -> Color { border_color() }
+pub fn BORDER() -> Color {
+    border_color()
+}
 /// Active border (backward-compat).
 #[allow(non_snake_case)]
-pub fn BORDER_ACTIVE() -> Color { border_active() }
+pub fn BORDER_ACTIVE() -> Color {
+    border_active()
+}
 /// Dim border (backward-compat).
 #[allow(non_snake_case)]
-pub fn BORDER_DIM() -> Color { border_dim() }
+pub fn BORDER_DIM() -> Color {
+    border_dim()
+}
 /// Primary text (backward-compat).
 #[allow(non_snake_case)]
-pub fn FG() -> Color { fg_color() }
+pub fn FG() -> Color {
+    fg_color()
+}
 /// Dimmed text (backward-compat).
 #[allow(non_snake_case)]
-pub fn FG_DIM() -> Color { fg_dim() }
+pub fn FG_DIM() -> Color {
+    fg_dim()
+}
 /// Bright text (backward-compat).
 #[allow(non_snake_case)]
-pub fn FG_BRIGHT() -> Color { fg_bright() }
+pub fn FG_BRIGHT() -> Color {
+    fg_bright()
+}
 /// Subtle text (backward-compat).
 #[allow(non_snake_case)]
-pub fn FG_SUBTLE() -> Color { fg_subtle() }
+pub fn FG_SUBTLE() -> Color {
+    fg_subtle()
+}
 
 // Accent aliases
 #[allow(non_snake_case)]
-pub fn GREEN() -> Color { palette().success }
+pub fn GREEN() -> Color {
+    palette().success
+}
 #[allow(non_snake_case)]
-pub fn RED() -> Color { palette().error }
+pub fn RED() -> Color {
+    palette().error
+}
 #[allow(non_snake_case)]
-pub fn AMBER() -> Color { palette().warning }
+pub fn AMBER() -> Color {
+    palette().warning
+}
 #[allow(non_snake_case)]
-pub fn BLUE() -> Color { palette().agent_blue }
+pub fn BLUE() -> Color {
+    palette().agent_blue
+}
 #[allow(non_snake_case)]
-pub fn PURPLE() -> Color { palette().purple }
+pub fn PURPLE() -> Color {
+    palette().purple
+}
 #[allow(non_snake_case)]
-pub fn CYAN() -> Color { palette().cyan }
+pub fn CYAN() -> Color {
+    palette().cyan
+}
 #[allow(non_snake_case)]
-pub fn CLAY_ORANGE() -> Color { palette().clay_orange }
+pub fn CLAY_ORANGE() -> Color {
+    palette().clay_orange
+}
 #[allow(non_snake_case)]
-pub fn SELECTION_BG() -> Color { palette().selection_bg }
+pub fn SELECTION_BG() -> Color {
+    palette().selection_bg
+}
 
 // Diff aliases
 #[allow(non_snake_case)]
-pub fn DIFF_ADD_BG() -> Color { palette().diff_add_bg }
+pub fn DIFF_ADD_BG() -> Color {
+    palette().diff_add_bg
+}
 #[allow(non_snake_case)]
-pub fn DIFF_DEL_BG() -> Color { palette().diff_del_bg }
+pub fn DIFF_DEL_BG() -> Color {
+    palette().diff_del_bg
+}
 #[allow(non_snake_case)]
-pub fn DIFF_ADD_FG() -> Color { palette().diff_add_fg }
+pub fn DIFF_ADD_FG() -> Color {
+    palette().diff_add_fg
+}
 #[allow(non_snake_case)]
-pub fn DIFF_DEL_FG() -> Color { palette().diff_del_fg }
+pub fn DIFF_DEL_FG() -> Color {
+    palette().diff_del_fg
+}
 #[allow(non_snake_case)]
-pub fn DIFF_WORD_ADD() -> Color { palette().diff_add_fg }
+pub fn DIFF_WORD_ADD() -> Color {
+    palette().diff_add_fg
+}
 #[allow(non_snake_case)]
-pub fn DIFF_WORD_DEL() -> Color { palette().diff_del_fg }
+pub fn DIFF_WORD_DEL() -> Color {
+    palette().diff_del_fg
+}
 #[allow(non_snake_case)]
-pub fn DIFF_HUNK() -> Color { palette().diff_hunk }
+pub fn DIFF_HUNK() -> Color {
+    palette().diff_hunk
+}
 
 // Agent color aliases
 #[allow(non_snake_case)]
-pub fn AGENT_RED() -> Color { palette().agent_red }
+pub fn AGENT_RED() -> Color {
+    palette().agent_red
+}
 #[allow(non_snake_case)]
-pub fn AGENT_BLUE() -> Color { palette().agent_blue }
+pub fn AGENT_BLUE() -> Color {
+    palette().agent_blue
+}
 #[allow(non_snake_case)]
-pub fn AGENT_GREEN() -> Color { palette().agent_green }
+pub fn AGENT_GREEN() -> Color {
+    palette().agent_green
+}
 #[allow(non_snake_case)]
-pub fn AGENT_YELLOW() -> Color { palette().agent_yellow }
+pub fn AGENT_YELLOW() -> Color {
+    palette().agent_yellow
+}
 #[allow(non_snake_case)]
-pub fn AGENT_PURPLE() -> Color { palette().agent_purple }
+pub fn AGENT_PURPLE() -> Color {
+    palette().agent_purple
+}
 #[allow(non_snake_case)]
-pub fn AGENT_ORANGE() -> Color { palette().agent_orange }
+pub fn AGENT_ORANGE() -> Color {
+    palette().agent_orange
+}
 #[allow(non_snake_case)]
-pub fn AGENT_PINK() -> Color { palette().agent_pink }
+pub fn AGENT_PINK() -> Color {
+    palette().agent_pink
+}
 #[allow(non_snake_case)]
-pub fn AGENT_CYAN() -> Color { palette().agent_cyan }
+pub fn AGENT_CYAN() -> Color {
+    palette().agent_cyan
+}
 
 // ── Role colors ─────────────────────────────────────────────────────────
 
@@ -454,7 +633,9 @@ pub fn role_name(role: crate::artifacts::types::AgentRole) -> &'static str {
 // ── Compound styles ─────────────────────────────────────────────────────
 
 pub fn header_style() -> Style {
-    Style::default().fg(fg(palette().fg_bright)).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(fg(palette().fg_bright))
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn dim_style() -> Style {
@@ -466,15 +647,21 @@ pub fn accent_style(color: Color) -> Style {
 }
 
 pub fn status_ok() -> Style {
-    Style::default().fg(fg(palette().success)).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(fg(palette().success))
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn status_err() -> Style {
-    Style::default().fg(fg(palette().error)).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(fg(palette().error))
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn status_warn() -> Style {
-    Style::default().fg(fg(palette().warning)).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(fg(palette().warning))
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn status_running(color: Color) -> Style {
@@ -495,7 +682,9 @@ pub fn block_border_active() -> Style {
 
 /// Clay orange accent style — the signature brand look.
 pub fn clay_accent() -> Style {
-    Style::default().fg(fg(palette().clay_orange)).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(fg(palette().clay_orange))
+        .add_modifier(Modifier::BOLD)
 }
 
 // ── Unicode-aware text utilities ────────────────────────────────────────
@@ -663,10 +852,16 @@ mod tests {
         let light_bg = bg_color();
         let light_fg = fg_color();
 
-        assert_ne!(format!("{:?}", dark_bg), format!("{:?}", light_bg),
-            "bg must differ between dark and light");
-        assert_ne!(format!("{:?}", dark_fg), format!("{:?}", light_fg),
-            "fg must differ between dark and light");
+        assert_ne!(
+            format!("{:?}", dark_bg),
+            format!("{:?}", light_bg),
+            "bg must differ between dark and light"
+        );
+        assert_ne!(
+            format!("{:?}", dark_fg),
+            format!("{:?}", light_fg),
+            "fg must differ between dark and light"
+        );
 
         set_mode(original);
     }
@@ -677,10 +872,19 @@ mod tests {
         assert_eq!(format!("{:?}", text_body()), format!("{:?}", fg_color()));
         assert_eq!(format!("{:?}", text_muted()), format!("{:?}", fg_dim()));
         assert_eq!(format!("{:?}", border()), format!("{:?}", border_color()));
-        assert_eq!(format!("{:?}", border_strong()), format!("{:?}", border_active()));
+        assert_eq!(
+            format!("{:?}", border_strong()),
+            format!("{:?}", border_active())
+        );
         assert_eq!(format!("{:?}", surface()), format!("{:?}", bg_color()));
-        assert_eq!(format!("{:?}", surface_soft()), format!("{:?}", bg_highlight()));
-        assert_eq!(format!("{:?}", surface_card()), format!("{:?}", bg_elevated()));
+        assert_eq!(
+            format!("{:?}", surface_soft()),
+            format!("{:?}", bg_highlight())
+        );
+        assert_eq!(
+            format!("{:?}", surface_card()),
+            format!("{:?}", bg_elevated())
+        );
         assert_eq!(format!("{:?}", ink_deep()), format!("{:?}", bg_deep()));
     }
 
@@ -745,8 +949,14 @@ mod tests {
     fn sub_agent_colors_are_distinct() {
         let p = &DARK;
         let colors = [
-            p.agent_red, p.agent_blue, p.agent_green, p.agent_yellow,
-            p.agent_purple, p.agent_orange, p.agent_pink, p.agent_cyan,
+            p.agent_red,
+            p.agent_blue,
+            p.agent_green,
+            p.agent_yellow,
+            p.agent_purple,
+            p.agent_orange,
+            p.agent_pink,
+            p.agent_cyan,
         ];
         let mut set = std::collections::HashSet::new();
         for c in &colors {
@@ -758,11 +968,20 @@ mod tests {
     #[test]
     fn light_accent_contrast_sufficient() {
         // Light-mode success/error/warning must differ from dark
-        assert_ne!(format!("{:?}", LIGHT.success), format!("{:?}", DARK.success),
-            "light success must be darkened");
-        assert_ne!(format!("{:?}", LIGHT.error), format!("{:?}", DARK.error),
-            "light error must be darkened");
-        assert_ne!(format!("{:?}", LIGHT.warning), format!("{:?}", DARK.warning),
-            "light warning must be darkened");
+        assert_ne!(
+            format!("{:?}", LIGHT.success),
+            format!("{:?}", DARK.success),
+            "light success must be darkened"
+        );
+        assert_ne!(
+            format!("{:?}", LIGHT.error),
+            format!("{:?}", DARK.error),
+            "light error must be darkened"
+        );
+        assert_ne!(
+            format!("{:?}", LIGHT.warning),
+            format!("{:?}", DARK.warning),
+            "light warning must be darkened"
+        );
     }
 }

@@ -72,7 +72,9 @@ pub fn create_provider(name: &str, config: &ProviderConfig) -> Result<Box<dyn Ll
         "openai" => Ok(Box::new(super::openai::OpenAiProvider::new(config)?)),
         "google" => Ok(Box::new(super::google::GoogleProvider::new(config)?)),
         "ollama" => Ok(Box::new(super::ollama::OllamaProvider::new(config)?)),
-        "mock" => Ok(Box::new(super::mock::MockProvider::new(config.base_url.as_deref())?)),
+        "mock" => Ok(Box::new(super::mock::MockProvider::new(
+            config.base_url.as_deref(),
+        )?)),
         _ => Err(anyhow!("Unknown provider: {}", name)),
     }
 }
@@ -87,8 +89,7 @@ pub fn redact_secrets(text: &str) -> String {
 
 fn redact_bearer_tokens(text: &str) -> String {
     let mut result = text.to_string();
-    let re = regex::Regex::new(r"(?i)(Bearer\s+)[A-Za-z0-9_\-\.]+")
-        .expect("valid regex");
+    let re = regex::Regex::new(r"(?i)(Bearer\s+)[A-Za-z0-9_\-\.]+").expect("valid regex");
     result = re.replace_all(&result, "${1}[REDACTED]").to_string();
     result
 }

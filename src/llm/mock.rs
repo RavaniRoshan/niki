@@ -1,4 +1,6 @@
-use crate::llm::provider::{CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage};
+use crate::llm::provider::{
+    CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage,
+};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use futures::Stream;
@@ -81,7 +83,10 @@ impl MockProvider {
         })?;
 
         if responses.responses.is_empty() {
-            return Err(anyhow!("No mock responses configured for model '{}'", model));
+            return Err(anyhow!(
+                "No mock responses configured for model '{}'",
+                model
+            ));
         }
 
         let response = responses.responses[cursor.index % responses.responses.len()].clone();
@@ -143,10 +148,8 @@ impl LlmProvider for MockProvider {
                         input_tokens: response.input_tokens.unwrap_or(0),
                         output_tokens: response.output_tokens.unwrap_or(0),
                     };
-                    let chunks: Vec<Result<StreamChunk>> = vec![
-                        Ok(StreamChunk::Text(msg)),
-                        Ok(StreamChunk::Usage(usage)),
-                    ];
+                    let chunks: Vec<Result<StreamChunk>> =
+                        vec![Ok(StreamChunk::Text(msg)), Ok(StreamChunk::Usage(usage))];
                     return Ok(Box::pin(futures::stream::iter(chunks)));
                 }
                 _ => {

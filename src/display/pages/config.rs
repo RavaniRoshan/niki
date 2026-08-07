@@ -21,7 +21,10 @@ impl Default for ConfigPage {
 
 impl ConfigPage {
     pub fn new() -> Self {
-        Self { selected_field: 0, selected_section: 0 }
+        Self {
+            selected_field: 0,
+            selected_section: 0,
+        }
     }
 }
 
@@ -68,7 +71,14 @@ impl Page for ConfigPage {
         let form_block = Block::default()
             .borders(Borders::ALL)
             .border_style(form_border)
-            .title(format!(" {} ", if self.selected_section == 0 { "▸ niki.toml " } else { " niki.toml " }));
+            .title(format!(
+                " {} ",
+                if self.selected_section == 0 {
+                    "▸ niki.toml "
+                } else {
+                    " niki.toml "
+                }
+            ));
 
         let mut form_lines: Vec<Line> = Vec::new();
 
@@ -120,7 +130,9 @@ impl Page for ConfigPage {
             form_lines.push(Line::from(vec![
                 Span::styled(
                     format!("    {:<10}", name),
-                    Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::fg_color())
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("provider [ {:<10} ]", agent.provider),
@@ -142,14 +154,20 @@ impl Page for ConfigPage {
                 .add_modifier(Modifier::BOLD),
         )));
         form_lines.push(Line::from(vec![
-            Span::styled("    base_image       ", Style::default().fg(theme::fg_color())),
+            Span::styled(
+                "    base_image       ",
+                Style::default().fg(theme::fg_color()),
+            ),
             Span::styled(
                 format!("[ {} ]", state.config.docker.base_image),
                 Style::default().fg(theme::AMBER()),
             ),
         ]));
         form_lines.push(Line::from(vec![
-            Span::styled("    memory_limit     ", Style::default().fg(theme::fg_color())),
+            Span::styled(
+                "    memory_limit     ",
+                Style::default().fg(theme::fg_color()),
+            ),
             Span::styled(
                 format!("[ {} ]", state.config.docker.memory_limit),
                 Style::default().fg(theme::AMBER()),
@@ -170,7 +188,10 @@ impl Page for ConfigPage {
                 .add_modifier(Modifier::BOLD),
         )));
         form_lines.push(Line::from(vec![
-            Span::styled("    topology         ", Style::default().fg(theme::fg_color())),
+            Span::styled(
+                "    topology         ",
+                Style::default().fg(theme::fg_color()),
+            ),
             Span::styled(
                 format!("[ {:?} ]", state.config.pipeline.topology),
                 Style::default().fg(theme::AMBER()),
@@ -186,7 +207,10 @@ impl Page for ConfigPage {
                 .add_modifier(Modifier::BOLD),
         )));
         form_lines.push(Line::from(vec![
-            Span::styled("    enabled          ", Style::default().fg(theme::fg_color())),
+            Span::styled(
+                "    enabled          ",
+                Style::default().fg(theme::fg_color()),
+            ),
             Span::styled(
                 format!(
                     "[ {} ]",
@@ -213,7 +237,10 @@ impl Page for ConfigPage {
                 .add_modifier(Modifier::BOLD),
         )));
         form_lines.push(Line::from(vec![
-            Span::styled("    enabled          ", Style::default().fg(theme::fg_color())),
+            Span::styled(
+                "    enabled          ",
+                Style::default().fg(theme::fg_color()),
+            ),
             Span::styled(
                 format!(
                     "[ {} ]",
@@ -249,16 +276,29 @@ impl Page for ConfigPage {
             crate::config::types::ThemePreference::Light => "light",
         };
         form_lines.push(Line::from(vec![
-            Span::styled("    theme             ", Style::default().fg(theme::fg_color())),
+            Span::styled(
+                "    theme             ",
+                Style::default().fg(theme::fg_color()),
+            ),
             Span::styled(
                 format!("[ {} ]", theme_name),
                 Style::default().fg(theme::accent()),
             ),
         ]));
         form_lines.push(Line::from(vec![
-            Span::styled("    tips              ", Style::default().fg(theme::fg_color())),
             Span::styled(
-                format!("[ {} ]", if state.config.ui.tips.enabled { "on" } else { "off" }),
+                "    tips              ",
+                Style::default().fg(theme::fg_color()),
+            ),
+            Span::styled(
+                format!(
+                    "[ {} ]",
+                    if state.config.ui.tips.enabled {
+                        "on"
+                    } else {
+                        "off"
+                    }
+                ),
                 Style::default().fg(if state.config.ui.tips.enabled {
                     theme::GREEN()
                 } else {

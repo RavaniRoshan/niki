@@ -20,17 +20,28 @@ pub fn assert_has_metric_for(metrics: &[StageMetric], role_name: &str) {
         found,
         "Expected a metric for role '{}', got roles: {:?}",
         role_name,
-        metrics.iter().map(|m| format!("{:?}", m.role)).collect::<Vec<_>>()
+        metrics
+            .iter()
+            .map(|m| format!("{:?}", m.role))
+            .collect::<Vec<_>>()
     );
 }
 
-pub fn find_metric(metrics: &[StageMetric], role: niki::artifacts::types::AgentRole) -> Option<&StageMetric> {
+pub fn find_metric(
+    metrics: &[StageMetric],
+    role: niki::artifacts::types::AgentRole,
+) -> Option<&StageMetric> {
     metrics.iter().find(|m| m.role == role)
 }
 
 pub fn assert_cost_non_negative(metrics: &[StageMetric]) {
     for m in metrics {
-        assert!(m.cost_usd >= 0.0, "Cost should be non-negative, got {} for {:?}", m.cost_usd, m.role);
+        assert!(
+            m.cost_usd >= 0.0,
+            "Cost should be non-negative, got {} for {:?}",
+            m.cost_usd,
+            m.role
+        );
     }
 }
 

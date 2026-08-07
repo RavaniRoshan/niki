@@ -33,10 +33,12 @@ fn diff_files(diff: &str) -> Vec<String> {
                 if !files.contains(&p) {
                     files.push(p);
                 }
-            } else if !path.starts_with('/') && !path.is_empty()
-                && !files.contains(&path.to_string()) {
-                    files.push(path.to_string());
-                }
+            } else if !path.starts_with('/')
+                && !path.is_empty()
+                && !files.contains(&path.to_string())
+            {
+                files.push(path.to_string());
+            }
         }
     }
     files

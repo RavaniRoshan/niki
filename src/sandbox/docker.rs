@@ -154,7 +154,6 @@ impl DockerSandbox {
         (n * multiplier) as i64
     }
 
-
     pub async fn create_from(
         docker: &Docker,
         agent_role: AgentRole,
@@ -303,11 +302,13 @@ impl DockerSandbox {
                     let mut edited = content.clone();
                     let mut file_changed = false;
                     for (i, block) in edit_blocks.iter().enumerate() {
-                        if let Some(new_content) = crate::sandbox::edit_format::apply_single_edit_block(
-                            &edited,
-                            &block.search,
-                            &block.replace,
-                        )? {
+                        if let Some(new_content) =
+                            crate::sandbox::edit_format::apply_single_edit_block(
+                                &edited,
+                                &block.search,
+                                &block.replace,
+                            )?
+                        {
                             edited = new_content;
                             unmatched.retain(|&idx| idx != i);
                             file_changed = true;
@@ -359,9 +360,10 @@ impl DockerSandbox {
                     .exec(&["sh", "-c", "cd /workspace && patch -p1 -i .niki-tmp.patch"])
                     .await;
                 if let Ok(p_out) = patch_res
-                    && p_out.exit_code == 0 {
-                        return Ok(());
-                    }
+                    && p_out.exit_code == 0
+                {
+                    return Ok(());
+                }
                 Err(anyhow::anyhow!(
                     "Failed to apply patch. git exit code: {}\nstdout: {}\nstderr: {}",
                     output.exit_code,
@@ -431,7 +433,9 @@ impl Sandbox for DockerSandbox {
         let timeout = std::time::Duration::from_secs(self.policy.max_exec_seconds);
         tokio::time::timeout(timeout, DockerSandbox::exec(self, cmd))
             .await
-            .map_err(|_| anyhow::anyhow!("exec timed out after {}s", self.policy.max_exec_seconds))?
+            .map_err(|_| {
+                anyhow::anyhow!("exec timed out after {}s", self.policy.max_exec_seconds)
+            })?
     }
     async fn destroy(&self) -> Result<()> {
         DockerSandbox::destroy(self).await

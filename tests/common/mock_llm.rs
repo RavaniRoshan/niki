@@ -27,12 +27,21 @@ impl MockScriptBuilder {
         Self::default()
     }
 
-    pub fn add_response(mut self, model: &str, text: &str, tokens_in: u32, tokens_out: u32) -> Self {
+    pub fn add_response(
+        mut self,
+        model: &str,
+        text: &str,
+        tokens_in: u32,
+        tokens_out: u32,
+    ) -> Self {
         let responses = self
             .scripts
             .entry(model.to_string())
             .or_insert_with(|| json!({"responses": []}));
-        if let Some(arr) = responses.get_mut("responses").and_then(|v| v.as_array_mut()) {
+        if let Some(arr) = responses
+            .get_mut("responses")
+            .and_then(|v| v.as_array_mut())
+        {
             arr.push(json!({
                 "text": text,
                 "input_tokens": tokens_in,
@@ -47,7 +56,10 @@ impl MockScriptBuilder {
             .scripts
             .entry(model.to_string())
             .or_insert_with(|| json!({"responses": []}));
-        if let Some(arr) = responses.get_mut("responses").and_then(|v| v.as_array_mut()) {
+        if let Some(arr) = responses
+            .get_mut("responses")
+            .and_then(|v| v.as_array_mut())
+        {
             arr.push(json!({
                 "error": {"kind": kind, "message": message}
             }));
@@ -60,7 +72,10 @@ impl MockScriptBuilder {
             .scripts
             .entry(model.to_string())
             .or_insert_with(|| json!({"responses": []}));
-        if let Some(arr) = responses.get_mut("responses").and_then(|v| v.as_array_mut()) {
+        if let Some(arr) = responses
+            .get_mut("responses")
+            .and_then(|v| v.as_array_mut())
+        {
             arr.push(entry);
         }
         self
@@ -259,47 +274,155 @@ pub fn security_verdict_json() -> String {
 
 pub fn mock_script_for_happy_path(script_path: &PathBuf) -> PathBuf {
     MockScriptBuilder::new()
-        .add_response("mock-planner", &format!("```json\n{}\n```", task_spec_json()), 80, 120)
-        .add_response("mock-coder", &format!("```json\n{}\n```", code_diff_json(
-            "let end = start + size - 1;",
-            "let end = start + size;",
-            "src/list.rs"
-        )), 200, 80)
-        .add_response("mock-tester", &format!("```json\n{}\n```", test_report_json()), 100, 60)
-        .add_response("mock-red", &format!("```json\n{}\n```", red_challenge_json_empty()), 60, 20)
-        .add_response("mock-reviewer", &format!("```json\n{}\n```", review_verdict_approved_json()), 150, 50)
-        .add_response("mock-planner2", &format!("```json\n{}\n```", task_spec_json()), 80, 120)
-        .add_response("mock-coder2", &format!("```json\n{}\n```", code_diff_json(
-            "let end = start + size - 1;",
-            "let end = start + size;",
-            "src/list.rs"
-        )), 200, 80)
-        .add_response("mock-tester2", &format!("```json\n{}\n```", test_report_json()), 100, 60)
-        .add_response("mock-red2", &format!("```json\n{}\n```", red_challenge_json_empty()), 60, 20)
-        .add_response("mock-reviewer2", &format!("```json\n{}\n```", review_verdict_approved_json()), 150, 50)
+        .add_response(
+            "mock-planner",
+            &format!("```json\n{}\n```", task_spec_json()),
+            80,
+            120,
+        )
+        .add_response(
+            "mock-coder",
+            &format!(
+                "```json\n{}\n```",
+                code_diff_json(
+                    "let end = start + size - 1;",
+                    "let end = start + size;",
+                    "src/list.rs"
+                )
+            ),
+            200,
+            80,
+        )
+        .add_response(
+            "mock-tester",
+            &format!("```json\n{}\n```", test_report_json()),
+            100,
+            60,
+        )
+        .add_response(
+            "mock-red",
+            &format!("```json\n{}\n```", red_challenge_json_empty()),
+            60,
+            20,
+        )
+        .add_response(
+            "mock-reviewer",
+            &format!("```json\n{}\n```", review_verdict_approved_json()),
+            150,
+            50,
+        )
+        .add_response(
+            "mock-planner2",
+            &format!("```json\n{}\n```", task_spec_json()),
+            80,
+            120,
+        )
+        .add_response(
+            "mock-coder2",
+            &format!(
+                "```json\n{}\n```",
+                code_diff_json(
+                    "let end = start + size - 1;",
+                    "let end = start + size;",
+                    "src/list.rs"
+                )
+            ),
+            200,
+            80,
+        )
+        .add_response(
+            "mock-tester2",
+            &format!("```json\n{}\n```", test_report_json()),
+            100,
+            60,
+        )
+        .add_response(
+            "mock-red2",
+            &format!("```json\n{}\n```", red_challenge_json_empty()),
+            60,
+            20,
+        )
+        .add_response(
+            "mock-reviewer2",
+            &format!("```json\n{}\n```", review_verdict_approved_json()),
+            150,
+            50,
+        )
         .write(script_path)
 }
 
 pub fn mock_script_for_revision(script_path: &PathBuf) -> PathBuf {
     MockScriptBuilder::new()
-        .add_response("mock-planner", &format!("```json\n{}\n```", task_spec_json()), 80, 120)
-        .add_response("mock-coder", &format!("```json\n{}\n```", code_diff_json(
-            "let end = start + size - 1;",
-            "let end = start + size;",
-            "src/list.rs"
-        )), 200, 80)
-        .add_response("mock-tester", &format!("```json\n{}\n```", test_report_json()), 100, 60)
-        .add_response("mock-red", &format!("```json\n{}\n```", red_challenge_json_empty()), 60, 20)
-        .add_response("mock-reviewer", &format!("```json\n{}\n```", review_verdict_revision_json(
-            "The fix needs more tests."
-        )), 150, 60)
-        .add_response("mock-coder2", &format!("```json\n{}\n```", code_diff_json(
-            "let end = start + size - 1;",
-            "let end = start + size;",
-            "src/list.rs"
-        )), 100, 40)
-        .add_response("mock-tester2", &format!("```json\n{}\n```", test_report_json()), 100, 60)
-        .add_response("mock-red2", &format!("```json\n{}\n```", red_challenge_json_empty()), 60, 20)
-        .add_response("mock-reviewer2", &format!("```json\n{}\n```", review_verdict_approved_json()), 150, 50)
+        .add_response(
+            "mock-planner",
+            &format!("```json\n{}\n```", task_spec_json()),
+            80,
+            120,
+        )
+        .add_response(
+            "mock-coder",
+            &format!(
+                "```json\n{}\n```",
+                code_diff_json(
+                    "let end = start + size - 1;",
+                    "let end = start + size;",
+                    "src/list.rs"
+                )
+            ),
+            200,
+            80,
+        )
+        .add_response(
+            "mock-tester",
+            &format!("```json\n{}\n```", test_report_json()),
+            100,
+            60,
+        )
+        .add_response(
+            "mock-red",
+            &format!("```json\n{}\n```", red_challenge_json_empty()),
+            60,
+            20,
+        )
+        .add_response(
+            "mock-reviewer",
+            &format!(
+                "```json\n{}\n```",
+                review_verdict_revision_json("The fix needs more tests.")
+            ),
+            150,
+            60,
+        )
+        .add_response(
+            "mock-coder2",
+            &format!(
+                "```json\n{}\n```",
+                code_diff_json(
+                    "let end = start + size - 1;",
+                    "let end = start + size;",
+                    "src/list.rs"
+                )
+            ),
+            100,
+            40,
+        )
+        .add_response(
+            "mock-tester2",
+            &format!("```json\n{}\n```", test_report_json()),
+            100,
+            60,
+        )
+        .add_response(
+            "mock-red2",
+            &format!("```json\n{}\n```", red_challenge_json_empty()),
+            60,
+            20,
+        )
+        .add_response(
+            "mock-reviewer2",
+            &format!("```json\n{}\n```", review_verdict_approved_json()),
+            150,
+            50,
+        )
         .write(script_path)
 }

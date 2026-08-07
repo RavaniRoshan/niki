@@ -44,7 +44,10 @@ impl HelpPage {
                     "GLOBAL",
                     vec![
                         ("[q] quit", "Quit NIKI"),
-                        ("[Esc] close/back", "Close current modal or return to previous page"),
+                        (
+                            "[Esc] close/back",
+                            "Close current modal or return to previous page",
+                        ),
                         ("[?] this help", "Toggle this help page"),
                         ("[Ctrl+P] commands", "Open command palette"),
                         ("[Ctrl+T] theme", "Cycle light/dark/auto themes"),
@@ -136,10 +139,7 @@ impl Page for HelpPage {
             };
 
             help_lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {} ", toggle),
-                    Style::default().fg(toggle_color),
-                ),
+                Span::styled(format!("  {} ", toggle), Style::default().fg(toggle_color)),
                 Span::styled(
                     section.title,
                     Style::default()
@@ -239,7 +239,11 @@ mod tests {
     use std::path::PathBuf;
 
     fn test_state() -> AppState {
-        AppState::new("test task".to_string(), NikiConfig::default(), PathBuf::from("."))
+        AppState::new(
+            "test task".to_string(),
+            NikiConfig::default(),
+            PathBuf::from("."),
+        )
     }
 
     #[test]

@@ -1,7 +1,7 @@
 mod common;
 
-use niki::llm::provider::{CompletionRequest, LlmProvider, StreamChunk};
 use niki::llm::mock::MockProvider;
+use niki::llm::provider::{CompletionRequest, LlmProvider, StreamChunk};
 use std::path::PathBuf;
 
 use common::mock_llm::MockScriptBuilder;
@@ -110,7 +110,11 @@ async fn mock_provider_stream_yields_text_and_usage_chunks() {
             }
         }
     }
-    assert!(full_text.contains("test"), "text should contain 'test': {}", full_text);
+    assert!(
+        full_text.contains("test"),
+        "text should contain 'test': {}",
+        full_text
+    );
     assert!(usage_seen, "should receive a Usage chunk");
 }
 
@@ -162,7 +166,13 @@ fn mock_script_builder_creates_valid_json() {
         .to_json_string();
     let parsed: serde_json::Value = serde_json::from_str(&script).unwrap();
     assert!(parsed["models"]["mock-test"]["responses"].is_array());
-    assert_eq!(parsed["models"]["mock-test"]["responses"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        parsed["models"]["mock-test"]["responses"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -186,7 +196,9 @@ fn mock_script_builder_multiple_responses() {
         .add_response("mock-test", "third", 30, 15)
         .to_json_string();
     let parsed: serde_json::Value = serde_json::from_str(&script).unwrap();
-    let responses = parsed["models"]["mock-test"]["responses"].as_array().unwrap();
+    let responses = parsed["models"]["mock-test"]["responses"]
+        .as_array()
+        .unwrap();
     assert_eq!(responses.len(), 3);
     assert_eq!(responses[0]["text"], "first");
     assert_eq!(responses[1]["text"], "second");

@@ -206,13 +206,11 @@ impl LlmProvider for OpenAiProvider {
                                         }
                                     } else if let Some(choices) = json["choices"].as_array()
                                         && let Some(choice) = choices.first()
-                                            && let Some(text) = choice["delta"]["content"].as_str()
-                                                && tx
-                                                    .send(Ok(StreamChunk::Text(text.to_string())))
-                                                    .is_err()
-                                                {
-                                                    return;
-                                                }
+                                        && let Some(text) = choice["delta"]["content"].as_str()
+                                        && tx.send(Ok(StreamChunk::Text(text.to_string()))).is_err()
+                                    {
+                                        return;
+                                    }
                                 }
                             }
                         }

@@ -2,8 +2,8 @@ mod common;
 
 use niki::artifacts::types::AgentRole;
 use niki::config::{DockerConfig, SecurityPolicyConfig};
-use niki::sandbox::{Sandbox, SandboxBackend, create_sandbox};
 use niki::sandbox::docker::ActiveContainers;
+use niki::sandbox::{Sandbox, SandboxBackend, create_sandbox};
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -63,10 +63,7 @@ async fn worktree_sandbox_stores_policy_for_coder_role() {
     let result = sandbox
         .exec(&["rm", "-rf", "/"], Some(&AgentRole::Coder))
         .await;
-    assert!(
-        result.is_err(),
-        "exec with denied command should fail"
-    );
+    assert!(result.is_err(), "exec with denied command should fail");
     let err_msg = result.unwrap_err().to_string();
     assert!(
         err_msg.contains("denied"),
@@ -214,9 +211,7 @@ async fn worktree_sandbox_custom_timeout_is_respected() {
 
     // A command that sleeps longer than the timeout should be killed.
     let start = std::time::Instant::now();
-    let result = sandbox
-        .exec(&["sleep", "5"], Some(&AgentRole::Coder))
-        .await;
+    let result = sandbox.exec(&["sleep", "5"], Some(&AgentRole::Coder)).await;
     let elapsed = start.elapsed();
 
     assert!(result.is_err(), "sleep 5 should time out");
@@ -274,6 +269,9 @@ async fn create_sandbox_worktree_backed() {
     )
     .await;
 
-    assert!(sandbox.is_ok(), "create_sandbox should succeed for worktree");
+    assert!(
+        sandbox.is_ok(),
+        "create_sandbox should succeed for worktree"
+    );
     let _ = sandbox.unwrap().destroy().await;
 }

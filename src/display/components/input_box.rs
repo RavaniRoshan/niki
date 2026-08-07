@@ -1,9 +1,9 @@
 //! Text input box with cursor rendering.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::display::state::{InputMode, InputState};
 use crate::display::theme;

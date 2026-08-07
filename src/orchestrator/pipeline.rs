@@ -9,8 +9,8 @@ use crate::artifacts::types::{
     AgentRole, CodeDiff, IsolationRecord, RedChallenge, ReviewVerdict, SecurityVerdict, Synthesis,
     TaskSpec, TestReport, Verdict,
 };
-use crate::config::{NikiConfig, SecurityPolicyConfig};
 pub use crate::config::types::{PipelineStageConfig, TopologyMode};
+use crate::config::{NikiConfig, SecurityPolicyConfig};
 use crate::cost::compute_cost;
 use crate::display::agent_stream::AgenticDisplay;
 use crate::knowledge::indexer::index_project;
@@ -119,14 +119,16 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
 
     // Parallel-coder mode (#3) always reconciles its coders through a
     // Synthesizer; inject the stage when enabled so the pipeline can find it.
-    if config.parallel.enabled && config.parallel.coder_count > 1
-        && !stages.iter().any(|s| s.role == AgentRole::Synthesizer) {
-            stages.push(stage(
-                AgentRole::Synthesizer,
-                &config.agents.synthesizer.provider,
-                &config.agents.synthesizer.model,
-            ));
-        }
+    if config.parallel.enabled
+        && config.parallel.coder_count > 1
+        && !stages.iter().any(|s| s.role == AgentRole::Synthesizer)
+    {
+        stages.push(stage(
+            AgentRole::Synthesizer,
+            &config.agents.synthesizer.provider,
+            &config.agents.synthesizer.model,
+        ));
+    }
 
     // Adversarial Red/Blue verification (#1.2): inject a `Red` stage immediately
     // BEFORE the Reviewer so the Reviewer is forced to reconcile the Red agent's
@@ -134,10 +136,11 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
     // silently rubber-stamping the Coder (sycophantic convergence).
     if config.red_blue.enabled
         && let Some(pos) = stages.iter().position(|s| s.role == AgentRole::Reviewer)
-            && !stages.iter().any(|s| s.role == AgentRole::Red) {
-                let (provider, model) = red_blue_stage_target(config);
-                stages.insert(pos, stage(AgentRole::Red, &provider, &model));
-            }
+        && !stages.iter().any(|s| s.role == AgentRole::Red)
+    {
+        let (provider, model) = red_blue_stage_target(config);
+        stages.insert(pos, stage(AgentRole::Red, &provider, &model));
+    }
 
     stages
 }
@@ -455,8 +458,17 @@ async fn run_stage(
     degrade_on_invalid: bool,
 ) -> Result<String> {
     let start = Instant::now();
-    let (json, usage, retry_count, ttft_ms) =
-        run_agent(role, llm, model, template_name, ctx, schema_path, display, degrade_on_invalid).await?;
+    let (json, usage, retry_count, ttft_ms) = run_agent(
+        role,
+        llm,
+        model,
+        template_name,
+        ctx,
+        schema_path,
+        display,
+        degrade_on_invalid,
+    )
+    .await?;
     let latency_ms = start.elapsed().as_millis() as u64;
     let cost_usd = compute_cost(provider, model, &usage);
     metrics.push(StageMetric {
@@ -1067,9 +1079,9 @@ pub async fn execute_pipeline(
                 && let Err(e) = sandbox
                     .apply_patch(&code_diff_to_edit_text(&parsed), &task.project_path)
                     .await
-                {
-                    eprintln!("Warning: Failed to apply solo coder patch: {}", e);
-                }
+            {
+                eprintln!("Warning: Failed to apply solo coder patch: {}", e);
+            }
             verdict = Verdict::Approved;
             round = 0;
         }
@@ -1121,18 +1133,19 @@ fn extract_memory_from_artifacts(
 
     // 1. Planner memory: record successful decomposition patterns
     if let Some((_, planner_json)) = artifacts.iter().find(|(r, _)| *r == AgentRole::Planner)
-        && let Ok(spec) = serde_json::from_str::<crate::artifacts::types::TaskSpec>(planner_json) {
-            let tags = vec![
-                "task-decomposition".into(),
-                format!("complexity:{:?}", spec.estimated_complexity).to_lowercase(),
-            ];
-            let content = format!(
-                "Task: {} → {} files to modify",
-                task.chars().take(80).collect::<String>(),
-                spec.files_to_modify.len(),
-            );
-            let _ = append_memory(project_dir, AgentRole::Planner, task, tags, content, None);
-        }
+        && let Ok(spec) = serde_json::from_str::<crate::artifacts::types::TaskSpec>(planner_json)
+    {
+        let tags = vec![
+            "task-decomposition".into(),
+            format!("complexity:{:?}", spec.estimated_complexity).to_lowercase(),
+        ];
+        let content = format!(
+            "Task: {} → {} files to modify",
+            task.chars().take(80).collect::<String>(),
+            spec.files_to_modify.len(),
+        );
+        let _ = append_memory(project_dir, AgentRole::Planner, task, tags, content, None);
+    }
 
     // 2. Coder memory: record revision needed patterns
     if matches!(verdict, Verdict::RevisionNeeded) {
@@ -1152,19 +1165,20 @@ fn extract_memory_from_artifacts(
     if let Some((_, red_json)) = artifacts.iter().find(|(r, _)| *r == AgentRole::Red)
         && let Ok(challenge) =
             serde_json::from_str::<crate::artifacts::types::RedChallenge>(red_json)
-            && !challenge.challenges.is_empty() {
-                let content = format!(
-                    "Adversarial challenges: {}",
-                    challenge
-                        .challenges
-                        .iter()
-                        .map(|c| c.claim.chars().take(100).collect::<String>())
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                );
-                let tags = vec!["adversarial-finding".into()];
-                let _ = append_memory(project_dir, AgentRole::Red, task, tags, content, None);
-            }
+        && !challenge.challenges.is_empty()
+    {
+        let content = format!(
+            "Adversarial challenges: {}",
+            challenge
+                .challenges
+                .iter()
+                .map(|c| c.claim.chars().take(100).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        let tags = vec!["adversarial-finding".into()];
+        let _ = append_memory(project_dir, AgentRole::Red, task, tags, content, None);
+    }
 }
 
 #[cfg(test)]

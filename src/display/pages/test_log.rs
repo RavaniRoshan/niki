@@ -62,7 +62,8 @@ impl Page for TestLogPage {
         frame.render_widget(Paragraph::new(header), chunks[0]);
 
         let log_content = state
-            .test_log.as_deref()
+            .test_log
+            .as_deref()
             .unwrap_or("No test output available");
 
         let mut lines: Vec<Line> = Vec::new();
@@ -71,7 +72,12 @@ impl Page for TestLogPage {
             if stripped.starts_with("test result:") {
                 lines.push(Line::from(vec![
                     Span::styled("  ", Style::default()),
-                    Span::styled(line.to_string(), Style::default().fg(theme::GREEN()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        line.to_string(),
+                        Style::default()
+                            .fg(theme::GREEN())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]));
             } else if stripped.starts_with("running") || stripped.starts_with("Doc-tests") {
                 lines.push(Line::from(vec![

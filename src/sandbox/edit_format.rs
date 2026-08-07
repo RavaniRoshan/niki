@@ -182,30 +182,31 @@ fn apply_single_edit(content: &str, edit: &EditBlock) -> Result<Option<String>> 
 
     // Strategy 3: Fuzzy match with similarity threshold
     if let Some((start_line, similarity)) = find_fuzzy_match(&content_lines, &search_lines)
-        && similarity >= 0.8 {
-            let end_line = start_line + search_lines.len();
-            let mut result = String::new();
+        && similarity >= 0.8
+    {
+        let end_line = start_line + search_lines.len();
+        let mut result = String::new();
 
-            // Write lines before the match
-            for line in &content_lines[..start_line] {
-                result.push_str(line);
-                result.push('\n');
-            }
-
-            // Write replacement
-            result.push_str(&edit.replace);
-            if !edit.replace.ends_with('\n') {
-                result.push('\n');
-            }
-
-            // Write lines after the match
-            for line in &content_lines[end_line..] {
-                result.push_str(line);
-                result.push('\n');
-            }
-
-            return Ok(Some(result));
+        // Write lines before the match
+        for line in &content_lines[..start_line] {
+            result.push_str(line);
+            result.push('\n');
         }
+
+        // Write replacement
+        result.push_str(&edit.replace);
+        if !edit.replace.ends_with('\n') {
+            result.push('\n');
+        }
+
+        // Write lines after the match
+        for line in &content_lines[end_line..] {
+            result.push_str(line);
+            result.push('\n');
+        }
+
+        return Ok(Some(result));
+    }
 
     Ok(None)
 }
@@ -267,7 +268,9 @@ fn calculate_similarity(a: &str, b: &str) -> f64 {
 
     for change in diff.iter_all_changes() {
         let value = change.value();
-        if change.tag() == ChangeTag::Equal { matches += value.len() }
+        if change.tag() == ChangeTag::Equal {
+            matches += value.len()
+        }
         total += value.len();
     }
 

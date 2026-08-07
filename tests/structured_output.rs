@@ -1,5 +1,5 @@
 use niki::config::ProviderConfig;
-use niki::llm::provider::{create_provider, CompletionRequest, LlmProvider};
+use niki::llm::provider::{CompletionRequest, LlmProvider, create_provider};
 use serde_json::json;
 
 #[test]

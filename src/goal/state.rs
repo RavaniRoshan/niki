@@ -122,9 +122,10 @@ impl GoalState {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("json")
                 && let Ok(content) = fs::read_to_string(&path)
-                    && let Ok(state) = serde_json::from_str::<GoalState>(&content) {
-                        states.push(state);
-                    }
+                && let Ok(state) = serde_json::from_str::<GoalState>(&content)
+            {
+                states.push(state);
+            }
         }
         Ok(states)
     }

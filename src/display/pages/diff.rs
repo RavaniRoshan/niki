@@ -94,7 +94,9 @@ impl Page for DiffPage {
             let info = Line::from(vec![
                 Span::styled(
                     format!("  {} files", files.len()),
-                    Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme::fg_color())
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("   +{} -{}", adds, dels),
@@ -116,7 +118,8 @@ impl Page for DiffPage {
             .title(" CHANGES ");
 
         if let Some(diff) = &state.diff_content {
-            let lines = render_diff_with_line_numbers(diff, self.line_numbers, self.show_annotations);
+            let lines =
+                render_diff_with_line_numbers(diff, self.line_numbers, self.show_annotations);
 
             let total_lines = lines.len() as u16;
             let view_h = chunks[2].height.saturating_sub(2);
@@ -141,15 +144,43 @@ impl Page for DiffPage {
 
         // Footer
         let footer = Line::from(vec![
-            Span::styled(" j/k", Style::default().fg(theme::fg_bright()).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " j/k",
+                Style::default()
+                    .fg(theme::fg_bright())
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" scroll  ", Style::default().fg(theme::fg_dim())),
-            Span::styled("g/G", Style::default().fg(theme::fg_bright()).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "g/G",
+                Style::default()
+                    .fg(theme::fg_bright())
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" top/bot  ", Style::default().fg(theme::fg_dim())),
-            Span::styled("n", Style::default().fg(theme::fg_bright()).add_modifier(Modifier::BOLD)),
-            Span::styled(format!(" lines:{}  ", if self.line_numbers { "on" } else { "off" }), Style::default().fg(theme::fg_dim())),
-            Span::styled("r", Style::default().fg(theme::fg_bright()).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "n",
+                Style::default()
+                    .fg(theme::fg_bright())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" lines:{}  ", if self.line_numbers { "on" } else { "off" }),
+                Style::default().fg(theme::fg_dim()),
+            ),
+            Span::styled(
+                "r",
+                Style::default()
+                    .fg(theme::fg_bright())
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" annot  ", Style::default().fg(theme::fg_dim())),
-            Span::styled("Esc", Style::default().fg(theme::fg_bright()).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Esc",
+                Style::default()
+                    .fg(theme::fg_bright())
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" back", Style::default().fg(theme::fg_dim())),
         ]);
         frame.render_widget(Paragraph::new(footer), chunks[3]);
@@ -242,7 +273,9 @@ fn render_diff_with_line_numbers(
             }
             spans.push(Span::styled(
                 format!("+{}", content),
-                Style::default().fg(theme::DIFF_ADD_FG()).bg(theme::DIFF_ADD_BG()),
+                Style::default()
+                    .fg(theme::DIFF_ADD_FG())
+                    .bg(theme::DIFF_ADD_BG()),
             ));
             lines.push(Line::from(spans));
             new_line += 1;
@@ -257,7 +290,9 @@ fn render_diff_with_line_numbers(
             }
             spans.push(Span::styled(
                 format!("-{}", content),
-                Style::default().fg(theme::DIFF_DEL_FG()).bg(theme::DIFF_DEL_BG()),
+                Style::default()
+                    .fg(theme::DIFF_DEL_FG())
+                    .bg(theme::DIFF_DEL_BG()),
             ));
             lines.push(Line::from(spans));
             old_line += 1;

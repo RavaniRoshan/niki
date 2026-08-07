@@ -196,7 +196,10 @@ impl OnboardingModal {
         ];
 
         if self.dont_show_again {
-            nav_spans.push(Span::styled("   [s] on", Style::default().fg(theme::GREEN())));
+            nav_spans.push(Span::styled(
+                "   [s] on",
+                Style::default().fg(theme::GREEN()),
+            ));
         } else {
             nav_spans.push(Span::styled(
                 "   [s] off",
@@ -278,7 +281,10 @@ impl OnboardingModal {
             Line::from(""),
             Line::from(vec![
                 Span::styled("    [q] quit", Style::default().fg(theme::fg_color())),
-                Span::styled("      [Esc] close/back", Style::default().fg(theme::fg_color())),
+                Span::styled(
+                    "      [Esc] close/back",
+                    Style::default().fg(theme::fg_color()),
+                ),
             ]),
             Line::from(vec![
                 Span::styled("    [p] pipeline", Style::default().fg(theme::fg_color())),

@@ -186,7 +186,13 @@ fn fix_single_quotes(input: &str) -> String {
             // Look backwards for whitespace, {, [, ,, or start of string
             let can_be_opening = i == 0 || {
                 let prev = bytes[i - 1];
-                prev == b'{' || prev == b'[' || prev == b',' || prev == b':' || prev == b' ' || prev == b'\t' || prev == b'\n'
+                prev == b'{'
+                    || prev == b'['
+                    || prev == b','
+                    || prev == b':'
+                    || prev == b' '
+                    || prev == b'\t'
+                    || prev == b'\n'
             };
 
             // Look forward for content then closing single quote
@@ -210,7 +216,11 @@ fn fix_single_quotes(input: &str) -> String {
                     // Check if what's between is a valid JSON value or key
                     let content = &input[i + 1..j];
                     let after_close = if j + 1 < len { bytes[j + 1] } else { b' ' };
-                    let can_be_value = after_close == b',' || after_close == b'}' || after_close == b']' || after_close == b':' || after_close == b' ';
+                    let can_be_value = after_close == b','
+                        || after_close == b'}'
+                        || after_close == b']'
+                        || after_close == b':'
+                        || after_close == b' ';
 
                     if can_be_value || content.contains(' ') {
                         // Replace opening and closing single quotes with double quotes
@@ -256,12 +266,24 @@ fn escape_control_chars(input: &str) -> String {
         }
         if in_string {
             match byte {
-                b'\n' => { result.extend_from_slice(b"\\n"); }
-                b'\r' => { result.extend_from_slice(b"\\r"); }
-                b'\t' => { result.extend_from_slice(b"\\t"); }
-                0x08 => { result.extend_from_slice(b"\\b"); }
-                0x0C => { result.extend_from_slice(b"\\f"); }
-                _ => { result.push(byte); }
+                b'\n' => {
+                    result.extend_from_slice(b"\\n");
+                }
+                b'\r' => {
+                    result.extend_from_slice(b"\\r");
+                }
+                b'\t' => {
+                    result.extend_from_slice(b"\\t");
+                }
+                0x08 => {
+                    result.extend_from_slice(b"\\b");
+                }
+                0x0C => {
+                    result.extend_from_slice(b"\\f");
+                }
+                _ => {
+                    result.push(byte);
+                }
             }
         } else {
             result.push(byte);
@@ -344,7 +366,9 @@ fn close_unclosed_brackets(input: &str) -> String {
         match byte {
             b'{' => stack.push(b'}'),
             b'[' => stack.push(b']'),
-            b'}' | b']' => { stack.pop(); }
+            b'}' | b']' => {
+                stack.pop();
+            }
             _ => {}
         }
     }

@@ -17,7 +17,11 @@ use super::code_block::render_code_block;
 use super::message::MessageRenderConfig;
 
 /// Render markdown text to a list of `Line`s.
-pub fn render_markdown(input: &str, width: usize, config: &MessageRenderConfig) -> Vec<Line<'static>> {
+pub fn render_markdown(
+    input: &str,
+    width: usize,
+    config: &MessageRenderConfig,
+) -> Vec<Line<'static>> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
@@ -70,9 +74,7 @@ impl<'a> MarkdownRenderer<'a> {
                 Event::Rule => self.handle_rule(),
                 Event::TaskListMarker(checked) => self.handle_task_list(checked),
                 // Unsupported events — skip
-                Event::InlineMath(_)
-                | Event::DisplayMath(_)
-                | Event::InlineHtml(_) => {}
+                Event::InlineMath(_) | Event::DisplayMath(_) | Event::InlineHtml(_) => {}
             }
         }
     }
@@ -163,12 +165,8 @@ impl<'a> MarkdownRenderer<'a> {
             }
             TagEnd::CodeBlock => {
                 self.in_code_block = false;
-                let code_lines = render_code_block(
-                    &self.code_content,
-                    &self.code_lang,
-                    self.width,
-                    self.config,
-                );
+                let code_lines =
+                    render_code_block(&self.code_content, &self.code_lang, self.width, self.config);
                 self.lines.extend(code_lines);
                 self.code_content.clear();
                 self.code_lang.clear();
@@ -199,7 +197,12 @@ impl<'a> MarkdownRenderer<'a> {
 
         // Split text into words and add them with wrapping
         for word in text.split_whitespace() {
-            let current_width: usize = self.current_line.spans.iter().map(|s| s.content.len()).sum();
+            let current_width: usize = self
+                .current_line
+                .spans
+                .iter()
+                .map(|s| s.content.len())
+                .sum();
             if current_width + word.len() + 1 > self.width && current_width > 0 {
                 self.push_current_line();
             }
@@ -316,9 +319,11 @@ mod tests {
         let lines = render_markdown("# Title", 80, &config);
         assert!(!lines.is_empty());
         // Heading should contain a '#' marker
-        assert!(lines.iter().any(|l| {
-            l.spans.iter().any(|s| s.content.contains('#'))
-        }));
+        assert!(
+            lines
+                .iter()
+                .any(|l| { l.spans.iter().any(|s| s.content.contains('#')) })
+        );
     }
 
     #[test]
@@ -343,9 +348,11 @@ mod tests {
         let lines = render_markdown(input, 80, &config);
         assert!(lines.len() >= 1);
         // Should contain list items
-        assert!(lines.iter().any(|l| {
-            l.spans.iter().any(|s| s.content.contains("item"))
-        }));
+        assert!(
+            lines
+                .iter()
+                .any(|l| { l.spans.iter().any(|s| s.content.contains("item")) })
+        );
     }
 
     #[test]
@@ -367,8 +374,10 @@ mod tests {
     fn render_rule() {
         let config = test_config();
         let lines = render_markdown("---", 80, &config);
-        assert!(lines.iter().any(|l| {
-            l.spans.iter().any(|s| s.content.contains('─'))
-        }));
+        assert!(
+            lines
+                .iter()
+                .any(|l| { l.spans.iter().any(|s| s.content.contains('─')) })
+        );
     }
 }

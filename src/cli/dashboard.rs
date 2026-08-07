@@ -42,15 +42,16 @@ fn find_task_dir(
         for entry in entries.flatten() {
             let path = entry.path().join("task.json");
             if let Ok(content) = std::fs::read_to_string(&path)
-                && let Ok(record) = serde_json::from_str::<TaskRecord>(&content) {
-                    let newer = match &latest {
-                        Some((_, l)) => record.created_at > l.created_at,
-                        None => true,
-                    };
-                    if newer {
-                        latest = Some((entry.path(), record));
-                    }
+                && let Ok(record) = serde_json::from_str::<TaskRecord>(&content)
+            {
+                let newer = match &latest {
+                    Some((_, l)) => record.created_at > l.created_at,
+                    None => true,
+                };
+                if newer {
+                    latest = Some((entry.path(), record));
                 }
+            }
         }
     }
     latest.ok_or_else(|| anyhow!("No tasks found in {}", tasks_dir.display()))

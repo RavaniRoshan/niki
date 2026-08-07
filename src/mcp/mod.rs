@@ -87,7 +87,8 @@ impl McpManager {
 
     /// Get all discovered tools.
     pub fn tools(&self) -> &[McpTool] {
-        &self.tools}
+        &self.tools
+    }
 }
 
 impl Default for McpManager {
@@ -113,7 +114,10 @@ mod tests {
             name: "filesystem".to_string(),
             server_type: McpServerType::Local {
                 command: "npx".to_string(),
-                args: vec!["-y".to_string(), "@modelcontextprotocol/server-filesystem".to_string()],
+                args: vec![
+                    "-y".to_string(),
+                    "@modelcontextprotocol/server-filesystem".to_string(),
+                ],
                 env: HashMap::new(),
             },
             enabled: true,

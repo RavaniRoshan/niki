@@ -57,14 +57,15 @@ fn render_red_blue_section(result: &PipelineResult) -> String {
         .iter()
         .find(|(r, _)| *r == AgentRole::Reviewer)
         && let Ok(verdict) = serde_json::from_str::<ReviewVerdict>(rev_json)
-            && let Some(recon) = verdict.red_reconciliation {
-                for r in recon {
-                    dispositions.insert(
-                        r.challenge_id,
-                        (format!("{:?}", r.disposition), r.rationale),
-                    );
-                }
-            }
+        && let Some(recon) = verdict.red_reconciliation
+    {
+        for r in recon {
+            dispositions.insert(
+                r.challenge_id,
+                (format!("{:?}", r.disposition), r.rationale),
+            );
+        }
+    }
 
     let mut out = String::from("## Adversarial Review (Red/Blue)\n\n");
     out.push_str(&format!("{}\n\n", red.overall_red_assessment));
@@ -276,18 +277,19 @@ fn render_audit_section(result: &PipelineResult) -> String {
                 }
             }
         } else if *role == AgentRole::SecurityAuditor
-            && let Ok(v) = serde_json::from_str::<SecurityVerdict>(json) {
-                for f in &v.findings {
-                    catches.push(Catch {
-                        stage: "Security Auditor".into(),
-                        severity: format!("{:?}", f.severity),
-                        category: format!("{:?}", f.category),
-                        file: f.file_path.clone(),
-                        line: f.line_range.clone(),
-                        description: f.description.clone(),
-                    });
-                }
+            && let Ok(v) = serde_json::from_str::<SecurityVerdict>(json)
+        {
+            for f in &v.findings {
+                catches.push(Catch {
+                    stage: "Security Auditor".into(),
+                    severity: format!("{:?}", f.severity),
+                    category: format!("{:?}", f.category),
+                    file: f.file_path.clone(),
+                    line: f.line_range.clone(),
+                    description: f.description.clone(),
+                });
             }
+        }
     }
 
     if catches.is_empty() {
@@ -334,11 +336,12 @@ fn render_audit_section(result: &PipelineResult) -> String {
             c.stage, c.severity, c.category, loc
         ));
         if let (Some(f), Some(_)) = (&c.file, &c.line)
-            && let Some(annotated) = extract_and_annotate(&result.final_diff, f, &c.line) {
-                out.push_str("```diff\n");
-                out.push_str(&annotated);
-                out.push_str("```\n\n");
-            }
+            && let Some(annotated) = extract_and_annotate(&result.final_diff, f, &c.line)
+        {
+            out.push_str("```diff\n");
+            out.push_str(&annotated);
+            out.push_str("```\n\n");
+        }
         out.push_str(&format!("{}\n\n", c.description));
     }
     out

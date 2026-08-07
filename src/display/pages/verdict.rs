@@ -92,13 +92,13 @@ impl Page for VerdictPage {
         if let Some(review_stage) = state.stages.iter().rev().find(|s| {
             s.role == crate::artifacts::types::AgentRole::Reviewer
                 && s.status == super::StageStatus::Done
-        })
-            && let Some(score_line) = review_stage.summary.first() {
-                verdict_lines.push(Line::from(Span::styled(
-                    format!("   {}", score_line),
-                    Style::default().fg(theme::fg_color()),
-                )));
-            }
+        }) && let Some(score_line) = review_stage.summary.first()
+        {
+            verdict_lines.push(Line::from(Span::styled(
+                format!("   {}", score_line),
+                Style::default().fg(theme::fg_color()),
+            )));
+        }
 
         frame.render_widget(
             Paragraph::new(verdict_lines).block(verdict_block),

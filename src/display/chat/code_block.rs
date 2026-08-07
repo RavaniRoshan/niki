@@ -5,7 +5,7 @@
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{ThemeSet};
+use syntect::highlighting::ThemeSet;
 use syntect::parsing::SyntaxSet;
 
 use super::message::MessageRenderConfig;
@@ -37,7 +37,8 @@ pub fn render_code_block(
     let syntax = if lang.is_empty() {
         ss.find_syntax_plain_text()
     } else {
-        ss.find_syntax_by_token(lang).unwrap_or_else(|| ss.find_syntax_plain_text())
+        ss.find_syntax_by_token(lang)
+            .unwrap_or_else(|| ss.find_syntax_plain_text())
     };
 
     let theme_name = if crate::display::theme::is_light() {
@@ -123,7 +124,12 @@ mod tests {
 
     #[test]
     fn syntect_color_conversion() {
-        let c = syntect::highlighting::Color { r: 255, g: 128, b: 0, a: 255 };
+        let c = syntect::highlighting::Color {
+            r: 255,
+            g: 128,
+            b: 0,
+            a: 255,
+        };
         let ratatui_color = syntect_color_to_ratatui(c);
         assert_eq!(ratatui_color, Color::Rgb(255, 128, 0));
     }

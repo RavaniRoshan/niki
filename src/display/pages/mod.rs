@@ -323,9 +323,19 @@ impl AppState {
             DisplayEvent::BranchName(name) => {
                 self.branch_name = name;
             }
-            DisplayEvent::StageTotals { input_tokens, output_tokens, cost_usd, latency_ms } => {
+            DisplayEvent::StageTotals {
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                latency_ms,
+            } => {
                 // Update stage totals on the last running stage for status line display
-                if let Some(s) = self.stages.iter_mut().rev().find(|s| s.status == StageStatus::Running) {
+                if let Some(s) = self
+                    .stages
+                    .iter_mut()
+                    .rev()
+                    .find(|s| s.status == StageStatus::Running)
+                {
                     s.input_tokens = input_tokens;
                     s.output_tokens = output_tokens;
                     s.cost_usd = cost_usd;

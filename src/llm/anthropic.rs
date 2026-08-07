@@ -185,9 +185,9 @@ impl LlmProvider for AnthropicProvider {
                                             && tx
                                                 .send(Ok(StreamChunk::Text(text.to_string())))
                                                 .is_err()
-                                            {
-                                                return;
-                                            }
+                                        {
+                                            return;
+                                        }
                                     } else if json["type"] == "message_start" {
                                         // input_tokens are known up front
                                         if let Some(input) =
@@ -198,9 +198,9 @@ impl LlmProvider for AnthropicProvider {
                                                     output_tokens: 0,
                                                 })))
                                                 .is_err()
-                                            {
-                                                return;
-                                            }
+                                        {
+                                            return;
+                                        }
                                     } else if json["type"] == "message_delta" {
                                         // output_tokens (and possibly the final input_tokens) arrive here
                                         if let Some(output) =
@@ -211,9 +211,9 @@ impl LlmProvider for AnthropicProvider {
                                                     output_tokens: output as u32,
                                                 })))
                                                 .is_err()
-                                            {
-                                                return;
-                                            }
+                                        {
+                                            return;
+                                        }
                                     }
                                 }
                             }
