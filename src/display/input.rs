@@ -57,11 +57,8 @@ impl InputHandler {
             }
             KeyCode::Tab => {
                 // Trigger autocomplete if buffer contains @
-                if should_trigger_autocomplete(&state.buffer, state.cursor_pos) {
-                    InputAction::None // Will be handled at app level to populate candidates
-                } else {
-                    InputAction::None
-                }
+                let _ = should_trigger_autocomplete(&state.buffer, state.cursor_pos);
+                InputAction::None // Will be handled at app level to populate candidates
             }
             KeyCode::BackTab => InputAction::None,
             KeyCode::Up => {

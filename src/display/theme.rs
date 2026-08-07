@@ -23,6 +23,7 @@ pub enum ThemeMode {
 
 impl ThemeMode {
     /// Parse from a lowercase string (for config deserialization).
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "dark" => ThemeMode::Dark,
@@ -432,8 +433,6 @@ pub fn surface_dark() -> Color {
 // ── Backward-compat aliases (old const names → new palette fns) ─────────
 // Mechanical sweep converts theme::OLD → theme::OLD() across all files.
 // These will be removed once all sites use the semantic accessors directly.
-#[allow(non_snake_case)]
-
 /// Background (backward-compat).
 #[allow(non_snake_case)]
 pub fn BG() -> Color {
