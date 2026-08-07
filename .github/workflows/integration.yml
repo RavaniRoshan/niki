@@ -1,0 +1,81 @@
+name: Integration Test
+
+on:
+  push:
+    branches: [master, "goal/**"]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  integration-mock-pipeline:
+    name: Mock LLM Pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Start mock LLM server
+        run: |
+          python3 tests/integration/mock_llm.py &
+          MOCK_PID=$!
+          for i in $(seq 1 20); do
+            curl -s http://localhost:8080/health > /dev/null 2>&1 && break
+            sleep 0.5
+          done
+          echo "Mock server ready"
+          echo $MOCK_PID > /tmp/mock_pid
+
+      - name: Prepare test project
+        run: |
+          mkdir -p /tmp/test-project
+          cd /tmp/test-project
+          git init
+          git config user.email "test@niki.dev"
+          git config user.name "Test"
+          echo '# Test App' > index.js
+          echo 'node_modules/' > .gitignore
+          git add . && git commit -m "initial"
+          cp tests/integration/niki.test.toml /tmp/test-project/niki.toml
+
+      - name: Run full pipeline (Planner → Coder → Tester → Reviewer)
+        run: |
+          cd /tmp/test-project
+          /home/runner/work/niki/niki/target/release/niki run \
+            'Add a health check endpoint that returns {status: ok}' \
+            --backend worktree \
+            --quiet \
+            --project /tmp/test-project
+        env:
+          MOCK_LLM_PORT: 8080
+
+      - name: Verify pipeline artifacts
+        run: |
+          echo "=== Exit code: $? ==="
+          echo "=== Git branches ==="
+          git -C /tmp/test-project branch
+          echo "=== .niki directory ==="
+          find /tmp/test-project/.niki -type f
+          echo "=== Report ==="
+          cat /tmp/test-project/.niki/report.md 2>/dev/null || echo "No report.md"
+          echo "=== Changes patch ==="
+          cat /tmp/test-project/.niki/changes.patch 2>/dev/null || echo "No changes.patch"
+
+      - name: Cleanup mock server
+        if: always()
+        run: |
+          kill $(cat /tmp/mock_pid 2>/dev/null) 2>/dev/null || true

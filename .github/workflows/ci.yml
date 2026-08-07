@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, "goal/**"]
   pull_request:
     branches: [master]
 
@@ -11,8 +11,9 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # ── Phase 1: Fast checks (fail fast) ──────────────────────────────
   check:
-    name: Check
+    name: Check (fmt + clippy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,9 +23,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check formatting
         run: cargo fmt --check
-      - name: Clippy lints
-        run: cargo clippy --all-targets 2>&1 | tail -20
+      - name: Clippy lints (warnings as errors)
+        run: cargo clippy --all-targets -- -D warnings
 
+  # ── Phase 2: Unit + integration tests ─────────────────────────────
   test:
     name: Tests
     runs-on: ubuntu-latest
@@ -33,7 +35,95 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Run tests
-        run: cargo test --all
+      - name: Run unit tests
+        run: cargo test --lib --verbose
+      - name: Run integration tests
+        run: cargo test --test '*' --verbose 2>&1 | tail -30
       - name: Build release binary
         run: cargo build --release
+      - name: Verify binary runs
+        run: |
+          ./target/release/niki --version
+          ./target/release/niki --help
+
+  # ── Phase 3: Multi-platform build verification ────────────────────
+  build-matrix:
+    name: Build ${{ matrix.target }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: niki-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/niki
+
+  # ── Phase 4: End-to-end pipeline test with mock LLM ───────────────
+  e2e-mock:
+    name: E2E Pipeline (Mock LLM)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build release
+        run: cargo build --release
+      - name: Start mock LLM
+        run: |
+          python3 tests/integration/mock_llm.py &
+          echo $! > /tmp/mock_pid
+          for i in $(seq 1 20); do
+            curl -s http://localhost:8080/health > /dev/null 2>&1 && break
+            sleep 0.5
+          done
+      - name: Prepare test project
+        run: |
+          export TEST_DIR=$(mktemp -d)
+          cd $TEST_DIR
+          git init
+          git config user.email "ci@niki.dev"
+          git config user.name "CI"
+          echo 'console.log("hello");' > index.js
+          echo 'node_modules/' > .gitignore
+          git add . && git commit -m "initial"
+          sed 's|base_url = "http://localhost:8080"|base_url = "http://localhost:8080"|' \
+            tests/integration/niki.test.toml > niki.toml
+          echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
+      - name: Run pipeline
+        run: |
+          ./target/release/niki run 'Add health endpoint' \
+            --backend worktree --quiet --project $TEST_DIR
+      - name: Verify artifacts
+        run: |
+          echo "=== Branches ==="
+          git -C $TEST_DIR branch
+          echo "=== .niki contents ==="
+          find $TEST_DIR/.niki -type f 2>/dev/null
+      - name: Cleanup
+        if: always()
+        run: kill $(cat /tmp/mock_pid 2>/dev/null) 2>/dev/null || true
