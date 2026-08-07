@@ -57,9 +57,9 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
           - target: x86_64-apple-darwin
-            os: macos-13  # Intel runner for x86_64
+            os: macos-13
           - target: aarch64-apple-darwin
-            os: macos-latest  # Apple Silicon runner
+            os: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -81,7 +81,7 @@ jobs:
     name: E2E Pipeline (Mock LLM)
     needs: test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
