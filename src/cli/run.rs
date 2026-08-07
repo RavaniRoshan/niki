@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 /// Probe container runtime sockets: Podman (rootless, then rootful) → Docker.
 /// Returns the first connection that pings successfully, or an error if none work.
+#[cfg(unix)]
 #[allow(clippy::collapsible_if)]
 pub(crate) async fn connect_container_runtime() -> Result<Docker> {
     // 1. Respect explicit DOCKER_HOST override if set.
@@ -31,8 +32,12 @@ pub(crate) async fn connect_container_runtime() -> Result<Docker> {
     }
 
     // 2. Probe known Podman and Docker socket paths in priority order.
+    #[cfg(unix)]
     let uid = unsafe { libc::getuid() };
+    #[cfg(unix)]
     let runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| format!("/run/user/{}", uid));
+    #[cfg(not(unix))]
+    let runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap_or_default();
 
     let candidates = [
         PathBuf::from(&runtime_dir).join("podman/podman.sock"), // rootless podman
@@ -242,6 +247,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 eprintln!("\n Shutting down — cleaning up...");
 
                 let ids = containers.lock().await.clone();
+                #[cfg(unix)]
                 if !ids.is_empty()
                     && let Ok(docker) = connect_container_runtime().await
                 {
@@ -276,6 +282,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // Only connect to a container runtime when the chosen backend needs it. The
     // worktree and cloud backends never touch Podman/Docker, so they run without
     // a daemon. The dry-run path also skips the daemon ping (it never creates a sandbox).
+    #[cfg(unix)]
     let docker = if uses_docker && !args.dry_run {
         let d = connect_container_runtime()
             .await
@@ -284,6 +291,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     } else {
         None
     };
+    #[cfg(not(unix))]
+    let docker: Option<Docker> = None;
 
     // Borrow the connection for the pipeline; None for non-Docker backends.
     let docker_ref = docker.as_ref();

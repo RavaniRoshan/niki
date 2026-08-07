@@ -539,7 +539,14 @@ pub fn should_show_onboarding(project_path: &Path) -> bool {
 }
 
 fn is_terminal() -> bool {
-    unsafe { libc::isatty(libc::STDIN_FILENO) != 0 }
+    #[cfg(unix)]
+    {
+        unsafe { libc::isatty(libc::STDIN_FILENO) != 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 #[cfg(test)]

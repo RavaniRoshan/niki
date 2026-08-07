@@ -9,7 +9,6 @@ use bollard::{
     exec::{CreateExecOptions, StartExecResults},
 };
 use futures::StreamExt;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -63,11 +62,18 @@ impl DockerSandbox {
         // Run the container as the host user's uid:gid so files it writes into the
         // bind-mounted project directory keep the host owner. Otherwise the container
         // (root) rewrites the files as root and the host-side git operations later fail
-        // with "Permission denied".
-        let meta = std::fs::metadata(source_repo).ok();
-        let uid = meta.as_ref().map(|m| m.uid()).unwrap_or(0);
-        let gid = meta.as_ref().map(|m| m.gid()).unwrap_or(0);
-        let user = format!("{}:{}", uid, gid);
+        // with "Permission denied". On non-Unix platforms this is a no-op (Docker is
+        // Unix-only anyway).
+        #[cfg(unix)]
+        let user = {
+            use std::os::unix::fs::MetadataExt;
+            let meta = std::fs::metadata(source_repo).ok();
+            let uid = meta.as_ref().map(|m| m.uid()).unwrap_or(0);
+            let gid = meta.as_ref().map(|m| m.gid()).unwrap_or(0);
+            format!("{}:{}", uid, gid)
+        };
+        #[cfg(not(unix))]
+        let user = "0:0".to_string();
 
         let create_opts = CreateContainerOptions {
             name: container_name.as_str(),
