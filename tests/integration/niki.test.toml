@@ -2,6 +2,9 @@
 max_revision_rounds = 3
 output_dir = ".niki"
 
+[docker]
+extra_packages = ["node", "npm", "python3"]
+
 [providers.openai]
 base_url = "http://localhost:8080"
 api_key = "mock-key"
