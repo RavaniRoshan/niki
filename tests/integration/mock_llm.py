@@ -277,26 +277,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _stream_sse(self, event_generator):
-        """Stream SSE events with small delays to simulate real-time."""
+        """Stream SSE events then close connection to signal completion."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
-        self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
         try:
             for event_bytes in event_generator:
-                # Write in chunked transfer encoding format
-                self.wfile.write(f"{len(event_bytes):x}\r\n".encode())
                 self.wfile.write(event_bytes)
-                self.wfile.write(b"\r\n")
                 self.wfile.flush()
                 time.sleep(TOKEN_DELAY)
-            # Terminate chunked stream
-            self.wfile.write(b"0\r\n\r\n")
-            self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
+        # Connection closes when this method returns (Connection: close)
 
     def do_GET(self):
         if self.path == "/health":
