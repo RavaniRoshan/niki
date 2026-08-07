@@ -157,11 +157,7 @@ impl Page for HelpPage {
                     help_lines.push(Line::from(vec![
                         Span::styled(
                             format!("    {:<20}  ", key),
-                            Style::default().fg(if is_selected {
-                                theme::fg_color()
-                            } else {
-                                theme::fg_color()
-                            }),
+                            Style::default().fg(theme::fg_color()),
                         ),
                         Span::styled(*desc, Style::default().fg(theme::fg_dim())),
                     ]));

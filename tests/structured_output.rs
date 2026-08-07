@@ -1,5 +1,5 @@
 use niki::config::ProviderConfig;
-use niki::llm::provider::{CompletionRequest, LlmProvider, create_provider};
+use niki::llm::provider::{CompletionRequest, create_provider};
 use serde_json::json;
 
 #[test]
@@ -81,7 +81,7 @@ fn test_request_structured_default_fallback() {
     };
 
     // Just verify the method compiles and has the right type
-    let _ = provider.request_structured(request, &schema);
+    provider.request_structured(request, &schema);
 }
 
 #[test]

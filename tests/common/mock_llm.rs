@@ -1,6 +1,5 @@
 use serde_json::json;
 use std::fs::File;
-use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
