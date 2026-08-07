@@ -111,7 +111,7 @@ jobs:
           echo 'node_modules/' > .gitignore
           git add . && git commit -m "initial"
           sed 's|base_url = "http://localhost:8080"|base_url = "http://localhost:8080"|' \
-            tests/integration/niki.test.toml > niki.toml
+            ${{ github.workspace }}/tests/integration/niki.test.toml > niki.toml
           echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
       - name: Run pipeline
         run: |
