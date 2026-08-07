@@ -1,0 +1,16 @@
+PackageIdentifier: RavaniRoshan.niki
+PackageVersion: 0.2.0
+PackageLocale: en-US
+Publisher: RavaniRoshan
+PackageName: niki
+License: BUSL-1.1
+ShortDescription: Hermetic multi-agent coding system
+Moniker: niki
+Tags:
+  - cli
+  - ai
+  - coding-agent
+ReleaseNotes: "Initial release of niki - a hermetic multi-agent coding system"
+ReleaseNotesUrl: https://github.com/RavaniRoshan/niki/releases/tag/v0.2.0
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

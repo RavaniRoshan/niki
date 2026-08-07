@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "description": "Hermetic multi-agent coding system",
+  "homepage": "https://github.com/RavaniRoshan/niki",
+  "license": "BUSL-1.1",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/RavaniRoshan/niki/releases/download/v0.2.0/niki-x86_64-pc-windows-msvc.zip",
+      "hash": "4eac59354496988ce5a94fe9c41255ae53c3dfeebb78df2d97da92e03384d2f6",
+      "extract_dir": "niki-x86_64-pc-windows-msvc",
+      "bin": "niki.exe"
+    }
+  },
+  "checkver": {
+    "github": "https://github.com/RavaniRoshan/niki"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/RavaniRoshan/niki/releases/download/v$version/niki-x86_64-pc-windows-msvc.zip"
+      }
+    }
+  }
+}
