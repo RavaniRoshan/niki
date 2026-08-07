@@ -3,7 +3,10 @@ max_revision_rounds = 3
 output_dir = ".niki"
 
 [docker]
+base_image = "niki-sandbox:24.04"
 extra_packages = ["node", "npm", "python3"]
+memory_limit = "2g"
+cpu_limit = 2.0
 
 [providers.openai]
 base_url = "http://localhost:8080"
