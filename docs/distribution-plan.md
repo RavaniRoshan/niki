@@ -8,38 +8,54 @@ a broken binary.
 
 ---
 
+## Research Summary (2026 Best Practices)
+
+Based on analysis of popular Rust CLIs (ripgrep, bat, helix, zed) and distribution tools:
+
+- **cargo-dist** is the de facto standard for Rust CLI release automation (2.1k stars, rapidly growing)
+- **cargo-binstall** provides fast binary installation (2.8k stars, recommended in ripgrep docs)
+- **GitHub Releases** is the central distribution hub — all package managers pull from there
+- **Package managers > custom installers** for CLI tools
+- **Snap/Flatpak/AppImage are NOT used** by any major Rust CLI — skip them entirely
+- **Static musl binaries** for Linux ensure maximum compatibility
+- **Code signing is optional** for CLI tools distributed via package managers
+- **Self-update is unnecessary** — rely on package managers + cargo-binstall
+
+---
+
 ## 1. Distribution Strategy (by platform)
 
 ### Recommended primary method: **cargo-dist** + **GitHub Releases**
 
-[cargo-dist](https://github.com/axodotdev/cargo-dist) is the modern standard for Rust CLI
-distribution. It generates installers, archives, and a shell/PowerShell install script.
-Used by: Zed, helix, fnm, biome, and many others.
+[cargo-dist](https://github.com/axodotdev/cargo-dist) generates installers, archives, and install
+scripts automatically. Used by Zed, helix, fnm, biome, and many others.
 
-| Platform | Install method | Updater | Notes |
-|----------|---------------|---------|-------|
-| Linux    | shell installer → `~/.cargo/bin/` or `/usr/local/bin/` | built-in self-update | Also generates .deb, .rpm, AppImage |
-| Windows  | PowerShell installer → `%USERPROFILE%\.cargo\bin` | built-in self-update | Also generates .msi |
-| macOS    | shell installer → `/usr/local/bin/` | built-in self-update | Also generates .dmg |
-| All      | `cargo install niki` | cargo | For developers |
+| Platform | Primary method | Secondary | Updater |
+|----------|---------------|-----------|---------|
+| Linux    | shell installer → `~/.cargo/bin/` | .deb, .rpm in Releases | cargo-binstall |
+| Windows  | PowerShell installer → `%USERPROFILE%\.cargo\bin` | winget, Scoop, Chocolatey | package manager |
+| macOS    | shell installer → `/usr/local/bin/` | Homebrew | brew upgrade |
+| All      | `cargo binstall niki` | `cargo install niki` | cargo-binstall |
 
-### Secondary / fallback channels
+### Channel priority (implementation order)
 
-| Channel | Platform | Reach | Effort |
-|---------|----------|-------|--------|
-| Homebrew | macOS + Linux | Very high (devs) | Low — one formula file |
-| winget  | Windows | High | Low — auto-generated manifest |
-| Scoop   | Windows | Medium | Low — one manifest JSON |
-| cargo-binstall | All | Medium | Zero — auto-detected from GitHub Releases |
+1. **cargo-dist + GitHub Releases** — gives install scripts + archives for all platforms
+2. **cargo-binstall** — auto-detected from GitHub Releases, zero config
+3. **Homebrew** — mandatory for macOS, highest ROI
+4. **winget** — built into Windows 10/11
+5. **Scoop** — popular among Windows developers
+6. **AUR (Arch Linux)** — usually community-contributed
 
-### Why cargo-dist over hand-rolled installers
+### What to skip
 
-1. **One config** (`dist-workspace.toml` or `Cargo.toml` `[workspace.metadata.dist]`) drives all platforms
-2. **Generates install scripts** that auto-detect platform + architecture
-3. **Native package formats** (.deb, .rpm, .msi, .dmg) from a single source
-4. **SHA256 checksums** generated automatically
-5. **npm installable** (optional — for JS-first devs)
-6. **Integrates with GitHub Actions** via `taiki-e/install-action`
+| Method | Why skip |
+|--------|----------|
+| Snap | Confinement bugs, slow startup, ripgrep docs explicitly warn against it |
+| Flatpak | Primarily for GUI apps, PATH issues for CLI |
+| AppImage | GUI-focused, not suited for CLI tools in PATH |
+| MSI/MSIX | Overkill for CLI tools, complex to maintain |
+| DMG | Not standard for CLI tools |
+| Self-update | Unnecessary — package managers handle this |
 
 ---
 
@@ -73,9 +89,9 @@ Used by: Zed, helix, fnm, biome, and many others.
 ┌─────────────────────────────────────────────────────────────────┐
 │  Phase 3: BUILD MATRIX (parallel)                               │
 │  • x86_64-unknown-linux-gnu  (ubuntu-latest)                    │
+│  • x86_64-pc-windows-msvc    (windows-latest)                   │
 │  • x86_64-apple-darwin       (macos-latest)                     │
 │  • aarch64-apple-darwin      (macos-latest)                     │
-│  • x86_64-pc-windows-msvc    (windows-latest)                   │
 │  (~3min)                                                        │
 └─────────────────┬───────────────────────────────────────────────┘
                   │ pass
@@ -98,76 +114,64 @@ Used by: Zed, helix, fnm, biome, and many others.
 v* tag pushed
     │
     ▼
-Build matrix (4 targets) ──→ Upload artifacts
+cargo-dist plan → build matrix (4-6 targets) → upload artifacts
     │
     ▼
-cargo-dist: generate installers + archives + checksums
+cargo-dist: generate installers + archives + checksums + release notes
     │
     ▼
 GitHub Release created with all assets
     │
     ▼
-Homebrew formula updated (via cargo-dist publish)
-winget manifest updated (via cargo-dist publish)
+cargo-binstall: auto-detects from Releases
+Homebrew: formula updated (via cargo-dist publish)
+winget: manifest updated (via cargo-dist publish)
 ```
 
 ---
 
 ## 3. cargo-dist Configuration
 
-### `Cargo.toml` additions
+### Already configured in repo
 
-```toml
-[workspace.metadata.dist]
-# Targets to build
-targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu",
-           "x86_64-apple-darwin", "aarch64-apple-darwin",
-           "x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]
-# Installers to generate
-installers = ["shell", "powershell", "npm"]
-# Native packages
-casks = []
-formula = ["niki"]
-# .deb and .rpm for Linux
-[[workspace.metadata.dist.apt]]
-name = "niki"
-[[workspace.metadata.dist.rpm]]
-name = "niki"
-```
+- `Cargo.toml`: `repository` URL added
+- `dist-workspace.toml`: targets for Linux (x86_64, aarch64), macOS (x86_64, aarch64), Windows (x86_64) with shell + PowerShell installers and updater enabled
+- `.github/workflows/v-release.yml`: auto-generated CI workflow for building and releasing on tag push
+
+### Targets
+
+| Target | Runner | Installer |
+|--------|--------|-----------|
+| x86_64-unknown-linux-gnu | ubuntu-latest | shell script |
+| aarch64-unknown-linux-gnu | ubuntu-latest | shell script |
+| x86_64-apple-darwin | macos-latest | shell script |
+| aarch64-apple-darwin | macos-latest | shell script |
+| x86_64-pc-windows-msvc | windows-latest | PowerShell script |
 
 ---
 
-## 4. Implementation Steps
+## 4. Implementation Steps (ordered)
 
-### Step 1: Add cargo-dist (1 hour)
-- Add `[workspace.metadata.dist]` to `Cargo.toml`
-- Install cargo-dist: `cargo install cargo-dist`
-- Generate config: `cargo dist init`
-- Test locally: `cargo dist build`
+### Phase 1: Foundation (done)
+- [x] Integration test harness (Dockerfile + mock LLM)
+- [x] cargo-dist setup (config + generated workflow)
+- [x] CI pipeline (check → test → build-matrix → e2e)
 
-### Step 2: Enhance CI workflow (30 min)
-- Add windows-latest to build matrix
-- Add E2E mock-LLM pipeline test job
-- Configure fail-fast: false so all targets build even if one fails
+### Phase 2: First release (do now)
+- [ ] Merge `goal/niki-10x-features-v2` into `master`
+- [ ] Tag `v0.2.0` and push
+- [ ] Verify cargo-dist creates GitHub Release with all binaries
+- [ ] Verify `cargo binstall niki` works
 
-### Step 3: Add Homebrew formula (30 min)
-- Create `HomebrewFormula/niki.rb` (or let cargo-dist auto-generate)
-- Tap: `RavaniRoshan/homebrew-niki`
+### Phase 3: Package managers (week 2-3)
+- [ ] Submit Homebrew formula to homebrew-core
+- [ ] Submit winget manifest to microsoft/winget-pkgs
+- [ ] Submit Scoop manifest to ScoopInstaller/Main
 
-### Step 4: Add winget manifest (30 min)
-- Create `manifests/r/RavaniRoshan/niki/<version>/`
-- Auto-published via cargo-dist or winget-create
-
-### Step 5: Integration test hardening (1 hour)
-- Fix the mock server to be more robust against streaming edge cases
-- Add retry logic for the pipeline test
-- Verify artifact generation for all agent roles
-
-### Step 6: First real release (1 hour)
-- Tag `v0.2.0`
-- Push tag → CI builds all targets
-- cargo-dist creates Release with all assets
-- Verify install script works on all three platforms
+### Phase 4: Community distribution (ongoing)
+- [ ] Document .deb/.rpm availability in GitHub Releases
+- [ ] Wait for community to submit to AUR, Debian, Fedora
+- [ ] Monitor https://repology.org for packaging status
 
 ---
 
@@ -189,22 +193,27 @@ publishing to distribution channels.
 
 ## 6. File Changes Summary
 
-| File | Action |
+| File | Status |
 |------|--------|
-| `Cargo.toml` | Add `[workspace.metadata.dist]` section |
-| `.github/workflows/ci.yml` | Enhance with build matrix + e2e test |
-| `.github/workflows/release.yml` | Replace with cargo-dist workflow |
-| `tests/integration/Dockerfile` | Already created |
-| `tests/integration/mock_llm.py` | Already created |
-| `tests/integration/niki.test.toml` | Already created |
-| `HomebrewFormula/niki.rb` | To create |
-| `manifests/` | To create (winget) |
+| `Cargo.toml` | Done — repository URL added |
+| `dist-workspace.toml` | Done — cargo-dist config |
+| `.github/workflows/v-release.yml` | Done — auto-generated release workflow |
+| `.github/workflows/ci.yml` | Done — enhanced 4-phase CI |
+| `.github/workflows/integration.yml` | Done — E2E mock-LLM test |
+| `tests/integration/Dockerfile` | Done — Ubuntu 24.04 + Rust + Node + Python |
+| `tests/integration/mock_llm.py` | Done — SSE streaming mock |
+| `tests/integration/niki.test.toml` | Done — config pointing at mock |
+| Homebrew formula | To create (week 2) |
+| winget manifest | To create (week 2) |
+| Scoop manifest | To create (week 3) |
 
 ---
 
 ## 7. References
 
-- <https://github.com/axodotdev/cargo-dist> — cargo-dist (distribution)
+- <https://github.com/axodotdev/cargo-dist> — cargo-dist (distribution automation)
 - <https://github.com/cargo-bins/cargo-binstall> — cargo-binstall (binary install)
 - <https://github.com/sharkdp/bat> — example Rust CLI using cargo-dist
-- <https://github.com/zed-industries/zed> — example Rust app with full cross-platform CI
+- <https://github.com/BurntSushi/ripgrep> — installation docs model
+- <https://github.com/helix-editor/helix> — Rust CLI with broad package manager support
+- <https://github.com/zed-industries/zed> — full cross-platform CI example
