@@ -1,8 +1,10 @@
 use anyhow::Result;
+use bollard::Docker;
 use clap::{Args, Subcommand};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+#[cfg(unix)]
 use crate::cli::run::connect_container_runtime;
 use crate::config::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
@@ -312,6 +314,7 @@ async fn handle_run(id: Option<&str>) -> Result<()> {
     println!();
 
     let config = NikiConfig::load(std::path::Path::new(&state.scope)).unwrap_or_default();
+    #[cfg(unix)]
     let docker = match connect_container_runtime().await {
         Ok(d) => Some(d),
         Err(e) => {
@@ -322,6 +325,8 @@ async fn handle_run(id: Option<&str>) -> Result<()> {
             None
         }
     };
+    #[cfg(not(unix))]
+    let docker: Option<bollard::Docker> = None;
     let docker_ref = docker.as_ref();
     let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
     let mut display = AgenticDisplay::new();
