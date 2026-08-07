@@ -76,7 +76,12 @@ pub enum DisplayEvent {
     /// Branch name from the pipeline (fixes the never-populated branch_name).
     BranchName(String),
     /// Total token/cost info for the status line.
-    StageTotals { input_tokens: u32, output_tokens: u32, cost_usd: f64, latency_ms: u64 },
+    StageTotals {
+        input_tokens: u32,
+        output_tokens: u32,
+        cost_usd: f64,
+        latency_ms: u64,
+    },
 }
 
 /// Restore terminal state no matter how we leave `run_tui`.
@@ -191,7 +196,10 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBu
             }
 
             let s = &state;
-            if terminal.draw(|f| render(f, s, &router, &command_palette)).is_err() {
+            if terminal
+                .draw(|f| render(f, s, &router, &command_palette))
+                .is_err()
+            {
                 break;
             }
 
@@ -208,105 +216,104 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBu
 
         // Handle keypresses (non-blocking, ~16ms poll)
         if event::poll(Duration::from_millis(16)).unwrap_or(false)
-            && let Ok(Event::Key(key)) = event::read() {
-                // Onboarding modal takes priority
-                if let Some(ref mut onboard) = state.onboarding {
-                    match onboard.handle_key(key) {
-                        OnboardingAction::None => {}
-                        OnboardingAction::Skip | OnboardingAction::Finish => {
-                            if onboard.dont_show_again {
-                                onboarding::persist_state(&project_path);
-                                state.onboarded = true;
-                            }
-                            state.onboarding = None;
-                            dirty = true;
+            && let Ok(Event::Key(key)) = event::read()
+        {
+            // Onboarding modal takes priority
+            if let Some(ref mut onboard) = state.onboarding {
+                match onboard.handle_key(key) {
+                    OnboardingAction::None => {}
+                    OnboardingAction::Skip | OnboardingAction::Finish => {
+                        if onboard.dont_show_again {
+                            onboarding::persist_state(&project_path);
+                            state.onboarded = true;
                         }
-                    }
-                } else if let Some(ref modal) = state.modal {
-                    // Regular modal key handling
-                    match modal::handle_modal_key(key, modal) {
-                        ModalAction::Dismiss => {
-                            state.modal = None;
-                            dirty = true;
-                        }
-                        ModalAction::Confirm => {
-                            state.modal = None;
-                            if key.code == KeyCode::Enter {
-                                break;
-                            }
-                            dirty = true;
-                        }
-                        ModalAction::Retry => {
-                            state.modal = None;
-                            dirty = true;
-                        }
-                        ModalAction::Config => {
-                            state.modal = None;
-                            state.current_page = PageId::Config;
-                            dirty = true;
-                        }
-                        ModalAction::Skip => {
-                            state.modal = None;
-                            dirty = true;
-                        }
-                        ModalAction::None => {}
-                    }
-                } else if state.show_command_palette {
-                    // Command palette takes priority
-                    if command_palette.handle_key(key, &mut state) {
-                        state.show_command_palette = false;
+                        state.onboarding = None;
                         dirty = true;
-                    } else {
+                    }
+                }
+            } else if let Some(ref modal) = state.modal {
+                // Regular modal key handling
+                match modal::handle_modal_key(key, modal) {
+                    ModalAction::Dismiss => {
+                        state.modal = None;
+                        dirty = true;
+                    }
+                    ModalAction::Confirm => {
+                        state.modal = None;
+                        if key.code == KeyCode::Enter {
+                            break;
+                        }
+                        dirty = true;
+                    }
+                    ModalAction::Retry => {
+                        state.modal = None;
+                        dirty = true;
+                    }
+                    ModalAction::Config => {
+                        state.modal = None;
+                        state.current_page = PageId::Config;
+                        dirty = true;
+                    }
+                    ModalAction::Skip => {
+                        state.modal = None;
+                        dirty = true;
+                    }
+                    ModalAction::None => {}
+                }
+            } else if state.show_command_palette {
+                // Command palette takes priority
+                if command_palette.handle_key(key, &mut state) {
+                    state.show_command_palette = false;
+                    dirty = true;
+                } else {
+                    dirty = true;
+                }
+            } else {
+                // Ctrl-P opens command palette (global, from any page)
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('p') {
+                    state.show_command_palette = true;
+                    command_palette = CommandPalette::new();
+                    dirty = true;
+                } else if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && key.code == KeyCode::Char('t')
+                {
+                    // Ctrl+T cycles theme: dark → light → auto → dark
+                    use crate::config::types::ThemePreference;
+                    let new_pref = match state.config.ui.theme {
+                        ThemePreference::Dark => ThemePreference::Light,
+                        ThemePreference::Light => ThemePreference::Auto,
+                        ThemePreference::Auto => ThemePreference::Dark,
+                    };
+                    // Apply to global theme mode
+                    let mode = match new_pref {
+                        ThemePreference::Dark => theme::ThemeMode::Dark,
+                        ThemePreference::Light => theme::ThemeMode::Light,
+                        ThemePreference::Auto => theme::ThemeMode::Auto,
+                    };
+                    theme::set_mode(mode);
+                    state.config.ui.theme = new_pref;
+                    // Persist to config file
+                    let _ = crate::config::types::NikiConfig::save_theme(new_pref);
+                    dirty = true;
+                } else if state.current_page == PageId::Run {
+                    // On Run page: q/Esc shows quit confirm modal
+                    if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
+                        state.modal = Some(super::pages::Modal::Confirm {
+                            title: "Quit NIKI?".to_string(),
+                            message: "The pipeline will continue in the background.".to_string(),
+                        });
+                        dirty = true;
+                    } else if router.handle_key(key, &mut state) {
                         dirty = true;
                     }
                 } else {
-                    // Ctrl-P opens command palette (global, from any page)
-                    if key.modifiers.contains(KeyModifiers::CONTROL)
-                        && key.code == KeyCode::Char('p')
-                    {
-                        state.show_command_palette = true;
-                        command_palette = CommandPalette::new();
+                    // On sub-pages: page-specific key handling (Esc/q handled by page → Run)
+                    if router.handle_key(key, &mut state) {
                         dirty = true;
-                    } else if key.modifiers.contains(KeyModifiers::CONTROL)
-                        && key.code == KeyCode::Char('t')
-                    {
-                        // Ctrl+T cycles theme: dark → light → auto → dark
-                        use crate::config::types::ThemePreference;
-                        let new_pref = match state.config.ui.theme {
-                            ThemePreference::Dark => ThemePreference::Light,
-                            ThemePreference::Light => ThemePreference::Auto,
-                            ThemePreference::Auto => ThemePreference::Dark,
-                        };
-                        // Apply to global theme mode
-                        let mode = match new_pref {
-                            ThemePreference::Dark => theme::ThemeMode::Dark,
-                            ThemePreference::Light => theme::ThemeMode::Light,
-                            ThemePreference::Auto => theme::ThemeMode::Auto,
-                        };
-                        theme::set_mode(mode);
-                        state.config.ui.theme = new_pref;
-                        // Persist to config file
-                        let _ = crate::config::types::NikiConfig::save_theme(new_pref);
-                        dirty = true;
-                    } else if state.current_page == PageId::Run {
-                        // On Run page: q/Esc shows quit confirm modal
-                        if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
-                            state.modal = Some(super::pages::Modal::Confirm {
-                                title: "Quit NIKI?".to_string(),
-                                message: "The pipeline will continue in the background.".to_string(),
-                            });
-                            dirty = true;
-                        } else if router.handle_key(key, &mut state) {
-                            dirty = true;
-                        }
-                    } else {
-                        // On sub-pages: page-specific key handling (Esc/q handled by page → Run)
-                        if router.handle_key(key, &mut state) {
-                            dirty = true;
-                        }
                     }
                 }
             }
+        }
 
         // Drain events from the pipeline — mark dirty on any state change
         match rx.recv_timeout(Duration::from_millis(16)) {
@@ -340,17 +347,18 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBu
 fn detect_synchronized_output() -> bool {
     // Check common env vars that indicate terminal capabilities
     if let Ok(term) = std::env::var("TERM")
-        && (term.contains("kitty") || term.contains("ghostty") || term.contains("xterm")) {
-            return true;
-        }
+        && (term.contains("kitty") || term.contains("ghostty") || term.contains("xterm"))
+    {
+        return true;
+    }
     if let Ok(term_program) = std::env::var("TERM_PROGRAM")
         && (term_program.contains("kitty")
             || term_program.contains("ghostty")
             || term_program.contains("WezTerm")
             || term_program.contains("iTerm"))
-        {
-            return true;
-        }
+    {
+        return true;
+    }
     // tmux with sync support (3.4+)
     if std::env::var("TMUX").is_ok() {
         // tmux < 3.4 does not support DEC 2026; we conservatively disable it
@@ -384,7 +392,9 @@ fn render_status_line(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, s
                 crate::artifacts::types::AgentRole::Tester => &state.config.agents.tester,
                 crate::artifacts::types::AgentRole::Reviewer => &state.config.agents.reviewer,
                 crate::artifacts::types::AgentRole::Synthesizer => &state.config.agents.synthesizer,
-                crate::artifacts::types::AgentRole::SecurityAuditor => &state.config.agents.security_auditor,
+                crate::artifacts::types::AgentRole::SecurityAuditor => {
+                    &state.config.agents.security_auditor
+                }
                 crate::artifacts::types::AgentRole::Red => &state.config.agents.red,
             };
             format!("  {} ", cfg.model)
@@ -411,14 +421,11 @@ fn render_status_line(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, s
                 .fg(theme::fg_color())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(&model_info, Style::default().fg(theme::fg_dim()),),
-        Span::styled(&token_display, Style::default().fg(theme::fg_dim()),),
-        Span::styled(&cost_display, Style::default().fg(theme::GREEN()),),
-        Span::styled(&duration, Style::default().fg(theme::fg_dim()),),
-        Span::styled(
-            " ctrl-t theme ",
-            Style::default().fg(theme::fg_dim()),
-        ),
+        Span::styled(&model_info, Style::default().fg(theme::fg_dim())),
+        Span::styled(&token_display, Style::default().fg(theme::fg_dim())),
+        Span::styled(&cost_display, Style::default().fg(theme::GREEN())),
+        Span::styled(&duration, Style::default().fg(theme::fg_dim())),
+        Span::styled(" ctrl-t theme ", Style::default().fg(theme::fg_dim())),
     ]);
 
     let bg = theme::bg_elevated();
@@ -445,7 +452,12 @@ fn format_duration(secs: u64) -> String {
     }
 }
 
-fn render(frame: &mut ratatui::Frame, state: &AppState, router: &PageRouter, command_palette: &CommandPalette) {
+fn render(
+    frame: &mut ratatui::Frame,
+    state: &AppState,
+    router: &PageRouter,
+    command_palette: &CommandPalette,
+) {
     let size = frame.area();
     if size.height < 10 {
         return;
@@ -459,9 +471,9 @@ fn render(frame: &mut ratatui::Frame, state: &AppState, router: &PageRouter, com
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),       // logo (6 lines + 2 padding)
-            Constraint::Min(5),          // page content
-            Constraint::Length(1),       // status line (footer meta)
+            Constraint::Length(8), // logo (6 lines + 2 padding)
+            Constraint::Min(5),    // page content
+            Constraint::Length(1), // status line (footer meta)
         ])
         .split(size);
 

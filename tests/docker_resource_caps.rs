@@ -5,14 +5,23 @@ use niki::sandbox::docker::DockerSandbox;
 
 #[test]
 fn parse_memory_limit_handles_gb() {
-    assert_eq!(DockerSandbox::parse_memory_limit("2g"), 2 * 1024 * 1024 * 1024);
-    assert_eq!(DockerSandbox::parse_memory_limit("4gb"), 4 * 1024 * 1024 * 1024);
+    assert_eq!(
+        DockerSandbox::parse_memory_limit("2g"),
+        2 * 1024 * 1024 * 1024
+    );
+    assert_eq!(
+        DockerSandbox::parse_memory_limit("4gb"),
+        4 * 1024 * 1024 * 1024
+    );
 }
 
 #[test]
 fn parse_memory_limit_handles_mb() {
     assert_eq!(DockerSandbox::parse_memory_limit("512m"), 512 * 1024 * 1024);
-    assert_eq!(DockerSandbox::parse_memory_limit("100mb"), 100 * 1024 * 1024);
+    assert_eq!(
+        DockerSandbox::parse_memory_limit("100mb"),
+        100 * 1024 * 1024
+    );
 }
 
 #[test]
@@ -34,8 +43,14 @@ fn parse_memory_limit_returns_zero_for_invalid() {
 
 #[test]
 fn parse_memory_limit_is_case_insensitive() {
-    assert_eq!(DockerSandbox::parse_memory_limit("2G"), 2 * 1024 * 1024 * 1024);
-    assert_eq!(DockerSandbox::parse_memory_limit("512MB"), 512 * 1024 * 1024);
+    assert_eq!(
+        DockerSandbox::parse_memory_limit("2G"),
+        2 * 1024 * 1024 * 1024
+    );
+    assert_eq!(
+        DockerSandbox::parse_memory_limit("512MB"),
+        512 * 1024 * 1024
+    );
 }
 
 #[test]

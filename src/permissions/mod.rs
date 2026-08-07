@@ -18,7 +18,6 @@ pub enum Permission {
     Deny,
 }
 
-
 /// A permission rule with optional pattern matching.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionRule {
@@ -91,9 +90,10 @@ impl PermissionChecker {
     pub fn check_command(&self, command: &str) -> Permission {
         for rule in self.config.rules.values() {
             if let Some(ref pattern) = rule.pattern
-                && command.contains(pattern) {
-                    return rule.permission;
-                }
+                && command.contains(pattern)
+            {
+                return rule.permission;
+            }
         }
         self.config.tools.bash
     }
@@ -149,7 +149,10 @@ mod tests {
             ..Default::default()
         };
         let checker = PermissionChecker::new(config);
-        assert_eq!(checker.check_command("cargo test --release"), Permission::Allow);
+        assert_eq!(
+            checker.check_command("cargo test --release"),
+            Permission::Allow
+        );
         assert_eq!(checker.check_command("rm -rf /"), Permission::Ask);
     }
 

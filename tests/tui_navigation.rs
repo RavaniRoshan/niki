@@ -1,7 +1,7 @@
+use niki::artifacts::types::AgentRole;
 use niki::config::types::NikiConfig;
 use niki::display::pages::{AppState, Modal, PageId, PageRouter, RunState, StageInfo, StageStatus};
 use niki::display::tui::DisplayEvent;
-use niki::artifacts::types::AgentRole;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 fn make_state() -> AppState {
@@ -112,7 +112,18 @@ fn run_page_ignores_navigation_hotkeys() {
     let mut state = make_state();
     let mut router = PageRouter::new();
     // All these keys should be ignored on Run page now
-    for key in [key_char('p'), key_char('a'), key_char('d'), key_char('v'), key_char('c'), key_char('f'), key_char('h'), key_char('?'), key_char(','), key_char('l')] {
+    for key in [
+        key_char('p'),
+        key_char('a'),
+        key_char('d'),
+        key_char('v'),
+        key_char('c'),
+        key_char('f'),
+        key_char('h'),
+        key_char('?'),
+        key_char(','),
+        key_char('l'),
+    ] {
         router.handle_key(key, &mut state);
         assert_eq!(state.current_page, PageId::Run);
     }
@@ -1481,6 +1492,10 @@ fn unrecognized_keys_ignored_all_pages() {
         let mut router = PageRouter::new();
         let original_page = state.current_page;
         router.handle_key(key_char('z'), &mut state);
-        assert_eq!(state.current_page, original_page, "page {:?} should not change on unrecognized key", page_id);
+        assert_eq!(
+            state.current_page, original_page,
+            "page {:?} should not change on unrecognized key",
+            page_id
+        );
     }
 }

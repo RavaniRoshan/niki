@@ -175,23 +175,19 @@ impl LlmProvider for GoogleProvider {
                                                     as u32,
                                             })))
                                             .is_err()
-                                        {
-                                            return;
-                                        }
+                                    {
+                                        return;
+                                    }
                                     if let Some(candidates) = json["candidates"].as_array()
                                         && let Some(candidate) = candidates.first()
-                                            && let Some(parts) =
-                                                candidate["content"]["parts"].as_array()
-                                                && let Some(part) = parts.first()
-                                                    && let Some(text) = part["text"].as_str()
-                                                        && tx
-                                                            .send(Ok(StreamChunk::Text(
-                                                                text.to_string(),
-                                                            )))
-                                                            .is_err()
-                                                        {
-                                                            return;
-                                                        }
+                                        && let Some(parts) =
+                                            candidate["content"]["parts"].as_array()
+                                        && let Some(part) = parts.first()
+                                        && let Some(text) = part["text"].as_str()
+                                        && tx.send(Ok(StreamChunk::Text(text.to_string()))).is_err()
+                                    {
+                                        return;
+                                    }
                                 }
                             }
                         }

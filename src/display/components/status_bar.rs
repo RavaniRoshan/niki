@@ -1,10 +1,10 @@
 //! Bottom status bar with model, context usage, cost, and background tasks.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::display::state::AppState;
 use crate::display::theme;
@@ -15,7 +15,9 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
         Span::styled("● ", theme::claude()),
         Span::styled(
             "NIKI",
-            Style::default().fg(theme::claude()).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::claude())
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" ─── ", theme::border()),
     ];
@@ -30,10 +32,7 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     }
 
     // Model
-    spans.push(Span::styled(
-        format!("{} ", state.model),
-        theme::text_dim(),
-    ));
+    spans.push(Span::styled(format!("{} ", state.model), theme::text_dim()));
     spans.push(Span::styled("─── ", theme::border()));
 
     // Background tasks
@@ -54,10 +53,7 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     } else {
         theme::success()
     };
-    spans.push(Span::styled(
-        format!("ctx: {}% ", pct),
-        color,
-    ));
+    spans.push(Span::styled(format!("ctx: {}% ", pct), color));
 
     // Cost
     spans.push(Span::styled(

@@ -1,5 +1,5 @@
-use niki::llm::repair::repair_json;
 use niki::agents::errors::validate_detailed;
+use niki::llm::repair::repair_json;
 use serde_json::json;
 
 /// Test that repair_json handles the most common LLM malformations.

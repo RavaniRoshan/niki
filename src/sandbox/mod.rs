@@ -120,8 +120,16 @@ pub async fn create_sandbox(
                 NikiError::Config("Docker backend selected but Docker is not available".into())
             })?;
             Ok(Box::new(
-                DockerSandbox::create(d, agent_role, source_repo, task_id, config, policy, containers)
-                    .await?,
+                DockerSandbox::create(
+                    d,
+                    agent_role,
+                    source_repo,
+                    task_id,
+                    config,
+                    policy,
+                    containers,
+                )
+                .await?,
             ))
         }
         SandboxBackend::Worktree => Ok(Box::new(

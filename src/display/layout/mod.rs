@@ -1,10 +1,10 @@
 //! Layout system — chat layout, page layout, and overlay rendering.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::display::state::{AppState, PageId};
 use crate::display::theme;
@@ -19,9 +19,9 @@ pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),          // messages area
-            Constraint::Length(1),       // status bar
-            Constraint::Length(1),       // input box
+            Constraint::Min(3),    // messages area
+            Constraint::Length(1), // status bar
+            Constraint::Length(1), // input box
         ])
         .split(area);
 
@@ -71,15 +71,24 @@ fn render_messages(frame: &mut Frame, area: Rect, state: &AppState) {
                 &msg_content(msg),
                 msg_role(msg),
                 &[],
-                &crate::display::chat::message::MessageRenderConfig::from_theme(area.width as usize),
+                &crate::display::chat::message::MessageRenderConfig::from_theme(
+                    area.width as usize,
+                ),
             ));
         }
     }
 
     // Apply scroll offset
     let visible_lines = area.height as usize;
-    let scroll = state.scroll_offset.min(lines.len().saturating_sub(visible_lines));
-    let visible: Vec<_> = lines.iter().skip(scroll).take(visible_lines).cloned().collect();
+    let scroll = state
+        .scroll_offset
+        .min(lines.len().saturating_sub(visible_lines));
+    let visible: Vec<_> = lines
+        .iter()
+        .skip(scroll)
+        .take(visible_lines)
+        .cloned()
+        .collect();
 
     // Fill remaining space
     let mut display_lines = visible;
@@ -102,15 +111,23 @@ fn msg_content(msg: &crate::display::state::Message) -> String {
 /// Get message role.
 fn msg_role(msg: &crate::display::state::Message) -> crate::display::chat::message::MessageRole {
     match msg {
-        crate::display::state::Message::User { .. } => crate::display::chat::message::MessageRole::User,
+        crate::display::state::Message::User { .. } => {
+            crate::display::chat::message::MessageRole::User
+        }
         crate::display::state::Message::Assistant { role, .. } => {
             crate::display::chat::message::MessageRole::Assistant(*role)
         }
         crate::display::state::Message::System { level, .. } => {
             crate::display::chat::message::MessageRole::System(match level {
-                crate::display::state::SystemLevel::Info => crate::display::chat::message::SystemLevel::Info,
-                crate::display::state::SystemLevel::Warning => crate::display::chat::message::SystemLevel::Warning,
-                crate::display::state::SystemLevel::Error => crate::display::chat::message::SystemLevel::Error,
+                crate::display::state::SystemLevel::Info => {
+                    crate::display::chat::message::SystemLevel::Info
+                }
+                crate::display::state::SystemLevel::Warning => {
+                    crate::display::chat::message::SystemLevel::Warning
+                }
+                crate::display::state::SystemLevel::Error => {
+                    crate::display::chat::message::SystemLevel::Error
+                }
             })
         }
     }
@@ -126,9 +143,9 @@ pub fn render_page(frame: &mut Frame, area: Rect, page_id: PageId, state: &AppSt
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),       // tab bar
-            Constraint::Min(3),          // content
-            Constraint::Length(2),       // footer
+            Constraint::Length(1), // tab bar
+            Constraint::Min(3),    // content
+            Constraint::Length(2), // footer
         ])
         .split(area);
 
@@ -165,8 +182,11 @@ fn render_tab_bar(state: &AppState, width: usize) -> Line<'_> {
         if spans.iter().map(|s: &Span| s.content.len()).sum::<usize>() + title.len() + 4 > width {
             break;
         }
-        let style = if matches!(state.view, crate::display::state::ViewMode::Page(p) if p == *page) {
-            Style::default().fg(theme::primary()).add_modifier(Modifier::BOLD)
+        let style = if matches!(state.view, crate::display::state::ViewMode::Page(p) if p == *page)
+        {
+            Style::default()
+                .fg(theme::primary())
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::text_dim())
         };
@@ -197,11 +217,17 @@ fn render_page_content(page_id: PageId, state: &AppState, width: usize) -> Vec<L
 /// Render pipeline page content.
 fn render_pipeline_page(state: &AppState, _width: usize) -> Vec<Line<'static>> {
     let mut lines = vec![];
-    lines.push(Line::from(Span::styled("Pipeline Status", theme::header_style())));
+    lines.push(Line::from(Span::styled(
+        "Pipeline Status",
+        theme::header_style(),
+    )));
     lines.push(Line::from(""));
 
     if state.pipeline.stages.is_empty() {
-        lines.push(Line::from(Span::styled("No stages yet...", theme::text_dim())));
+        lines.push(Line::from(Span::styled(
+            "No stages yet...",
+            theme::text_dim(),
+        )));
     } else {
         for stage in &state.pipeline.stages {
             let (icon, color) = match stage.status {
@@ -224,14 +250,20 @@ fn render_pipeline_page(state: &AppState, _width: usize) -> Vec<Line<'static>> {
 /// Render agents page content.
 fn render_agents_page(state: &AppState, _width: usize) -> Vec<Line<'static>> {
     let mut lines = vec![];
-    lines.push(Line::from(Span::styled("Agent Configuration", theme::header_style())));
+    lines.push(Line::from(Span::styled(
+        "Agent Configuration",
+        theme::header_style(),
+    )));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         format!("Model: {}", state.model),
         theme::text(),
     )));
     lines.push(Line::from(Span::styled(
-        format!("Revision: {}/{}", state.revision_round, state.max_revision_rounds),
+        format!(
+            "Revision: {}/{}",
+            state.revision_round, state.max_revision_rounds
+        ),
         theme::text_dim(),
     )));
     lines
@@ -255,7 +287,10 @@ fn render_diff_page(state: &AppState, _width: usize) -> Vec<Line<'static>> {
             lines.push(Line::from(Span::styled(line.to_string(), style)));
         }
     } else {
-        lines.push(Line::from(Span::styled("No diff available yet...", theme::text_dim())));
+        lines.push(Line::from(Span::styled(
+            "No diff available yet...",
+            theme::text_dim(),
+        )));
     }
 
     lines
@@ -284,7 +319,10 @@ fn render_verdict_page(state: &AppState, _width: usize) -> Vec<Line<'static>> {
 /// Render cost page content.
 fn render_cost_page(state: &AppState, _width: usize) -> Vec<Line<'static>> {
     let mut lines = vec![];
-    lines.push(Line::from(Span::styled("Cost Breakdown", theme::header_style())));
+    lines.push(Line::from(Span::styled(
+        "Cost Breakdown",
+        theme::header_style(),
+    )));
     lines.push(Line::from(""));
 
     let (in_t, out_t, cost, _) = state.totals();
@@ -305,7 +343,10 @@ fn render_cost_page(state: &AppState, _width: usize) -> Vec<Line<'static>> {
     for stage in &state.pipeline.stages {
         let role_name = format!("{:?}", stage.role);
         lines.push(Line::from(Span::styled(
-            format!("{}: ${:.4} (in: {}, out: {})", role_name, stage.cost_usd, stage.input_tokens, stage.output_tokens),
+            format!(
+                "{}: ${:.4} (in: {}, out: {})",
+                role_name, stage.cost_usd, stage.input_tokens, stage.output_tokens
+            ),
             theme::text_dim(),
         )));
     }

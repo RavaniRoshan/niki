@@ -33,9 +33,10 @@ fn load_history_entries(project_path: &std::path::Path) -> Vec<HistoryEntry> {
             let path = entry.path();
             if path.is_dir()
                 && let Ok(content) = std::fs::read_to_string(path.join("task.json"))
-                    && let Ok(record) = serde_json::from_str::<TaskRecord>(&content) {
-                        records.push((path, record));
-                    }
+                && let Ok(record) = serde_json::from_str::<TaskRecord>(&content)
+            {
+                records.push((path, record));
+            }
         }
     }
 
@@ -100,9 +101,7 @@ impl Default for HistoryPage {
 
 impl HistoryPage {
     pub fn new() -> Self {
-        Self {
-            selected: 0,
-        }
+        Self { selected: 0 }
     }
 }
 
@@ -195,7 +194,14 @@ impl Page for HistoryPage {
                     Style::default().fg(theme::fg_dim()),
                 ),
                 Span::styled(
-                    format!("{}", state.project_path.join(&state.config.general.output_dir).join("tasks").display()),
+                    format!(
+                        "{}",
+                        state
+                            .project_path
+                            .join(&state.config.general.output_dir)
+                            .join("tasks")
+                            .display()
+                    ),
                     Style::default().fg(theme::fg_color()),
                 ),
             ]));
@@ -203,7 +209,9 @@ impl Page for HistoryPage {
             for (i, entry) in entries.iter().enumerate() {
                 let is_selected = i == self.selected;
                 let style = if is_selected {
-                    Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::fg_color())
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme::fg_color())
                 };
@@ -228,7 +236,9 @@ impl Page for HistoryPage {
                     Span::styled(
                         format!("{:<6}", &entry.branch[..entry.branch.len().min(6)]),
                         if is_selected {
-                            Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(theme::fg_color())
+                                .add_modifier(Modifier::BOLD)
                         } else {
                             Style::default().fg(theme::fg_dim())
                         },

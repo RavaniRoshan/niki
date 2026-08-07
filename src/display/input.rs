@@ -235,10 +235,7 @@ fn delete_word_backward(state: &mut InputState) {
     }
 
     // Find start of word
-    let word_start = before[..trimmed_end]
-        .rfind(' ')
-        .map(|p| p + 1)
-        .unwrap_or(0);
+    let word_start = before[..trimmed_end].rfind(' ').map(|p| p + 1).unwrap_or(0);
 
     state.buffer.replace_range(word_start..end, "");
     state.cursor_pos = word_start;

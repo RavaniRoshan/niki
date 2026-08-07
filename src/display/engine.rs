@@ -8,10 +8,10 @@
 
 use std::io::{self};
 
+use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::Block;
-use ratatui::Terminal;
 
 use crate::display::state::AppState;
 
@@ -139,7 +139,9 @@ pub struct RenderEngine {
 impl RenderEngine {
     /// Create a new render engine, taking ownership of the terminal.
     pub fn new(terminal: Terminal<CrosstermBackend<io::Stdout>>, synchronized: bool) -> Self {
-        let size = terminal.size().unwrap_or(ratatui::layout::Size::new(80, 24));
+        let size = terminal
+            .size()
+            .unwrap_or(ratatui::layout::Size::new(80, 24));
         Self {
             terminal,
             front: CellBuffer::new(size.width, size.height),
@@ -210,9 +212,10 @@ impl RenderEngine {
 
             // Render overlays on top
             if state.show_permission_modal
-                && let Some(ref req) = state.permission_request {
-                    super::components::render_permission_modal(frame, req, area, state);
-                }
+                && let Some(ref req) = state.permission_request
+            {
+                super::components::render_permission_modal(frame, req, area, state);
+            }
             if state.show_command_menu {
                 super::components::render_command_menu(frame, area, state);
             }
@@ -267,12 +270,16 @@ mod tests {
     #[test]
     fn cell_buffer_set_get() {
         let mut buf = CellBuffer::new(80, 24);
-        buf.set(5, 3, Cell {
-            symbol: b'A' as u32,
-            fg: Color::Red,
-            bg: Color::Black,
-            modifiers: Modifier::BOLD,
-        });
+        buf.set(
+            5,
+            3,
+            Cell {
+                symbol: b'A' as u32,
+                fg: Color::Red,
+                bg: Color::Black,
+                modifiers: Modifier::BOLD,
+            },
+        );
 
         let cell = buf.get(5, 3);
         assert_eq!(cell.symbol, b'A' as u32);
@@ -294,18 +301,26 @@ mod tests {
         let mut buf2 = CellBuffer::new(80, 24);
 
         // Only change a few cells
-        buf2.set(10, 5, Cell {
-            symbol: b'X' as u32,
-            fg: Color::Yellow,
-            bg: Color::Black,
-            modifiers: Modifier::empty(),
-        });
-        buf2.set(11, 5, Cell {
-            symbol: b'Y' as u32,
-            fg: Color::Yellow,
-            bg: Color::Black,
-            modifiers: Modifier::empty(),
-        });
+        buf2.set(
+            10,
+            5,
+            Cell {
+                symbol: b'X' as u32,
+                fg: Color::Yellow,
+                bg: Color::Black,
+                modifiers: Modifier::empty(),
+            },
+        );
+        buf2.set(
+            11,
+            5,
+            Cell {
+                symbol: b'Y' as u32,
+                fg: Color::Yellow,
+                bg: Color::Black,
+                modifiers: Modifier::empty(),
+            },
+        );
 
         let diff = buf1.diff(&buf2);
         assert_eq!(diff.len(), 2);
@@ -318,12 +333,16 @@ mod tests {
     #[test]
     fn cell_buffer_clear() {
         let mut buf = CellBuffer::new(10, 10);
-        buf.set(5, 5, Cell {
-            symbol: b'Z' as u32,
-            fg: Color::Cyan,
-            bg: Color::White,
-            modifiers: Modifier::empty(),
-        });
+        buf.set(
+            5,
+            5,
+            Cell {
+                symbol: b'Z' as u32,
+                fg: Color::Cyan,
+                bg: Color::White,
+                modifiers: Modifier::empty(),
+            },
+        );
         buf.clear();
         assert_eq!(buf.get(5, 5).symbol, Cell::EMPTY.symbol);
     }
@@ -331,12 +350,16 @@ mod tests {
     #[test]
     fn cell_buffer_resize() {
         let mut buf = CellBuffer::new(80, 24);
-        buf.set(79, 23, Cell {
-            symbol: b'A' as u32,
-            fg: Color::Red,
-            bg: Color::Reset,
-            modifiers: Modifier::empty(),
-        });
+        buf.set(
+            79,
+            23,
+            Cell {
+                symbol: b'A' as u32,
+                fg: Color::Red,
+                bg: Color::Reset,
+                modifiers: Modifier::empty(),
+            },
+        );
         buf.resize(40, 12);
         assert_eq!(buf.width(), 40);
         assert_eq!(buf.height(), 12);

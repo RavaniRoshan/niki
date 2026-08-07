@@ -102,7 +102,8 @@ impl CommandRegistry {
             SlashCommand {
                 name: "compact".to_string(),
                 description: "Compact conversation context".to_string(),
-                template: "Please summarize the conversation so far to reduce context usage.".to_string(),
+                template: "Please summarize the conversation so far to reduce context usage."
+                    .to_string(),
                 agent: None,
                 model: None,
             },

@@ -70,7 +70,6 @@ pub enum Difficulty {
     Hard,
 }
 
-
 /// One evaluation case: a task + its known seeded defect + where to find the
 /// recorded artifacts for replay.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,25 +227,26 @@ pub fn score_result(result: &PipelineResult, defect: &SeededDefect) -> RunOutcom
     let mut caught_by_reviewer = false;
     let mut reviewer_issues = 0usize;
     if let Some(j) = reviewer_json
-        && let Ok(rv) = serde_json::from_str::<ReviewVerdict>(j) {
-            reviewer_issues = rv.issues.len();
-            let issue_hit = rv
-                .issues
-                .iter()
-                .any(|i| i.category == cat && kw_match(&i.description, kw))
-                || rv.feedback.as_ref().is_some_and(|f| {
-                    f.critical_issues
-                        .iter()
-                        .any(|i| i.category == cat && kw_match(&i.description, kw))
-                });
-            // Fuzzy recall: keyword appearing in the overall assessment still counts.
-            let assess_hit = kw.as_ref().is_some_and(|k| {
-                rv.overall_assessment
-                    .to_lowercase()
-                    .contains(&k.to_lowercase())
+        && let Ok(rv) = serde_json::from_str::<ReviewVerdict>(j)
+    {
+        reviewer_issues = rv.issues.len();
+        let issue_hit = rv
+            .issues
+            .iter()
+            .any(|i| i.category == cat && kw_match(&i.description, kw))
+            || rv.feedback.as_ref().is_some_and(|f| {
+                f.critical_issues
+                    .iter()
+                    .any(|i| i.category == cat && kw_match(&i.description, kw))
             });
-            caught_by_reviewer = issue_hit || assess_hit;
-        }
+        // Fuzzy recall: keyword appearing in the overall assessment still counts.
+        let assess_hit = kw.as_ref().is_some_and(|k| {
+            rv.overall_assessment
+                .to_lowercase()
+                .contains(&k.to_lowercase())
+        });
+        caught_by_reviewer = issue_hit || assess_hit;
+    }
 
     let mut caught_by_red = false;
     let mut red_challenges = 0usize;
@@ -255,24 +255,25 @@ pub fn score_result(result: &PipelineResult, defect: &SeededDefect) -> RunOutcom
         && let (Ok(rc), Ok(rv)) = (
             serde_json::from_str::<RedChallenge>(rj),
             serde_json::from_str::<ReviewVerdict>(vj),
-        ) {
-            red_challenges = rc.challenges.len();
-            let upheld: HashSet<String> = rv
-                .red_reconciliation
-                .as_ref()
-                .map(|rs| {
-                    rs.iter()
-                        .filter(|r| r.disposition == RedDisposition::Upheld)
-                        .map(|r| r.challenge_id.clone())
-                        .collect()
-                })
-                .unwrap_or_default();
-            red_upheld = upheld.len();
-            caught_by_red = rc
-                .challenges
-                .iter()
-                .any(|c| c.category == cat && kw_match(&c.claim, kw) && upheld.contains(&c.id));
-        }
+        )
+    {
+        red_challenges = rc.challenges.len();
+        let upheld: HashSet<String> = rv
+            .red_reconciliation
+            .as_ref()
+            .map(|rs| {
+                rs.iter()
+                    .filter(|r| r.disposition == RedDisposition::Upheld)
+                    .map(|r| r.challenge_id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        red_upheld = upheld.len();
+        caught_by_red = rc
+            .challenges
+            .iter()
+            .any(|c| c.category == cat && kw_match(&c.claim, kw) && upheld.contains(&c.id));
+    }
 
     RunOutcome {
         caught: caught_by_red || caught_by_reviewer,

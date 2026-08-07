@@ -88,9 +88,10 @@ pub fn classify_failure(
 
     // Check for validation errors (provided by caller)
     if let Some(fields) = validation_errors
-        && !fields.is_empty() {
-            return OutputFailure::ValidationError { fields };
-        }
+        && !fields.is_empty()
+    {
+        return OutputFailure::ValidationError { fields };
+    }
 
     // Check for parse errors (provided by caller)
     if let Some(detail) = parse_error {
@@ -121,43 +122,46 @@ pub fn validate_detailed(json_str: &str, schema: &Value) -> Result<(), Vec<Strin
 
     // Check required fields
     if let Some(required) = schema.get("required").and_then(|v| v.as_array())
-        && let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
-            for field in required {
-                if let Some(field_name) = field.as_str() {
-                    if !props.contains_key(field_name) {
-                        continue;
-                    }
-                    // Check if field is present in artifact
-                    if artifact.get(field_name).is_none() {
-                        errors.push(format!("missing required field '{}'", field_name));
-                    }
+        && let Some(props) = schema.get("properties").and_then(|v| v.as_object())
+    {
+        for field in required {
+            if let Some(field_name) = field.as_str() {
+                if !props.contains_key(field_name) {
+                    continue;
+                }
+                // Check if field is present in artifact
+                if artifact.get(field_name).is_none() {
+                    errors.push(format!("missing required field '{}'", field_name));
                 }
             }
         }
+    }
 
     // Check type mismatches for properties
     if let Some(properties) = schema.get("properties").and_then(|v| v.as_object())
-        && let Some(obj) = artifact.as_object() {
-            for (key, prop_schema) in properties {
-                if let Some(actual) = obj.get(key)
-                    && let Some(expected_type) = prop_schema.get("type").and_then(|v| v.as_str()) {
-                        let actual_type = match actual {
-                            Value::String(_) => "string",
-                            Value::Number(_) => "number",
-                            Value::Bool(_) => "boolean",
-                            Value::Null => "null",
-                            Value::Array(_) => "array",
-                            Value::Object(_) => "object",
-                        };
-                        if actual_type != expected_type {
-                            errors.push(format!(
-                                "field '{}' expected type '{}' but got '{}'",
-                                key, expected_type, actual_type
-                            ));
-                        }
-                    }
+        && let Some(obj) = artifact.as_object()
+    {
+        for (key, prop_schema) in properties {
+            if let Some(actual) = obj.get(key)
+                && let Some(expected_type) = prop_schema.get("type").and_then(|v| v.as_str())
+            {
+                let actual_type = match actual {
+                    Value::String(_) => "string",
+                    Value::Number(_) => "number",
+                    Value::Bool(_) => "boolean",
+                    Value::Null => "null",
+                    Value::Array(_) => "array",
+                    Value::Object(_) => "object",
+                };
+                if actual_type != expected_type {
+                    errors.push(format!(
+                        "field '{}' expected type '{}' but got '{}'",
+                        key, expected_type, actual_type
+                    ));
+                }
             }
         }
+    }
 
     if errors.is_empty() {
         Ok(())

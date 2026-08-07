@@ -1,10 +1,10 @@
 //! Slash command menu overlay.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
 use crate::display::state::AppState;
 use crate::display::theme;
@@ -20,7 +20,12 @@ pub fn render_command_menu(frame: &mut Frame, area: Rect, state: &AppState) {
     let x = (area.width - menu_width) / 2;
     let y = area.height.saturating_sub(menu_height + 3);
 
-    let modal_area = Rect { x, y, width: menu_width, height: menu_height };
+    let modal_area = Rect {
+        x,
+        y,
+        width: menu_width,
+        height: menu_height,
+    };
 
     frame.render_widget(Clear, modal_area);
 
@@ -43,13 +48,19 @@ pub fn render_command_menu(frame: &mut Frame, area: Rect, state: &AppState) {
 
     // Filter commands by current input
     let filter = state.command_filter.trim_start_matches('/');
-    let filtered: Vec<_> = state.commands.iter()
+    let filtered: Vec<_> = state
+        .commands
+        .iter()
         .filter(|c| filter.is_empty() || c.name.contains(filter) || c.description.contains(filter))
         .collect();
 
     // Show commands
     for (i, cmd) in filtered.iter().enumerate().take(max_visible) {
-        let marker = if i == state.command_selected { "●" } else { " " };
+        let marker = if i == state.command_selected {
+            "●"
+        } else {
+            " "
+        };
         let color = if i == state.command_selected {
             theme::primary()
         } else {
@@ -78,7 +89,9 @@ pub fn render_command_menu(frame: &mut Frame, area: Rect, state: &AppState) {
 /// Get the selected command from state.
 pub fn get_selected_command(state: &AppState) -> Option<String> {
     let filter = state.command_filter.trim_start_matches('/');
-    let filtered: Vec<_> = state.commands.iter()
+    let filtered: Vec<_> = state
+        .commands
+        .iter()
         .filter(|c| filter.is_empty() || c.name.contains(filter) || c.description.contains(filter))
         .collect();
 
@@ -92,7 +105,8 @@ mod tests {
     #[test]
     fn get_selected_command_test() {
         let config = crate::config::NikiConfig::default();
-        let mut state = crate::display::state::AppState::new("test".to_string(), config, ".".into());
+        let mut state =
+            crate::display::state::AppState::new("test".to_string(), config, ".".into());
         state.command_filter = "/".to_string();
         state.command_selected = 0;
         let cmd = get_selected_command(&state);
@@ -103,7 +117,8 @@ mod tests {
     #[test]
     fn get_selected_command_filtered() {
         let config = crate::config::NikiConfig::default();
-        let mut state = crate::display::state::AppState::new("test".to_string(), config, ".".into());
+        let mut state =
+            crate::display::state::AppState::new("test".to_string(), config, ".".into());
         state.command_filter = "/co".to_string();
         state.command_selected = 0;
         let cmd = get_selected_command(&state);

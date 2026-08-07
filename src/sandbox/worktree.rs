@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::artifacts::types::AgentRole;
 use crate::config::{DockerConfig, SecurityPolicyConfig};
-use crate::sandbox::{check_command_policy, ExecOutput, Sandbox};
+use crate::sandbox::{ExecOutput, Sandbox, check_command_policy};
 
 /// Lightweight sandbox using a `git worktree` of the project plus local
 /// `std::process::Command` execution. No Docker daemon required.
@@ -125,11 +125,13 @@ impl Sandbox for WorktreeSandbox {
                     let mut edited = content.clone();
                     let mut file_changed = false;
                     for (i, block) in edit_blocks.iter().enumerate() {
-                        if let Some(new_content) = crate::sandbox::edit_format::apply_single_edit_block(
-                            &edited,
-                            block.search.as_str(),
-                            block.replace.as_str(),
-                        )? {
+                        if let Some(new_content) =
+                            crate::sandbox::edit_format::apply_single_edit_block(
+                                &edited,
+                                block.search.as_str(),
+                                block.replace.as_str(),
+                            )?
+                        {
                             edited = new_content;
                             unmatched.retain(|&idx| idx != i);
                             file_changed = true;
@@ -282,9 +284,10 @@ fn find_files_in_worktree(wt: &Path) -> Result<Vec<(std::path::PathBuf, String)>
     for file in files.lines() {
         let path = wt.join(file);
         if path.is_file()
-            && let Ok(content) = std::fs::read_to_string(&path) {
-                result.push((path, content));
-            }
+            && let Ok(content) = std::fs::read_to_string(&path)
+        {
+            result.push((path, content));
+        }
     }
 
     Ok(result)

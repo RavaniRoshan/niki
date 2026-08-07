@@ -1,23 +1,33 @@
 //! Permission request modal overlay.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
 use crate::display::state::{AppState, PermissionRequest};
 use crate::display::theme;
 
 /// Render the permission modal overlay.
-pub fn render_permission_modal(frame: &mut Frame, request: &PermissionRequest, area: Rect, state: &AppState) {
+pub fn render_permission_modal(
+    frame: &mut Frame,
+    request: &PermissionRequest,
+    area: Rect,
+    state: &AppState,
+) {
     let modal_width = 60u16.min(area.width.saturating_sub(4));
     let modal_height = 11u16;
 
     let x = (area.width - modal_width) / 2;
     let y = (area.height - modal_height) / 2;
 
-    let modal_area = Rect { x, y, width: modal_width, height: modal_height };
+    let modal_area = Rect {
+        x,
+        y,
+        width: modal_width,
+        height: modal_height,
+    };
 
     // Clear the area (dim background)
     frame.render_widget(Clear, modal_area);
@@ -45,7 +55,9 @@ pub fn render_permission_modal(frame: &mut Frame, request: &PermissionRequest, a
         Line::from(""),
         Line::from(Span::styled(
             format!("  $ {}", request.command),
-            Style::default().fg(theme::primary()).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::primary())
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
@@ -53,7 +65,10 @@ pub fn render_permission_modal(frame: &mut Frame, request: &PermissionRequest, a
             theme::text(),
         )),
         Line::from(""),
-        Line::from(Span::styled("[Enter] Confirm  [Esc] Deny", theme::text_dim())),
+        Line::from(Span::styled(
+            "[Enter] Confirm  [Esc] Deny",
+            theme::text_dim(),
+        )),
     ];
 
     frame.render_widget(Paragraph::new(lines), inner);

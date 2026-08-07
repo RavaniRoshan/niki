@@ -51,13 +51,22 @@ impl MessageRenderConfig {
 }
 
 /// Render a user message.
-pub fn render_user_message(content: &str, timestamp: &DateTime<Utc>, config: &MessageRenderConfig) -> Vec<Line<'static>> {
+pub fn render_user_message(
+    content: &str,
+    timestamp: &DateTime<Utc>,
+    config: &MessageRenderConfig,
+) -> Vec<Line<'static>> {
     let mut lines = vec![];
 
     // Header: ● user (gold bullet)
     lines.push(Line::from(vec![
         Span::styled("● ", Style::default().fg(config.role_user_color)),
-        Span::styled("user", Style::default().fg(config.role_user_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "user",
+            Style::default()
+                .fg(config.role_user_color)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]));
 
     // Separator
@@ -71,7 +80,7 @@ pub fn render_user_message(content: &str, timestamp: &DateTime<Utc>, config: &Me
         lines.push(Line::from(Span::styled(
             timestamp.format("%H:%M:%S").to_string(),
             Style::default().fg(config.text_dim_color),
-       )));
+        )));
     }
 
     lines
@@ -115,7 +124,11 @@ pub fn render_assistant_message(
 }
 
 /// Render a system message.
-pub fn render_system_message(content: &str, level: SystemLevel, config: &MessageRenderConfig) -> Vec<Line<'static>> {
+pub fn render_system_message(
+    content: &str,
+    level: SystemLevel,
+    config: &MessageRenderConfig,
+) -> Vec<Line<'static>> {
     let color = match level {
         SystemLevel::Info => config.text_dim_color,
         SystemLevel::Warning => config.warning_color,
@@ -138,7 +151,10 @@ pub fn render_system_message(content: &str, level: SystemLevel, config: &Message
 }
 
 /// Render a tool call.
-pub fn render_tool_call(tool_call: &ToolCallDisplay, config: &MessageRenderConfig) -> Vec<Line<'static>> {
+pub fn render_tool_call(
+    tool_call: &ToolCallDisplay,
+    config: &MessageRenderConfig,
+) -> Vec<Line<'static>> {
     let mut lines = vec![];
 
     let (icon, color) = match tool_call.status {
@@ -176,15 +192,11 @@ pub fn render_message(
     config: &MessageRenderConfig,
 ) -> Vec<Line<'static>> {
     match role {
-        MessageRole::User => {
-            render_user_message(content, &Utc::now(), config)
-        }
+        MessageRole::User => render_user_message(content, &Utc::now(), config),
         MessageRole::Assistant(agent_role) => {
             render_assistant_message(content, agent_role, tool_calls, config)
         }
-        MessageRole::System(level) => {
-            render_system_message(content, level, config)
-        }
+        MessageRole::System(level) => render_system_message(content, level, config),
     }
 }
 
@@ -307,7 +319,12 @@ mod tests {
         let lines = render_message("Hi", MessageRole::User, &[], &config);
         assert!(lines.len() >= 3);
 
-        let lines = render_message("Working", MessageRole::Assistant(AgentRole::Coder), &[], &config);
+        let lines = render_message(
+            "Working",
+            MessageRole::Assistant(AgentRole::Coder),
+            &[],
+            &config,
+        );
         assert!(lines.len() >= 3);
 
         let lines = render_message("Done", MessageRole::System(SystemLevel::Info), &[], &config);

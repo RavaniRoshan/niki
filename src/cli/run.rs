@@ -243,20 +243,21 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
 
                 let ids = containers.lock().await.clone();
                 if !ids.is_empty()
-                    && let Ok(docker) = connect_container_runtime().await {
-                        for id in ids {
-                            // force:true stops the container if still running, then removes it.
-                            let _ = docker
-                                .remove_container(
-                                    &id,
-                                    Some(bollard::container::RemoveContainerOptions {
-                                        force: true,
-                                        ..Default::default()
-                                    }),
-                                )
-                                .await;
-                        }
+                    && let Ok(docker) = connect_container_runtime().await
+                {
+                    for id in ids {
+                        // force:true stops the container if still running, then removes it.
+                        let _ = docker
+                            .remove_container(
+                                &id,
+                                Some(bollard::container::RemoveContainerOptions {
+                                    force: true,
+                                    ..Default::default()
+                                }),
+                            )
+                            .await;
                     }
+                }
 
                 // Persist a cancelled task record so status commands reflect reality.
                 let mut rec =
@@ -406,12 +407,13 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // separate git worktree or a cloud VM), so `working_tree_diff` on the host
     // would be empty. Apply the sandbox's diff to the host working tree first; the
     // Docker backend already wrote through the bind mount and skips this step.
-    if !uses_docker && !result.final_diff.trim().is_empty()
+    if !uses_docker
+        && !result.final_diff.trim().is_empty()
         && let Err(e) =
             crate::output::git::apply_diff_to_working_tree(&project_dir, &result.final_diff)
-        {
-            eprintln!("Warning: could not apply sandbox diff to host: {}", e);
-        }
+    {
+        eprintln!("Warning: could not apply sandbox diff to host: {}", e);
+    }
 
     // Create the git branch + commit (no-op when there is no diff).
     if let Err(e) = crate::output::git::create_branch_and_commit(
@@ -429,21 +431,21 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // Skip when there was no diff (no branch was created), so a no-op run isn't
     // misreported as NON-HERMETIC.
     if !result.final_diff.trim().is_empty()
-        && let Some(pre) = &pre_snapshot {
-            match crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string(), false)
-            {
-                Ok(proof) => {
-                    if let Err(e) = std::fs::write(
-                        task_dir.join("safety_proof.json"),
-                        serde_json::to_string_pretty(&proof)?,
-                    ) {
-                        eprintln!("Warning: could not write safety_proof.json: {}", e);
-                    }
-                    result.safety_proof = Some(proof);
+        && let Some(pre) = &pre_snapshot
+    {
+        match crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string(), false) {
+            Ok(proof) => {
+                if let Err(e) = std::fs::write(
+                    task_dir.join("safety_proof.json"),
+                    serde_json::to_string_pretty(&proof)?,
+                ) {
+                    eprintln!("Warning: could not write safety_proof.json: {}", e);
                 }
-                Err(e) => eprintln!("Warning: could not compute safety proof: {}", e),
+                result.safety_proof = Some(proof);
             }
+            Err(e) => eprintln!("Warning: could not compute safety proof: {}", e),
         }
+    }
 
     // Generate the markdown report (now includes the hermetic safety proof).
     if let Err(e) = crate::output::report::generate_report(&task, &config, &result) {

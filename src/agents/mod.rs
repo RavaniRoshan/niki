@@ -9,17 +9,17 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 pub mod coder;
+pub mod errors;
 pub mod planner;
 pub mod reviewer;
 pub mod tester;
-pub mod errors;
 
 /// Full-jitter exponential backoff delay.
 fn jitter_delay(attempt: u32, base_ms: u64, max_ms: u64) -> u64 {
     let exp = 2u64.saturating_pow(attempt);
     let cap = base_ms.saturating_mul(exp).min(max_ms);
     // full jitter: random in [0, cap]
-    
+
     fastrand::u64(0..=cap)
 }
 
@@ -244,9 +244,9 @@ pub async fn run_agent(
                             schema_path_resolved.to_str().unwrap_or(schema_path),
                         )
                         .is_ok()
-                        {
-                            break; // Fixed by local repair
-                        }
+                    {
+                        break; // Fixed by local repair
+                    }
                 }
                 Err(_) => {} // Local repair failed, will re-prompt
             }
@@ -282,12 +282,14 @@ pub async fn run_agent(
                     }
                     // Update usage
                     usage = Some(TokenUsage {
-                        input_tokens: response.usage.input_tokens.max(
-                            usage.map(|x| x.input_tokens).unwrap_or(0),
-                        ),
-                        output_tokens: response.usage.output_tokens.max(
-                            usage.map(|x| x.output_tokens).unwrap_or(0),
-                        ),
+                        input_tokens: response
+                            .usage
+                            .input_tokens
+                            .max(usage.map(|x| x.input_tokens).unwrap_or(0)),
+                        output_tokens: response
+                            .usage
+                            .output_tokens
+                            .max(usage.map(|x| x.output_tokens).unwrap_or(0)),
                     });
                 }
                 Err(e) => {

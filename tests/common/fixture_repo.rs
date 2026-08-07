@@ -53,7 +53,11 @@ pub fn create_fixture_repo() -> FixtureRepo {
         "mod list;\n\nfn main() {\n    println!(\"Hello\");\n}\n",
     )
     .unwrap();
-    std::fs::write(path.join("README.md"), "# Test Project\n\nA fixture for hermetic tests.\n").unwrap();
+    std::fs::write(
+        path.join("README.md"),
+        "# Test Project\n\nA fixture for hermetic tests.\n",
+    )
+    .unwrap();
 
     git(path, &["add", "-A"]);
     git(path, &["commit", "-q", "-m", "initial commit"]);
@@ -75,7 +79,8 @@ impl FixtureRepoBuilder {
     }
 
     pub fn add_file(mut self, path: &str, content: &str) -> Self {
-        self.source_files.push((path.to_string(), content.to_string()));
+        self.source_files
+            .push((path.to_string(), content.to_string()));
         self
     }
 

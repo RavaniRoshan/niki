@@ -17,14 +17,12 @@ use crate::display::theme;
 use crate::display::tui::DisplayEvent;
 
 /// View mode — chat or page-based.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewMode {
     #[default]
     Chat,
     Page(PageId),
 }
-
 
 /// Page identifiers (re-exported from pages module for convenience).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -61,15 +59,13 @@ impl PageId {
 }
 
 /// Input modes (matching Claude Code / Kimi Code).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InputMode {
     #[default]
     Insert,
     Command,
     Shell,
 }
-
 
 /// Result of handling a key in the input system.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -396,8 +392,7 @@ pub enum StageStatus {
 }
 
 /// Run state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RunState {
     #[default]
     Idle,
@@ -407,7 +402,6 @@ pub enum RunState {
     Failed,
     Cancelled,
 }
-
 
 impl AppState {
     /// Create a new AppState with default values.
@@ -539,8 +533,7 @@ impl AppState {
                     theme::warning(),
                 ));
                 for i in &issues {
-                    self.notes
-                        .push((format!("  {}", i), theme::text_dim()));
+                    self.notes.push((format!("  {}", i), theme::text_dim()));
                 }
                 self.run_state = RunState::AwaitingReviewer;
             }
@@ -568,7 +561,13 @@ impl AppState {
                 cost_usd,
                 latency_ms,
             } => {
-                if let Some(s) = self.pipeline.stages.iter_mut().rev().find(|s| s.status == StageStatus::Running) {
+                if let Some(s) = self
+                    .pipeline
+                    .stages
+                    .iter_mut()
+                    .rev()
+                    .find(|s| s.status == StageStatus::Running)
+                {
                     s.input_tokens = input_tokens;
                     s.output_tokens = output_tokens;
                     s.cost_usd = cost_usd;

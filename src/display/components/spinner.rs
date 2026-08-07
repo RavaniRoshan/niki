@@ -21,7 +21,9 @@ impl SpinnerStyle {
         match self {
             SpinnerStyle::Moon => &["◐", "◓", "◑", "◒"],
             SpinnerStyle::Dots => &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-            SpinnerStyle::Bars => &["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃"],
+            SpinnerStyle::Bars => &[
+                "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃",
+            ],
             SpinnerStyle::Arrow => &["←", "↖", "↑", "↗", "→", "↘", "↓", "↙"],
         }
     }
@@ -73,7 +75,10 @@ impl Spinner {
     pub fn render_with_label(&self, label: &str) -> Vec<Span<'_>> {
         vec![
             self.render(),
-            Span::styled(format!(" {}", label), Style::default().fg(theme::text_dim())),
+            Span::styled(
+                format!(" {}", label),
+                Style::default().fg(theme::text_dim()),
+            ),
         ]
     }
 
@@ -116,7 +121,10 @@ impl SpinnerState {
 
     /// Render as a Span.
     pub fn render(&self) -> Span<'_> {
-        Span::styled(self.frame().to_string(), Style::default().fg(theme::claude()))
+        Span::styled(
+            self.frame().to_string(),
+            Style::default().fg(theme::claude()),
+        )
     }
 }
 
@@ -177,7 +185,12 @@ mod tests {
 
     #[test]
     fn spinner_all_styles() {
-        for style in [SpinnerStyle::Moon, SpinnerStyle::Dots, SpinnerStyle::Bars, SpinnerStyle::Arrow] {
+        for style in [
+            SpinnerStyle::Moon,
+            SpinnerStyle::Dots,
+            SpinnerStyle::Bars,
+            SpinnerStyle::Arrow,
+        ] {
             let s = Spinner::new(style);
             assert!(!s.current_frame().is_empty());
         }

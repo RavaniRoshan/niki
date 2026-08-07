@@ -14,9 +14,7 @@ fn policy_allowed_command_passes() {
 #[test]
 fn policy_deny_list_blocks_dangerous_commands() {
     let policy = SecurityPolicyConfig::default();
-    assert!(
-        check_command_policy(&["git", "push", "--force", "origin", "main"], &policy).is_err()
-    );
+    assert!(check_command_policy(&["git", "push", "--force", "origin", "main"], &policy).is_err());
     assert!(check_command_policy(&["rm", "-rf", "/"], &policy).is_err());
     assert!(check_command_policy(&["mkfs", "/dev/sda"], &policy).is_err());
     assert!(check_command_policy(&["dd", "if=/dev/zero", "of=/dev/sda"], &policy).is_err());
@@ -97,8 +95,16 @@ fn deny_error_message_contains_context() {
     let policy = SecurityPolicyConfig::default();
     let err = check_command_policy(&["rm", "-rf", "/"], &policy).unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("denied"), "error should mention 'denied': {}", msg);
-    assert!(msg.contains("rm -rf /"), "error should include the command: {}", msg);
+    assert!(
+        msg.contains("denied"),
+        "error should mention 'denied': {}",
+        msg
+    );
+    assert!(
+        msg.contains("rm -rf /"),
+        "error should include the command: {}",
+        msg
+    );
 }
 
 #[test]

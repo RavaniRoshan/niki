@@ -11,7 +11,11 @@ fn redact_secrets_replaces_bearer_token() {
         "bearer token should be redacted: {}",
         result
     );
-    assert!(result.contains("[REDACTED]"), "result should contain [REDACTED]: {}", result);
+    assert!(
+        result.contains("[REDACTED]"),
+        "result should contain [REDACTED]: {}",
+        result
+    );
 }
 
 #[test]
@@ -23,7 +27,11 @@ fn redact_secrets_replaces_api_key() {
         "API key should be redacted: {}",
         result
     );
-    assert!(result.contains("[REDACTED]"), "result should contain [REDACTED]: {}", result);
+    assert!(
+        result.contains("[REDACTED]"),
+        "result should contain [REDACTED]: {}",
+        result
+    );
 }
 
 #[test]
@@ -52,8 +60,16 @@ fn redact_secrets_replaces_github_token() {
 fn redact_secrets_preserves_context() {
     let input = "HTTP 401: {\"error\":{\"message\":\"Invalid API key\"}}";
     let result = redact_secrets(input);
-    assert!(result.contains("HTTP 401"), "should preserve status: {}", result);
-    assert!(result.contains("Invalid API key"), "should preserve message: {}", result);
+    assert!(
+        result.contains("HTTP 401"),
+        "should preserve status: {}",
+        result
+    );
+    assert!(
+        result.contains("Invalid API key"),
+        "should preserve message: {}",
+        result
+    );
 }
 
 #[test]
@@ -98,7 +114,8 @@ fn redact_secrets_ignores_short_strings() {
 
 #[test]
 fn redact_secrets_replaces_authorization_header() {
-    let input = "authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0";
+    let input =
+        "authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0";
     let result = redact_secrets(input);
     assert!(
         result.contains("[REDACTED]"),

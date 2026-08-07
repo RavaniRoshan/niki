@@ -108,7 +108,9 @@ impl Page for ArtifactsPage {
         for (i, (name, desc, is_file)) in entries.iter().enumerate() {
             let is_selected = i == self.selected;
             let style = if is_selected {
-                Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme::fg_color())
+                    .add_modifier(Modifier::BOLD)
             } else if *is_file {
                 Style::default().fg(theme::fg_color())
             } else {

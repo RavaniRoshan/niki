@@ -70,7 +70,9 @@ impl Page for PipelinePage {
             Span::styled("  MODE ", Style::default().fg(theme::fg_dim())),
             Span::styled(
                 mode,
-                Style::default().fg(theme::fg_color()).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::fg_color())
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("   SECURITY ", Style::default().fg(theme::fg_dim())),
             Span::styled(
@@ -193,18 +195,24 @@ impl Page for PipelinePage {
             let truncated_desc = theme::truncate_str(desc, desc_width);
 
             let card_lines = vec![
-                Line::from(vec![
-                    Span::styled(
-                        format!(" {} {}", glyph, name),
-                        Style::default()
-                            .fg(role_color)
-                            .add_modifier(if is_selected { Modifier::BOLD } else { Modifier::empty() }),
-                    ),
-                ]),
-                Line::from(vec![
-                    Span::styled(format!(" {} {}", status_glyph, status_glyph), Style::default().fg(status_color)),
-                ]),
-                Line::from(Span::styled(format!(" {}", truncated_desc), Style::default().fg(theme::fg_dim()))),
+                Line::from(vec![Span::styled(
+                    format!(" {} {}", glyph, name),
+                    Style::default()
+                        .fg(role_color)
+                        .add_modifier(if is_selected {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                )]),
+                Line::from(vec![Span::styled(
+                    format!(" {} {}", status_glyph, status_glyph),
+                    Style::default().fg(status_color),
+                )]),
+                Line::from(Span::styled(
+                    format!(" {}", truncated_desc),
+                    Style::default().fg(theme::fg_dim()),
+                )),
                 Line::from(Span::styled(
                     format!(" provider: {}", cfg.provider),
                     Style::default().fg(theme::fg_color()),
@@ -216,10 +224,7 @@ impl Page for PipelinePage {
                 .border_style(border_style)
                 .style(Style::default().bg(theme::bg_elevated()));
 
-            frame.render_widget(
-                Paragraph::new(card_lines).block(card_block),
-                card_area,
-            );
+            frame.render_widget(Paragraph::new(card_lines).block(card_block), card_area);
         }
 
         // Agent models — highlight selected stage
@@ -272,7 +277,7 @@ impl Page for PipelinePage {
                 state.current_page = PageId::Run;
                 true
             }
-             KeyCode::Char('j') | KeyCode::Down => {
+            KeyCode::Char('j') | KeyCode::Down => {
                 let primary_roles = [
                     crate::artifacts::types::AgentRole::Planner,
                     crate::artifacts::types::AgentRole::Coder,

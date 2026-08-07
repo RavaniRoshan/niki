@@ -1,10 +1,10 @@
 //! @ file autocomplete overlay.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
 use crate::display::state::AppState;
 use crate::display::theme;
@@ -28,7 +28,12 @@ pub fn render_autocomplete(frame: &mut Frame, area: Rect, state: &AppState) {
     let x = (area.width - menu_width) / 2;
     let y = area.height.saturating_sub(menu_height + 3);
 
-    let modal_area = Rect { x, y, width: menu_width, height: menu_height };
+    let modal_area = Rect {
+        x,
+        y,
+        width: menu_width,
+        height: menu_height,
+    };
 
     frame.render_widget(Clear, modal_area);
 
@@ -48,7 +53,11 @@ pub fn render_autocomplete(frame: &mut Frame, area: Rect, state: &AppState) {
 
     let mut lines = vec![];
     for (i, candidate) in autocomplete.candidates.iter().enumerate().take(visible) {
-        let marker = if i == autocomplete.selected { "●" } else { " " };
+        let marker = if i == autocomplete.selected {
+            "●"
+        } else {
+            " "
+        };
         let color = if i == autocomplete.selected {
             theme::primary()
         } else {
@@ -56,7 +65,10 @@ pub fn render_autocomplete(frame: &mut Frame, area: Rect, state: &AppState) {
         };
         lines.push(Line::from(vec![
             Span::styled(format!("{} ", marker), color),
-            Span::styled(candidate, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                candidate,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
         ]));
     }
 
@@ -66,9 +78,11 @@ pub fn render_autocomplete(frame: &mut Frame, area: Rect, state: &AppState) {
 /// Build autocomplete candidates for a given prefix.
 pub fn build_candidates(prefix: &str, project_files: &[String]) -> Vec<String> {
     let prefix_clean = prefix.trim_start_matches('@');
-    project_files.iter()
+    project_files
+        .iter()
         .filter(|f| f.contains(prefix_clean))
-        .take(20).cloned()
+        .take(20)
+        .cloned()
         .collect()
 }
 

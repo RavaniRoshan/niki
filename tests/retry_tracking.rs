@@ -1,7 +1,7 @@
 mod common;
 
-use niki::orchestrator::state::{StageMetric, TaskRecord, TaskStatus};
 use niki::artifacts::types::AgentRole;
+use niki::orchestrator::state::{StageMetric, TaskRecord, TaskStatus};
 use uuid::Uuid;
 
 #[test]
@@ -83,8 +83,16 @@ fn stage_metric_serializes_all_fields() {
         ttft_ms: 120,
     };
     let json = serde_json::to_string(&metric).unwrap();
-    assert!(json.contains("\"retry_count\":3"), "JSON should include retry_count: {}", json);
-    assert!(json.contains("\"ttft_ms\":120"), "JSON should include ttft_ms: {}", json);
+    assert!(
+        json.contains("\"retry_count\":3"),
+        "JSON should include retry_count: {}",
+        json
+    );
+    assert!(
+        json.contains("\"ttft_ms\":120"),
+        "JSON should include ttft_ms: {}",
+        json
+    );
 }
 
 #[test]
@@ -180,8 +188,14 @@ fn task_record_serializes_with_new_fields() {
     record.add_metrics(&[metric]);
 
     let json = serde_json::to_string(&record).unwrap();
-    assert!(json.contains("\"total_retry_count\":2"), "JSON should include total_retry_count");
-    assert!(json.contains("\"max_ttft_ms\":300"), "JSON should include max_ttft_ms");
+    assert!(
+        json.contains("\"total_retry_count\":2"),
+        "JSON should include total_retry_count"
+    );
+    assert!(
+        json.contains("\"max_ttft_ms\":300"),
+        "JSON should include max_ttft_ms"
+    );
 }
 
 #[test]

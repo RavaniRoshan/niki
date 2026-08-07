@@ -114,7 +114,9 @@ impl Session {
 
     /// Restore to a checkpoint by index.
     pub fn restore_checkpoint(&mut self, index: usize) -> Result<()> {
-        let checkpoint = self.checkpoints.get(index)
+        let checkpoint = self
+            .checkpoints
+            .get(index)
             .context("Checkpoint not found")?;
         self.messages = checkpoint.messages.clone();
         self.current_checkpoint = Some(index);
@@ -197,9 +199,10 @@ impl SessionManager {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("json")
                 && let Ok(json) = fs::read_to_string(&path)
-                    && let Ok(session) = serde_json::from_str::<Session>(&json) {
-                        sessions.push(session);
-                    }
+                && let Ok(session) = serde_json::from_str::<Session>(&json)
+            {
+                sessions.push(session);
+            }
         }
 
         sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -229,7 +232,11 @@ mod tests {
     #[test]
     fn session_new() {
         let dir = TempDir::new().unwrap();
-        let session = Session::new(dir.path().to_path_buf(), "claude-sonnet-4".to_string(), "anthropic".to_string());
+        let session = Session::new(
+            dir.path().to_path_buf(),
+            "claude-sonnet-4".to_string(),
+            "anthropic".to_string(),
+        );
         assert_eq!(session.messages.len(), 0);
         assert_eq!(session.title, "New Session");
     }
@@ -237,7 +244,11 @@ mod tests {
     #[test]
     fn session_add_message() {
         let dir = TempDir::new().unwrap();
-        let mut session = Session::new(dir.path().to_path_buf(), "claude-sonnet-4".to_string(), "anthropic".to_string());
+        let mut session = Session::new(
+            dir.path().to_path_buf(),
+            "claude-sonnet-4".to_string(),
+            "anthropic".to_string(),
+        );
         session.add_message("user", "Fix the login bug");
         assert_eq!(session.messages.len(), 1);
         assert_eq!(session.title, "Fix the login bug");
@@ -246,7 +257,11 @@ mod tests {
     #[test]
     fn session_title_truncation() {
         let dir = TempDir::new().unwrap();
-        let mut session = Session::new(dir.path().to_path_buf(), "claude-sonnet-4".to_string(), "anthropic".to_string());
+        let mut session = Session::new(
+            dir.path().to_path_buf(),
+            "claude-sonnet-4".to_string(),
+            "anthropic".to_string(),
+        );
         let long_msg = "a".repeat(100);
         session.add_message("user", &long_msg);
         assert!(session.title.ends_with("..."));
@@ -256,7 +271,11 @@ mod tests {
     #[test]
     fn session_checkpoints() {
         let dir = TempDir::new().unwrap();
-        let mut session = Session::new(dir.path().to_path_buf(), "claude-sonnet-4".to_string(), "anthropic".to_string());
+        let mut session = Session::new(
+            dir.path().to_path_buf(),
+            "claude-sonnet-4".to_string(),
+            "anthropic".to_string(),
+        );
         session.add_message("user", "First message");
         session.create_checkpoint("after first", None);
         session.add_message("assistant", "Response");
@@ -274,7 +293,11 @@ mod tests {
         let manager = SessionManager::new(dir.path());
         manager.init().unwrap();
 
-        let mut session = Session::new(dir.path().to_path_buf(), "claude-sonnet-4".to_string(), "anthropic".to_string());
+        let mut session = Session::new(
+            dir.path().to_path_buf(),
+            "claude-sonnet-4".to_string(),
+            "anthropic".to_string(),
+        );
         session.add_message("user", "Test message");
         manager.save(&session).unwrap();
 
@@ -289,11 +312,19 @@ mod tests {
         let manager = SessionManager::new(dir.path());
         manager.init().unwrap();
 
-        let mut s1 = Session::new(dir.path().to_path_buf(), "claude-sonnet-4".to_string(), "anthropic".to_string());
+        let mut s1 = Session::new(
+            dir.path().to_path_buf(),
+            "claude-sonnet-4".to_string(),
+            "anthropic".to_string(),
+        );
         s1.add_message("user", "Session 1");
         manager.save(&s1).unwrap();
 
-        let mut s2 = Session::new(dir.path().to_path_buf(), "gpt-4o".to_string(), "openai".to_string());
+        let mut s2 = Session::new(
+            dir.path().to_path_buf(),
+            "gpt-4o".to_string(),
+            "openai".to_string(),
+        );
         s2.add_message("user", "Session 2");
         manager.save(&s2).unwrap();
 
@@ -304,7 +335,11 @@ mod tests {
     #[test]
     fn session_record_usage() {
         let dir = TempDir::new().unwrap();
-        let mut session = Session::new(dir.path().to_path_buf(), "claude-sonnet-4".to_string(), "anthropic".to_string());
+        let mut session = Session::new(
+            dir.path().to_path_buf(),
+            "claude-sonnet-4".to_string(),
+            "anthropic".to_string(),
+        );
         session.record_usage(1000, 500, 0.015);
         session.record_usage(2000, 1000, 0.03);
         assert_eq!(session.total_input_tokens, 3000);
