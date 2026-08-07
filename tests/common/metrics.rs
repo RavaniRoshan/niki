@@ -24,7 +24,7 @@ pub fn assert_has_metric_for(metrics: &[StageMetric], role_name: &str) {
     );
 }
 
-pub fn find_metric<'a>(metrics: &'a [StageMetric], role: niki::artifacts::types::AgentRole) -> Option<&'a StageMetric> {
+pub fn find_metric(metrics: &[StageMetric], role: niki::artifacts::types::AgentRole) -> Option<&StageMetric> {
     metrics.iter().find(|m| m.role == role)
 }
 

@@ -207,8 +207,8 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBu
         }
 
         // Handle keypresses (non-blocking, ~16ms poll)
-        if event::poll(Duration::from_millis(16)).unwrap_or(false) {
-            if let Ok(Event::Key(key)) = event::read() {
+        if event::poll(Duration::from_millis(16)).unwrap_or(false)
+            && let Ok(Event::Key(key)) = event::read() {
                 // Onboarding modal takes priority
                 if let Some(ref mut onboard) = state.onboarding {
                     match onboard.handle_key(key) {
@@ -307,7 +307,6 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBu
                     }
                 }
             }
-        }
 
         // Drain events from the pipeline — mark dirty on any state change
         match rx.recv_timeout(Duration::from_millis(16)) {
@@ -340,20 +339,18 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBu
 /// Returns true if the terminal likely supports it.
 fn detect_synchronized_output() -> bool {
     // Check common env vars that indicate terminal capabilities
-    if let Ok(term) = std::env::var("TERM") {
-        if term.contains("kitty") || term.contains("ghostty") || term.contains("xterm") {
+    if let Ok(term) = std::env::var("TERM")
+        && (term.contains("kitty") || term.contains("ghostty") || term.contains("xterm")) {
             return true;
         }
-    }
-    if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
-        if term_program.contains("kitty")
+    if let Ok(term_program) = std::env::var("TERM_PROGRAM")
+        && (term_program.contains("kitty")
             || term_program.contains("ghostty")
             || term_program.contains("WezTerm")
-            || term_program.contains("iTerm")
+            || term_program.contains("iTerm"))
         {
             return true;
         }
-    }
     // tmux with sync support (3.4+)
     if std::env::var("TMUX").is_ok() {
         // tmux < 3.4 does not support DEC 2026; we conservatively disable it

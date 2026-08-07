@@ -65,11 +65,10 @@ fn resolve_task_id(tasks_dir: &Path, input: &str) -> Result<String> {
             if !entry.path().join("task.json").is_file() {
                 continue;
             }
-            if let Some(name) = entry.file_name().to_str() {
-                if name.starts_with(input) {
+            if let Some(name) = entry.file_name().to_str()
+                && name.starts_with(input) {
                     matches.push(name.to_string());
                 }
-            }
         }
     }
 
@@ -97,8 +96,8 @@ fn latest_task_id(tasks_dir: &Path) -> Option<String> {
     if let Ok(entries) = std::fs::read_dir(tasks_dir) {
         for entry in entries.flatten() {
             let path = entry.path().join("task.json");
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(record) = serde_json::from_str::<TaskRecord>(&content) {
+            if let Ok(content) = std::fs::read_to_string(&path)
+                && let Ok(record) = serde_json::from_str::<TaskRecord>(&content) {
                     let newer = match &latest {
                         Some((_, t)) => record.created_at > *t,
                         None => true,
@@ -107,7 +106,6 @@ fn latest_task_id(tasks_dir: &Path) -> Option<String> {
                         latest = Some((record.task_id.to_string(), record.created_at));
                     }
                 }
-            }
         }
     }
     latest.map(|(id, _)| id)

@@ -56,9 +56,8 @@ fn render_red_blue_section(result: &PipelineResult) -> String {
         .artifacts
         .iter()
         .find(|(r, _)| *r == AgentRole::Reviewer)
-    {
-        if let Ok(verdict) = serde_json::from_str::<ReviewVerdict>(rev_json) {
-            if let Some(recon) = verdict.red_reconciliation {
+        && let Ok(verdict) = serde_json::from_str::<ReviewVerdict>(rev_json)
+            && let Some(recon) = verdict.red_reconciliation {
                 for r in recon {
                     dispositions.insert(
                         r.challenge_id,
@@ -66,8 +65,6 @@ fn render_red_blue_section(result: &PipelineResult) -> String {
                     );
                 }
             }
-        }
-    }
 
     let mut out = String::from("## Adversarial Review (Red/Blue)\n\n");
     out.push_str(&format!("{}\n\n", red.overall_red_assessment));
@@ -278,8 +275,8 @@ fn render_audit_section(result: &PipelineResult) -> String {
                     });
                 }
             }
-        } else if *role == AgentRole::SecurityAuditor {
-            if let Ok(v) = serde_json::from_str::<SecurityVerdict>(json) {
+        } else if *role == AgentRole::SecurityAuditor
+            && let Ok(v) = serde_json::from_str::<SecurityVerdict>(json) {
                 for f in &v.findings {
                     catches.push(Catch {
                         stage: "Security Auditor".into(),
@@ -291,7 +288,6 @@ fn render_audit_section(result: &PipelineResult) -> String {
                     });
                 }
             }
-        }
     }
 
     if catches.is_empty() {
@@ -337,13 +333,12 @@ fn render_audit_section(result: &PipelineResult) -> String {
             "### [{} · {} · {}] {}\n",
             c.stage, c.severity, c.category, loc
         ));
-        if let (Some(f), Some(_)) = (&c.file, &c.line) {
-            if let Some(annotated) = extract_and_annotate(&result.final_diff, f, &c.line) {
+        if let (Some(f), Some(_)) = (&c.file, &c.line)
+            && let Some(annotated) = extract_and_annotate(&result.final_diff, f, &c.line) {
                 out.push_str("```diff\n");
                 out.push_str(&annotated);
                 out.push_str("```\n\n");
             }
-        }
         out.push_str(&format!("{}\n\n", c.description));
     }
     out

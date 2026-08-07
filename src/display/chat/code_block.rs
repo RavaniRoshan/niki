@@ -2,7 +2,7 @@
 //!
 //! Uses syntect for syntax highlighting with fallback to plain text.
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{ThemeSet};

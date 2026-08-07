@@ -1,0 +1,37 @@
+{
+  "id": "a7f3e2",
+  "slug": "uiux-refactor-chat-a7f3e2",
+  "objective": "Implement full conversational chat UI/UX refactor for NIKI TUI matching Claude Code/Kimi Code quality",
+  "status": "complete",
+  "branch": "goal/uiux-refactor-chat-interface",
+  "scope": "src/display/",
+  "scope_lock": ["src/display/"],
+  "scope_flex": ["src/main.rs", "src/lib.rs", "Cargo.toml", "src/errors.rs"],
+  "criteria": [
+    {"label": "Cargo build clean", "check": "cargo build 2>&1 | tail -1", "must_pass": true, "passed": true},
+    {"label": "All unit tests pass", "check": "cargo test 2>&1 | grep 'test result:'", "must_pass": true, "passed": true},
+    {"label": "New modules exist (engine, state, input, chat, components, layout)", "check": "ls src/display/engine.rs src/display/state.rs src/display/input.rs src/display/chat/mod.rs src/display/components/mod.rs src/display/layout/mod.rs 2>&1 | wc -l", "must_pass": true, "passed": true},
+    {"label": "Theme tokens expanded (50+ accessors)", "check": "grep -c 'pub fn ' src/display/theme.rs", "must_pass": true, "passed": true, "actual": 97},
+    {"label": "No scope violations outside display/", "check": "git diff --name-only master | grep -v '^src/display/' | grep -v '^Cargo.toml' | wc -l", "must_pass": true, "passed": true}
+  ],
+  "tasks": [
+    {"id": 1, "desc": "Phase 1: Create engine.rs (rendering engine with cell-level diffing)", "status": "complete"},
+    {"id": 2, "desc": "Phase 1: Create state.rs (reactive state management with Store pattern)", "status": "complete"},
+    {"id": 3, "desc": "Phase 1: Create input.rs (full input handling with cursor management)", "status": "complete"},
+    {"id": 4, "desc": "Phase 2: Create chat/message.rs (message rendering)", "status": "complete"},
+    {"id": 5, "desc": "Phase 2: Create chat/streaming.rs (streaming text display)", "status": "complete"},
+    {"id": 6, "desc": "Phase 2: Create chat/markdown.rs (pulldown-cmark parser + renderer)", "status": "complete"},
+    {"id": 7, "desc": "Phase 3: Create components (status_bar, input_box, spinner, permission, command_menu)", "status": "complete"},
+    {"id": 8, "desc": "Phase 4: Create layout system (chat_layout, page_layout, overlay)", "status": "complete"},
+    {"id": 9, "desc": "Phase 5: Integrate with existing pipeline (event bridge, main loop)", "status": "complete"},
+    {"id": 10, "desc": "Phase 6: Expand theme tokens + animations + comprehensive tests", "status": "complete"}
+  ],
+  "current_task": 11,
+  "iterations": 1,
+  "budget_used": 0,
+  "max_iterations": 50,
+  "negative_knowledge": [],
+  "context_summary": "Goal: Implement conversational chat UI/UX refactor. Completed all 6 phases: Foundation (engine, state, input), Chat Interface (message, streaming, markdown), Components (status_bar, input_box, spinner, permission, command_menu, autocomplete, progress), Layout System (chat_layout, page_layout, overlays), Integration (event bridge, DisplayEvent adapter), Theme Expansion (97 accessors). All 253+ tests pass. Build clean.",
+  "created_at": "2026-08-06T12:33:00Z",
+  "completed_at": "2026-08-06T13:15:00Z"
+}

@@ -12,7 +12,7 @@ use crate::display::theme;
 /// Render the slash command menu overlay.
 pub fn render_command_menu(frame: &mut Frame, area: Rect, state: &AppState) {
     let menu_width = 50u16.min(area.width.saturating_sub(4));
-    let item_height = 1u16;
+    let _item_height = 1u16;
     let max_visible = 10usize;
     let visible = state.commands.len().min(max_visible);
     let menu_height = (visible as u16) + 3;

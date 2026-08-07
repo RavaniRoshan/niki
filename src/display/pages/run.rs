@@ -13,6 +13,12 @@ pub struct RunPage {
     auto_scroll: bool,
 }
 
+impl Default for RunPage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RunPage {
     pub fn new() -> Self {
         Self { scroll_offset: 0, auto_scroll: true }

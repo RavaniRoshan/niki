@@ -26,6 +26,12 @@ pub struct AgentsPage {
     scroll_offset: u16,
 }
 
+impl Default for AgentsPage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AgentsPage {
     pub fn new() -> Self {
         Self {

@@ -125,17 +125,14 @@ impl Sandbox for WorktreeSandbox {
                     let mut edited = content.clone();
                     let mut file_changed = false;
                     for (i, block) in edit_blocks.iter().enumerate() {
-                        match crate::sandbox::edit_format::apply_single_edit_block(
+                        if let Some(new_content) = crate::sandbox::edit_format::apply_single_edit_block(
                             &edited,
                             block.search.as_str(),
                             block.replace.as_str(),
                         )? {
-                            Some(new_content) => {
-                                edited = new_content;
-                                unmatched.retain(|&idx| idx != i);
-                                file_changed = true;
-                            }
-                            None => {}
+                            edited = new_content;
+                            unmatched.retain(|&idx| idx != i);
+                            file_changed = true;
                         }
                     }
                     if file_changed {
@@ -284,11 +281,10 @@ fn find_files_in_worktree(wt: &Path) -> Result<Vec<(std::path::PathBuf, String)>
 
     for file in files.lines() {
         let path = wt.join(file);
-        if path.is_file() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
+        if path.is_file()
+            && let Ok(content) = std::fs::read_to_string(&path) {
                 result.push((path, content));
             }
-        }
     }
 
     Ok(result)

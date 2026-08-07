@@ -12,6 +12,12 @@ pub struct PipelinePage {
     selected_stage: usize,
 }
 
+impl Default for PipelinePage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PipelinePage {
     pub fn new() -> Self {
         Self { selected_stage: 0 }
@@ -128,7 +134,7 @@ impl Page for PipelinePage {
         let card_gap_v: u16 = 1;
 
         let total_cards = primary_roles.len() as u16;
-        let rows = (total_cards + cols as u16 - 1) / cols as u16;
+        let rows = total_cards.div_ceil(cols as u16);
         let total_height = card_height * rows + card_gap_v * (rows - 1);
         let top_pad = (chunks[2].height.saturating_sub(total_height)) / 2;
 

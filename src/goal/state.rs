@@ -120,13 +120,11 @@ impl GoalState {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if let Ok(state) = serde_json::from_str::<GoalState>(&content) {
+            if path.extension().and_then(|e| e.to_str()) == Some("json")
+                && let Ok(content) = fs::read_to_string(&path)
+                    && let Ok(state) = serde_json::from_str::<GoalState>(&content) {
                         states.push(state);
                     }
-                }
-            }
         }
         Ok(states)
     }

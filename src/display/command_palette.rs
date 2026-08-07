@@ -29,6 +29,12 @@ pub enum PaletteAction {
     None,
 }
 
+impl Default for CommandPalette {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CommandPalette {
     pub fn new() -> Self {
         let items = vec![

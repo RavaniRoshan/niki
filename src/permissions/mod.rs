@@ -10,17 +10,14 @@ use serde::{Deserialize, Serialize};
 /// Permission decision for an action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Permission {
     Allow,
+    #[default]
     Ask,
     Deny,
 }
 
-impl Default for Permission {
-    fn default() -> Self {
-        Permission::Ask
-    }
-}
 
 /// A permission rule with optional pattern matching.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,12 +89,11 @@ impl PermissionChecker {
 
     /// Check a command against bash permission rules.
     pub fn check_command(&self, command: &str) -> Permission {
-        for (_, rule) in &self.config.rules {
-            if let Some(ref pattern) = rule.pattern {
-                if command.contains(pattern) {
+        for rule in self.config.rules.values() {
+            if let Some(ref pattern) = rule.pattern
+                && command.contains(pattern) {
                     return rule.permission;
                 }
-            }
         }
         self.config.tools.bash
     }

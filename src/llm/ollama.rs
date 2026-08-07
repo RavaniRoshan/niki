@@ -180,14 +180,12 @@ impl LlmProvider for OllamaProvider {
                                     {
                                         return;
                                     }
-                                } else if let Some(text) = json["message"]["content"].as_str() {
-                                    if !text.is_empty() {
-                                        if tx.send(Ok(StreamChunk::Text(text.to_string()))).is_err()
+                                } else if let Some(text) = json["message"]["content"].as_str()
+                                    && !text.is_empty()
+                                        && tx.send(Ok(StreamChunk::Text(text.to_string()))).is_err()
                                         {
                                             return;
                                         }
-                                    }
-                                }
                             }
                         }
                     }

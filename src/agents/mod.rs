@@ -19,8 +19,8 @@ fn jitter_delay(attempt: u32, base_ms: u64, max_ms: u64) -> u64 {
     let exp = 2u64.saturating_pow(attempt);
     let cap = base_ms.saturating_mul(exp).min(max_ms);
     // full jitter: random in [0, cap]
-    let jitter = fastrand::u64(0..=cap);
-    jitter
+    
+    fastrand::u64(0..=cap)
 }
 
 pub async fn run_agent(
@@ -159,7 +159,7 @@ pub async fn run_agent(
         }
     }
 
-    let token_usage = usage.unwrap_or_else(|| TokenUsage {
+    let token_usage = usage.unwrap_or(TokenUsage {
         input_tokens: 0,
         output_tokens: estimated_output_tokens,
     });
@@ -238,8 +238,8 @@ pub async fn run_agent(
                 Ok(repaired) => {
                     json_content = repaired;
                     // Re-validate after local repair
-                    if validate_detailed(&json_content, &schema_json).is_ok() {
-                        if validate_artifact(
+                    if validate_detailed(&json_content, &schema_json).is_ok()
+                        && validate_artifact(
                             &json_content,
                             schema_path_resolved.to_str().unwrap_or(schema_path),
                         )
@@ -247,7 +247,6 @@ pub async fn run_agent(
                         {
                             break; // Fixed by local repair
                         }
-                    }
                 }
                 Err(_) => {} // Local repair failed, will re-prompt
             }

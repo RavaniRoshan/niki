@@ -406,17 +406,14 @@ fn default_goal_fail_fast() -> bool {
 /// Theme preference for the TUI (light/dark/auto).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ThemePreference {
+    #[default]
     Auto,
     Dark,
     Light,
 }
 
-impl Default for ThemePreference {
-    fn default() -> Self {
-        ThemePreference::Auto
-    }
-}
 
 impl ThemePreference {
     pub fn from_str(s: &str) -> Self {
@@ -438,6 +435,7 @@ impl ThemePreference {
 
 /// TUI display configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct UiConfig {
     #[serde(default)]
     pub tips: TipsConfig,
@@ -445,14 +443,6 @@ pub struct UiConfig {
     pub theme: ThemePreference,
 }
 
-impl Default for UiConfig {
-    fn default() -> Self {
-        Self {
-            tips: TipsConfig::default(),
-            theme: ThemePreference::default(),
-        }
-    }
-}
 
 /// Tips banner configuration for the TUI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -818,13 +808,12 @@ impl NikiConfig {
 
         let local_path = project_dir.join("niki.toml");
 
-        if let Some(gp) = &global_path {
-            if gp.exists() {
+        if let Some(gp) = &global_path
+            && gp.exists() {
                 let content = fs::read_to_string(gp)?;
                 let c: NikiConfig = toml::from_str(&content)?;
                 config.merge(c);
             }
-        }
 
         if local_path.exists() {
             let content = fs::read_to_string(&local_path)?;
@@ -988,86 +977,69 @@ impl NikiConfig {
         // NIKI standard and BYOK: users supply their own OpenAI/Anthropic (or any
         // compatible) key via env or `niki.toml`, and nothing is tied to a specific
         // gateway.
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            if !key.is_empty() {
-                if let Some(p) = self.providers.get_mut("anthropic") {
+        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
+            && !key.is_empty()
+                && let Some(p) = self.providers.get_mut("anthropic") {
                     p.api_key = Some(key);
                 }
-            }
-        }
-        if let Ok(key) = std::env::var("NIKI_PROVIDERS_ANTHROPIC_API_KEY") {
-            if !key.is_empty() {
-                if let Some(p) = self.providers.get_mut("anthropic") {
-                    if p.api_key.is_none() {
+        if let Ok(key) = std::env::var("NIKI_PROVIDERS_ANTHROPIC_API_KEY")
+            && !key.is_empty()
+                && let Some(p) = self.providers.get_mut("anthropic")
+                    && p.api_key.is_none() {
                         p.api_key = Some(key);
                     }
-                }
-            }
-        }
-        if let Some(p) = self.providers.get_mut("anthropic") {
-            if p.api_key.is_none() {
+        if let Some(p) = self.providers.get_mut("anthropic")
+            && p.api_key.is_none() {
                 if let Ok(token) = std::env::var("ANTHROPIC_AUTH_TOKEN") {
                     if !token.is_empty() {
                         p.api_key = Some(token);
                     }
-                } else if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
-                    if !key.is_empty() {
+                } else if let Ok(key) = std::env::var("OPENROUTER_API_KEY")
+                    && !key.is_empty() {
                         p.api_key = Some(key);
                     }
-                }
             }
-        }
-        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-            if let Some(p) = self.providers.get_mut("openai") {
-                if p.api_key.is_none() {
+        if let Ok(key) = std::env::var("OPENAI_API_KEY")
+            && let Some(p) = self.providers.get_mut("openai")
+                && p.api_key.is_none() {
                     p.api_key = Some(key);
                 }
-            }
-        }
-        if let Ok(key) = std::env::var("GOOGLE_API_KEY") {
-            if let Some(p) = self.providers.get_mut("google") {
-                if p.api_key.is_none() {
+        if let Ok(key) = std::env::var("GOOGLE_API_KEY")
+            && let Some(p) = self.providers.get_mut("google")
+                && p.api_key.is_none() {
                     p.api_key = Some(key);
                 }
-            }
-        }
 
         // Standard base-URL overrides (SDK convention: a host/base, not the full
         // endpoint — the provider appends the path). Env takes precedence over
         // whatever is in niki.toml.
-        if let Ok(base) = std::env::var("ANTHROPIC_BASE_URL") {
-            if !base.is_empty() {
-                if let Some(p) = self.providers.get_mut("anthropic") {
+        if let Ok(base) = std::env::var("ANTHROPIC_BASE_URL")
+            && !base.is_empty()
+                && let Some(p) = self.providers.get_mut("anthropic") {
                     p.base_url = Some(base.trim_end_matches('/').to_string());
                 }
-            }
-        }
-        if let Ok(base) = std::env::var("OPENAI_BASE_URL") {
-            if !base.is_empty() {
-                if let Some(p) = self.providers.get_mut("openai") {
+        if let Ok(base) = std::env::var("OPENAI_BASE_URL")
+            && !base.is_empty()
+                && let Some(p) = self.providers.get_mut("openai") {
                     p.base_url = Some(base.trim_end_matches('/').to_string());
                 }
-            }
-        }
 
         // Standard model overrides. Applied to agents still using the provider's
         // built-in default, so an explicit per-agent model in niki.toml is respected.
-        if let Ok(model) = std::env::var("ANTHROPIC_MODEL") {
-            if !model.is_empty() {
+        if let Ok(model) = std::env::var("ANTHROPIC_MODEL")
+            && !model.is_empty() {
                 if let Some(p) = self.providers.get_mut("anthropic") {
                     p.default_model = model.clone();
                 }
                 apply_env_model_to_agents(&mut self.agents, "anthropic", &model);
             }
-        }
-        if let Ok(model) = std::env::var("OPENAI_MODEL") {
-            if !model.is_empty() {
+        if let Ok(model) = std::env::var("OPENAI_MODEL")
+            && !model.is_empty() {
                 if let Some(p) = self.providers.get_mut("openai") {
                     p.default_model = model.clone();
                 }
                 apply_env_model_to_agents(&mut self.agents, "openai", &model);
             }
-        }
     }
 }
 

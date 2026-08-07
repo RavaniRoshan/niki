@@ -54,7 +54,7 @@ pub fn repair_json(input: &str) -> Result<String> {
         Err(e) => Err(anyhow!(
             "JSON repair failed after all strategies. Last error: {}. Input preview: {}",
             e,
-            preview(&input, 200)
+            preview(input, 200)
         )),
     }
 }

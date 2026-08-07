@@ -31,13 +31,11 @@ fn load_history_entries(project_path: &std::path::Path) -> Vec<HistoryEntry> {
     if let Ok(entries) = std::fs::read_dir(&tasks_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
-                if let Ok(content) = std::fs::read_to_string(path.join("task.json")) {
-                    if let Ok(record) = serde_json::from_str::<TaskRecord>(&content) {
+            if path.is_dir()
+                && let Ok(content) = std::fs::read_to_string(path.join("task.json"))
+                    && let Ok(record) = serde_json::from_str::<TaskRecord>(&content) {
                         records.push((path, record));
                     }
-                }
-            }
         }
     }
 
@@ -91,6 +89,12 @@ fn format_time_ago(dt: chrono::DateTime<chrono::Utc>) -> String {
         format!("{}h ago", elapsed / 3600)
     } else {
         format!("{}d ago", elapsed / 86400)
+    }
+}
+
+impl Default for HistoryPage {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -2,7 +2,7 @@ mod common;
 
 use niki::artifacts::types::AgentRole;
 use niki::config::{DockerConfig, SecurityPolicyConfig};
-use niki::sandbox::{Sandbox, SandboxBackend, create_sandbox, check_command_policy};
+use niki::sandbox::{Sandbox, SandboxBackend, create_sandbox};
 use niki::sandbox::docker::ActiveContainers;
 use std::sync::Arc;
 use std::time::Duration;

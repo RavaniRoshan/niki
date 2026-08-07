@@ -4,7 +4,6 @@
 //! role-colored icons, and markdown content.
 
 use chrono::{DateTime, Utc};
-use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -96,7 +95,7 @@ pub fn render_assistant_message(
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("{}", role_label(role)),
+            role_label(role).to_string(),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         ),
     ]));

@@ -370,6 +370,12 @@ pub struct PageRouter {
     pub pages: HashMap<PageId, Box<dyn Page>>,
 }
 
+impl Default for PageRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PageRouter {
     pub fn new() -> Self {
         let mut pages: HashMap<PageId, Box<dyn Page>> = HashMap::new();

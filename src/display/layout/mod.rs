@@ -149,7 +149,7 @@ pub fn render_page(frame: &mut Frame, area: Rect, page_id: PageId, state: &AppSt
 }
 
 /// Render the tab bar.
-fn render_tab_bar(state: &AppState, width: usize) -> Line {
+fn render_tab_bar(state: &AppState, width: usize) -> Line<'_> {
     let pages = [
         PageId::Pipeline,
         PageId::Agents,

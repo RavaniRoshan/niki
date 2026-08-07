@@ -1028,7 +1028,7 @@ fn modal_confirm_enter_closes() {
         title: "Quit NIKI?".to_string(),
         message: "The pipeline will continue in the background.".to_string(),
     });
-    let mut router = PageRouter::new();
+    let _router = PageRouter::new();
     // Simulate modal key handling (handled in tui.rs loop, but we test the modal key handler)
     let key = key_code(KeyCode::Enter);
     let modal = state.modal.as_ref().unwrap();

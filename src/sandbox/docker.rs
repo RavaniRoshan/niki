@@ -47,7 +47,7 @@ impl DockerSandbox {
     ) -> Result<Self> {
         let container_name = format!(
             "niki-{}-{}-{:?}",
-            task_id.to_string()[..8].to_string(),
+            &task_id.to_string()[..8],
             "sandbox",
             agent_role
         )
@@ -64,7 +64,7 @@ impl DockerSandbox {
         // bind-mounted project directory keep the host owner. Otherwise the container
         // (root) rewrites the files as root and the host-side git operations later fail
         // with "Permission denied".
-        let meta = std::fs::metadata(&source_repo).ok();
+        let meta = std::fs::metadata(source_repo).ok();
         let uid = meta.as_ref().map(|m| m.uid()).unwrap_or(0);
         let gid = meta.as_ref().map(|m| m.gid()).unwrap_or(0);
         let user = format!("{}:{}", uid, gid);
@@ -303,17 +303,14 @@ impl DockerSandbox {
                     let mut edited = content.clone();
                     let mut file_changed = false;
                     for (i, block) in edit_blocks.iter().enumerate() {
-                        match crate::sandbox::edit_format::apply_single_edit_block(
+                        if let Some(new_content) = crate::sandbox::edit_format::apply_single_edit_block(
                             &edited,
                             &block.search,
                             &block.replace,
                         )? {
-                            Some(new_content) => {
-                                edited = new_content;
-                                unmatched.retain(|&idx| idx != i);
-                                file_changed = true;
-                            }
-                            None => {}
+                            edited = new_content;
+                            unmatched.retain(|&idx| idx != i);
+                            file_changed = true;
                         }
                     }
                     if file_changed {
@@ -361,11 +358,10 @@ impl DockerSandbox {
                 let patch_res = self
                     .exec(&["sh", "-c", "cd /workspace && patch -p1 -i .niki-tmp.patch"])
                     .await;
-                if let Ok(p_out) = patch_res {
-                    if p_out.exit_code == 0 {
+                if let Ok(p_out) = patch_res
+                    && p_out.exit_code == 0 {
                         return Ok(());
                     }
-                }
                 Err(anyhow::anyhow!(
                     "Failed to apply patch. git exit code: {}\nstdout: {}\nstderr: {}",
                     output.exit_code,

@@ -1,4 +1,3 @@
-use anyhow::Result;
 use niki::agents::errors::{OutputFailure, classify_failure, validate_detailed};
 use niki::llm::repair::repair_json;
 use serde_json::json;

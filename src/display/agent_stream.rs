@@ -277,7 +277,7 @@ impl AgenticDisplay {
             if stage.role == role {
                 stage.status = StageStatus::Done;
                 stage.elapsed = stage.start_time.map(|s| s.elapsed());
-                stage.usage = Some(usage.clone());
+                stage.usage = Some(usage);
                 stage.cost_usd = Some(cost_usd);
                 stage.summary_lines = summary.clone();
                 stage.elapsed

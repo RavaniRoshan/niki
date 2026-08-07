@@ -65,12 +65,12 @@ impl Spinner {
     }
 
     /// Render the current frame as a Span.
-    pub fn render(&self) -> Span {
+    pub fn render(&self) -> Span<'_> {
         Span::styled(self.current_frame().to_string(), self.color)
     }
 
     /// Render with a custom label.
-    pub fn render_with_label(&self, label: &str) -> Vec<Span> {
+    pub fn render_with_label(&self, label: &str) -> Vec<Span<'_>> {
         vec![
             self.render(),
             Span::styled(format!(" {}", label), Style::default().fg(theme::text_dim())),
@@ -115,7 +115,7 @@ impl SpinnerState {
     }
 
     /// Render as a Span.
-    pub fn render(&self) -> Span {
+    pub fn render(&self) -> Span<'_> {
         Span::styled(self.frame().to_string(), Style::default().fg(theme::claude()))
     }
 }

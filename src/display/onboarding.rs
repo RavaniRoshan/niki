@@ -61,6 +61,12 @@ pub struct OnboardingModal {
     pub dont_show_again: bool,
 }
 
+impl Default for OnboardingModal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OnboardingModal {
     pub fn new() -> Self {
         Self {

@@ -13,6 +13,12 @@ pub struct ConfigPage {
     selected_section: usize,
 }
 
+impl Default for ConfigPage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConfigPage {
     pub fn new() -> Self {
         Self { selected_field: 0, selected_section: 0 }

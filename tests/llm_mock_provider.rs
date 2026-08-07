@@ -1,11 +1,10 @@
 mod common;
 
-use niki::llm::provider::{CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage};
-use niki::config::ProviderConfig;
+use niki::llm::provider::{CompletionRequest, LlmProvider, StreamChunk};
 use niki::llm::mock::MockProvider;
 use std::path::PathBuf;
 
-use common::mock_llm::{MockScriptBuilder, mock_script_for_happy_path};
+use common::mock_llm::MockScriptBuilder;
 
 fn make_mock_script_path(dir: &tempfile::TempDir) -> PathBuf {
     dir.path().join(".niki-mock-script.json")

@@ -87,11 +87,10 @@ pub fn classify_failure(
     }
 
     // Check for validation errors (provided by caller)
-    if let Some(fields) = validation_errors {
-        if !fields.is_empty() {
+    if let Some(fields) = validation_errors
+        && !fields.is_empty() {
             return OutputFailure::ValidationError { fields };
         }
-    }
 
     // Check for parse errors (provided by caller)
     if let Some(detail) = parse_error {
@@ -121,28 +120,27 @@ pub fn validate_detailed(json_str: &str, schema: &Value) -> Result<(), Vec<Strin
     let mut errors = Vec::new();
 
     // Check required fields
-    if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
-        if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
+    if let Some(required) = schema.get("required").and_then(|v| v.as_array())
+        && let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
             for field in required {
                 if let Some(field_name) = field.as_str() {
                     if !props.contains_key(field_name) {
                         continue;
                     }
                     // Check if field is present in artifact
-                    if !artifact.get(field_name).is_some() {
+                    if artifact.get(field_name).is_none() {
                         errors.push(format!("missing required field '{}'", field_name));
                     }
                 }
             }
         }
-    }
 
     // Check type mismatches for properties
-    if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
-        if let Some(obj) = artifact.as_object() {
+    if let Some(properties) = schema.get("properties").and_then(|v| v.as_object())
+        && let Some(obj) = artifact.as_object() {
             for (key, prop_schema) in properties {
-                if let Some(actual) = obj.get(key) {
-                    if let Some(expected_type) = prop_schema.get("type").and_then(|v| v.as_str()) {
+                if let Some(actual) = obj.get(key)
+                    && let Some(expected_type) = prop_schema.get("type").and_then(|v| v.as_str()) {
                         let actual_type = match actual {
                             Value::String(_) => "string",
                             Value::Number(_) => "number",
@@ -158,10 +156,8 @@ pub fn validate_detailed(json_str: &str, schema: &Value) -> Result<(), Vec<Strin
                             ));
                         }
                     }
-                }
             }
         }
-    }
 
     if errors.is_empty() {
         Ok(())

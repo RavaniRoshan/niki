@@ -182,8 +182,7 @@ impl LlmProvider for OpenAiProvider {
                             buffer = buffer[pos + 1..].to_string();
 
                             let line = line.trim();
-                            if line.starts_with("data: ") {
-                                let data = &line[6..];
+                            if let Some(data) = line.strip_prefix("data: ") {
                                 if data == "[DONE]" {
                                     continue;
                                 }
@@ -205,19 +204,15 @@ impl LlmProvider for OpenAiProvider {
                                         {
                                             return;
                                         }
-                                    } else if let Some(choices) = json["choices"].as_array() {
-                                        if let Some(choice) = choices.get(0) {
-                                            if let Some(text) = choice["delta"]["content"].as_str()
-                                            {
-                                                if tx
+                                    } else if let Some(choices) = json["choices"].as_array()
+                                        && let Some(choice) = choices.first()
+                                            && let Some(text) = choice["delta"]["content"].as_str()
+                                                && tx
                                                     .send(Ok(StreamChunk::Text(text.to_string())))
                                                     .is_err()
                                                 {
                                                     return;
                                                 }
-                                            }
-                                        }
-                                    }
                                 }
                             }
                         }

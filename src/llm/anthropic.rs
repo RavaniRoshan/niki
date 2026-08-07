@@ -175,27 +175,24 @@ impl LlmProvider for AnthropicProvider {
                             buffer = buffer[pos + 1..].to_string();
 
                             let line = line.trim();
-                            if line.starts_with("data: ") {
-                                let data = &line[6..];
+                            if let Some(data) = line.strip_prefix("data: ") {
                                 if data == "[DONE]" {
                                     continue;
                                 }
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
                                     if json["type"] == "content_block_delta" {
-                                        if let Some(text) = json["delta"]["text"].as_str() {
-                                            if tx
+                                        if let Some(text) = json["delta"]["text"].as_str()
+                                            && tx
                                                 .send(Ok(StreamChunk::Text(text.to_string())))
                                                 .is_err()
                                             {
                                                 return;
                                             }
-                                        }
                                     } else if json["type"] == "message_start" {
                                         // input_tokens are known up front
                                         if let Some(input) =
                                             json["message"]["usage"]["input_tokens"].as_u64()
-                                        {
-                                            if tx
+                                            && tx
                                                 .send(Ok(StreamChunk::Usage(TokenUsage {
                                                     input_tokens: input as u32,
                                                     output_tokens: 0,
@@ -204,13 +201,11 @@ impl LlmProvider for AnthropicProvider {
                                             {
                                                 return;
                                             }
-                                        }
                                     } else if json["type"] == "message_delta" {
                                         // output_tokens (and possibly the final input_tokens) arrive here
                                         if let Some(output) =
                                             json["usage"]["output_tokens"].as_u64()
-                                        {
-                                            if tx
+                                            && tx
                                                 .send(Ok(StreamChunk::Usage(TokenUsage {
                                                     input_tokens: 0,
                                                     output_tokens: output as u32,
@@ -219,7 +214,6 @@ impl LlmProvider for AnthropicProvider {
                                             {
                                                 return;
                                             }
-                                        }
                                     }
                                 }
                             }

@@ -249,7 +249,7 @@ async fn handle_resume(id: &str) -> Result<()> {
     state.status = crate::goal::state::GoalStatus::Active;
     state.save()?;
     let session_id = format!("goal-{}", id);
-    create_claim(&session_id, &id)?;
+    create_claim(&session_id, id)?;
     println!(
         "Goal resumed. {} iterations remaining.",
         state.max_iterations - state.iterations
@@ -280,7 +280,7 @@ async fn handle_cancel() -> Result<()> {
 }
 
 async fn handle_run(id: Option<&str>) -> Result<()> {
-    let mut state = match id {
+    let state = match id {
         Some(goal_id) => GoalState::find_by_id(goal_id)?,
         None => {
             let claims = claim_files()?;

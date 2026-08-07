@@ -12,6 +12,12 @@ pub struct ArtifactsPage {
     selected: usize,
 }
 
+impl Default for ArtifactsPage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArtifactsPage {
     pub fn new() -> Self {
         Self { selected: 0 }

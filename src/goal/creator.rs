@@ -98,7 +98,7 @@ fn survey_codebase(scope: &str) -> SurveyResult {
     );
     let todo_count: usize = todo_output
         .lines()
-        .filter_map(|l| l.split(':').last()?.parse::<usize>().ok())
+        .filter_map(|l| l.split(':').next_back()?.parse::<usize>().ok())
         .sum();
 
     SurveyResult {
