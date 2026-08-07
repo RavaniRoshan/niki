@@ -50,7 +50,7 @@ jobs:
           echo '# Test App' > index.js
           echo 'node_modules/' > .gitignore
           git add . && git commit -m "initial"
-          cp tests/integration/niki.test.toml /tmp/test-project/niki.toml
+          cp ${{ github.workspace }}/tests/integration/niki.test.toml /tmp/test-project/niki.toml
 
       - name: Run full pipeline (Planner → Coder → Tester → Reviewer)
         run: |
