@@ -1,13 +1,11 @@
 use crate::common::mock_llm::MockScriptBuilder;
-use niki::artifacts::types::AgentRole;
-use niki::config::{DockerConfig, NikiConfig};
+use niki::config::NikiConfig;
 use niki::orchestrator::pipeline::{Task, execute_pipeline};
 use niki::sandbox::docker::ActiveContainers;
 use niki::display::agent_stream::AgenticDisplay;
 use niki::sandbox::SandboxBackend;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tempfile::TempDir;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -48,8 +46,8 @@ impl TestHarness {
         let dir = self.repo.dir.path();
         let path = dir.join(".niki-mock-script.json");
         let _ = std::fs::create_dir_all(path.parent().unwrap());
-        let mut file = std::fs::write(&path, builder.to_json_string()).unwrap();
-        let _ = file;
+        std::fs::write(&path, builder.to_json_string()).unwrap();
+        ();
         TestHarness {
             repo: self.repo,
             config: self.config,

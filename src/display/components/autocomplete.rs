@@ -20,7 +20,7 @@ pub fn render_autocomplete(frame: &mut Frame, area: Rect, state: &AppState) {
     }
 
     let menu_width = 50u16.min(area.width.saturating_sub(4));
-    let item_height = 1u16;
+    let _item_height = 1u16;
     let max_visible = 8usize;
     let visible = autocomplete.candidates.len().min(max_visible);
     let menu_height = (visible as u16) + 2;
@@ -68,8 +68,7 @@ pub fn build_candidates(prefix: &str, project_files: &[String]) -> Vec<String> {
     let prefix_clean = prefix.trim_start_matches('@');
     project_files.iter()
         .filter(|f| f.contains(prefix_clean))
-        .cloned()
-        .take(20)
+        .take(20).cloned()
         .collect()
 }
 

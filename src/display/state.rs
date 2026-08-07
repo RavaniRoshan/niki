@@ -9,9 +9,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use chrono::{DateTime, Utc};
-use ratatui::crossterm::event::KeyEvent;
 use ratatui::style::Color;
-use uuid::Uuid;
 
 use crate::artifacts::types::AgentRole;
 use crate::config::NikiConfig;
@@ -20,16 +18,13 @@ use crate::display::tui::DisplayEvent;
 
 /// View mode — chat or page-based.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum ViewMode {
+    #[default]
     Chat,
     Page(PageId),
 }
 
-impl Default for ViewMode {
-    fn default() -> Self {
-        ViewMode::Chat
-    }
-}
 
 /// Page identifiers (re-exported from pages module for convenience).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -67,17 +62,14 @@ impl PageId {
 
 /// Input modes (matching Claude Code / Kimi Code).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum InputMode {
+    #[default]
     Insert,
     Command,
     Shell,
 }
 
-impl Default for InputMode {
-    fn default() -> Self {
-        InputMode::Insert
-    }
-}
 
 /// Result of handling a key in the input system.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -405,7 +397,9 @@ pub enum StageStatus {
 
 /// Run state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum RunState {
+    #[default]
     Idle,
     Running,
     AwaitingReviewer,
@@ -414,11 +408,6 @@ pub enum RunState {
     Cancelled,
 }
 
-impl Default for RunState {
-    fn default() -> Self {
-        RunState::Idle
-    }
-}
 
 impl AppState {
     /// Create a new AppState with default values.

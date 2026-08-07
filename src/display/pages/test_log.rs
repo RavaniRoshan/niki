@@ -12,6 +12,12 @@ pub struct TestLogPage {
     scroll_offset: u16,
 }
 
+impl Default for TestLogPage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestLogPage {
     pub fn new() -> Self {
         Self { scroll_offset: 0 }
@@ -56,9 +62,7 @@ impl Page for TestLogPage {
         frame.render_widget(Paragraph::new(header), chunks[0]);
 
         let log_content = state
-            .test_log
-            .as_ref()
-            .map(|s| s.as_str())
+            .test_log.as_deref()
             .unwrap_or("No test output available");
 
         let mut lines: Vec<Line> = Vec::new();

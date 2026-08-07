@@ -1,7 +1,6 @@
 //! Text input box with cursor rendering.
 
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;

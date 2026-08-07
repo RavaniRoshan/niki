@@ -163,61 +163,54 @@ pub async fn index_project(path: &Path, config: &NikiConfig) -> Result<ProjectKn
             if name == "Cargo.toml" {
                 if let Ok(content) = fs::read_to_string(entry.path()) {
                     let mut deps = Vec::new();
-                    if let Ok(value) = content.parse::<toml::Value>() {
-                        if let Some(d) = value.get("dependencies").and_then(|v| v.as_table()) {
+                    if let Ok(value) = content.parse::<toml::Value>()
+                        && let Some(d) = value.get("dependencies").and_then(|v| v.as_table()) {
                             deps.extend(d.keys().cloned());
                         }
-                    }
                     package_info.push(PackageInfo {
                         manager: "Cargo.toml".to_string(),
                         file_path: rel_path.to_string_lossy().to_string(),
                         dependencies: deps,
                     });
                 }
-            } else if name == "package.json" {
-                if let Ok(content) = fs::read_to_string(entry.path()) {
+            } else if name == "package.json"
+                && let Ok(content) = fs::read_to_string(entry.path()) {
                     let mut deps = Vec::new();
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if let Some(d) = value.get("dependencies").and_then(|v| v.as_object()) {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&content)
+                        && let Some(d) = value.get("dependencies").and_then(|v| v.as_object()) {
                             deps.extend(d.keys().cloned());
                         }
-                    }
                     package_info.push(PackageInfo {
                         manager: "package.json".to_string(),
                         file_path: rel_path.to_string_lossy().to_string(),
                         dependencies: deps,
                     });
                 }
-            }
 
-            if ["AGENTS.md", ".cursorrules", ".editorconfig"].contains(&name.as_str()) {
-                if let Ok(content) = fs::read_to_string(entry.path()) {
+            if ["AGENTS.md", ".cursorrules", ".editorconfig"].contains(&name.as_str())
+                && let Ok(content) = fs::read_to_string(entry.path()) {
                     skills_files.push(SkillsFile {
                         path: rel_path.to_string_lossy().to_string(),
                         content,
                     });
                 }
-            }
         }
     }
 
     let mut git_recent_commits = Vec::new();
-    if let Ok(repo) = Repository::open(path) {
-        if let Ok(mut revwalk) = repo.revwalk() {
-            if revwalk.push_head().is_ok() {
+    if let Ok(repo) = Repository::open(path)
+        && let Ok(mut revwalk) = repo.revwalk()
+            && revwalk.push_head().is_ok() {
                 for oid in revwalk.take(10) {
-                    if let Ok(oid) = oid {
-                        if let Ok(commit) = repo.find_commit(oid) {
+                    if let Ok(oid) = oid
+                        && let Ok(commit) = repo.find_commit(oid) {
                             git_recent_commits.push(CommitSummary {
                                 hash: commit.id().to_string()[..7].to_string(),
                                 message: commit.summary().unwrap_or("").to_string(),
                             });
                         }
-                    }
                 }
             }
-        }
-    }
 
     let project_size = if file_count < 50 {
         ProjectSize::Small
@@ -235,8 +228,8 @@ pub async fn index_project(path: &Path, config: &NikiConfig) -> Result<ProjectKn
         let full = path.join(pattern);
         if let Ok(paths) = glob::glob(&full.to_string_lossy()) {
             for entry in paths.flatten() {
-                if entry.is_file() {
-                    if let Ok(content) = fs::read_to_string(&entry) {
+                if entry.is_file()
+                    && let Ok(content) = fs::read_to_string(&entry) {
                         let content: String = content
                             .chars()
                             .take(config.knowledge.max_source_chars)
@@ -246,7 +239,6 @@ pub async fn index_project(path: &Path, config: &NikiConfig) -> Result<ProjectKn
                             content,
                         });
                     }
-                }
             }
         }
     }

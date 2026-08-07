@@ -5,8 +5,7 @@
 //! - Unclosed bold/italic spans
 //! - Unfinished list items
 
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 
 use super::markdown::render_markdown;
 use super::message::MessageRenderConfig;
@@ -97,7 +96,7 @@ fn render_streaming_markdown(
     config: &MessageRenderConfig,
     incomplete_code_fence: &mut bool,
     incomplete_bold: &mut bool,
-    incomplete_list: &mut bool,
+    _incomplete_list: &mut bool,
 ) -> Vec<Line<'static>> {
     // For streaming, use the standard renderer but track incomplete state
     // by checking the raw content for unclosed markdown constructs

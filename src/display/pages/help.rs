@@ -30,6 +30,12 @@ pub struct HelpPage {
     scroll_offset: u16,
 }
 
+impl Default for HelpPage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HelpPage {
     pub fn new() -> Self {
         Self {

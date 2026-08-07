@@ -157,14 +157,13 @@ impl LlmProvider for GoogleProvider {
                             buffer = buffer[pos + 1..].to_string();
 
                             let line = line.trim();
-                            if line.starts_with("data: ") {
-                                let data = &line[6..];
+                            if let Some(data) = line.strip_prefix("data: ") {
                                 if data == "[DONE]" {
                                     continue;
                                 }
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                                    if let Some(usage) = json["usageMetadata"].as_object() {
-                                        if tx
+                                    if let Some(usage) = json["usageMetadata"].as_object()
+                                        && tx
                                             .send(Ok(StreamChunk::Usage(TokenUsage {
                                                 input_tokens: usage["promptTokenCount"]
                                                     .as_u64()
@@ -179,15 +178,13 @@ impl LlmProvider for GoogleProvider {
                                         {
                                             return;
                                         }
-                                    }
-                                    if let Some(candidates) = json["candidates"].as_array() {
-                                        if let Some(candidate) = candidates.get(0) {
-                                            if let Some(parts) =
+                                    if let Some(candidates) = json["candidates"].as_array()
+                                        && let Some(candidate) = candidates.first()
+                                            && let Some(parts) =
                                                 candidate["content"]["parts"].as_array()
-                                            {
-                                                if let Some(part) = parts.get(0) {
-                                                    if let Some(text) = part["text"].as_str() {
-                                                        if tx
+                                                && let Some(part) = parts.first()
+                                                    && let Some(text) = part["text"].as_str()
+                                                        && tx
                                                             .send(Ok(StreamChunk::Text(
                                                                 text.to_string(),
                                                             )))
@@ -195,11 +192,6 @@ impl LlmProvider for GoogleProvider {
                                                         {
                                                             return;
                                                         }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
                                 }
                             }
                         }

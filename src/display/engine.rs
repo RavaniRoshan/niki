@@ -6,18 +6,12 @@
 //! - Targets 60fps during streaming, 30fps idle
 //! - Tracks damage rectangles for minimal redraw
 
-use std::io::{self, Write};
+use std::io::{self};
 
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::event::KeyEvent;
-use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::Block;
-use ratatui::{
-    Terminal,
-    layout::{Constraint, Direction, Layout},
-    text::{Line, Span},
-};
+use ratatui::Terminal;
 
 use crate::display::state::AppState;
 
@@ -215,11 +209,10 @@ impl RenderEngine {
             }
 
             // Render overlays on top
-            if state.show_permission_modal {
-                if let Some(ref req) = state.permission_request {
+            if state.show_permission_modal
+                && let Some(ref req) = state.permission_request {
                     super::components::render_permission_modal(frame, req, area, state);
                 }
-            }
             if state.show_command_menu {
                 super::components::render_command_menu(frame, area, state);
             }

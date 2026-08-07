@@ -242,25 +242,21 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 eprintln!("\n Shutting down — cleaning up...");
 
                 let ids = containers.lock().await.clone();
-                if !ids.is_empty() {
-                    match connect_container_runtime().await {
-                        Ok(docker) => {
-                            for id in ids {
-                                // force:true stops the container if still running, then removes it.
-                                let _ = docker
-                                    .remove_container(
-                                        &id,
-                                        Some(bollard::container::RemoveContainerOptions {
-                                            force: true,
-                                            ..Default::default()
-                                        }),
-                                    )
-                                    .await;
-                            }
+                if !ids.is_empty()
+                    && let Ok(docker) = connect_container_runtime().await {
+                        for id in ids {
+                            // force:true stops the container if still running, then removes it.
+                            let _ = docker
+                                .remove_container(
+                                    &id,
+                                    Some(bollard::container::RemoveContainerOptions {
+                                        force: true,
+                                        ..Default::default()
+                                    }),
+                                )
+                                .await;
                         }
-                        Err(_) => {}
                     }
-                }
 
                 // Persist a cancelled task record so status commands reflect reality.
                 let mut rec =
@@ -410,13 +406,12 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // separate git worktree or a cloud VM), so `working_tree_diff` on the host
     // would be empty. Apply the sandbox's diff to the host working tree first; the
     // Docker backend already wrote through the bind mount and skips this step.
-    if !uses_docker && !result.final_diff.trim().is_empty() {
-        if let Err(e) =
+    if !uses_docker && !result.final_diff.trim().is_empty()
+        && let Err(e) =
             crate::output::git::apply_diff_to_working_tree(&project_dir, &result.final_diff)
         {
             eprintln!("Warning: could not apply sandbox diff to host: {}", e);
         }
-    }
 
     // Create the git branch + commit (no-op when there is no diff).
     if let Err(e) = crate::output::git::create_branch_and_commit(
@@ -433,8 +428,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // Emit `safety_proof.json` next to the report and attach it to the result.
     // Skip when there was no diff (no branch was created), so a no-op run isn't
     // misreported as NON-HERMETIC.
-    if !result.final_diff.trim().is_empty() {
-        if let Some(pre) = &pre_snapshot {
+    if !result.final_diff.trim().is_empty()
+        && let Some(pre) = &pre_snapshot {
             match crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string(), false)
             {
                 Ok(proof) => {
@@ -449,7 +444,6 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 Err(e) => eprintln!("Warning: could not compute safety proof: {}", e),
             }
         }
-    }
 
     // Generate the markdown report (now includes the hermetic safety proof).
     if let Err(e) = crate::output::report::generate_report(&task, &config, &result) {

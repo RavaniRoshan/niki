@@ -25,6 +25,12 @@ pub struct CostPage {
     scroll_offset: u16,
 }
 
+impl Default for CostPage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CostPage {
     pub fn new() -> Self {
         Self { scroll_offset: 0 }

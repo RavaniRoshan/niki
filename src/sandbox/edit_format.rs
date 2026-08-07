@@ -181,8 +181,8 @@ fn apply_single_edit(content: &str, edit: &EditBlock) -> Result<Option<String>> 
     }
 
     // Strategy 3: Fuzzy match with similarity threshold
-    if let Some((start_line, similarity)) = find_fuzzy_match(&content_lines, &search_lines) {
-        if similarity >= 0.8 {
+    if let Some((start_line, similarity)) = find_fuzzy_match(&content_lines, &search_lines)
+        && similarity >= 0.8 {
             let end_line = start_line + search_lines.len();
             let mut result = String::new();
 
@@ -206,7 +206,6 @@ fn apply_single_edit(content: &str, edit: &EditBlock) -> Result<Option<String>> 
 
             return Ok(Some(result));
         }
-    }
 
     Ok(None)
 }
@@ -268,10 +267,7 @@ fn calculate_similarity(a: &str, b: &str) -> f64 {
 
     for change in diff.iter_all_changes() {
         let value = change.value();
-        match change.tag() {
-            ChangeTag::Equal => matches += value.len(),
-            _ => {}
-        }
+        if change.tag() == ChangeTag::Equal { matches += value.len() }
         total += value.len();
     }
 

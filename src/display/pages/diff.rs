@@ -14,6 +14,12 @@ pub struct DiffPage {
     line_numbers: bool,
 }
 
+impl Default for DiffPage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiffPage {
     pub fn new() -> Self {
         Self {
@@ -225,9 +231,8 @@ fn render_diff_with_line_numbers(
                 raw_line.to_string(),
                 Style::default().fg(theme::DIFF_HUNK()),
             )));
-        } else if raw_line.starts_with('+') {
+        } else if let Some(content) = raw_line.strip_prefix('+') {
             // Added line — green on diff bg
-            let content = &raw_line[1..];
             let mut spans = Vec::new();
             if show_line_numbers {
                 spans.push(Span::styled(
@@ -241,9 +246,8 @@ fn render_diff_with_line_numbers(
             ));
             lines.push(Line::from(spans));
             new_line += 1;
-        } else if raw_line.starts_with('-') {
+        } else if let Some(content) = raw_line.strip_prefix('-') {
             // Removed line — red on diff bg
-            let content = &raw_line[1..];
             let mut spans = Vec::new();
             if show_line_numbers {
                 spans.push(Span::styled(
