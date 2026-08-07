@@ -4,6 +4,7 @@ version = "0.2.0"
 edition = "2024"
 description = "Hermetic multi-agent coding system"
 license = "BUSL-1.1"
+repository = "https://github.com/RavaniRoshan/niki"
 
 [dependencies]
 # CLI framework
@@ -90,3 +91,8 @@ tempfile = "3"
 assert_cmd = "2"
 predicates = "3"
 wiremock = "0.6"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
