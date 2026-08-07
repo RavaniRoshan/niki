@@ -1,0 +1,22 @@
+PackageIdentifier: RavaniRoshan.niki
+PackageVersion: 0.2.0
+DefaultLocale: en-US
+Publisher: RavaniRoshan
+PackageName: niki
+License: BUSL-1.1
+ShortDescription: Hermetic multi-agent coding system
+Moniker: niki
+Tags:
+  - cli
+  - ai
+  - coding-agent
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    InstallerUrl: https://github.com/RavaniRoshan/niki/releases/download/v0.2.0/niki-x86_64-pc-windows-msvc.zip
+    InstallerSha256: 4eac59354496988ce5a94fe9c41255ae53c3dfeebb78df2d97da92e03384d2f6
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: niki.exe
+ManifestType: installer
+ManifestVersion: 1.9.0
