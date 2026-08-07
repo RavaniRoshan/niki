@@ -1,0 +1,29 @@
+[general]
+max_revision_rounds = 3
+output_dir = ".niki"
+
+[providers.openai]
+base_url = "http://localhost:8080"
+api_key = "mock-key"
+default_model = "mock-model"
+
+[providers.anthropic]
+base_url = "http://localhost:8080"
+api_key = "mock-key"
+default_model = "mock-model"
+
+[agents.planner]
+provider = "anthropic"
+model = "mock-model"
+
+[agents.coder]
+provider = "anthropic"
+model = "mock-model"
+
+[agents.tester]
+provider = "openai"
+model = "mock-model"
+
+[agents.reviewer]
+provider = "anthropic"
+model = "mock-model"
