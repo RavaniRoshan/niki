@@ -442,18 +442,21 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     if !result.final_diff.trim().is_empty()
         && let Some(pre) = &pre_snapshot
     {
-        match crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string(), false) {
-            Ok(proof) => {
-                if let Err(e) = std::fs::write(
-                    task_dir.join("safety_proof.json"),
-                    serde_json::to_string_pretty(&proof)?,
-                ) {
-                    eprintln!("Warning: could not write safety_proof.json: {}", e);
-                }
-                result.safety_proof = Some(proof);
-            }
-            Err(e) => eprintln!("Warning: could not compute safety proof: {}", e),
+        // Enforce the hermetic guarantee (research report S9). Previously this used
+        // strict=false and only printed a warning on a committed-state breach, so a
+        // non-hermetic run could silently complete. strict=true makes prove() return
+        // an Err when existing branches are repointed, history is rewritten, or the
+        // new branch is missing — which we propagate to abort the run rather than
+        // present a completed task. The working-tree cleanliness flags remain
+        // informational (NIKI intentionally applies the diff to the host working tree).
+        let proof = crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string(), true)?;
+        if let Err(e) = std::fs::write(
+            task_dir.join("safety_proof.json"),
+            serde_json::to_string_pretty(&proof)?,
+        ) {
+            eprintln!("Warning: could not write safety_proof.json: {}", e);
         }
+        result.safety_proof = Some(proof);
     }
 
     // Generate the markdown report (now includes the hermetic safety proof).
