@@ -21,13 +21,20 @@ fn render_safety_section(result: &PipelineResult) -> String {
     }
     out.push('\n');
     if proof.hermetic {
+        // Honest wording (research report S9): the working tree IS mutated by
+        // NIKI (the diff is applied to the host working tree so the user can
+        // review it); what is guaranteed is that no *existing branch* was
+        // repointed and no history was rewritten.
         out.push_str(
-            "_Your working tree and existing branches were never mutated. The Coder's output \
-             landed only on the new branch shown above._\n",
+            "_Hermetic: only the new branch was created. Your existing branches are intact at \
+             the same commits, and no history was rewritten. The host working tree was updated to \
+             apply the diff (review the diff above before merging)._",
         );
+        out.push('\n');
     } else {
         out.push_str(
-            "_⚠️ This run was NOT hermetic. Inspect the details above before trusting the branch._\n",
+            "_⚠️ This run was NOT hermetic — a committed branch or its history was modified. \
+             Inspect the details above before trusting the branch._",
         );
     }
     out
@@ -606,7 +613,7 @@ mod tests {
             pre_working_tree_clean: true,
             post_working_tree_clean: true,
             no_rebase_or_force_push: true,
-            blast_radius: "Hermetic: working tree never mutated.".into(),
+            blast_radius: "Hermetic: existing branches and history untouched.".into(),
             details: vec!["PASS existing branches preserved.".into()],
         };
         let result = result_with_proof(Some(proof));
@@ -636,7 +643,7 @@ mod tests {
         )
         .expect("report.md should exist");
         assert!(report.contains("## Hermetic Safety Proof"));
-        assert!(report.contains("Hermetic: working tree never mutated."));
+        assert!(report.contains("Hermetic: existing branches and history untouched."));
         assert!(report.contains("PASS existing branches preserved."));
 
         let _ = std::fs::remove_dir_all(&dir);

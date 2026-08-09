@@ -243,9 +243,12 @@ pub fn prove(
     }
 
     let blast_radius = if hermetic {
+        // Honest wording (research report S9): NIKI intentionally mutates the host
+        // working tree (to apply the diff so the user can review it). The guarantee
+        // is about *committed* state — existing branches and history.
         format!(
-            "Hermetic: working tree never mutated. Your {} existing branch(es) are intact at the \
-             same commits; only `{}` was added (parented on base commit `{}`). Task {}.",
+            "Hermetic: existing branches and history untouched. Your {} existing branch(es) are \
+             intact at the same commits; only `{}` was added (parented on base commit `{}`). Task {}.",
             pre.branches.len(),
             branch_name,
             short(&pre.head_commit),
