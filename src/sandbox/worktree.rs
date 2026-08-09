@@ -251,21 +251,10 @@ impl WorktreeSandbox {
 
         match res {
             Ok(s) if s.success() => Ok(()),
-            _ => {
-                let p2 = wt.join(".niki-tmp.patch");
-                std::fs::write(&p2, patch)?;
-                let r2 = Command::new("patch")
-                    .arg("-p1")
-                    .arg("-i")
-                    .arg(&p2)
-                    .current_dir(wt)
-                    .status();
-                let _ = std::fs::remove_file(&p2);
-                match r2 {
-                    Ok(s) if s.success() => Ok(()),
-                    _ => Err(anyhow!("Failed to apply patch in worktree")),
-                }
-            }
+            // No `patch -p1` fallback: it does not guard against `../` or absolute
+            // paths in the diff, which is a path-traversal risk. `git apply` is the
+            // only accepted method. See report S3.
+            _ => Err(anyhow!("Failed to apply patch (git apply only)")),
         }
     }
 }
