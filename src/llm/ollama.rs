@@ -18,7 +18,7 @@ impl OllamaProvider {
     pub fn new(config: &ProviderConfig) -> Result<Self> {
         Ok(Self {
             config: config.clone(),
-            client: Client::new(),
+            client: super::provider::http_client()?,
         })
     }
 }
@@ -52,16 +52,17 @@ impl LlmProvider for OllamaProvider {
             }
         });
 
-        let mut req = self
+        let mut request = self
             .client
             .post(&url)
             .header("content-type", "application/json");
 
         if let Some(api_key) = &self.config.api_key {
-            req = req.header("Authorization", format!("Bearer {}", api_key));
+            request = request.header("Authorization", format!("Bearer {}", api_key));
         }
 
-        let resp = req.json(&payload).send().await?;
+        request = request.json(&payload);
+        let resp = super::provider::send_request("ollama request", || request.try_clone().unwrap().send()).await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -85,7 +86,7 @@ impl LlmProvider for OllamaProvider {
 
         Ok(CompletionResponse {
             content,
-            model: request.model,
+            model: self.config.default_model.clone(),
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
@@ -123,16 +124,17 @@ impl LlmProvider for OllamaProvider {
             }
         });
 
-        let mut req = self
+        let mut request = self
             .client
             .post(&url)
             .header("content-type", "application/json");
 
         if let Some(api_key) = &self.config.api_key {
-            req = req.header("Authorization", format!("Bearer {}", api_key));
+            request = request.header("Authorization", format!("Bearer {}", api_key));
         }
 
-        let resp = req.json(&payload).send().await?;
+        request = request.json(&payload);
+        let resp = super::provider::send_request("ollama request", || request.try_clone().unwrap().send()).await?;
 
         if !resp.status().is_success() {
             let status = resp.status();

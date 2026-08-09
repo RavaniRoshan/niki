@@ -37,7 +37,7 @@ impl OpenAiProvider {
             .ok_or_else(|| anyhow!("OpenAI API key not configured"))?;
         Ok(Self {
             config: config.clone(),
-            client: Client::new(),
+            client: super::provider::http_client()?,
         })
     }
 }
@@ -73,14 +73,13 @@ impl LlmProvider for OpenAiProvider {
             ]
         });
 
-        let resp = self
+        let req = self
             .client
             .post(url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("content-type", "application/json")
-            .json(&payload)
-            .send()
-            .await?;
+            .json(&payload);
+        let resp = super::provider::send_request("openai request", || req.try_clone().unwrap().send()).await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -147,14 +146,13 @@ impl LlmProvider for OpenAiProvider {
             }
         });
 
-        let resp = self
+        let req = self
             .client
             .post(url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("content-type", "application/json")
-            .json(&payload)
-            .send()
-            .await?;
+            .json(&payload);
+        let resp = super::provider::send_request("openai request", || req.try_clone().unwrap().send()).await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -276,14 +274,13 @@ impl LlmProvider for OpenAiProvider {
             }
         });
 
-        let resp = self
+        let req = self
             .client
             .post(url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("content-type", "application/json")
-            .json(&payload)
-            .send()
-            .await?;
+            .json(&payload);
+        let resp = super::provider::send_request("openai request", || req.try_clone().unwrap().send()).await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
