@@ -94,6 +94,33 @@ impl DockerSandbox {
                 None
             },
             nano_cpus: if nanocpus > 0 { Some(nanocpus) } else { None },
+            // Defense-in-depth for the sandbox (research report S2):
+            // - Drop ALL Linux capabilities: the agent runtime needs none of them.
+            cap_drop: if config.cap_drop_all {
+                Some(vec!["ALL".to_string()])
+            } else {
+                None
+            },
+            // Bound the process count to contain fork-bombs / runaway recursion.
+            pids_limit: if config.pids_limit > 0 {
+                Some(config.pids_limit as i64)
+            } else {
+                None
+            },
+            // Disabling egress is opt-in because many tasks (npm/pip/cargo install)
+            // require network. Default leaves egress on; flip `network_disabled`
+            // only for fully-offline workloads.
+            network_mode: if config.network_disabled {
+                Some("none".to_string())
+            } else {
+                None
+            },
+            // Read-only rootfs; the bind-mounted /workspace stays writable.
+            readonly_rootfs: if config.readonly_rootfs {
+                Some(true)
+            } else {
+                None
+            },
             ..Default::default()
         };
 
@@ -187,6 +214,18 @@ impl DockerSandbox {
     async fn pull_image(docker: &Docker, image: &str) -> Result<()> {
         use bollard::image::CreateImageOptions;
         use futures::StreamExt as _;
+
+        // Supply-chain hardening (research report S2): a mutable tag (e.g.
+        // `:24.04`) can be repointed by a compromised registry, silently swapping
+        // the sandbox image under us. Prefer an immutable `@sha256:` digest. This
+        // is a warning, not a hard failure, so local dev images still work.
+        if !image.contains("@sha256:") && image.contains(':') {
+            tracing::warn!(
+                "Sandbox base image {:?} uses a mutable tag, not an immutable \
+                 digest. Pin it to @sha256:<digest> to prevent registry repointing.",
+                image
+            );
+        }
 
         // Locally-built images (e.g. our pre-baked `niki-sandbox:24.04`) are not on any
         // registry. `create_image` always contacts Docker Hub, so pulling them 404s. Skip
