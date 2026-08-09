@@ -234,14 +234,25 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         .join("tasks")
         .join(task.id.to_string());
 
-    // Track containers so a Ctrl+C handler can tear them down cleanly.
+    // Capture values the shutdown handlers need BEFORE any handler closure
+    // moves them. (String/PathBuf don't impl Copy, so an `async move` would
+    // otherwise leave nothing for the second handler.) See research report S13.
+    let output_dir = config.general.output_dir.clone();
+    let project_dir_for_signal = project_dir.clone();
+    let project_dir_for_ctrlc = project_dir.clone();
+    let output_dir_for_ctrlc = output_dir.clone();
+
+    // Track containers so the shutdown handlers can tear them down cleanly.
     let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
 
     {
         let containers = containers.clone();
         let task_dir = task_dir.clone();
         let task_id_str = task.id.to_string();
-        let output_dir = config.general.output_dir.clone();
+        let output_dir = output_dir_for_ctrlc;
+        let worktree_dir = project_dir_for_ctrlc
+            .join(&output_dir)
+            .join(format!(".niki-worktrees/{}", task_id_str));
         tokio::spawn(async move {
             if signal::ctrl_c().await.is_ok() {
                 eprintln!("\n Shutting down — cleaning up...");
@@ -271,11 +282,67 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 rec.status = TaskStatus::Cancelled;
                 let _ = rec.save_to_disk(&task_dir);
 
+                // Clean up any leftover .niki-worktrees/<task_id> dirs that were
+                // created for parallel coder agents. Left behind after a cancelled
+                // or killed run, they can be large and are never reused. See
+                // research report S13.
+                if worktree_dir.exists() {
+                    let _ = std::fs::remove_dir_all(&worktree_dir);
+                }
+
                 eprintln!(" Partial results saved under ./{}/tasks/", output_dir);
                 // 130 = 128 + SIGINT(2), the conventional exit code for Ctrl+C.
                 // Lets CI/scripts distinguish an interrupt from a generic failure.
                 std::process::exit(130);
             }
+        });
+    }
+
+    // SIGTERM handler (kill, systemd stop, container engine timeout, CI cancel).
+    // Mirrors the Ctrl+C path but exits 143 (128 + SIGTERM(15)) so callers can
+    // distinguish the two signals. See research report S13.
+    #[cfg(unix)]
+    {
+        use signal::unix::{SignalKind, signal};
+        let containers = containers.clone();
+        let task_dir = task_dir.clone();
+        let task_id_str = task.id.to_string();
+        let worktree_cleanup = project_dir_for_signal
+            .join(&output_dir)
+            .join(format!(".niki-worktrees/{}", task.id));
+        tokio::spawn(async move {
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            if sigterm.recv().await.is_none() {
+                return;
+            }
+            eprintln!("\n SIGTERM received — cleaning up...");
+            let ids = containers.lock().await.clone();
+            if !ids.is_empty() {
+                if let Ok(docker) = connect_container_runtime().await {
+                    for id in ids {
+                        let _ = docker
+                            .remove_container(
+                                &id,
+                                Some(bollard::container::RemoveContainerOptions {
+                                    force: true,
+                                    ..Default::default()
+                                }),
+                            )
+                            .await;
+                    }
+                }
+            }
+            if worktree_cleanup.exists() {
+                let _ = std::fs::remove_dir_all(&worktree_cleanup);
+            }
+            let mut rec =
+                TaskRecord::new(uuid::Uuid::parse_str(&task_id_str).unwrap_or_default(), "");
+            rec.status = TaskStatus::Cancelled;
+            let _ = rec.save_to_disk(&task_dir);
+            std::process::exit(143);
         });
     }
 
