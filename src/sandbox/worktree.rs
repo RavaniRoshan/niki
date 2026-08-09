@@ -117,34 +117,59 @@ impl Sandbox for WorktreeSandbox {
             let wt = self.worktree_path.clone();
             return tokio::task::spawn_blocking(move || -> Result<()> {
                 let files = find_files_in_worktree(&wt)?;
-                // Track which edits matched somewhere; edits that match nothing
-                // are reported so the caller can retry with a revision.
+                let paths: Vec<std::path::PathBuf> =
+                    files.iter().map(|(p, _)| p.clone()).collect();
                 let mut unmatched: Vec<usize> = (0..edit_blocks.len()).collect();
-                let mut any_applied = false;
+                let mut changed_files: std::collections::HashSet<std::path::PathBuf> =
+                    std::collections::HashSet::new();
+                let mut contents: std::collections::HashMap<std::path::PathBuf, String> =
+                    std::collections::HashMap::new();
                 for (path, content) in &files {
-                    let mut edited = content.clone();
-                    let mut file_changed = false;
-                    for (i, block) in edit_blocks.iter().enumerate() {
-                        if let Some(new_content) =
-                            crate::sandbox::edit_format::apply_single_edit_block(
-                                &edited,
-                                block.search.as_str(),
-                                block.replace.as_str(),
-                            )?
-                        {
-                            edited = new_content;
-                            unmatched.retain(|&idx| idx != i);
-                            file_changed = true;
+                    contents.insert(path.clone(), content.clone());
+                }
+
+                for (i, block) in edit_blocks.iter().enumerate() {
+                    // Bound blocks apply only to their target file; unbound blocks
+                    // fall back to the cross-file search. See research report S4.
+                    let targets: Vec<std::path::PathBuf> = match &block.file {
+                        Some(target) => paths
+                            .iter()
+                            .filter(|f| {
+                                let s = f.to_string_lossy();
+                                &s == target || s.ends_with(target) || s.ends_with(&format!("/{target}"))
+                            })
+                            .cloned()
+                            .collect(),
+                        None => paths.clone(),
+                    };
+                    let mut applied = false;
+                    for file_path in targets {
+                        if let Some(content) = contents.get(&file_path) {
+                            if let Some(new_content) =
+                                crate::sandbox::edit_format::apply_single_edit_block(
+                                    content,
+                                    block.search.as_str(),
+                                    block.replace.as_str(),
+                                )?
+                            {
+                                contents.insert(file_path.clone(), new_content);
+                                applied = true;
+                                changed_files.insert(file_path);
+                            }
                         }
                     }
-                    if file_changed {
-                        std::fs::write(path, edited)?;
-                        any_applied = true;
+                    if applied {
+                        unmatched.retain(|&idx| idx != i);
                     }
                 }
-                if !unmatched.is_empty() && !any_applied {
+                for file_path in changed_files {
+                    if let Some(content) = contents.get(&file_path) {
+                        std::fs::write(&file_path, content)?;
+                    }
+                }
+                if !unmatched.is_empty() {
                     return Err(anyhow!(
-                        "No edit block matched any file in the worktree ({} unmatched)",
+                        "No edit block matched its target file in the worktree ({} unmatched)",
                         unmatched.len()
                     ));
                 }

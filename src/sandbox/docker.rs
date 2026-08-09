@@ -337,37 +337,64 @@ impl DockerSandbox {
         // Try edit format (SEARCH/REPLACE blocks) first
         let edit_blocks = crate::sandbox::edit_format::parse_edit_blocks(patch);
         if !edit_blocks.is_empty() {
-            // Read all files in the workspace and apply edits
+            use std::collections::{HashMap, HashSet};
+            // Read all workspace files once.
             let files = self.list_files().await?;
-            let mut unmatched: Vec<usize> = (0..edit_blocks.len()).collect();
-            let mut any_applied = false;
-            for file_path in files {
-                let full_path = host_workspace.join(&file_path);
-                if let Ok(content) = std::fs::read_to_string(&full_path) {
-                    let mut edited = content.clone();
-                    let mut file_changed = false;
-                    for (i, block) in edit_blocks.iter().enumerate() {
-                        if let Some(new_content) =
-                            crate::sandbox::edit_format::apply_single_edit_block(
-                                &edited,
-                                &block.search,
-                                &block.replace,
-                            )?
-                        {
-                            edited = new_content;
-                            unmatched.retain(|&idx| idx != i);
-                            file_changed = true;
-                        }
-                    }
-                    if file_changed {
-                        std::fs::write(&full_path, edited)?;
-                        any_applied = true;
-                    }
+            let mut contents: HashMap<String, String> = HashMap::new();
+            for file_path in &files {
+                if let Ok(content) = std::fs::read_to_string(host_workspace.join(file_path)) {
+                    contents.insert(file_path.clone(), content);
                 }
             }
-            if !unmatched.is_empty() && !any_applied {
+
+            let mut unmatched: Vec<usize> = (0..edit_blocks.len()).collect();
+            let mut changed_files: HashSet<String> = HashSet::new();
+
+            for (i, block) in edit_blocks.iter().enumerate() {
+                // When a block is bound to a file, only consider that file (or any
+                // workspace path ending in it). Unbound blocks fall back to a
+                // cross-file search (the previous behavior). See research report S4.
+                let targets: Vec<String> = match &block.file {
+                    Some(target) => files
+                        .iter()
+                        .filter(|f| {
+                            *f == target
+                                || f.ends_with(target)
+                                || f.ends_with(&format!("/{target}"))
+                        })
+                        .cloned()
+                        .collect(),
+                    None => files.clone(),
+                };
+                let mut applied = false;
+                for file_path in targets {
+                    if let Some(content) = contents.get(&file_path) {
+                        if let Some(new_content) = crate::sandbox::edit_format::apply_single_edit_block(
+                            content,
+                            &block.search,
+                            &block.replace,
+                        )? {
+                            contents.insert(file_path.clone(), new_content);
+                            applied = true;
+                            changed_files.insert(file_path);
+                        }
+                    }
+                }
+                if applied {
+                    unmatched.retain(|&idx| idx != i);
+                }
+            }
+
+            // Write back only the files that actually changed.
+            for file_path in changed_files {
+                if let Some(content) = contents.get(&file_path) {
+                    std::fs::write(host_workspace.join(&file_path), content)?;
+                }
+            }
+
+            if !unmatched.is_empty() {
                 return Err(anyhow::anyhow!(
-                    "No edit block matched any file in the workspace ({} unmatched)",
+                    "No edit block matched its target file in the workspace ({} unmatched)",
                     unmatched.len()
                 ));
             }
