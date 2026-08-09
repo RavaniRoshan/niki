@@ -1,0 +1,10 @@
+# CODEOWNERS
+
+# Default owners for everything in the repo.
+*       @RavaniRoshan
+
+# Security-sensitive areas.
+/src/sandbox/      @RavaniRoshan
+/src/llm/         @RavaniRoshan
+/src/goal/        @RavaniRoshan
+/.github/workflows/   @RavaniRoshan

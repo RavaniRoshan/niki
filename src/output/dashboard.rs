@@ -251,7 +251,7 @@ pub fn render_html(input: &DashboardInput) -> String {
 pub fn write_dashboard(task_dir: &Path, input: &DashboardInput) -> Result<std::path::PathBuf> {
     std::fs::create_dir_all(task_dir)?;
     let path = task_dir.join("dashboard.html");
-    std::fs::write(&path, render_html(input))?;
+    crate::util::write_restricted(&path, render_html(input))?;
     Ok(path)
 }
 

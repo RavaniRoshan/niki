@@ -175,7 +175,7 @@ impl SessionManager {
         fs::create_dir_all(&self.sessions_dir)?;
         let path = self.session_path(&session.id);
         let json = serde_json::to_string_pretty(session)?;
-        fs::write(&path, json)?;
+        crate::util::write_restricted(&path, json)?;
         Ok(())
     }
 

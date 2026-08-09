@@ -1,10 +1,8 @@
 use anyhow::{Result, anyhow};
 use serde_json::Value;
-use std::fs;
 
 pub fn validate_artifact(json_str: &str, schema_path: &str) -> Result<()> {
-    let schema_content = fs::read_to_string(schema_path)
-        .map_err(|e| anyhow!("Failed to read schema {}: {}", schema_path, e))?;
+    let schema_content = crate::load_asset(schema_path)?;
     let schema_json: Value = serde_json::from_str(&schema_content)
         .map_err(|e| anyhow!("Failed to parse schema JSON: {}", e))?;
     let artifact_json: Value = serde_json::from_str(json_str)

@@ -21,10 +21,10 @@ Podman or Docker sandbox and hand you a clean git branch, a diff, and a full aud
 
 [![Built with Rust](https://img.shields.io/badge/built_with-Rust-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![CI](https://github.com/RavaniRoshan/niki/actions/workflows/ci.yml/badge.svg)](https://github.com/RavaniRoshan/niki/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-220_passing-007ec6)](#testing)
+[![Tests](https://img.shields.io/badge/tests-passing-007ec6)](CONTRIBUTING.md)
 [![Sandbox](https://img.shields.io/badge/sandbox-Podman_/_Docker-2496ED?logo=podman&logoColor=white)](#sandbox)
 [![BYOK · multi-provider](https://img.shields.io/badge/LLM-BYOK_·_multi--provider-58a6ff)](#configuration)
-[![License: BUSL-1.1 (source-available)](https://img.shields.io/badge/license-BUSL--1.1_·_source--available-d2a8ff)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0_·_open_source-2da44f)](LICENSE)
 [![Status: beta](https://img.shields.io/badge/status-beta-58a6ff)](#roadmap)
 
 <a href="#quick-start"><b>Quick Start</b></a> ·
@@ -62,7 +62,7 @@ niki run "Add a GET /health endpoint returning { status: 'ok', uptime }" --proje
 
 Every run leaves behind a `niki/<id>` branch, a `changes.patch`, a human-readable `report.md`, and per-agent JSON artifacts — the entire decision trail is inspectable.
 
-> **Proof, not promises.** Every claim about NIKI is backed by artifacts NIKI itself produces. Read [FINDINGS.md](FINDINGS.md) — the data-backed answers to "does the Reviewer genuinely challenge?", "what's the real token cost?", and "does the moat hold vs Codex/Cursor-style isolated multi-agent?".
+> **Proof, not promises.** Every claim about NIKI is backed by artifacts NIKI itself produces. Each run writes a `report.md` plus per-agent JSON artifacts (`artifacts/*.json`) capturing exactly what every agent decided and why — the entire decision trail is inspectable and reproducible. See the `research/` directory for the methodology and honest findings behind NIKI's design.
 
 ## About
 
@@ -284,7 +284,7 @@ docker/            # sandbox image (Dockerfile) + scripts/
 - [ ] Cloud (production) · adversarial debate mode · Team tier · Anthropic partnership
 - [ ] Architect agent · Enterprise licensing · general-purpose domain expansion · Company Brain spin-out
 
-See [`ROADMAP.md`](ROADMAP.md) for the full phased plan and decision traceability.
+See the **Roadmap** section above and [`docs/distribution-plan.md`](docs/distribution-plan.md) for the phased plan and decision traceability.
 
 ## Contributing
 
@@ -292,25 +292,13 @@ Issues and PRs are welcome. Please keep `cargo build` warning-free and keep secr
 
 ## License
 
-NIKI is **source-available, not open source.** It is licensed under the
-**Business Source License 1.1 (BUSL-1.1)** — see the full terms in
-[`LICENSE`](LICENSE).
+NIKI is **free and open source**, licensed under the **Apache License 2.0** —
+see the full text in [`LICENSE`](LICENSE).
 
-What that means in practice:
-
-- **You can** read the source, build it, modify it, and run it in production
-  for yourself or your organization (including with your own API keys — NIKI is
-  BYOK). Non-production use is unrestricted.
-- **You can't** offer NIKI to third parties as a competing hosted or managed
-  "NIKI-as-a-service." That carve-out (the *Additional Use Grant* in the
-  license) protects the managed-cloud offering that funds development.
-- **On the Change Date (2030-07-20)** each released version automatically
-  converts to the **Apache License 2.0** — a true open-source license.
-
-We deliberately **do not** call NIKI "open source." BUSL-1.1 restricts
-production-competitor use until the Change Date, so "open source" would be
-inaccurate; "source-available" is the honest term. If you need terms beyond the
-Additional Use Grant, a commercial license is available from the Licensor.
+- You may use, modify, redistribute, and run NIKI in production for yourself or
+  your organization (including with your own API keys — NIKI is BYOK).
+- Contributions are welcome under the same license; by contributing you agree
+  your contributions are licensed under Apache-2.0.
 
 ---
 

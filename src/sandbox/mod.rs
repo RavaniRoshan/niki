@@ -64,11 +64,18 @@ pub fn check_command_policy(cmd: &[&str], policy: &SecurityPolicyConfig) -> Resu
         }
     }
 
+    // The global deny-list is *always* enforced for every role, in addition to
+    // any per-role denies. (Previously the per-role policies overrode it, which
+    // let the coder/reviewer roles run dangerous commands like `curl | sh`,
+    // `mkfs`, `dd`, or `rm -rf`.) See research report S1.
+    let mut denied: Vec<String> = policy.denied_commands.clone();
+    denied.extend(crate::config::default_global_deny_list());
+
     // Check deny-list using two strategies:
     // 1. Prefix match on the full joined command (catches "git push --force origin main")
     // 2. Individual argument match (catches "git commit --no-verify")
     // 3. Substring match on the full command (catches "sh -c 'curl | sh'")
-    for denied in &policy.denied_commands {
+    for denied in &denied {
         if full_cmd.starts_with(denied) {
             return Err(anyhow!(
                 "Command denied by security policy: '{}' matches denied pattern '{}'",

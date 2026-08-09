@@ -200,12 +200,14 @@ fn derive_criteria(objective: &str, survey: &SurveyResult) -> Vec<GoalCriterion>
     }
 
     if criteria.len() < 2 {
+        // Count words in Rust and assert a threshold with a numeric literal so
+        // the objective text is never interpolated into a shell command
+        // (a malicious objective containing shell metacharacters could otherwise
+        // execute arbitrary commands). See research report S8.
+        let word_count = objective.split_whitespace().count();
         criteria.push(GoalCriterion {
             label: "Objective interpretation check".to_string(),
-            check: format!(
-                "echo '{}' | wc -w | awk '{{if ($1 >= 2) exit 0; else exit 1}}'",
-                objective
-            ),
+            check: format!("test {} -ge 2", word_count),
             must_pass: true,
             coverage_gate: false,
             result: None,

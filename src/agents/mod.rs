@@ -5,7 +5,6 @@ use crate::llm::provider::{CompletionRequest, LlmProvider, StreamChunk, TokenUsa
 use crate::llm::repair::repair_json;
 use anyhow::{Result, anyhow};
 use minijinja::Environment;
-use std::fs;
 use std::time::{Duration, Instant};
 
 pub mod coder;
@@ -34,23 +33,8 @@ pub async fn run_agent(
     degrade_on_invalid: bool,
 ) -> Result<(String, TokenUsage, u32, u32)> {
     let mut env = Environment::new();
-    let template_path = crate::resolve_asset(&format!("prompts/{}", template_name));
-    let template_content = fs::read_to_string(&template_path).map_err(|e| {
-        anyhow!(
-            "Failed to read prompt template {}: {}",
-            template_path.display(),
-            e
-        )
-    })?;
-
-    let schema_path_resolved = crate::resolve_asset(schema_path);
-    let schema_content = fs::read_to_string(&schema_path_resolved).map_err(|e| {
-        anyhow!(
-            "Failed to read schema {}: {}",
-            schema_path_resolved.display(),
-            e
-        )
-    })?;
+    let template_content = crate::load_asset(&format!("prompts/{}", template_name))?;
+    let schema_content = crate::load_asset(schema_path)?;
 
     let schema_json: serde_json::Value = serde_json::from_str(&schema_content)
         .map_err(|e| anyhow!("Failed to parse schema JSON: {}", e))?;
@@ -190,7 +174,7 @@ pub async fn run_agent(
                 // Schema valid — also do strict validation
                 if let Err(e) = validate_artifact(
                     &json_content,
-                    schema_path_resolved.to_str().unwrap_or(schema_path),
+                    schema_path,
                 ) {
                     // Schema valid per field-level but strict validation failed
                     parse_error_detail = Some(e.to_string());
@@ -241,7 +225,7 @@ pub async fn run_agent(
                     if validate_detailed(&json_content, &schema_json).is_ok()
                         && validate_artifact(
                             &json_content,
-                            schema_path_resolved.to_str().unwrap_or(schema_path),
+        schema_path,
                         )
                         .is_ok()
                     {
@@ -317,7 +301,7 @@ pub async fn run_agent(
     // Final validation — if still invalid, surface the error (or degrade)
     if let Err(e) = validate_artifact(
         &json_content,
-        schema_path_resolved.to_str().unwrap_or(schema_path),
+        schema_path,
     ) {
         let err_msg = e.to_string();
         if degrade_on_invalid {
