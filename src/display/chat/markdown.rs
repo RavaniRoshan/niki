@@ -287,6 +287,7 @@ impl<'a> MarkdownRenderer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Color;
 
     fn test_config() -> MessageRenderConfig {
         MessageRenderConfig {

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use bollard::Docker;
 use clap::{Args, Subcommand};
 use std::sync::Arc;
 use tokio::sync::Mutex;

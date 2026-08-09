@@ -34,7 +34,7 @@ pub fn write_audit_entry(task_id: &str, entry: &AuditEntry) {
 
     let file_path = audit_dir.join(format!("{}.jsonl", task_id));
     let line = entry.to_json_line();
-    if let Err(e) = fs::write(&file_path, format!("{}\n", line)) {
+    if let Err(e) = crate::util::write_restricted(&file_path, format!("{}\n", line)) {
         eprintln!("Warning: could not write audit entry: {}", e);
     }
 }
@@ -55,7 +55,7 @@ pub fn append_audit_entry(task_id: &str, entry: &AuditEntry) {
         String::new()
     };
 
-    if let Err(e) = fs::write(&file_path, format!("{}{}\n", existing, line)) {
+    if let Err(e) = crate::util::write_restricted(&file_path, format!("{}{}\n", existing, line)) {
         eprintln!("Warning: could not append audit entry: {}", e);
     }
 }

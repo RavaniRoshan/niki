@@ -1245,8 +1245,7 @@ mod tests {
     #[test]
     fn reviewer_template_toggles_red_block() {
         use minijinja::Environment;
-        let path = crate::resolve_asset("prompts/reviewer.md");
-        let content = std::fs::read_to_string(&path).unwrap();
+        let content = crate::load_asset("prompts/reviewer.md").unwrap();
         let mut env = Environment::new();
         env.add_template("reviewer.md", &content).unwrap();
         let tmpl = env.get_template("reviewer.md").unwrap();

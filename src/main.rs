@@ -2,6 +2,16 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
+/// On Unix, ignore SIGPIPE so piping output to `head`/`less`/`grep` does not
+/// terminate the process. A closed pipe then surfaces as a normal write error
+/// instead of a crash (previously `niki recommend | head` exited 101).
+#[cfg(unix)]
+fn ignore_sigpipe() {
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+}
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -36,6 +46,9 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    #[cfg(unix)]
+    ignore_sigpipe();
+
     // Initialize logging
     let subscriber = FmtSubscriber::builder()
         .with_env_filter(EnvFilter::from_default_env())

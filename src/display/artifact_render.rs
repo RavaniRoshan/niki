@@ -1,8 +1,11 @@
 use crate::artifacts::types::*;
+use unicode_truncate::UnicodeTruncateStr;
 
 pub fn truncate(s: &str, max_len: usize) -> String {
     if s.len() > max_len {
-        format!("{}...", &s[..max_len - 3])
+        // UnicodeTruncateStr avoids slicing in the middle of a multi-byte char
+        // (which previously panicked on e.g. em-dashes / non-Latin text).
+        format!("{}...", s.unicode_truncate(max_len - 3).0)
     } else {
         s.to_string()
     }

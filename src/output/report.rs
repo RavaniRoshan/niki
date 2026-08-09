@@ -544,10 +544,10 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
     fs::create_dir_all(&output_dir)?;
 
     let report_path = output_dir.join("report.md");
-    fs::write(&report_path, rendered)?;
+    crate::util::write_restricted(&report_path, rendered)?;
 
     let diff_path = output_dir.join("changes.patch");
-    fs::write(&diff_path, &result.final_diff)?;
+    crate::util::write_restricted(&diff_path, &result.final_diff)?;
 
     Ok(())
 }

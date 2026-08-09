@@ -2,9 +2,16 @@
 name = "niki"
 version = "0.2.0"
 edition = "2024"
-description = "Hermetic multi-agent coding system"
-license = "BUSL-1.1"
+rust-version = "1.85"
+description = "Hermetic multi-agent coding system: isolated AI agents independently plan, code, test & review in Docker/Podman sandboxes, then hand you a reviewable git branch."
+license = "Apache-2.0"
 repository = "https://github.com/RavaniRoshan/niki"
+homepage = "https://niki-site.vercel.app"
+readme = "README.md"
+authors = ["Ravani Roshan <ravani.roshan@gmail.com>"]
+keywords = ["ai", "agents", "coding-agent", "multi-agent", "llm", "cli", "rust", "sandbox", "devtools", "automation"]
+categories = ["command-line-utilities", "development-tools", "ai"]
+exclude = ["/.github", "/assets", "/docs", "/research", "/tests", "/evals", "/bench", "/scripts", "/target", "/prompts", "/schemas", "/niki.example.toml"]
 
 [dependencies]
 # CLI framework
@@ -56,6 +63,9 @@ uuid = { version = "1", features = ["serde", "v4"] }
 
 # Timestamps
 chrono = { version = "0.4", features = ["serde"] }
+
+# Embedded prompts/schemas (bundled into the binary so it works outside the source tree)
+include_dir = "0.7"
 
 # File watching / globbing
 globset = "0.4"

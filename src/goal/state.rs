@@ -100,7 +100,7 @@ impl GoalState {
         fs::create_dir_all(&dir)?;
         let path = state_path(&self.slug, &self.id);
         let json = serde_json::to_string_pretty(self)?;
-        fs::write(&path, json)?;
+        crate::util::write_restricted(&path, json)?;
         Ok(())
     }
 
@@ -197,7 +197,7 @@ pub fn create_claim(session_id: &str, goal_id: &str) -> Result<()> {
         claimed_at: Utc::now().to_rfc3339(),
     };
     let json = serde_json::to_string_pretty(&claim)?;
-    fs::write(&path, json)?;
+    crate::util::write_restricted(&path, json)?;
     Ok(())
 }
 

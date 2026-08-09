@@ -126,6 +126,7 @@ fn render_streaming_markdown(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Color;
 
     fn test_config() -> MessageRenderConfig {
         MessageRenderConfig {
