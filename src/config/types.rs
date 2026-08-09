@@ -113,7 +113,7 @@ fn default_max_exec_seconds() -> u64 {
 }
 
 /// Global deny-list applied to every role unless overridden.
-fn default_global_deny_list() -> Vec<String> {
+pub fn default_global_deny_list() -> Vec<String> {
     vec![
         "git push --force".to_string(),
         "git push -f".to_string(),
@@ -775,15 +775,42 @@ pub struct AgentConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DockerConfig {
     pub base_image: String,
+    #[serde(default)]
     pub extra_packages: Vec<String>,
     pub memory_limit: String,
     pub cpu_limit: f32,
+    /// Max number of processes (PIDs) the container may spawn. Bounds fork-bombs
+    /// and runaway recursion inside the sandbox. 0 = unset.
+    #[serde(default = "default_pids_limit")]
+    pub pids_limit: u64,
+    /// Drop all Linux capabilities by default (defense-in-depth). The sandbox does
+    /// not need CAP_NET_ADMIN/etc. to run agents.
+    #[serde(default = "default_true")]
+    pub cap_drop_all: bool,
+    /// Disable outbound network egress from the sandbox. WARNING: many real
+    /// workloads (npm/pip/cargo install, fetching deps) require egress, so this
+    /// defaults to `false`. Enable only when the task is fully offline.
+    #[serde(default)]
+    pub network_disabled: bool,
+    /// Mount the container rootfs read-only. The bind-mounted workspace remains
+    /// writable. Adds an extra tamper-resistance layer.
+    #[serde(default)]
+    pub readonly_rootfs: bool,
     /// Sandbox backend: `docker` (container, default), `worktree` (git worktree +
     /// local process, no Docker), or `cloud` (NIKI infra, beta).
     #[serde(default)]
     pub backend: SandboxBackend,
+}
+
+fn default_pids_limit() -> u64 {
+    512
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for DockerConfig {
@@ -793,6 +820,10 @@ impl Default for DockerConfig {
             extra_packages: vec!["nodejs".into(), "npm".into(), "python3".into()],
             memory_limit: "2g".to_string(),
             cpu_limit: 2.0,
+            pids_limit: default_pids_limit(),
+            cap_drop_all: true,
+            network_disabled: false,
+            readonly_rootfs: false,
             backend: SandboxBackend::Docker,
         }
     }
