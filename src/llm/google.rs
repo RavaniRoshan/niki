@@ -22,7 +22,7 @@ impl GoogleProvider {
             .ok_or_else(|| anyhow!("Google API key not configured"))?;
         Ok(Self {
             config: config.clone(),
-            client: Client::new(),
+            client: super::provider::http_client()?,
         })
     }
 }
@@ -37,8 +37,8 @@ impl LlmProvider for GoogleProvider {
             .ok_or_else(|| anyhow!("Google API key not configured"))?;
 
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            request.model, api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            request.model
         );
 
         let payload = json!({
@@ -54,13 +54,16 @@ impl LlmProvider for GoogleProvider {
             }
         });
 
-        let resp = self
+        // Build the request once; send_request rebuilds it on each retry attempt
+        // (RequestBuilder::try_clone). Retries on 429/5xx; 120s timeout on the shared
+        // client bounds a hung call. See research report S12.
+        let req = self
             .client
             .post(&url)
+            .header("x-goog-api-key", api_key)
             .header("content-type", "application/json")
-            .json(&payload)
-            .send()
-            .await?;
+            .json(&payload);
+        let resp = super::provider::send_request("google complete", || req.try_clone().unwrap().send()).await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -106,8 +109,8 @@ impl LlmProvider for GoogleProvider {
             .ok_or_else(|| anyhow!("Google API key not configured"))?;
 
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
-            request.model, api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse",
+            request.model
         );
 
         let payload = json!({
@@ -123,13 +126,13 @@ impl LlmProvider for GoogleProvider {
             }
         });
 
-        let resp = self
+        let req = self
             .client
             .post(&url)
+            .header("x-goog-api-key", api_key)
             .header("content-type", "application/json")
-            .json(&payload)
-            .send()
-            .await?;
+            .json(&payload);
+        let resp = super::provider::send_request("google stream", || req.try_clone().unwrap().send()).await?;
 
         if !resp.status().is_success() {
             let status = resp.status();

@@ -37,7 +37,7 @@ impl AnthropicProvider {
             .ok_or_else(|| anyhow!("Anthropic API key not configured"))?;
         Ok(Self {
             config: config.clone(),
-            client: Client::new(),
+            client: super::provider::http_client()?,
         })
     }
 }
@@ -70,15 +70,17 @@ impl LlmProvider for AnthropicProvider {
             ]
         });
 
-        let resp = self
+        // Build the request once; send_request rebuilds it on each retry attempt
+        // (RequestBuilder is Clone). Retries on 429/5xx; 120s timeout on the shared
+        // client bounds a hung call. See research report S12.
+        let req = self
             .client
             .post(url)
             .header("x-api-key", api_key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
-            .json(&payload)
-            .send()
-            .await?;
+            .json(&payload);
+        let resp = super::provider::send_request("anthropic complete", || req.try_clone().unwrap().send()).await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
