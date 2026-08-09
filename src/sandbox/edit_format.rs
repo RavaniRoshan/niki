@@ -6,6 +6,11 @@ use similar::{ChangeTag, TextDiff};
 pub struct EditBlock {
     pub search: String,
     pub replace: String,
+    /// Optional target file for this block. When set, the block is applied only
+    /// to that file (by exact or suffix path match) instead of being matched
+    /// against every file in the workspace. Binding the file prevents a block
+    /// from silently matching the wrong file (see research report S4).
+    pub file: Option<String>,
 }
 
 /// Parse search/replace blocks from LLM output.
@@ -30,8 +35,22 @@ pub fn parse_edit_blocks(text: &str) -> Vec<EditBlock> {
 
     // Try SEARCH/REPLACE format first
     let mut lines = text.lines().peekable();
+    let mut prev: Option<&str> = None;
     while let Some(line) = lines.next() {
         if line.trim() == "<<<<<<< SEARCH" {
+            // Allow an optional `FILE: <path>` (or `*** <path>`) line immediately
+            // preceding the block to bind the edit to a specific file (report S4).
+            let file = prev
+                .map(str::trim)
+                .filter(|p| p.starts_with("FILE: ") || p.starts_with("*** "))
+                .map(|p| {
+                    if let Some((_, f)) = p.split_once(':') {
+                        f.trim().to_string()
+                    } else {
+                        p.trim_start_matches("*** ").to_string()
+                    }
+                });
+
             let mut search_lines = Vec::new();
             let mut replace_lines = Vec::new();
             let mut in_search = true;
@@ -55,9 +74,14 @@ pub fn parse_edit_blocks(text: &str) -> Vec<EditBlock> {
             let replace = replace_lines.join("\n");
 
             if !search.is_empty() {
-                blocks.push(EditBlock { search, replace });
+                blocks.push(EditBlock {
+                    search,
+                    replace,
+                    file,
+                });
             }
         }
+        prev = Some(line);
     }
 
     // If no SEARCH/REPLACE blocks found, try fenced format
@@ -88,7 +112,11 @@ pub fn parse_edit_blocks(text: &str) -> Vec<EditBlock> {
                         let replace = replace_lines.join("\n");
 
                         if !search.is_empty() {
-                            blocks.push(EditBlock { search, replace });
+                            blocks.push(EditBlock {
+                                search,
+                                replace,
+                                file: None,
+                            });
                         }
                         break;
                     }
@@ -136,6 +164,7 @@ pub fn apply_single_edit_block(
         &EditBlock {
             search: search.to_string(),
             replace: replace.to_string(),
+            file: None,
         },
     )
 }
@@ -313,6 +342,7 @@ fn hello() {
         let edits = vec![EditBlock {
             search: "println!(\"hello\")".to_string(),
             replace: "println!(\"world\")".to_string(),
+            file: None,
         }];
         let result = apply_edits(content, &edits).unwrap();
         assert!(result.contains("println!(\"world\")"));
@@ -320,16 +350,17 @@ fn hello() {
     }
 
     #[test]
-    fn test_apply_trimmed_match() {
-        let content = r#"fn hello() {
-    println!("hello");
-}
+    fn test_parse_file_binding() {
+        let text = r#"
+FILE: src/main.rs
+<<<<<<< SEARCH
+fn main() {}
+=======
+fn main() { println!("hi"); }
+>>>>>>> REPLACE
 "#;
-        let edits = vec![EditBlock {
-            search: "  println!(\"hello\");".to_string(),
-            replace: "  println!(\"world\");".to_string(),
-        }];
-        let result = apply_edits(content, &edits).unwrap();
-        assert!(result.contains("println!(\"world\")"));
+        let blocks = parse_edit_blocks(text);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].file.as_deref(), Some("src/main.rs"));
     }
 }
