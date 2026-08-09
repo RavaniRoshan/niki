@@ -360,23 +360,16 @@ impl DockerSandbox {
 
         match res {
             Ok(output) if output.exit_code == 0 => Ok(()),
-            Ok(output) => {
-                // If git apply fails, try patch -p1 as a fallback.
-                let patch_res = self
-                    .exec(&["sh", "-c", "cd /workspace && patch -p1 -i .niki-tmp.patch"])
-                    .await;
-                if let Ok(p_out) = patch_res
-                    && p_out.exit_code == 0
-                {
-                    return Ok(());
-                }
-                Err(anyhow::anyhow!(
-                    "Failed to apply patch. git exit code: {}\nstdout: {}\nstderr: {}",
-                    output.exit_code,
-                    output.stdout,
-                    output.stderr
-                ))
-            }
+            Ok(output) => Err(anyhow::anyhow!(
+                // `git apply` is the only accepted path application method. We
+                // deliberately do NOT fall back to `patch -p1`: unlike `git apply`
+                // it does not reject paths escaping the repository, which is a
+                // path-traversal risk for attacker-influenced diffs. See report S3.
+                "Failed to apply patch (git apply only; patch -p1 fallback disabled for safety). git exit code: {}\nstdout: {}\nstderr: {}",
+                output.exit_code,
+                output.stdout,
+                output.stderr
+            )),
             Err(e) => Err(e),
         }
     }
