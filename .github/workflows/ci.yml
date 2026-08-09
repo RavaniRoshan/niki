@@ -16,15 +16,34 @@ jobs:
     name: Check (fmt + clippy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: 11d5960a326750d5838078e36cf38b85af677262
+      - uses: 4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: 49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Check formatting
         run: cargo fmt --check
       - name: Clippy lints
-        run: cargo clippy --all-targets 2>&1 | tail -20
+        run: set -eo pipefail; cargo clippy --all-targets 2>&1 | tail -40
+
+  # ── Phase 1b: Supply-chain audit (cargo-audit + cargo-deny) ────────
+  audit:
+    name: Audit (supply chain)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: 11d5960a326750d5838078e36cf38b85af677262
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: 49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run cargo-audit (RustSec advisories)
+        run: cargo audit
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: Run cargo-deny (advisories + licenses + sources)
+        run: cargo deny check
 
   # ── Phase 2: Unit + integration tests ─────────────────────────────
   test:
@@ -32,12 +51,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: check
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Run unit tests (best-effort, test harness has pre-existing issues)
-        continue-on-error: true
-        run: cargo test --lib --verbose 2>&1 | tail -30
+      - uses: 11d5960a326750d5838078e36cf38b85af677262
+      - uses: 4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+      - uses: 49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
+      - name: Run unit tests
+        run: cargo test --lib --verbose
       - name: Build release binary
         run: cargo build --release
       - name: Verify binary runs
@@ -61,17 +79,17 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: 11d5960a326750d5838078e36cf38b85af677262
+      - uses: 4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: 49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
         with:
           key: ${{ matrix.target }}
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: niki-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/niki
@@ -83,11 +101,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: 11d5960a326750d5838078e36cf38b85af677262
+      - uses: 4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+      - uses: 49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: 49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "20"
       - name: Build release
