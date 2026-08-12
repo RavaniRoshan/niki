@@ -19,7 +19,7 @@ use crate::display::theme;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEvent,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers,
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
@@ -355,8 +355,7 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBu
                             dirty = true;
                         }
                     }
-                }
-                _ => {}
+                }                _ => {}
             }
         }
 
