@@ -89,7 +89,7 @@ impl ChatPage {
     /// indexed by `msg_index` used in [`ChatLine`].
     fn source_texts(state: &AppState) -> Vec<String> {
         let mut v: Vec<String> = Vec::new();
-        for (_i, (role, text)) in state.chat_log.iter().enumerate() {
+        for (role, text) in state.chat_log.iter() {
             v.push(format!("{}: {}", role, text));
         }
         for s in &state.stages {
@@ -158,9 +158,8 @@ impl ChatPage {
                 state.chat_sel_anchor = Some((row, col));
             }
             MouseEventKind::Drag(_) => {
-                if state.chat_sel_anchor.is_some() {
-                    let anchor = state.chat_sel_anchor.unwrap();
-                    let text = Self::selected_text(state, anchor, (row, col));
+                if let Some(anchor) = state.chat_sel_anchor {
+                    let text = ChatPage::selected_text(state, anchor, (row, col));
                     if !text.is_empty() {
                         copy_to_clipboard(&text);
                         state.chat_copied = Some("copied selection".to_string());
