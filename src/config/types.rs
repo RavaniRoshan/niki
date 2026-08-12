@@ -830,6 +830,59 @@ impl Default for DockerConfig {
 }
 
 impl NikiConfig {
+    /// Known top-level config sections. Any key in niki.toml not in this list
+    /// is warned about at load time so users don't silently configure a feature
+    /// that has no runtime wiring.
+    const KNOWN_SECTIONS: &'static [&'static str] = &[
+        "general",
+        "providers",
+        "agents",
+        "docker",
+        "pipeline",
+        "knowledge",
+        "security",
+        "parallel",
+        "red_blue",
+        "goal",
+        "ui",
+        "session",
+        "compaction",
+        "mcp",
+        "permissions",
+        "instructions",
+    ];
+
+    fn warn_unknown_sections(content: &str, path: &std::path::Path) {
+        if let Ok(raw) = content.parse::<toml::Value>() {
+            if let Some(table) = raw.as_table() {
+                for key in table.keys() {
+                    if !Self::KNOWN_SECTIONS.contains(&key.as_str()) {
+                        eprintln!(
+                            "warning: unknown config section `[{}]` in {} — it will be ignored",
+                            key,
+                            path.display()
+                        );
+                    }
+                }
+                for known in Self::KNOWN_SECTIONS {
+                    if !table.contains_key(*known) {
+                        continue;
+                    }
+                    if matches!(
+                        *known,
+                        "session" | "compaction" | "mcp" | "permissions"
+                    ) {
+                        eprintln!(
+                            "note: `[{}]` in {} is parsed but not yet wired to any runtime behavior — settings will be ignored for now",
+                            known,
+                            path.display()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     pub fn load(project_dir: &Path) -> Result<Self> {
         let mut config = Self::default();
 
@@ -841,12 +894,14 @@ impl NikiConfig {
             && gp.exists()
         {
             let content = fs::read_to_string(gp)?;
+            Self::warn_unknown_sections(&content, gp);
             let c: NikiConfig = toml::from_str(&content)?;
             config.merge(c);
         }
 
         if local_path.exists() {
             let content = fs::read_to_string(&local_path)?;
+            Self::warn_unknown_sections(&content, &local_path);
             let c: NikiConfig = toml::from_str(&content)?;
             config.merge(c);
         }
@@ -1080,6 +1135,81 @@ impl NikiConfig {
             }
             apply_env_model_to_agents(&mut self.agents, "openai", &model);
         }
+    }
+
+    /// Generate the JSON schema for niki.toml and return it as a pretty-printed string.
+    /// This can be used to set up editor autocomplete (VSCode, Neovim, etc.).
+    pub fn config_schema_json() -> String {
+        let schema = serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "NikiConfig",
+            "description": "NIKI configuration file (niki.toml)",
+            "type": "object",
+            "properties": {
+                "general": {
+                    "type": "object",
+                    "properties": {
+                        "max_revision_rounds": {"type": "integer", "default": 3},
+                        "output_dir": {"type": "string", "default": ".niki"}
+                    }
+                },
+                "providers": {
+                    "type": "object",
+                    "description": "Provider configurations (api_key, base_url, default_model)",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                            "api_key": {"type": "string", "description": "API key (prefer env var or keyring)"},
+                            "base_url": {"type": "string"},
+                            "default_model": {"type": "string"}
+                        }
+                    }
+                },
+                "agents": {
+                    "type": "object",
+                    "properties": {
+                        "planner": {"$ref": "#/$defs/agent"},
+                        "coder": {"$ref": "#/$defs/agent"},
+                        "tester": {"$ref": "#/$defs/agent"},
+                        "reviewer": {"$ref": "#/$defs/agent"},
+                        "synthesizer": {"$ref": "#/$defs/agent"},
+                        "security_auditor": {"$ref": "#/$defs/agent"}
+                    }
+                },
+                "docker": {
+                    "type": "object",
+                    "properties": {
+                        "base_image": {"type": "string"},
+                        "extra_packages": {"type": "array", "items": {"type": "string"}},
+                        "memory_limit": {"type": "string"},
+                        "cpu_limit": {"type": "number"},
+                        "backend": {"type": "string", "enum": ["docker", "worktree", "cloud"]}
+                    }
+                },
+                "pipeline": {"type": "object"},
+                "knowledge": {"type": "object"},
+                "security": {"type": "object"},
+                "parallel": {"type": "object"},
+                "red_blue": {"type": "object"},
+                "goal": {"type": "object"},
+                "ui": {"type": "object"},
+                "session": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
+                "compaction": {"type": "object", "properties": {"strategy": {"type": "string"}}},
+                "mcp": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
+                "permissions": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
+                "instructions": {"type": "object"}
+            },
+            "$defs": {
+                "agent": {
+                    "type": "object",
+                    "properties": {
+                        "provider": {"type": "string"},
+                        "model": {"type": "string"}
+                    }
+                }
+            }
+        });
+        serde_json::to_string_pretty(&schema).unwrap_or_else(|_| "{}".to_string())
     }
 }
 

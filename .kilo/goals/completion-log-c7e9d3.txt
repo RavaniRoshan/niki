@@ -1,0 +1,29 @@
+Goal: auth-flow-doctor-login-c7e9d3
+Status: COMPLETE
+Iterations: 7
+Date: 2026-08-12
+
+## Deliverables
+
+1. **Cargo.toml**: Added `keyring = "2"` and `rpassword = "7"` dependencies
+2. **src/cli/auth.rs**: New module with Login/Logout/Status subcommands
+   - Login: masked input via rpassword, env var detection, keyring storage, --stdin mode
+   - Logout: removes from keyring (single or all providers)
+   - Status: shows keyring + env var status per provider
+   - resolve_api_key(): public helper checking env vars first, then keyring
+3. **src/cli/doctor.rs**: New module with Doctor command
+   - Checks: niki version, rust toolchain, local/global config, provider credentials, container runtime (docker/podman), git
+   - --category filter for focused checks
+   - Colored output (✓ pass, ⚠ warn, ✗ fail)
+4. **src/cli/config.rs**: Enhanced Init + new Schema command
+   - Init --interactive: wizard checking env vars, offering keyring storage
+   - Schema: exports JSON schema for editor autocomplete (VSCode, Neovim)
+5. **src/config/types.rs**: Added config_schema_json() function
+   - Manually constructed JSON schema covering all NikiConfig fields
+6. **src/main.rs**: Added Auth and Doctor command variants to CLI enum + handlers
+7. **src/cli/mod.rs**: Added pub mod auth and pub mod doctor
+
+## Verification
+- cargo build: 0 warnings
+- cargo test: 14 test suites pass, 434 total tests
+- All 7 criteria pass

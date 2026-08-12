@@ -1,0 +1,37 @@
+{
+  "id": "d2f6a4",
+  "slug": "marketing-kit-landing-page-d2f6a4",
+  "objective": "Create marketing kit: landing page (index.html), Show HN post draft, Product Hunt assets, X/thread outline, social kit, VHS demo script, 5-day launch run sheet",
+  "status": "complete",
+  "completed_at": "2026-08-12T09:40:00Z",
+  "final_iterations": 6,
+  "branch": "goal/marketing-kit-landing-page-d2f6a4",
+  "scope": "docs/marketing/",
+  "scope_lock": ["docs/marketing/"],
+  "scope_flex": [],
+  "criteria": [
+    {"label": "Landing page exists", "check": "ls docs/marketing/landing.md", "must_pass": true, "passed": true},
+    {"label": "Show HN post draft exists", "check": "ls docs/marketing/show-hn.md", "must_pass": true, "passed": true},
+    {"label": "Product Hunt assets spec exists", "check": "ls docs/marketing/ph-assets.md", "must_pass": true, "passed": true},
+    {"label": "Social media kit exists", "check": "ls docs/marketing/social.md", "must_pass": true, "passed": true},
+    {"label": "VHS demo script exists", "check": "ls docs/marketing/vhs-script.tape", "must_pass": true, "passed": true},
+    {"label": "Launch run sheet exists", "check": "ls docs/marketing/launch-run-sheet.md", "must_pass": true, "passed": true},
+    {"label": "All files are non-empty (> 10 lines)", "check": "for f in docs/marketing/landing.md docs/marketing/show-hn.md docs/marketing/ph-assets.md docs/marketing/social.md docs/marketing/vhs-script.tape docs/marketing/launch-run-sheet.md; do wc -l $f | awk '{if ($1 > 10) print \"ok\"; else print \"FAIL\"}'; done | grep -c 'ok'", "must_pass": true, "passed": true}
+  ],
+  "tasks": [
+    {"id": 1, "desc": "Create landing page content (docs/marketing/landing.md) - problem/solutions/features/features", "status": "done"},
+    {"id": 2, "desc": "Create Show HN post draft (docs/marketing/show-hn.md) with human username style + backstory", "status": "done"},
+    {"id": 3, "desc": "Create Product Hunt assets spec (docs/marketing/ph-assets.md) - gallery images, tagline, description", "status": "done"},
+    {"id": 4, "desc": "Create social media kit (docs/marketing/social.md) - X thread, mastodon, LinkedIn posts", "status": "done"},
+    {"id": 5, "desc": "Create VHS demo script (docs/marketing/vhs-script.tape) for 0→running demo", "status": "done"},
+    {"id": 6, "desc": "Create 5-day launch run sheet (docs/marketing/launch-run-sheet.md)", "status": "done"},
+    {"id": 7, "desc": "Verify all files exist and are substantial", "status": "done"}
+  ],
+  "current_task": 7,
+  "iterations": 6,
+  "budget_used": 6,
+  "max_iterations": 30,
+  "negative_knowledge": [],
+  "context_summary": "Goal complete. Created all 6 marketing kit files in docs/marketing/: (1) landing.md — headline, subheadline, hero demo, 3 feature bullets, honest limitations, waitlist, install matrix. (2) show-hn.md — hand-written Show HN post with backstory, differentiators, limitations, CTA, launch timing notes. (3) ph-assets.md — tagline (≤60 chars), thumbnail spec, 3 gallery image specs (1270×760), YouTube video, description (≤260 chars), tags, first comment template. (4) social.md — X thread (7 tweets), LinkedIn post, dev.to tutorial angle, Reddit posts, Instagram carousel, Mastodon. (5) vhs-script.tape — 60-90s 0→running demo script for VHS rendering. (6) launch-run-sheet.md — day-by-day schedule with PST timestamps, pre-launch checklist, launch day schedule, post-launch follow-up. All 7 criteria pass.",
+  "created_at": "2026-08-12T09:36:00Z"
+}

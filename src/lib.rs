@@ -15,7 +15,6 @@
 #![allow(clippy::field_reassign_with_default)]
 #![allow(clippy::branches_sharing_code)]
 #![allow(clippy::derived_hash_with_manual_eq)]
-#![allow(dead_code)]
 
 use anyhow::anyhow;
 use include_dir::{include_dir, Dir};
