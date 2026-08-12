@@ -1,7 +1,7 @@
 class Niki < Formula
   desc "Hermetic multi-agent coding system"
   homepage "https://github.com/RavaniRoshan/niki"
-  license "BUSL-1.1"
+  license "Apache-2.0"
 
   on_macos do
     on_arm do

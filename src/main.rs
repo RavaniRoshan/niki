@@ -42,6 +42,13 @@ enum Commands {
     Memory(niki::cli::memory::MemoryArgs),
     /// Manage persistent goals (autonomous goal runner)
     Goal(niki::cli::goal::GoalArgs),
+    /// Manage API credentials (login, logout, status)
+    Auth {
+        #[command(subcommand)]
+        command: niki::cli::auth::AuthCommands,
+    },
+    /// Run diagnostics to verify installation and configuration
+    Doctor(niki::cli::doctor::DoctorArgs),
 }
 
 #[tokio::main]
@@ -67,6 +74,8 @@ async fn main() -> Result<()> {
         Commands::Eval(args) => niki::cli::eval::handle(args).await?,
         Commands::Memory(args) => niki::cli::memory::handle(args)?,
         Commands::Goal(args) => niki::cli::goal::handle(args).await?,
+        Commands::Auth { command } => niki::cli::auth::handle(command).await?,
+        Commands::Doctor(args) => niki::cli::doctor::handle(args)?,
     }
 
     Ok(())

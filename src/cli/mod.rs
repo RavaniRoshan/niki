@@ -1,5 +1,7 @@
+pub mod auth;
 pub mod config;
 pub mod dashboard;
+pub mod doctor;
 pub mod eval;
 pub mod goal;
 pub mod memory;

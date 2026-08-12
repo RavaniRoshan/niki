@@ -126,6 +126,7 @@ pub enum FrameTarget {
 }
 
 /// High-performance rendering engine with cell-level diffing.
+#[allow(dead_code)] // compiled but unreachable until chat UI is wired
 pub struct RenderEngine {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     front: CellBuffer,
