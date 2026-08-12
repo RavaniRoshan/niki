@@ -95,6 +95,10 @@ pulldown-cmark = "0.12"
 
 # Regex for secret redaction
 regex = "1"
+# OS keyring for secure API key storage
+keyring = "2"
+# Masked password/key input
+rpassword = "7"
 
 [dev-dependencies]
 tempfile = "3"

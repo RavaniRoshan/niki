@@ -42,8 +42,38 @@ Out of scope:
 
 NIKI applies defense-in-depth: container isolation, a command deny-list that is
 enforced for **every** agent role, network egress restrictions, capability
-dropping, and secret redaction. The `worktree` backend runs commands on the
-host by design and is intended for trusted, single-user use — treat it as such.
+dropping, and secret redaction.
+
+## Trust boundaries by backend
+
+| Backend | Isolation | Trust model |
+|---------|-----------|-------------|
+| `docker` / `podman` | Container sandbox with dropped capabilities, read-only mounts where possible, resource limits | LLM code is **untrusted**; host is protected by container boundaries |
+| `worktree` | Git worktree on host filesystem | LLM code runs **directly on the host**; no sandbox boundary — use only in single-user, trusted environments |
+| `cloud` | Remote container (Upstash Box or similar) | LLM code is **untrusted**; host is not involved |
+
+### Worktree backend security considerations
+
+The `worktree` backend creates a git worktree and executes LLM-generated commands
+directly on your host machine. This is a deliberate design choice for speed and
+simplicity, but it means:
+
+- **No filesystem isolation.** The LLM agent can read/write any path the niki
+  process can access. Never run `niki --backend worktree` in directories
+  containing secrets, credentials, or data you would not want an LLM to see.
+- **No network isolation.** Commands like `curl` or `npm install` execute with
+  full host network access.
+- **No capability dropping.** Unlike the Docker backend, there is no seccomp,
+  AppArmor, or capability restriction.
+- **Workspace config files are executable code.** Per the "Pillar: Week of
+  Sandbox Escapes" finding (Jul 2026), files like `.cursorrules`, `AGENTS.md`,
+  or custom config files in the workspace root can instruct LLM agents to execute
+  arbitrary code. When using the worktree backend, treat every file in the
+  workspace as potentially adversarial.
+
+**Recommendation:** Use `docker` or `podman` for untrusted code or shared CI
+environments. Use `worktree` only for personal, single-user development where
+you trust the task description and the project contents.
 
 ## Responsible disclosure
 
