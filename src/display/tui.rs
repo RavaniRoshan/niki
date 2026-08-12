@@ -18,7 +18,9 @@ use crate::artifacts::types::AgentRole;
 use crate::display::theme;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEvent,
+};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -31,7 +33,8 @@ use ratatui::widgets::Paragraph;
 use super::command_palette::CommandPalette;
 use super::modal::{self, ModalAction};
 use super::onboarding::{self, OnboardingAction};
-use super::pages::{AppState, PageId, PageRouter};
+use super::pages::{AppState, Page, PageId, PageRouter};
+use super::pages::chat;
 
 /// Events emitted by the pipeline/display layer for the TUI to render.
 #[derive(Debug, Clone)]
@@ -91,6 +94,7 @@ impl Drop for RestoreGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(io::stdout(), DisableMouseCapture);
     }
 }
 
@@ -115,6 +119,8 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBu
     if execute!(io::stdout(), EnterAlternateScreen).is_err() {
         return;
     }
+    // Enable mouse capture so the chat view can offer drag-to-select + auto-copy.
+    let _ = execute!(io::stdout(), EnableMouseCapture);
 
     // Best-effort DEC 2026 synchronized output — eliminates flicker on
     // supporting terminals (kitty, Ghostty, xterm.js ≥6.0, newer tmux).
@@ -214,104 +220,143 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBu
             last_render = now;
         }
 
-        // Handle keypresses (non-blocking, ~16ms poll)
-        if event::poll(Duration::from_millis(16)).unwrap_or(false)
-            && let Ok(Event::Key(key)) = event::read()
-        {
-            // Onboarding modal takes priority
-            if let Some(ref mut onboard) = state.onboarding {
-                match onboard.handle_key(key) {
-                    OnboardingAction::None => {}
-                    OnboardingAction::Skip | OnboardingAction::Finish => {
-                        if onboard.dont_show_again {
-                            onboarding::persist_state(&project_path);
-                            state.onboarded = true;
+        // Handle input events (non-blocking, ~16ms poll)
+        if event::poll(Duration::from_millis(16)).unwrap_or(false) {
+            match event::read() {
+                Ok(Event::Key(key)) => {
+                    // Onboarding modal takes priority
+                    if let Some(ref mut onboard) = state.onboarding {
+                        match onboard.handle_key(key) {
+                            OnboardingAction::None => {}
+                            OnboardingAction::Skip | OnboardingAction::Finish => {
+                                if onboard.dont_show_again {
+                                    onboarding::persist_state(&project_path);
+                                    state.onboarded = true;
+                                }
+                                state.onboarding = None;
+                                dirty = true;
+                            }
                         }
-                        state.onboarding = None;
-                        dirty = true;
-                    }
-                }
-            } else if let Some(ref modal) = state.modal {
-                // Regular modal key handling
-                match modal::handle_modal_key(key, modal) {
-                    ModalAction::Dismiss => {
-                        state.modal = None;
-                        dirty = true;
-                    }
-                    ModalAction::Confirm => {
-                        state.modal = None;
-                        if key.code == KeyCode::Enter {
-                            break;
+                    } else if let Some(ref modal) = state.modal {
+                        // Regular modal key handling
+                        match modal::handle_modal_key(key, modal) {
+                            ModalAction::Dismiss => {
+                                state.modal = None;
+                                dirty = true;
+                            }
+                            ModalAction::Confirm => {
+                                state.modal = None;
+                                if key.code == KeyCode::Enter {
+                                    break;
+                                }
+                                dirty = true;
+                            }
+                            ModalAction::Retry => {
+                                state.modal = None;
+                                dirty = true;
+                            }
+                            ModalAction::Config => {
+                                state.modal = None;
+                                state.current_page = PageId::Config;
+                                dirty = true;
+                            }
+                            ModalAction::Skip => {
+                                state.modal = None;
+                                dirty = true;
+                            }
+                            ModalAction::None => {}
                         }
+                    } else if state.show_command_palette {
+                        // Command palette takes priority
+                        if command_palette.handle_key(key, &mut state) {
+                            state.show_command_palette = false;
+                            dirty = true;
+                        } else {
+                            dirty = true;
+                        }
+                    } else if key.code == KeyCode::Tab
+                        && !key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        // Toggle between the conversational chat view and the page view.
+                        state.current_page = if state.current_page == PageId::Chat {
+                            PageId::Run
+                        } else {
+                            PageId::Chat
+                        };
                         dirty = true;
+                    } else if state.current_page == PageId::Chat {
+                        // Chat view owns all key handling (input + copy-mode).
+                        let mut page = chat::ChatPage::new();
+                        if page.handle_key(key, &mut state) {
+                            dirty = true;
+                        }
+                    } else {
+                        // Ctrl-P opens command palette (global, from any page)
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && key.code == KeyCode::Char('p')
+                        {
+                            state.show_command_palette = true;
+                            command_palette = CommandPalette::new();
+                            dirty = true;
+                        } else if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && key.code == KeyCode::Char('t')
+                        {
+                            // Ctrl+T cycles theme: dark → light → auto → dark
+                            use crate::config::types::ThemePreference;
+                            let new_pref = match state.config.ui.theme {
+                                ThemePreference::Dark => ThemePreference::Light,
+                                ThemePreference::Light => ThemePreference::Auto,
+                                ThemePreference::Auto => ThemePreference::Dark,
+                            };
+                            // Apply to global theme mode
+                            let mode = match new_pref {
+                                ThemePreference::Dark => theme::ThemeMode::Dark,
+                                ThemePreference::Light => theme::ThemeMode::Light,
+                                ThemePreference::Auto => theme::ThemeMode::Auto,
+                            };
+                            theme::set_mode(mode);
+                            state.config.ui.theme = new_pref;
+                            // Persist to config file
+                            let _ = crate::config::types::NikiConfig::save_theme(new_pref);
+                            dirty = true;
+                        } else if state.current_page == PageId::Run {
+                            // On Run page: q/Esc shows quit confirm modal
+                            if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
+                                state.modal = Some(super::pages::Modal::Confirm {
+                                    title: "Quit NIKI?".to_string(),
+                                    message:
+                                        "The pipeline will continue in the background.".to_string(),
+                                });
+                                dirty = true;
+                            } else if router.handle_key(key, &mut state) {
+                                dirty = true;
+                            }
+                        } else {
+                            // On sub-pages: page-specific key handling
+                            if router.handle_key(key, &mut state) {
+                                dirty = true;
+                            }
+                        }
                     }
-                    ModalAction::Retry => {
-                        state.modal = None;
-                        dirty = true;
-                    }
-                    ModalAction::Config => {
-                        state.modal = None;
-                        state.current_page = PageId::Config;
-                        dirty = true;
-                    }
-                    ModalAction::Skip => {
-                        state.modal = None;
-                        dirty = true;
-                    }
-                    ModalAction::None => {}
                 }
-            } else if state.show_command_palette {
-                // Command palette takes priority
-                if command_palette.handle_key(key, &mut state) {
-                    state.show_command_palette = false;
-                    dirty = true;
-                } else {
-                    dirty = true;
-                }
-            } else {
-                // Ctrl-P opens command palette (global, from any page)
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('p') {
-                    state.show_command_palette = true;
-                    command_palette = CommandPalette::new();
-                    dirty = true;
-                } else if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('t')
-                {
-                    // Ctrl+T cycles theme: dark → light → auto → dark
-                    use crate::config::types::ThemePreference;
-                    let new_pref = match state.config.ui.theme {
-                        ThemePreference::Dark => ThemePreference::Light,
-                        ThemePreference::Light => ThemePreference::Auto,
-                        ThemePreference::Auto => ThemePreference::Dark,
-                    };
-                    // Apply to global theme mode
-                    let mode = match new_pref {
-                        ThemePreference::Dark => theme::ThemeMode::Dark,
-                        ThemePreference::Light => theme::ThemeMode::Light,
-                        ThemePreference::Auto => theme::ThemeMode::Auto,
-                    };
-                    theme::set_mode(mode);
-                    state.config.ui.theme = new_pref;
-                    // Persist to config file
-                    let _ = crate::config::types::NikiConfig::save_theme(new_pref);
-                    dirty = true;
-                } else if state.current_page == PageId::Run {
-                    // On Run page: q/Esc shows quit confirm modal
-                    if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
-                        state.modal = Some(super::pages::Modal::Confirm {
-                            title: "Quit NIKI?".to_string(),
-                            message: "The pipeline will continue in the background.".to_string(),
-                        });
-                        dirty = true;
-                    } else if router.handle_key(key, &mut state) {
-                        dirty = true;
-                    }
-                } else {
-                    // On sub-pages: page-specific key handling (Esc/q handled by page → Run)
-                    if router.handle_key(key, &mut state) {
-                        dirty = true;
+                Ok(Event::Mouse(mouse)) => {
+                    if state.current_page == PageId::Chat {
+                        if let Ok(size) = terminal.size() {
+                            let full = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                            let chunks = Layout::default()
+                                .direction(Direction::Vertical)
+                                .constraints([
+                                    Constraint::Length(8),
+                                    Constraint::Min(5),
+                                    Constraint::Length(1),
+                                ])
+                                .split(full);
+                            chat::ChatPage::handle_mouse(&mut state, mouse, chunks[1]);
+                            dirty = true;
+                        }
                     }
                 }
+                _ => {}
             }
         }
 
