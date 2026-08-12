@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod artifacts;
+pub mod chat;
 pub mod config;
 pub mod cost;
 pub mod diff;
@@ -35,6 +36,8 @@ pub enum PageId {
     Config,
     Help,
     TestLog,
+    /// Conversational chat view (primary). Toggled with Tab from any page.
+    Chat,
 }
 
 impl PageId {
@@ -51,6 +54,7 @@ impl PageId {
             PageId::Config,
             PageId::Help,
             PageId::TestLog,
+            PageId::Chat,
         ]
     }
 
@@ -87,6 +91,7 @@ impl PageId {
             PageId::Config => "config",
             PageId::Help => "help",
             PageId::TestLog => "test_log",
+            PageId::Chat => "chat",
         }
     }
 
@@ -103,6 +108,7 @@ impl PageId {
             PageId::Config => ",",
             PageId::Help => "?",
             PageId::TestLog => "l",
+            PageId::Chat => "tab",
         }
     }
 }
@@ -172,6 +178,23 @@ pub struct AppState {
     pub start_time: Option<std::time::Instant>,
     pub tips: TipsBanner,
     pub show_command_palette: bool,
+    // --- Chat view state (conversational UI) ---
+    /// Draft text typed into the chat input box.
+    pub chat_input: String,
+    /// Cursor position (char index) within `chat_input`.
+    pub chat_cursor: usize,
+    /// Whether keyboard copy-mode is active.
+    pub chat_copy_mode: bool,
+    /// Anchor (row, col) for an active selection, in rendered-line coordinates.
+    pub chat_sel_anchor: Option<(usize, usize)>,
+    /// Cursor (row, col) for copy-mode navigation, in rendered-line coordinates.
+    pub chat_cursor_pos: (usize, usize),
+    /// Transient "copied" hint (cleared after the next render tick).
+    pub chat_copied: Option<String>,
+    /// Cache of the last rendered chat lines (for selection -> source mapping).
+    pub chat_lines: Vec<crate::display::pages::chat::ChatLine>,
+    /// Local echo of user-typed messages in the chat input (interactive feedback).
+    pub chat_log: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -217,6 +240,14 @@ impl AppState {
             start_time: None,
             tips: TipsBanner::new(tips_enabled, tips_rotation),
             show_command_palette: false,
+            chat_input: String::new(),
+            chat_cursor: 0,
+            chat_copy_mode: false,
+            chat_sel_anchor: None,
+            chat_cursor_pos: (0, 0),
+            chat_copied: None,
+            chat_lines: Vec::new(),
+            chat_log: Vec::new(),
         }
     }
 
@@ -400,6 +431,7 @@ impl PageRouter {
         pages.insert(PageId::Config, Box::new(config::ConfigPage::new()));
         pages.insert(PageId::Help, Box::new(help::HelpPage::new()));
         pages.insert(PageId::TestLog, Box::new(test_log::TestLogPage::new()));
+        pages.insert(PageId::Chat, Box::new(chat::ChatPage::new()));
         Self { pages }
     }
 
