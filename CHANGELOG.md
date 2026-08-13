@@ -4,34 +4,44 @@ All notable changes to NIKI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-08-18
+
+Launch cut. Focus: distribution, onboarding, and trust — the agent engine is unchanged.
 
 ### Added
-- Prompts and JSON schemas are now **embedded in the binary**, so the released
-  executable runs `niki run` from any directory without the source tree present.
-- `load_asset` API for resolving bundled assets.
+- `niki init` wizard: detects the container runtime, pulls the published sandbox
+  image, validates the API key, and runs a smoke task (target: first branch in < 5 min).
+- Prebuilt sandbox image published to `ghcr.io/ravaniRoshan/niki-sandbox` — no manual
+  `podman build` required.
+- `general.spend_cap_usd` — a per-run spend ceiling. Exceeding it prints a clear
+  warning so autonomous runs can't run away on cost.
+- Explicit config-trust warnings: `[session]`, `[compaction]`, `[mcp]`, `[permissions]`
+  are parsed but **not yet wired**; NIKI now says so at load instead of silently
+  ignoring them.
+- `assets/logo.svg` recolored to the teal brand (`#0d9488`) to match the TUI.
+- `docs/benchmarks.md` (honest eval-harness notes) and a static landing page.
 
 ### Changed
-- **License changed from BUSL-1.1 to Apache-2.0** — NIKI is now fully open
-  source.
-- Google provider now sends the API key via the `x-goog-api-key` header instead
-  of a URL query parameter (avoids leaking the key into logs/proxies).
-- The command security deny-list is now **enforced for every agent role**
-  (previously only the default policy, letting the coder/reviewer roles run
-  dangerous commands such as `curl | sh`, `mkfs`, `dd`, `rm -rf`).
-- `display::artifact_render::truncate` is now Unicode-safe (no longer panics on
-  multi-byte characters).
-- SIGPIPE is ignored so piping output to `head`/`less` no longer crashes the CLI.
+- Package manifests (Homebrew, Scoop, Winget) now target `v0.3.0`; Winget license
+  corrected `BUSL-1.1` → `Apache-2.0`.
+- `[mcp]` now defaults to `enabled = false` (the MCP client is not yet wired; the
+  previous default implied protection that did not exist — see security audit S14).
+- Worktree backend now prints an explicit "runs on your host with your privileges"
+  warning, since it has no VM isolation (security audit S6).
+
+### From 0.3.0-pre
+- Prompts and JSON schemas are **embedded in the binary** (runs from any directory).
+- License changed from BUSL-1.1 to Apache-2.0.
+- Google key sent via `x-goog-api-key` header (not URL param).
+- Command deny-list enforced for every agent role.
+- `display::artifact_render::truncate` Unicode-safe; SIGPIPE ignored.
 
 ### Fixed
-- `cargo test` (lib unit tests) now compiles — missing `Color` import in the
-  chat display tests.
-- Goal criteria no longer interpolate the objective string into a shell command
-  (removed a command-injection vector).
+- `cargo test` (lib unit tests) compiles; goal criteria no longer interpolate the
+  objective into a shell command.
 
 ### Security
-- Secret redaction now covers Google API keys (`AIza…`) and `?key=` / `&key=`
-  URL parameters in addition to existing patterns.
+- Secret redaction covers Google API keys and `?key=` / `&key=` URL parameters.
 
 ## [0.2.0] - 2025-08
 - Initial public beta: Planner → Coder → Tester → Reviewer pipeline, Podman/Docker
