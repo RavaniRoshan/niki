@@ -21,6 +21,31 @@ api_key = "sk-..."                    # Or set OPENAI_API_KEY env var
 base_url = "https://api.openai.com/v1"  # Host/base for compatible APIs (or set OPENAI_BASE_URL)
 default_model = "gpt-4o"                  # Or set OPENAI_MODEL env var
 
+[providers.openrouter]
+api_key = "sk-or-..."                 # Or set OPENROUTER_API_KEY env var
+base_url = "https://openrouter.ai/api/v1"
+default_model = "anthropic/claude-sonnet-4"
+
+[providers.nvidia]
+api_key = "nvapi-..."                 # Or set NVIDIA_API_KEY env var
+base_url = "https://integrate.api.nvidia.com/v1"
+default_model = "meta/llama-3.1-405b-instruct"
+
+[providers.together]
+api_key = "..."                       # Or set TOGETHER_API_KEY env var
+base_url = "https://api.together.xyz/v1"
+default_model = "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo"
+
+[providers.groq]
+api_key = "gsk_..."                   # Or set GROQ_API_KEY env var
+base_url = "https://api.groq.com/openai/v1"
+default_model = "llama-3.1-70b-versatile"
+
+[providers.deepseek]
+api_key = "..."                       # Or set DEEPSEEK_API_KEY env var
+base_url = "https://api.deepseek.com/v1"
+default_model = "deepseek-chat"
+
 [providers.google]
 api_key = "AIza..."                   # Or set GOOGLE_API_KEY env var
 default_model = "gemini-2.5-pro"
@@ -30,6 +55,8 @@ base_url = "http://localhost:11434"   # Local Ollama instance
 default_model = "llama3.1"
 
 # Per-agent model assignment (BYOK mixing)
+# Each agent can use a different provider and model. This lets you optimize
+# for cost, speed, and quality across the pipeline.
 [agents.planner]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"         # Best reasoning for planning
@@ -39,12 +66,12 @@ provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 
 [agents.tester]
-provider = "openai"
-model = "gpt-4o-mini"               # Cheaper model for test generation
+provider = "groq"                          # Fast + cheap for test generation
+model = "llama-3.1-70b-versatile"
 
 [agents.reviewer]
-provider = "anthropic"
-model = "claude-sonnet-4-20250514"         # Best reasoning for review
+provider = "nvidia"                        # Strong model for adversarial review
+model = "meta/llama-3.1-405b-instruct"
 
 # Optional: data-driven pipeline topology.
 # Define your own ordered list of stages instead of the built-in
