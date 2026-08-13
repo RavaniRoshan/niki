@@ -148,7 +148,7 @@ brew install niki
 scoop install niki
 
 # Windows (Winget)
-winget install Niki.Niki
+winget install RavaniRoshan.niki
 
 # Any platform (cargo)
 cargo install niki
@@ -158,6 +158,21 @@ Then run `niki init` — it detects your container runtime, pulls the prebuilt s
 from `ghcr.io/ravaniRoshan/niki-sandbox`, writes `niki.toml`, validates your key, and runs a
 smoke task. **First reviewable branch in under five minutes — no manual `podman build`.**
 Requires Rust **1.85+** (MSRV) and Podman or Docker (rootless). Full docs live in `docs/`.
+
+### Security & privacy posture
+
+- **No telemetry.** NIKI makes no analytics calls. The only outbound traffic is your own
+  LLM API traffic (or a local Ollama) and the optional `[knowledge]` document fetch.
+- **Sandboxed by default.** Agent commands run in a rootless container with `CapDrop ALL`,
+  pid limits, and a read-only rootfs; the repository is treated as untrusted input.
+  The `worktree` backend (no isolation) prints an explicit warning when selected.
+- **Your keys, never bundled.** BYOK only; keys are redacted from logs and reports
+  (including `?key=` URL parameters and Google API keys).
+- **Spend cap is warn-only in v0.3.** `general.spend_cap_usd` surfaces estimates before and
+  after a run; it does not abort mid-run yet — hard enforcement is on the roadmap. Set a
+  remote budget cap on your provider key as the real ceiling today.
+- **Audit trail.** Per-agent artifacts, metrics, and a hermetic `safety_proof.json` land in
+  `.niki/` for every run.
 
 > Launching on Product Hunt **2026-08-18** — see the research folder for the positioning and plan.
 

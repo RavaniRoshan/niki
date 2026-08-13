@@ -45,24 +45,50 @@ impl ThemeMode {
 /// Global theme mode — atomic so CLI threads see the same mode.
 static MODE: AtomicU8 = AtomicU8::new(ThemeMode::Dark as u8);
 
-/// Set the global theme mode.
+/// Set the global theme mode (preference; Auto is resolved on read).
 pub fn set_mode(mode: ThemeMode) {
     MODE.store(mode as u8, Ordering::Relaxed);
 }
 
-/// Get the effective theme mode (resolves Auto → Dark as default fallback).
+/// Get the stored theme mode preference.
 pub fn current_mode() -> ThemeMode {
     match MODE.load(Ordering::Relaxed) {
-        0 => ThemeMode::Auto, // resolved via auto-detect at startup
+        0 => ThemeMode::Auto,
         1 => ThemeMode::Dark,
         2 => ThemeMode::Light,
         _ => ThemeMode::Dark,
     }
 }
 
-/// Check if the effective mode is light.
+/// Interpret the `COLORFGBG` background index (xterm-family convention:
+/// background index >= 8 means a light terminal background).
+fn bg_from_colorfgbg(value: &str) -> Option<bool> {
+    let bg = value.rsplit(';').next()?;
+    let bg_num: u32 = bg.parse().ok()?;
+    Some(bg_num >= 8)
+}
+
+/// Detect the terminal background preference from `COLORFGBG`.
+/// Returns `None` when the variable is absent or unparseable.
+pub fn detect_terminal_bg() -> Option<bool> {
+    std::env::var("COLORFGBG").ok().as_deref().and_then(bg_from_colorfgbg)
+}
+
+/// Resolve the effective mode: Auto detects from the terminal (`COLORFGBG`),
+/// falling back to Dark when detection is unavailable.
+pub fn resolved_mode() -> ThemeMode {
+    match current_mode() {
+        ThemeMode::Auto => match detect_terminal_bg() {
+            Some(true) => ThemeMode::Light,
+            _ => ThemeMode::Dark,
+        },
+        mode => mode,
+    }
+}
+
+/// Check if the effective (resolved) mode is light.
 pub fn is_light() -> bool {
-    current_mode() == ThemeMode::Light
+    resolved_mode() == ThemeMode::Light
 }
 
 // ── NO_COLOR detection ──────────────────────────────────────────────────
@@ -141,7 +167,7 @@ pub const DARK: Palette = Palette {
     bg_highlight: Color::Rgb(0x1c, 0x21, 0x28), // #1c2128
 
     border: Color::Rgb(0x30, 0x36, 0x3d),        // #30363d
-    border_active: Color::Rgb(0x0d, 0x94, 0x88), // #0d9488 (teal)
+    border_active: Color::Rgb(0x4e, 0xcd, 0xc4), // #4ecdc4 (brand teal)
     border_dim: Color::Rgb(0x21, 0x26, 0x2d),    // #21262d
 
     fg: Color::Rgb(0xe6, 0xed, 0xf3),        // #e6edf3
@@ -149,13 +175,13 @@ pub const DARK: Palette = Palette {
     fg_bright: Color::Rgb(0xf0, 0xf6, 0xfc), // #f0f6fc
     fg_subtle: Color::Rgb(0x6e, 0x76, 0x81), // #6e7681
 
-    success: Color::Rgb(0x34, 0xd3, 0x99),     // #34d399
+    success: Color::Rgb(0x4e, 0xcd, 0xc4),     // #4ecdc4 (brand teal)
     error: Color::Rgb(0xf8, 0x71, 0x71),       // #f87171
     warning: Color::Rgb(0xfb, 0xbf, 0x24),     // #fbbf24
-    accent: Color::Rgb(0x0d, 0x94, 0x88),      // #0d9488 (teal)
+    accent: Color::Rgb(0x4e, 0xcd, 0xc4),      // #4ecdc4 (brand teal)
     clay_orange: Color::Rgb(0xf5, 0x9e, 0x0b), // #f59e0b (amber)
-    cyan: Color::Rgb(0x22, 0xd3, 0xee),        // #22d3ee
-    purple: Color::Rgb(0xa7, 0x8b, 0xfa),      // #a78bfa
+    cyan: Color::Rgb(0x5d, 0x8f, 0xd6),        // #5d8fd6 (brand blue)
+    purple: Color::Rgb(0x96, 0x82, 0xc8),      // #9682c8 (brand purple)
 
     selection_bg: Color::Rgb(0x0d, 0x94, 0x88), // #0d9488 (teal)
     diff_add_bg: Color::Rgb(0x06, 0x4e, 0x3b),  // #064e3b
@@ -168,7 +194,7 @@ pub const DARK: Palette = Palette {
     agent_blue: Color::Rgb(0x38, 0xbd, 0xf8), // #38bdf8
     agent_green: Color::Rgb(0x34, 0xd3, 0x99), // #34d399
     agent_yellow: Color::Rgb(0xf5, 0x9e, 0x0b), // #f59e0b (amber)
-    agent_purple: Color::Rgb(0xa7, 0x8b, 0xfa), // #a78bfa
+    agent_purple: Color::Rgb(0x96, 0x82, 0xc8), // #9682c8 (brand purple)
     agent_orange: Color::Rgb(0xfb, 0x92, 0x3c), // #fb923c
     agent_pink: Color::Rgb(0xf4, 0x72, 0xb6), // #f472b6
     agent_cyan: Color::Rgb(0x22, 0xd3, 0xee), // #22d3ee
@@ -183,7 +209,7 @@ pub const LIGHT: Palette = Palette {
     bg_highlight: Color::Rgb(0xf1, 0xf5, 0xf9), // #f1f5f9
 
     border: Color::Rgb(0xcb, 0xd5, 0xe1),        // #cbd5e1
-    border_active: Color::Rgb(0x0f, 0x76, 0x6e), // #0f766e (teal)
+    border_active: Color::Rgb(0x0d, 0x94, 0x88), // #0d9488 (darkened teal)
     border_dim: Color::Rgb(0xe2, 0xe8, 0xf0),    // #e2e8f0
 
     fg: Color::Rgb(0x1e, 0x29, 0x3b),        // #1e293b
@@ -191,13 +217,13 @@ pub const LIGHT: Palette = Palette {
     fg_bright: Color::Rgb(0x0f, 0x17, 0x2a), // #0f172a
     fg_subtle: Color::Rgb(0x94, 0xa3, 0xb8), // #94a3b8
 
-    success: Color::Rgb(0x05, 0x96, 0x69), // #059669 (darkened for light)
+    success: Color::Rgb(0x0d, 0x94, 0x88), // #0d9488 (darkened teal)
     error: Color::Rgb(0xdc, 0x26, 0x28),   // #dc2628 (darkened for light)
     warning: Color::Rgb(0xd9, 0x77, 0x06), // #d97706 (amber)
-    accent: Color::Rgb(0x0f, 0x76, 0x6e),  // #0f766e (teal)
+    accent: Color::Rgb(0x0d, 0x94, 0x88),  // #0d9488 (darkened teal)
     clay_orange: Color::Rgb(0xd9, 0x77, 0x06), // #d97706 (amber)
-    cyan: Color::Rgb(0x08, 0x91, 0xb2),    // #0891b2
-    purple: Color::Rgb(0x7c, 0x3a, 0xed),  // #7c3aed
+    cyan: Color::Rgb(0x4a, 0x6f, 0xa5),    // #4a6fa5 (darkened brand blue)
+    purple: Color::Rgb(0x7c, 0x5f, 0xc0),  // #7c5fc0 (darkened brand purple)
 
     selection_bg: Color::Rgb(0xcc, 0xf7, 0xf0), // #ccf7f0 (teal 8% tint)
     diff_add_bg: Color::Rgb(0xec, 0xfd, 0xf5),  // #ecfdf5 (success 8% tint)
@@ -210,18 +236,18 @@ pub const LIGHT: Palette = Palette {
     agent_blue: Color::Rgb(0x08, 0x91, 0xb2), // #0891b2
     agent_green: Color::Rgb(0x05, 0x96, 0x69), // #059669
     agent_yellow: Color::Rgb(0xd9, 0x77, 0x06), // #d97706 (amber)
-    agent_purple: Color::Rgb(0x7c, 0x3a, 0xed), // #7c3aed
+    agent_purple: Color::Rgb(0x7c, 0x5f, 0xc0), // #7c5fc0 (darkened brand purple)
     agent_orange: Color::Rgb(0xc2, 0x41, 0x0c), // #c2410c
     agent_pink: Color::Rgb(0xbe, 0x18, 0x5d), // #be185d
     agent_cyan: Color::Rgb(0x0e, 0x74, 0x90), // #0e7490
 };
 
-/// Get the current palette based on active theme mode.
+/// Get the current palette based on the resolved theme mode.
 #[inline]
 fn palette() -> &'static Palette {
-    match current_mode() {
+    match resolved_mode() {
         ThemeMode::Light => &LIGHT,
-        _ => &DARK, // Dark + Auto fallback
+        _ => &DARK, // Dark + Auto-without-detection fallback
     }
 }
 
@@ -233,10 +259,10 @@ pub fn primary() -> Color {
     fg(palette().accent)
 }
 
-/// Claude brand accent — spinners, logo (alias for purple).
+/// Brand accent — spinners, status dot, logo (alias for accent; teal per token.md).
 #[inline]
 pub fn claude() -> Color {
-    fg(palette().purple)
+    fg(palette().accent)
 }
 
 /// Shell mode border/prompt color.
@@ -369,10 +395,30 @@ pub fn text() -> Color {
 pub fn text_body() -> Color {
     fg_color()
 }
-/// Muted text (alias for fg_dim).
+/// Muted text (token.md `text.muted` — alias for fg_subtle).
 #[inline]
 pub fn text_muted() -> Color {
-    fg_dim()
+    fg_subtle()
+}
+/// Strong/emphasis text (token.md `text.strong` — alias for fg_bright).
+#[inline]
+pub fn text_strong() -> Color {
+    fg_bright()
+}
+/// Autocomplete dropdown background (token.md `autocomplete.bg` — alias for bg_elevated).
+#[inline]
+pub fn autocomplete_bg() -> Color {
+    bg_elevated()
+}
+/// Scrollbar thumb color (token.md `scrollbar.thumb` — alias for border_active).
+#[inline]
+pub fn scrollbar_thumb() -> Color {
+    border_active()
+}
+/// Shimmer/animation accent (token.md `shimmer` — alias for cyan).
+#[inline]
+pub fn shimmer() -> Color {
+    fg(palette().cyan)
 }
 /// Default border (alias for border_color).
 #[inline]
@@ -637,53 +683,12 @@ pub fn header_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-pub fn dim_style() -> Style {
-    Style::default().fg(fg(palette().fg_dim))
-}
-
-pub fn accent_style(color: Color) -> Style {
-    Style::default().fg(fg(color)).add_modifier(Modifier::BOLD)
-}
-
-pub fn status_ok() -> Style {
-    Style::default()
-        .fg(fg(palette().success))
-        .add_modifier(Modifier::BOLD)
-}
-
-pub fn status_err() -> Style {
-    Style::default()
-        .fg(fg(palette().error))
-        .add_modifier(Modifier::BOLD)
-}
-
-pub fn status_warn() -> Style {
-    Style::default()
-        .fg(fg(palette().warning))
-        .add_modifier(Modifier::BOLD)
-}
-
 pub fn status_running(color: Color) -> Style {
     Style::default().fg(fg(color)).add_modifier(Modifier::BOLD)
 }
 
-pub fn footer_style() -> Style {
-    Style::default().fg(fg(palette().fg_dim))
-}
-
-pub fn block_border() -> Style {
-    Style::default().fg(fg(palette().border))
-}
-
 pub fn block_border_active() -> Style {
     Style::default().fg(fg(palette().border_active))
-}
-
-/// Clay orange accent style — the signature brand look.
-pub fn clay_accent() -> Style {
-    Style::default()
-        .fg(fg(palette().clay_orange))
-        .add_modifier(Modifier::BOLD)
 }
 
 // ── Unicode-aware text utilities ────────────────────────────────────────
@@ -869,7 +874,8 @@ mod tests {
     fn semantic_aliases_match_core() {
         assert_eq!(format!("{:?}", text()), format!("{:?}", fg_color()));
         assert_eq!(format!("{:?}", text_body()), format!("{:?}", fg_color()));
-        assert_eq!(format!("{:?}", text_muted()), format!("{:?}", fg_dim()));
+        assert_eq!(format!("{:?}", text_muted()), format!("{:?}", fg_subtle()));
+        assert_eq!(format!("{:?}", text_strong()), format!("{:?}", fg_bright()));
         assert_eq!(format!("{:?}", border()), format!("{:?}", border_color()));
         assert_eq!(
             format!("{:?}", border_strong()),
@@ -885,6 +891,16 @@ mod tests {
             format!("{:?}", bg_elevated())
         );
         assert_eq!(format!("{:?}", ink_deep()), format!("{:?}", bg_deep()));
+    }
+
+    #[test]
+    fn auto_detection_uses_colorfgbg() {
+        assert_eq!(bg_from_colorfgbg("15;0"), Some(false));
+        assert_eq!(bg_from_colorfgbg("15;7"), Some(false));
+        assert_eq!(bg_from_colorfgbg("5;15"), Some(true));
+        assert_eq!(bg_from_colorfgbg("5;8"), Some(true));
+        assert_eq!(bg_from_colorfgbg("nope"), None);
+        assert_eq!(bg_from_colorfgbg(""), None);
     }
 
     #[test]
@@ -933,15 +949,8 @@ mod tests {
     #[test]
     fn compound_styles_use_no_color_guard() {
         let _ = header_style();
-        let _ = dim_style();
-        let _ = accent_style(palette().clay_orange);
-        let _ = status_ok();
-        let _ = status_err();
-        let _ = status_warn();
-        let _ = footer_style();
-        let _ = block_border();
+        let _ = status_running(palette().accent);
         let _ = block_border_active();
-        let _ = clay_accent();
     }
 
     #[test]

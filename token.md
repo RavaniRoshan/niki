@@ -1,33 +1,29 @@
 # NIKI Design Tokens — `token.md` (single source of truth)
 
-> **Provenance (read me):** You pasted an image for color extraction, but this model
-> cannot read image input (clipboard/image read failed). Per your 3-try rule, this file
-> was reconstructed from the **actual repo assets** — the implemented `Midnight Teal`
-> palette in `src/display/theme.rs` and `assets/logo.svg` — which is the real, shipped
-> brand. If your pasted image intended *different* colors, tell me and I'll regenerate.
->
-> **Intended use:** This file is the canonical source for every design token in NIKI
-> (TUI, README, landing page, marketing kit, sandbox assets). Today the TUI reads
-> `src/display/theme.rs` directly; promote this file to a build-time source (e.g. a
-> `tokens/token.md` consumed by a small generator that emits `tokens.rs`) so one edit
-> flows everywhere. See research report §"Design tokens" for the migration plan.
+> **Provenance:** Colors extracted from the NIKI brand image (TUI screenshot). The palette
+> uses three signature accents: teal (#4ecdc4) for hero/success, purple (#9682c8) for
+> agent status, and blue (#5d8fd6) for structural elements. This file is the canonical
+> source for every design token in NIKI (TUI, README, landing page, marketing kit).
+> Today the TUI reads `src/display/theme.rs` directly; promote this file to a build-time
+> source (e.g. a `tokens/token.md` consumed by a small generator that emits `tokens.rs`)
+> so one edit flows everywhere. See research report §"Design tokens" for the migration plan.
 
 ## Tier 1 — Primitives (raw values, private to the theme module)
 
 These are the only hardcoded hex values. Everything below resolves to these.
 
 ```
-# Midnight Teal primitives
-TEAL_500   = #0d9488   # brand primary (dark)
-TEAL_600   = #0f766e   # brand primary (light)
+# Midnight Teal primitives (extracted from brand image)
+TEAL_500   = #4ecdc4   # brand teal (hero accent)
+TEAL_600   = #0d9488   # brand teal (darkened for light bg)
 AMBER_500  = #f59e0b   # warm accent (dark)
 AMBER_600  = #d97706   # warm accent (light)
-CYAN_500   = #22d3ee
-PURPLE_500 = #a78bfa
+CYAN_500   = #5d8fd6   # brand blue (header, badges)
+PURPLE_500 = #9682c8   # brand purple (Coder/Tester)
 CLAY_500   = #f59e0b
 
 # Status
-SUCCESS_500 = #34d399   SUCCESS_600 = #059669
+SUCCESS_500 = #4ecdc4   SUCCESS_600 = #0d9488
 ERROR_500   = #f87171   ERROR_600   = #dc2626
 WARNING_500 = #fbbf24   WARNING_600 = #d97706
 
@@ -85,27 +81,27 @@ AGENT_CYAN_LIGHT   = #0e7490
 | `bg.elevated` | `#161b22` | `#ffffff` | cards, modals |
 | `bg.surface` | `#1c2128` | `#f1f5f9` | panels, inputs |
 | `border.base` | `#30363d` | `#cbd5e1` | default borders |
-| `border.focus` | `#0d9488` | `#0f766e` | focused element border |
+| `border.focus` | `#4ecdc4` | `#0d9488` | focused element border (brand teal) |
 | `border.dim` | `#21262d` | `#e2e8f0` | subtle dividers |
 | `text.primary` | `#e6edf3` | `#1e293b` | body text |
 | `text.strong` | `#f0f6fc` | `#0f172a` | bold/emphasis |
 | `text.dim` | `#8b949e` | `#64748b` | secondary text |
 | `text.muted` | `#6e7681` | `#94a3b8` | counters, URLs |
-| `accent.primary` | `#0d9488` | `#0f766e` | brand, focus, interactive |
+| `accent.primary` | `#4ecdc4` | `#0d9488` | brand teal, focus, interactive |
 | `accent.secondary` | `#f59e0b` | `#d97706` | highlights, secondary action |
-| `accent.cyan` | `#22d3ee` | `#0891b2` | links, info |
-| `accent.purple` | `#a78bfa` | `#7c3aed` | logo/sparkle (currently used for spinner) |
-| `status.success` | `#34d399` | `#059669` | checkmarks |
+| `accent.cyan` | `#5d8fd6` | `#4a6fa5` | links, info (brand blue) |
+| `accent.purple` | `#9682c8` | `#7c5fc0` | logo/sparkle (brand purple) |
+| `status.success` | `#4ecdc4` | `#0d9488` | checkmarks (brand teal) |
 | `status.error` | `#f87171` | `#dc2626` | errors |
 | `status.warning` | `#fbbf24` | `#d97706` | warnings |
-| `prompt.cursor` | `#0d9488` (reversed) | `#0f766e` (reversed) | input cursor |
-| `prompt.border` | `#0d9488` | `#0f766e` | input box border |
-| `diff.add` (fg) | `#34d399` | `#059669` | added lines |
+| `prompt.cursor` | `#4ecdc4` (reversed) | `#0d9488` (reversed) | input cursor |
+| `prompt.border` | `#4ecdc4` | `#0d9488` | input box border |
+| `diff.add` (fg) | `#4ecdc4` | `#0d9488` | added lines |
 | `diff.del` (fg) | `#f87171` | `#dc2626` | removed lines |
-| `diff.add.bg` | `rgba(52,211,153,.15)` | `rgba(5,150,105,.12)` | added line bg |
+| `diff.add.bg` | `rgba(78,205,196,.15)` | `rgba(13,148,136,.12)` | added line bg |
 | `diff.del.bg` | `rgba(248,113,113,.15)` | `rgba(220,38,38,.12)` | removed line bg |
 | `role.user` | `#f59e0b` | `#d97706` | user messages |
-| `role.assistant` | `#0d9488` | `#0f766e` | assistant messages |
+| `role.assistant` | `#4ecdc4` | `#0d9488` | assistant messages |
 | `role.system` | `#8b949e` | `#64748b` | system messages |
 
 ### Agent role colors (semantic -> primitive above)
@@ -128,22 +124,14 @@ Planner, Coder, Tester, Reviewer + any user-defined stages map to the 8 agent hu
 | `scrollbar.thumb` | `border.focus` | (future) scrollbar |
 | `selection.bg` | `accent.primary` | copy selection highlight |
 
-## Conflicts to resolve before launch
+## Conflicts — resolution status (verified 2026-08-13)
 
-1. **Logo vs TUI brand mismatch.** `assets/logo.svg` uses blue `#58a6ff` for the
-   "NIKI" wordmark, but the shipped TUI identity is teal `#0d9488`. Pick one.
-   Recommendation: make the logo teal to match the product, OR accept blue as a
-   deliberate "ink" brand color and keep teal as the *interactive* accent. Document it.
-2. **Spinner color.** `theme.rs` `claude()` returns purple `#a78bfa` and is used for the
-   logo/spinner, contradicting the teal brand the doc recommends. Either rename to
-   `brand_ink()` or switch the spinner to `accent.primary`.
-3. **`text.muted` mis-map.** Code's `text_muted()` returns `#8b949e` (fg_dim) while the
-   doc's `text.muted` = `#6e7681` (fg_subtle). Align the value.
-4. **Missing tokens.** `text_strong`, `autocomplete_bg`, `scrollbar_thumb`, `shimmer`
-   are referenced by the doc but absent in code. Add them or drop the references.
-5. **Dead compound styles** (`clay_accent`, `status_ok/err/warn`, `footer_style`,
-   `block_border`, `dim_style`, `accent_style`) are defined but unused. Wire or remove.
-6. **`ThemeMode::Auto`** only falls back to Dark; no OSC 4 / `COLORFGBG` detection.
+1. **Logo vs TUI brand mismatch — RESOLVED.** `assets/logo.svg` is teal `#0d9488`, matching the TUI brand.
+2. **Spinner color — RESOLVED.** `theme::claude()` (spinners, status dot, logo) now returns `accent.primary` (teal). `accent.purple` remains reserved for the shell prompt marker (`theme::shell()`).
+3. **`text.muted` mis-map — RESOLVED.** `text_muted()` now returns `fg_subtle` (`#6e7681` dark / `#94a3b8` light) per the Tier 2 table.
+4. **Missing tokens — RESOLVED.** `text_strong()`, `autocomplete_bg()`, `scrollbar_thumb()`, `shimmer()` added to `theme.rs` (aliases per Tier 3 table).
+5. **Dead compound styles — RESOLVED (removed).** `clay_accent`, `status_ok/err/warn`, `footer_style`, `block_border`, `dim_style`, `accent_style` removed from `theme.rs`; surviving styles: `header_style`, `status_running`, `block_border_active`.
+6. **`ThemeMode::Auto` light detection — RESOLVED.** `resolved_mode()` interprets `COLORFGBG` (background index ≥ 8 → light), falling back to Dark when absent.
 
 ## Accessibility
 

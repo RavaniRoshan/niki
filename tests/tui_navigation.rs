@@ -68,8 +68,8 @@ fn page_id_from_key_all_mappings() {
 }
 
 #[test]
-fn page_id_all_has_11_entries() {
-    assert_eq!(PageId::all().len(), 11);
+fn page_id_all_has_12_entries() {
+    assert_eq!(PageId::all().len(), 12);
 }
 
 #[test]

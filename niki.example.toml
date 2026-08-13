@@ -5,6 +5,11 @@
 max_revision_rounds = 3
 # Task output directory (relative to project root)
 output_dir = ".niki"
+# Optional per-run spend ceiling in USD. 0.0 = unlimited.
+# WARNING (v0.3): this is warn-only — NIKI prints a pre-run estimate and a
+# post-run warning when the cap is exceeded, but does NOT abort mid-run.
+# Set a hard budget/limit on your provider key as the real ceiling today.
+spend_cap_usd = 0.0
 
 [providers.anthropic]
 api_key = "sk-ant-..."               # Or set ANTHROPIC_API_KEY env var
