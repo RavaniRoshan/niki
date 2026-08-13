@@ -122,13 +122,30 @@ pub struct TokenUsage {
 pub fn create_provider(name: &str, config: &ProviderConfig) -> Result<Box<dyn LlmProvider>> {
     match name {
         "anthropic" => Ok(Box::new(super::anthropic::AnthropicProvider::new(config)?)),
-        "openai" => Ok(Box::new(super::openai::OpenAiProvider::new(config)?)),
+        // All OpenAI-compatible providers share the same implementation.
+        // The only difference is base_url configured in niki.toml.
+        "openai" | "openrouter" | "nvidia" | "together" | "groq" | "deepseek" => {
+            Ok(Box::new(super::openai::OpenAiProvider::new(config)?))
+        }
         "google" => Ok(Box::new(super::google::GoogleProvider::new(config)?)),
         "ollama" => Ok(Box::new(super::ollama::OllamaProvider::new(config)?)),
         "mock" => Ok(Box::new(super::mock::MockProvider::new(
             config.base_url.as_deref(),
         )?)),
-        _ => Err(anyhow!("Unknown provider: {}", name)),
+        _ => Err(anyhow!("Unknown provider: {name}")),
+    }
+}
+
+/// Default base URLs for known OpenAI-compatible providers.
+/// Used when `base_url` is not explicitly set in config.
+pub fn default_base_url(name: &str) -> Option<&'static str> {
+    match name {
+        "openrouter" => Some("https://openrouter.ai/api/v1"),
+        "nvidia" => Some("https://integrate.api.nvidia.com/v1"),
+        "together" => Some("https://api.together.xyz/v1"),
+        "groq" => Some("https://api.groq.com/openai/v1"),
+        "deepseek" => Some("https://api.deepseek.com/v1"),
+        _ => None,
     }
 }
 

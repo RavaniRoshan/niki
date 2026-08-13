@@ -1065,6 +1065,11 @@ impl NikiConfig {
         self.providers.entry("anthropic".to_string()).or_default();
         self.providers.entry("openai".to_string()).or_default();
         self.providers.entry("google".to_string()).or_default();
+        self.providers.entry("openrouter".to_string()).or_default();
+        self.providers.entry("nvidia".to_string()).or_default();
+        self.providers.entry("together".to_string()).or_default();
+        self.providers.entry("groq".to_string()).or_default();
+        self.providers.entry("deepseek".to_string()).or_default();
 
         // Standard provider keys take precedence, so a vanilla `ANTHROPIC_API_KEY`
         // (or `OPENAI_API_KEY`) always wins. Gateway-style tokens
@@ -1092,10 +1097,6 @@ impl NikiConfig {
                 if !token.is_empty() {
                     p.api_key = Some(token);
                 }
-            } else if let Ok(key) = std::env::var("OPENROUTER_API_KEY")
-                && !key.is_empty()
-            {
-                p.api_key = Some(key);
             }
         }
         if let Ok(key) = std::env::var("OPENAI_API_KEY")
@@ -1106,6 +1107,43 @@ impl NikiConfig {
         }
         if let Ok(key) = std::env::var("GOOGLE_API_KEY")
             && let Some(p) = self.providers.get_mut("google")
+            && p.api_key.is_none()
+        {
+            p.api_key = Some(key);
+        }
+
+        // OpenAI-compatible provider env vars (each gets its own key).
+        if let Ok(key) = std::env::var("OPENROUTER_API_KEY")
+            && !key.is_empty()
+            && let Some(p) = self.providers.get_mut("openrouter")
+            && p.api_key.is_none()
+        {
+            p.api_key = Some(key);
+        }
+        if let Ok(key) = std::env::var("NVIDIA_API_KEY")
+            && !key.is_empty()
+            && let Some(p) = self.providers.get_mut("nvidia")
+            && p.api_key.is_none()
+        {
+            p.api_key = Some(key);
+        }
+        if let Ok(key) = std::env::var("TOGETHER_API_KEY")
+            && !key.is_empty()
+            && let Some(p) = self.providers.get_mut("together")
+            && p.api_key.is_none()
+        {
+            p.api_key = Some(key);
+        }
+        if let Ok(key) = std::env::var("GROQ_API_KEY")
+            && !key.is_empty()
+            && let Some(p) = self.providers.get_mut("groq")
+            && p.api_key.is_none()
+        {
+            p.api_key = Some(key);
+        }
+        if let Ok(key) = std::env::var("DEEPSEEK_API_KEY")
+            && !key.is_empty()
+            && let Some(p) = self.providers.get_mut("deepseek")
             && p.api_key.is_none()
         {
             p.api_key = Some(key);

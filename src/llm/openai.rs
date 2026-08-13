@@ -27,6 +27,7 @@ fn openai_endpoint(base: &str) -> String {
 pub struct OpenAiProvider {
     config: ProviderConfig,
     client: Client,
+    provider_name: String,
 }
 
 impl OpenAiProvider {
@@ -34,11 +35,42 @@ impl OpenAiProvider {
         let _api_key = config
             .api_key
             .clone()
-            .ok_or_else(|| anyhow!("OpenAI API key not configured"))?;
+            .ok_or_else(|| anyhow!("API key not configured for this provider"))?;
+        // Derive provider name from base_url or config for logging
+        let provider_name = config
+            .base_url
+            .as_ref()
+            .and_then(|url| {
+                if url.contains("openrouter") {
+                    Some("openrouter")
+                } else if url.contains("nvidia") {
+                    Some("nvidia")
+                } else if url.contains("together") {
+                    Some("together")
+                } else if url.contains("groq") {
+                    Some("groq")
+                } else if url.contains("deepseek") {
+                    Some("deepseek")
+                } else {
+                    None
+                }
+            })
+            .unwrap_or("openai")
+            .to_string();
         Ok(Self {
             config: config.clone(),
             client: super::provider::http_client()?,
+            provider_name,
         })
+    }
+
+    /// Resolve the base URL, applying provider-specific defaults.
+    fn base_url(&self) -> &str {
+        self.config
+            .base_url
+            .as_deref()
+            .or_else(|| super::provider::default_base_url(&self.provider_name))
+            .unwrap_or("https://api.openai.com/v1")
     }
 }
 
@@ -49,13 +81,8 @@ impl LlmProvider for OpenAiProvider {
             .config
             .api_key
             .as_ref()
-            .ok_or_else(|| anyhow!("OpenAI API key not configured"))?;
-        let url = openai_endpoint(
-            self.config
-                .base_url
-                .as_deref()
-                .unwrap_or("https://api.openai.com/v1"),
-        );
+            .ok_or_else(|| anyhow!("API key not configured for this provider"))?;
+        let url = openai_endpoint(self.base_url());
 
         let payload = json!({
             "model": request.model,
@@ -85,7 +112,7 @@ impl LlmProvider for OpenAiProvider {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             return Err(crate::NikiError::LlmProvider {
-                provider: "openai".into(),
+                provider: self.provider_name.clone(),
                 message: format!("HTTP {}: {}", status, redact_secrets(&body)),
             }
             .into());
@@ -118,13 +145,8 @@ impl LlmProvider for OpenAiProvider {
             .config
             .api_key
             .as_ref()
-            .ok_or_else(|| anyhow!("OpenAI API key not configured"))?;
-        let url = openai_endpoint(
-            self.config
-                .base_url
-                .as_deref()
-                .unwrap_or("https://api.openai.com/v1"),
-        );
+            .ok_or_else(|| anyhow!("API key not configured for this provider"))?;
+        let url = openai_endpoint(self.base_url());
 
         let payload = json!({
             "model": request.model,
@@ -158,7 +180,7 @@ impl LlmProvider for OpenAiProvider {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             return Err(crate::NikiError::LlmProvider {
-                provider: "openai".into(),
+                provider: self.provider_name.clone(),
                 message: format!("HTTP {}: {}", status, redact_secrets(&body)),
             }
             .into());
@@ -227,7 +249,7 @@ impl LlmProvider for OpenAiProvider {
     }
 
     fn provider_name(&self) -> &str {
-        "openai"
+        &self.provider_name
     }
 
     fn supports_structured_output(&self) -> bool {
@@ -243,13 +265,8 @@ impl LlmProvider for OpenAiProvider {
             .config
             .api_key
             .as_ref()
-            .ok_or_else(|| anyhow!("OpenAI API key not configured"))?;
-        let url = openai_endpoint(
-            self.config
-                .base_url
-                .as_deref()
-                .unwrap_or("https://api.openai.com/v1"),
-        );
+            .ok_or_else(|| anyhow!("API key not configured for this provider"))?;
+        let url = openai_endpoint(self.base_url());
 
         let payload = json!({
             "model": request.model,
@@ -286,7 +303,7 @@ impl LlmProvider for OpenAiProvider {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             return Err(crate::NikiError::LlmProvider {
-                provider: "openai".into(),
+                provider: self.provider_name.clone(),
                 message: format!("HTTP {}: {}", status, redact_secrets(&body)),
             }
             .into());
