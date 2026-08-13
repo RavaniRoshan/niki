@@ -432,7 +432,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     } else {
         for (role, json) in &result.artifacts {
             let path = artifacts_dir.join(format!("{}.json", role_filename(*role)));
-            if let Err(e) = std::fs::write(&path, json) {
+            if let Err(e) = crate::util::write_restricted(&path, json) {
                 eprintln!("Warning: could not save artifact {:?}: {}", role, e);
             }
         }
@@ -539,8 +539,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         // present a completed task. The working-tree cleanliness flags remain
         // informational (NIKI intentionally applies the diff to the host working tree).
         let proof = crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string(), true)?;
-        if let Err(e) = std::fs::write(
-            task_dir.join("safety_proof.json"),
+        if let Err(e) = crate::util::write_restricted(
+            &task_dir.join("safety_proof.json"),
             serde_json::to_string_pretty(&proof)?,
         ) {
             eprintln!("Warning: could not write safety_proof.json: {}", e);

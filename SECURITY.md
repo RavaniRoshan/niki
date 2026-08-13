@@ -44,6 +44,31 @@ NIKI applies defense-in-depth: container isolation, a command deny-list that is
 enforced for **every** agent role, network egress restrictions, capability
 dropping, and secret redaction.
 
+## Threat model & trust commitments
+
+NIKI is a **single-user, localhost, BYOK** tool. The dominant realistic risks are
+prompt-injected destructive commands and exfiltration of local secrets by a
+hijacked agent — not multi-tenant kernel attacks. Against that model we commit to:
+
+- **No telemetry, ever.** NIKI has no analytics dependency and makes no outbound
+  calls beyond your configured LLM provider (or local Ollama) and the optional,
+  SSRF-guarded `[knowledge]` fetch. Verified in `Cargo.toml` (no analytics crates).
+- **Repository contents are untrusted input.** Rule files (`AGENTS.md`,
+  `.cursorrules`, etc.) and READMEs may contain prompt injection; the container +
+  deny-list is the enforcement boundary, never the model's judgment.
+- **Keys stay on the host.** Provider keys are read from env/config on the host and
+  are redacted from logs, reports, and artifacts. NIKI never seeds host
+  `~/.aws`, `~/.ssh`, or `.env` files into the agent context.
+- **Egress is restricted, not open.** The container backend uses network
+  restrictions; a default-blocked egress with per-run allowlisting is the
+  post-launch roadmap item (matching Codex/Claude's current defaults).
+- **Spend visibility, honesty first.** `general.spend_cap_usd` is warn-only in
+  v0.3 (pre-run estimate + post-run warning); hard mid-run enforcement is
+  planned. For a hard ceiling today, set one on your provider key.
+- **Supply chain.** Releases ship SHA-pinned CI and dependency audits
+  (cargo-audit/deny); digest-pinned sandbox image pulls and Sigstore signing of
+  the GHCR image are the immediate post-launch items.
+
 ## Trust boundaries by backend
 
 | Backend | Isolation | Trust model |
