@@ -31,6 +31,8 @@ pub async fn run_agent(
     schema_path: &str,
     display: &mut crate::display::agent_stream::AgenticDisplay,
     degrade_on_invalid: bool,
+    max_tokens: u32,
+    temperature: f32,
 ) -> Result<(String, TokenUsage, u32, u32)> {
     let mut env = Environment::new();
     let template_content = crate::load_asset(&format!("prompts/{}", template_name))?;
@@ -55,8 +57,8 @@ pub async fn run_agent(
         model: model.to_string(),
         system_prompt,
         user_message: "Please begin your task and produce the required JSON artifact.".to_string(),
-        max_tokens: 8192,
-        temperature: 0.2,
+        max_tokens,
+        temperature,
         json_schema: None,
     };
 

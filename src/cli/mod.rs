@@ -5,6 +5,7 @@ pub mod doctor;
 pub mod eval;
 pub mod goal;
 pub mod memory;
+pub mod providers;
 pub mod recommend;
 pub mod report;
 pub mod run;

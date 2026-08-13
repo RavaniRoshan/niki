@@ -47,6 +47,8 @@ enum Commands {
         #[command(subcommand)]
         command: niki::cli::auth::AuthCommands,
     },
+    /// Manage and check LLM providers
+    Providers(niki::cli::providers::ProvidersArgs),
     /// Run diagnostics to verify installation and configuration
     Doctor(niki::cli::doctor::DoctorArgs),
 }
@@ -75,6 +77,7 @@ async fn main() -> Result<()> {
         Commands::Memory(args) => niki::cli::memory::handle(args)?,
         Commands::Goal(args) => niki::cli::goal::handle(args).await?,
         Commands::Auth { command } => niki::cli::auth::handle(command).await?,
+        Commands::Providers(args) => niki::cli::providers::handle(args)?,
         Commands::Doctor(args) => niki::cli::doctor::handle(args)?,
     }
 

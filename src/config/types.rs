@@ -689,6 +689,15 @@ pub struct PipelineStageConfig {
     /// When true, this stage is omitted from the run.
     #[serde(default)]
     pub skip: bool,
+    /// Max tokens for this stage. 0 = use agent default (8192).
+    #[serde(default)]
+    pub max_tokens: u32,
+    /// Temperature for this stage. 0.0 = use agent default (0.2).
+    #[serde(default)]
+    pub temperature: f32,
+    /// Fallback providers to try if the primary fails on transient errors.
+    #[serde(default)]
+    pub fallbacks: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -760,6 +769,9 @@ fn default_red_agent() -> AgentConfig {
     AgentConfig {
         provider: "anthropic".to_string(),
         model: "claude-opus-4".to_string(),
+        max_tokens: 0,
+        temperature: 0.0,
+        fallbacks: Vec::new(),
     }
 }
 
@@ -767,6 +779,9 @@ fn default_anthropic_agent() -> AgentConfig {
     AgentConfig {
         provider: "anthropic".to_string(),
         model: "claude-sonnet-4-20250514".to_string(),
+        max_tokens: 0,
+        temperature: 0.0,
+        fallbacks: Vec::new(),
     }
 }
 
@@ -774,13 +789,50 @@ fn default_openai_agent() -> AgentConfig {
     AgentConfig {
         provider: "openai".to_string(),
         model: "gpt-4o-mini".to_string(),
+        max_tokens: 0,
+        temperature: 0.0,
+        fallbacks: Vec::new(),
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     pub provider: String,
     pub model: String,
+    /// Max tokens for this agent's completions. 0 = use default (8192).
+    #[serde(default)]
+    pub max_tokens: u32,
+    /// Temperature for this agent's completions. 0.0 = use default (0.2).
+    #[serde(default)]
+    pub temperature: f32,
+    /// Ordered list of fallback providers if the primary fails on transient errors.
+    /// The primary provider is always tried first; fallbacks are attempted in order.
+    #[serde(default)]
+    pub fallbacks: Vec<String>,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            provider: String::new(),
+            model: String::new(),
+            max_tokens: 0,
+            temperature: 0.0,
+            fallbacks: Vec::new(),
+        }
+    }
+}
+
+impl AgentConfig {
+    /// Effective max_tokens: per-agent override or global default.
+    pub fn effective_max_tokens(&self) -> u32 {
+        if self.max_tokens > 0 { self.max_tokens } else { 8192 }
+    }
+
+    /// Effective temperature: per-agent override or global default.
+    pub fn effective_temperature(&self) -> f32 {
+        if self.temperature > 0.0 { self.temperature } else { 0.2 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

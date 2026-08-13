@@ -89,7 +89,7 @@ where
     last.expect("send_request: loop always stashes a response before returning")
 }
 
-fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+pub(crate) fn is_retryable_status(status: reqwest::StatusCode) -> bool {
     status.as_u16() == 429 || status.is_server_error()
 }
 

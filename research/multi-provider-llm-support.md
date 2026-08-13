@@ -135,13 +135,13 @@ Source: docs.continue.dev, aider.chat/docs/config, docs.openhands.dev
 3. ✅ Done: 26 integration tests
 
 ### Short-term (v0.4.0)
-1. Add `max_tokens` and `temperature` as configurable per-agent fields in `AgentConfig`
-2. Add provider health check endpoint (`/health` route that tests each configured provider)
+1. ✅ Done: Add `max_tokens` and `temperature` as configurable per-agent fields in `AgentConfig`
+2. ✅ Done: Add provider health check endpoint (`niki providers check` CLI command)
 3. Add cost estimation per-agent (use existing `cost.rs` module)
 
 ### Medium-term (v0.5.0)
-1. Add failover chain config: `fallbacks = ["anthropic", "openai", "groq"]`
-2. Add circuit breaker per provider (sliding window, 3 failures → open, 60s → half-open)
+1. ✅ Done: Add failover chain config: `fallbacks = ["anthropic", "openai", "groq"]`
+2. ✅ Done: Add circuit breaker per provider (sliding window, 3 failures → open, 60s → half-open)
 3. Add response caching (TTL-based, configurable per provider)
 
 ### Long-term
