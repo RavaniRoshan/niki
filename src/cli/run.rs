@@ -210,6 +210,21 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
 
     let uses_docker = matches!(backend, SandboxBackend::Docker);
 
+    // Trust & cost notices (launch-plan B3 / S6 / G9).
+    if matches!(backend, SandboxBackend::Worktree) {
+        eprintln!(
+            "warning: worktree backend runs agent commands as local processes on YOUR host \
+             with your privileges — there is no VM/container isolation. Prefer the default \
+             container backend for untrusted tasks."
+        );
+    }
+    if config.general.spend_cap_usd > 0.0 {
+        eprintln!(
+            "note: spend cap active — this run will warn if estimated cost exceeds ${:.2}",
+            config.general.spend_cap_usd
+        );
+    }
+
     let task = Task {
         id: Uuid::new_v4(),
         description: args.description.clone(),
@@ -439,6 +454,13 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         let total_out: u32 = result.metrics.iter().map(|m| m.output_tokens).sum();
         let total_cost: f64 = result.metrics.iter().map(|m| m.cost_usd).sum();
         let total_ms: u64 = result.metrics.iter().map(|m| m.latency_ms).sum();
+        if config.general.spend_cap_usd > 0.0 && total_cost > config.general.spend_cap_usd {
+            eprintln!(
+                "\nwarning: spend cap exceeded — estimated ${:.4} > cap ${:.2}. \
+                 Lower the task scope or raise [general] spend_cap_usd.",
+                total_cost, config.general.spend_cap_usd
+            );
+        }
         let metrics_rows = vec![
             ("Agents run".to_string(), result.metrics.len().to_string()),
             ("Input tokens".to_string(), total_in.to_string()),

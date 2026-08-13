@@ -138,6 +138,29 @@ git -C /path/to/your/project switch niki/<id>
 niki report <id>                      # full report, or a unique short prefix
 ```
 
+## Install (one line)
+
+```bash
+# macOS / Linux (Homebrew)
+brew install niki
+
+# Windows (Scoop)
+scoop install niki
+
+# Windows (Winget)
+winget install Niki.Niki
+
+# Any platform (cargo)
+cargo install niki
+```
+
+Then run `niki init` — it detects your container runtime, pulls the prebuilt sandbox image
+from `ghcr.io/ravaniRoshan/niki-sandbox`, writes `niki.toml`, validates your key, and runs a
+smoke task. **First reviewable branch in under five minutes — no manual `podman build`.**
+Requires Rust **1.85+** (MSRV) and Podman or Docker (rootless). Full docs live in `docs/`.
+
+> Launching on Product Hunt **2026-08-18** — see the research folder for the positioning and plan.
+
 ## Configuration
 
 NIKI reads `niki.toml` from the project root. Keys can also come from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`) — **env vars take precedence, so secrets never have to be committed.**
@@ -263,6 +286,24 @@ src/
 prompts/           # externalized agent prompts (*.md)
 docker/            # sandbox image (Dockerfile) + scripts/
 ```
+
+## What NIKI is NOT
+
+We'd rather be precise than hyped:
+
+- **NIKI is not a replacement for your judgment.** It hands you a *reviewable* branch — you
+  still read the diff and the `report.md` before merging. Nothing lands on `main` without you.
+- **NIKI is not a single all-knowing agent.** It is four independent agents (Planner → Coder →
+  Tester → Reviewer) that can't see each other's context — that independence is the point (no
+  confirmation bias), but it means it reasons in narrower windows than a long single context.
+- **NIKI does not train on your code and does not phone home.** It is BYOK: your keys, your
+  models, your provider. There is no telemetry and no hosted service required to run locally.
+- **The `worktree` backend runs on your host.** It executes agent commands with your privileges
+  and has no VM/container isolation — use the default container backend for untrusted tasks.
+- **`[session]`, `[compaction]`, `[mcp]`, and `[permissions]` are parsed but not yet wired.**
+  NIKI tells you this at load instead of silently ignoring them. They are on the roadmap.
+- **NIKI is not magic on huge, unfamiliar codebases.** Like every coding agent, it works best on
+  tasks with a clear spec and a testable outcome.
 
 ## Roadmap
 

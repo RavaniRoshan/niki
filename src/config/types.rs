@@ -545,7 +545,10 @@ pub struct McpConfig {
 }
 
 fn default_mcp_enabled() -> bool {
-    true
+    // Default OFF: the MCP client is not yet wired to any runtime behavior (security
+    // audit S14). Shipping it enabled-by-default implied a protection that did not
+    // exist. Opt in explicitly once the client lands.
+    false
 }
 
 fn default_mcp_timeout_ms() -> u64 {
@@ -693,6 +696,11 @@ pub struct GeneralConfig {
     pub max_revision_rounds: u32,
     #[serde(default = "default_output_dir")]
     pub output_dir: String,
+    /// Optional per-run spend ceiling in USD. `0.0` (default) means unlimited.
+    /// When set, `niki run` prints a warning if the run's estimated cost exceeds it,
+    /// so autonomous runs can't run away on cost. See launch-plan item G9.
+    #[serde(default)]
+    pub spend_cap_usd: f64,
 }
 
 impl Default for GeneralConfig {
@@ -700,6 +708,7 @@ impl Default for GeneralConfig {
         Self {
             max_revision_rounds: 3,
             output_dir: ".niki".to_string(),
+            spend_cap_usd: 0.0,
         }
     }
 }
@@ -959,6 +968,7 @@ impl NikiConfig {
     fn merge(&mut self, other: NikiConfig) {
         self.general.max_revision_rounds = other.general.max_revision_rounds;
         self.general.output_dir = other.general.output_dir;
+        self.general.spend_cap_usd = other.general.spend_cap_usd;
 
         for (k, v) in other.providers {
             self.providers.insert(k, v);
