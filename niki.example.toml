@@ -60,6 +60,8 @@ default_model = "llama3.1"
 [agents.planner]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"         # Best reasoning for planning
+# max_tokens = 8192                        # Optional: override default
+# temperature = 0.2                        # Optional: override default
 
 [agents.coder]
 provider = "anthropic"
@@ -68,6 +70,9 @@ model = "claude-sonnet-4-20250514"
 [agents.tester]
 provider = "groq"                          # Fast + cheap for test generation
 model = "llama-3.1-70b-versatile"
+# Fallback providers: if Groq is rate-limited or down, try OpenRouter, then OpenAI.
+# Only transient errors (429, 503, timeout, connection) trigger failover.
+fallbacks = ["openrouter", "openai"]
 
 [agents.reviewer]
 provider = "nvidia"                        # Strong model for adversarial review

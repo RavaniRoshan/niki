@@ -86,34 +86,40 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
     let mut stages = if !config.pipeline.stages.is_empty() {
         config.pipeline.stages.clone()
     } else {
-        vec![
-            stage(
-                AgentRole::Planner,
-                &config.agents.planner.provider,
-                &config.agents.planner.model,
-            ),
-            stage(
-                AgentRole::Coder,
-                &config.agents.coder.provider,
-                &config.agents.coder.model,
-            ),
-            stage(
-                AgentRole::Tester,
-                &config.agents.tester.provider,
-                &config.agents.tester.model,
-            ),
-            stage(
-                AgentRole::Reviewer,
-                &config.agents.reviewer.provider,
-                &config.agents.reviewer.model,
-            ),
-        ]
+        // Build default stages from [agents] config, carrying max_tokens/temperature/fallbacks.
+        let mut s = Vec::new();
+        for (role, agent) in [
+            (AgentRole::Planner, &config.agents.planner),
+            (AgentRole::Coder, &config.agents.coder),
+            (AgentRole::Tester, &config.agents.tester),
+            (AgentRole::Reviewer, &config.agents.reviewer),
+        ] {
+            s.push(PipelineStageConfig {
+                role,
+                provider: agent.provider.clone(),
+                model: agent.model.clone(),
+                skip: false,
+                max_tokens: agent.max_tokens,
+                temperature: agent.temperature,
+                fallbacks: agent.fallbacks.clone(),
+            });
+        }
+        s
     };
 
     if config.security.enabled {
         let (provider, model) = security_stage_target(config);
         if !stages.iter().any(|s| s.role == AgentRole::SecurityAuditor) {
-            stages.push(stage(AgentRole::SecurityAuditor, &provider, &model));
+            let agent = &config.agents.security_auditor;
+            stages.push(PipelineStageConfig {
+                role: AgentRole::SecurityAuditor,
+                provider: if provider.is_empty() { agent.provider.clone() } else { provider },
+                model: if model.is_empty() { agent.model.clone() } else { model },
+                skip: false,
+                max_tokens: agent.max_tokens,
+                temperature: agent.temperature,
+                fallbacks: agent.fallbacks.clone(),
+            });
         }
     }
 
@@ -123,11 +129,16 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
         && config.parallel.coder_count > 1
         && !stages.iter().any(|s| s.role == AgentRole::Synthesizer)
     {
-        stages.push(stage(
-            AgentRole::Synthesizer,
-            &config.agents.synthesizer.provider,
-            &config.agents.synthesizer.model,
-        ));
+        let agent = &config.agents.synthesizer;
+        stages.push(PipelineStageConfig {
+            role: AgentRole::Synthesizer,
+            provider: agent.provider.clone(),
+            model: agent.model.clone(),
+            skip: false,
+            max_tokens: agent.max_tokens,
+            temperature: agent.temperature,
+            fallbacks: agent.fallbacks.clone(),
+        });
     }
 
     // Adversarial Red/Blue verification (#1.2): inject a `Red` stage immediately
@@ -139,7 +150,16 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
         && !stages.iter().any(|s| s.role == AgentRole::Red)
     {
         let (provider, model) = red_blue_stage_target(config);
-        stages.insert(pos, stage(AgentRole::Red, &provider, &model));
+        let agent = &config.agents.red;
+        stages.insert(pos, PipelineStageConfig {
+            role: AgentRole::Red,
+            provider: if provider.is_empty() { agent.provider.clone() } else { provider },
+            model: if model.is_empty() { agent.model.clone() } else { model },
+            skip: false,
+            max_tokens: agent.max_tokens,
+            temperature: agent.temperature,
+            fallbacks: agent.fallbacks.clone(),
+        });
     }
 
     stages
@@ -270,15 +290,6 @@ fn required_tools(config: &NikiConfig) -> Vec<String> {
     required
 }
 
-fn stage(role: AgentRole, provider: &str, model: &str) -> PipelineStageConfig {
-    PipelineStageConfig {
-        role,
-        provider: provider.to_string(),
-        model: model.to_string(),
-        skip: false,
-    }
-}
-
 /// A pipeline always needs a Planner to produce the spec; inject one if the
 /// user's topology omitted it.
 fn ensure_planner(
@@ -286,11 +297,16 @@ fn ensure_planner(
     config: &NikiConfig,
 ) -> Vec<PipelineStageConfig> {
     if !stages.iter().any(|s| s.role == AgentRole::Planner) {
-        let mut out = vec![stage(
-            AgentRole::Planner,
-            &config.agents.planner.provider,
-            &config.agents.planner.model,
-        )];
+        let agent = &config.agents.planner;
+        let mut out = vec![PipelineStageConfig {
+            role: AgentRole::Planner,
+            provider: agent.provider.clone(),
+            model: agent.model.clone(),
+            skip: false,
+            max_tokens: agent.max_tokens,
+            temperature: agent.temperature,
+            fallbacks: agent.fallbacks.clone(),
+        }];
         out.extend(stages);
         out
     } else {
@@ -298,11 +314,22 @@ fn ensure_planner(
     }
 }
 
-fn provider_for(provider: &str, config: &NikiConfig) -> Result<Box<dyn LlmProvider>> {
-    let cfg = config.providers.get(provider).ok_or_else(|| {
-        crate::NikiError::Config(format!("Provider '{}' not configured", provider))
-    })?;
-    create_provider(provider, cfg)
+fn provider_for(
+    provider: &str,
+    fallbacks: &[String],
+    config: &NikiConfig,
+) -> Result<Box<dyn LlmProvider>> {
+    if fallbacks.is_empty() {
+        // No fallbacks — plain provider.
+        let cfg = config.providers.get(provider).ok_or_else(|| {
+            crate::NikiError::Config(format!("Provider '{}' not configured", provider))
+        })?;
+        create_provider(provider, cfg)
+    } else {
+        // Build a failover chain: primary + fallbacks.
+        crate::llm::failover::FailoverProvider::new(provider, fallbacks, &config.providers)
+            .map(|p| Box::new(p) as Box<dyn LlmProvider>)
+    }
 }
 
 /// Read the current on-disk contents of every file the spec wants to modify, so the
@@ -412,6 +439,8 @@ async fn run_parallel_coders(
                 None,
                 &mut disp,
                 &mut local_metrics,
+                0,    // max_tokens: use agent default
+                0.0,  // temperature: use agent default
             )
             .await?;
 
@@ -456,6 +485,8 @@ async fn run_stage(
     display: &mut AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
     degrade_on_invalid: bool,
+    max_tokens: u32,
+    temperature: f32,
 ) -> Result<String> {
     let start = Instant::now();
     let (json, usage, retry_count, ttft_ms) = run_agent(
@@ -467,6 +498,8 @@ async fn run_stage(
         schema_path,
         display,
         degrade_on_invalid,
+        max_tokens,
+        temperature,
     )
     .await?;
     let latency_ms = start.elapsed().as_millis() as u64;
@@ -519,6 +552,8 @@ async fn run_role(
     review_feedback: Option<&String>,
     display: &mut AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
+    max_tokens: u32,
+    temperature: f32,
 ) -> Result<(String, Vec<String>, RoleOutput)> {
     let task_spec_json = serde_json::to_string_pretty(task_spec)?;
     let (template, schema) = role_prompt(role);
@@ -591,6 +626,8 @@ async fn run_role(
     let json = run_stage(
         role, llm, model, provider, template, ctx, schema, display, metrics,
         false, // degrade_on_invalid: strict by default for body stages
+        max_tokens,
+        temperature,
     )
     .await?;
 
@@ -650,7 +687,7 @@ pub async fn execute_pipeline(
         .iter()
         .find(|s| s.role == AgentRole::Planner && !s.skip)
         .ok_or_else(|| crate::NikiError::Config("No Planner stage configured".to_string()))?;
-    let planner_llm = provider_for(&planner_stage.provider, config)?;
+    let planner_llm = provider_for(&planner_stage.provider, &planner_stage.fallbacks, config)?;
 
     let planner_json = run_stage(
         AgentRole::Planner,
@@ -667,6 +704,8 @@ pub async fn execute_pipeline(
         display,
         &mut metrics,
         false, // Planner must not degrade — it's the pipeline entry point
+        planner_stage.max_tokens,
+        planner_stage.temperature,
     )
     .await?;
     let task_spec: TaskSpec = serde_json::from_str(&planner_json)?;
@@ -737,14 +776,22 @@ pub async fn execute_pipeline(
         .filter(|s| s.role != AgentRole::Planner && !s.skip)
         .collect();
 
-    // Build one provider client per distinct provider referenced by the stages.
+    // Build one provider client per distinct provider+fallbacks combination.
     // Stored as `Arc` so the parallel-coder path can move a clone into a
     // spawned task without fighting the borrow checker.
     let mut provider_cache: HashMap<String, Arc<dyn LlmProvider>> = HashMap::new();
     for s in &body_stages {
-        if !provider_cache.contains_key(&s.provider) {
-            let llm = provider_for(&s.provider, config)?;
-            provider_cache.insert(s.provider.clone(), Arc::from(llm));
+        // Cache key includes fallbacks so different failover chains don't collide.
+        let cache_key = if s.fallbacks.is_empty() {
+            s.provider.clone()
+        } else {
+            let mut parts = vec![s.provider.clone()];
+            parts.extend(s.fallbacks.iter().cloned());
+            parts.join(":")
+        };
+        if !provider_cache.contains_key(&cache_key) {
+            let llm = provider_for(&s.provider, &s.fallbacks, config)?;
+            provider_cache.insert(cache_key, Arc::from(llm));
         }
     }
 
@@ -770,10 +817,17 @@ pub async fn execute_pipeline(
                     .iter()
                     .find(|s| s.role == AgentRole::Coder)
                     .expect("parallel mode requires a Coder stage");
+                let coder_cache_key = if coder_stage.fallbacks.is_empty() {
+                    coder_stage.provider.clone()
+                } else {
+                    let mut parts = vec![coder_stage.provider.clone()];
+                    parts.extend(coder_stage.fallbacks.iter().cloned());
+                    parts.join(":")
+                };
                 let per_coder = run_parallel_coders(
                     config.parallel.coder_count,
                     provider_cache
-                        .get(&coder_stage.provider)
+                        .get(&coder_cache_key)
                         .ok_or_else(|| {
                             anyhow::anyhow!(
                                 "Provider '{}' not found in cache",
@@ -812,7 +866,14 @@ pub async fn execute_pipeline(
                     .iter()
                     .find(|s| s.role == AgentRole::Synthesizer)
                     .expect("parallel mode requires a Synthesizer stage");
-                let synth_llm = provider_cache.get(&synth_stage.provider).ok_or_else(|| {
+                let synth_cache_key = if synth_stage.fallbacks.is_empty() {
+                    synth_stage.provider.clone()
+                } else {
+                    let mut parts = vec![synth_stage.provider.clone()];
+                    parts.extend(synth_stage.fallbacks.iter().cloned());
+                    parts.join(":")
+                };
+                let synth_llm = provider_cache.get(&synth_cache_key).ok_or_else(|| {
                     anyhow::anyhow!("Provider '{}' not found in cache", synth_stage.provider)
                 })?;
                 let coder_json_in = serde_json::to_string(&per_coder)?;
@@ -831,6 +892,8 @@ pub async fn execute_pipeline(
                     None,
                     display,
                     &mut metrics,
+                    synth_stage.max_tokens,
+                    synth_stage.temperature,
                 )
                 .await?;
                 artifacts.push((AgentRole::Synthesizer, json.clone()));
@@ -868,7 +931,14 @@ pub async fn execute_pipeline(
                     .iter()
                     .filter(|s| s.role != AgentRole::Coder && s.role != AgentRole::Synthesizer)
                 {
-                    let llm = provider_cache.get(&stage.provider).ok_or_else(|| {
+                    let cache_key = if stage.fallbacks.is_empty() {
+                        stage.provider.clone()
+                    } else {
+                        let mut parts = vec![stage.provider.clone()];
+                        parts.extend(stage.fallbacks.iter().cloned());
+                        parts.join(":")
+                    };
+                    let llm = provider_cache.get(&cache_key).ok_or_else(|| {
                         anyhow::anyhow!("Provider '{}' not found in cache", stage.provider)
                     })?;
                     let (json, summary, role_output) = run_role(
@@ -886,6 +956,8 @@ pub async fn execute_pipeline(
                         None,
                         display,
                         &mut metrics,
+                        stage.max_tokens,
+                        stage.temperature,
                     )
                     .await?;
                     artifacts.push((stage.role, json.clone()));
@@ -920,7 +992,14 @@ pub async fn execute_pipeline(
             } else {
                 while round < max_rounds {
                     for stage in &body_stages {
-                        let llm = provider_cache.get(&stage.provider).ok_or_else(|| {
+                        let cache_key = if stage.fallbacks.is_empty() {
+                            stage.provider.clone()
+                        } else {
+                            let mut parts = vec![stage.provider.clone()];
+                            parts.extend(stage.fallbacks.iter().cloned());
+                            parts.join(":")
+                        };
+                        let llm = provider_cache.get(&cache_key).ok_or_else(|| {
                             anyhow::anyhow!("Provider '{}' not found in cache", stage.provider)
                         })?;
                         let (json, summary, role_output) = run_role(
@@ -938,6 +1017,8 @@ pub async fn execute_pipeline(
                             review_feedback.as_ref(),
                             display,
                             &mut metrics,
+                            stage.max_tokens,
+                            stage.temperature,
                         )
                         .await?;
                         artifacts.push((stage.role, json.clone()));
@@ -1033,7 +1114,14 @@ pub async fn execute_pipeline(
                 .iter()
                 .find(|s| s.role == AgentRole::Coder)
                 .expect("single-agent mode requires a Coder stage");
-            let coder_llm = provider_cache.get(&coder_stage.provider).ok_or_else(|| {
+            let coder_cache_key = if coder_stage.fallbacks.is_empty() {
+                coder_stage.provider.clone()
+            } else {
+                let mut parts = vec![coder_stage.provider.clone()];
+                parts.extend(coder_stage.fallbacks.iter().cloned());
+                parts.join(":")
+            };
+            let coder_llm = provider_cache.get(&coder_cache_key).ok_or_else(|| {
                 anyhow::anyhow!("Provider '{}' not found in cache", coder_stage.provider)
             })?;
             let current_files = build_current_files(&task_spec, &task.project_path);
@@ -1053,6 +1141,8 @@ pub async fn execute_pipeline(
                 display,
                 &mut metrics,
                 false, // Solo mode: strict — no degradation
+                coder_stage.max_tokens,
+                coder_stage.temperature,
             )
             .await?;
             artifacts.push((AgentRole::Coder, solo_json.clone()));
@@ -1374,18 +1464,27 @@ mod tests {
                 provider: "a".into(),
                 model: "m".into(),
                 skip: false,
+                max_tokens: 0,
+                temperature: 0.0,
+                fallbacks: Vec::new(),
             },
             PipelineStageConfig {
                 role: AgentRole::Tester,
                 provider: "a".into(),
                 model: "m".into(),
                 skip: false,
+                max_tokens: 0,
+                temperature: 0.0,
+                fallbacks: Vec::new(),
             },
             PipelineStageConfig {
                 role: AgentRole::Reviewer,
                 provider: "a".into(),
                 model: "m".into(),
                 skip: false,
+                max_tokens: 0,
+                temperature: 0.0,
+                fallbacks: Vec::new(),
             },
         ];
         // Single-agent collapses everything but the Coder.
