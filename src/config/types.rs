@@ -357,7 +357,7 @@ impl Default for RedBlueConfig {
 }
 
 fn default_red_blue_enabled() -> bool {
-    true
+    false
 }
 
 /// Goal runner configuration.
@@ -772,6 +772,7 @@ fn default_red_agent() -> AgentConfig {
         max_tokens: 0,
         temperature: 0.0,
         fallbacks: Vec::new(),
+        test_command: None,
     }
 }
 
@@ -782,6 +783,7 @@ fn default_anthropic_agent() -> AgentConfig {
         max_tokens: 0,
         temperature: 0.0,
         fallbacks: Vec::new(),
+        test_command: None,
     }
 }
 
@@ -792,6 +794,7 @@ fn default_openai_agent() -> AgentConfig {
         max_tokens: 0,
         temperature: 0.0,
         fallbacks: Vec::new(),
+        test_command: None,
     }
 }
 
@@ -809,6 +812,12 @@ pub struct AgentConfig {
     /// The primary provider is always tried first; fallbacks are attempted in order.
     #[serde(default)]
     pub fallbacks: Vec<String>,
+    /// Optional command the Tester runs inside the sandbox to verify the change
+    /// (e.g. `cargo test`, `npm test`, `pytest`). When unset, NIKI auto-detects a
+    /// command from the project layout (Cargo.toml / package.json / pyproject.toml /
+    /// go.mod). The real exit code + output are recorded in every run's audit trail.
+    #[serde(default)]
+    pub test_command: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -819,6 +828,7 @@ impl Default for AgentConfig {
             max_tokens: 0,
             temperature: 0.0,
             fallbacks: Vec::new(),
+            test_command: None,
         }
     }
 }
@@ -851,11 +861,15 @@ pub struct DockerConfig {
     /// not need CAP_NET_ADMIN/etc. to run agents.
     #[serde(default = "default_true")]
     pub cap_drop_all: bool,
-    /// Disable outbound network egress from the sandbox. WARNING: many real
-    /// workloads (npm/pip/cargo install, fetching deps) require egress, so this
-    /// defaults to `false`. Enable only when the task is fully offline.
-    #[serde(default)]
+    /// Disable outbound network egress from the sandbox. Defaults to `true` for
+    /// security — use `network_allowlist` for specific domains that need egress.
+    #[serde(default = "default_true")]
     pub network_disabled: bool,
+    /// Domain allowlist for outbound network egress. When `network_disabled` is
+    /// `true`, only these domains are allowed. Empty = block all egress.
+    /// Use `*` to allow all (equivalent to `network_disabled = false`).
+    #[serde(default)]
+    pub network_allowlist: Vec<String>,
     /// Mount the container rootfs read-only. The bind-mounted workspace remains
     /// writable. Adds an extra tamper-resistance layer.
     #[serde(default)]
@@ -883,7 +897,8 @@ impl Default for DockerConfig {
             cpu_limit: 2.0,
             pids_limit: default_pids_limit(),
             cap_drop_all: true,
-            network_disabled: false,
+            network_disabled: true,
+            network_allowlist: Vec::new(),
             readonly_rootfs: false,
             backend: SandboxBackend::Docker,
         }
@@ -1347,8 +1362,9 @@ mod tests {
         assert!(c.agents.security_auditor.provider.len() > 0);
         assert!(!c.security.enabled);
         assert_eq!(c.parallel.coder_count, 2);
-        // Red/Blue is on by default — it is the product's core thesis.
-        assert!(c.red_blue.enabled);
+        // Red/Blue is off by default to match "four agents" messaging.
+        // Enable via [red_blue] enabled = true in niki.toml.
+        assert!(!c.red_blue.enabled);
         assert!(c.agents.red.provider.len() > 0);
     }
 

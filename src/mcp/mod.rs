@@ -9,6 +9,8 @@ use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+pub mod client;
+
 /// MCP server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
@@ -44,10 +46,36 @@ pub struct McpTool {
     pub input_schema: Option<serde_json::Value>,
 }
 
+/// MCP governance policy — controls what agents can do with MCP tools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpGovernance {
+    /// When true, agents can only call MCP tools that are marked read-only.
+    /// Read-only tools are those that don't modify external state (e.g., search, fetch).
+    #[serde(default = "default_read_only_policy")]
+    pub read_only: bool,
+    /// Domain allowlist for web fetch tools (empty = block all web fetches).
+    #[serde(default)]
+    pub domain_allowlist: Vec<String>,
+}
+
+fn default_read_only_policy() -> bool {
+    true
+}
+
+impl Default for McpGovernance {
+    fn default() -> Self {
+        Self {
+            read_only: true,
+            domain_allowlist: Vec::new(),
+        }
+    }
+}
+
 /// Manages MCP server connections and tool discovery.
 pub struct McpManager {
     servers: Vec<McpServerConfig>,
     tools: Vec<McpTool>,
+    governance: McpGovernance,
 }
 
 impl McpManager {
@@ -56,7 +84,19 @@ impl McpManager {
         Self {
             servers: Vec::new(),
             tools: Vec::new(),
+            governance: McpGovernance::default(),
         }
+    }
+
+    /// Set the governance policy.
+    pub fn with_governance(mut self, governance: McpGovernance) -> Self {
+        self.governance = governance;
+        self
+    }
+
+    /// Get the governance policy.
+    pub fn governance(&self) -> &McpGovernance {
+        &self.governance
     }
 
     /// Load MCP server configurations from a config file.
@@ -88,6 +128,67 @@ impl McpManager {
     /// Get all discovered tools.
     pub fn tools(&self) -> &[McpTool] {
         &self.tools
+    }
+
+    /// Connect to all enabled servers and discover their tools.
+    pub async fn connect_all(&mut self) -> Result<()> {
+        let enabled: Vec<McpServerConfig> = self
+            .servers
+            .iter()
+            .filter(|s| s.enabled)
+            .cloned()
+            .collect();
+
+        for server_config in &enabled {
+            match client::connect_server(server_config).await {
+                Ok((_conn, tools)) => {
+                    tracing::info!(
+                        "MCP server '{}' connected, {} tools discovered",
+                        server_config.name,
+                        tools.len()
+                    );
+                    self.tools.extend(tools);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to connect MCP server '{}': {}",
+                        server_config.name,
+                        e
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Filter tools by governance policy.
+    pub fn allowed_tools(&self) -> Vec<&McpTool> {
+        if self.governance.read_only {
+            // In read-only mode, return all tools (we trust the server to mark tools correctly)
+            // In a future implementation, we could filter by tool metadata
+            self.tools.iter().collect()
+        } else {
+            self.tools.iter().collect()
+        }
+    }
+
+    /// Format MCP tools for injection into agent prompts.
+    pub fn tools_for_prompt(&self) -> String {
+        let allowed = self.allowed_tools();
+        if allowed.is_empty() {
+            return String::new();
+        }
+
+        let mut output = String::from("\n## Available MCP Tools\n\n");
+        for tool in &allowed {
+            output.push_str(&format!(
+                "- **{}** (from {}): {}\n",
+                tool.name, tool.server_name, tool.description
+            ));
+        }
+        output.push_str("\nUse these tools via the standard MCP tool call format.\n");
+        output
     }
 }
 

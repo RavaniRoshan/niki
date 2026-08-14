@@ -10,7 +10,7 @@ NIKI runs a team of role-isolated agents (Planner → Coder → Tester → Revie
 [Embed demo.gif or demo.mp4 — 60s "0 → running" sequence]
 
 ```bash
-cargo install niki
+brew install niki
 export ANTHROPIC_API_KEY=your_key
 niki run "Add a health endpoint to the API"
 # → opens a reviewable git branch with diff + report
@@ -32,7 +32,7 @@ Watch the multi-agent pipeline run in real-time with a terminal TUI: per-stage l
 
 ## What it's NOT
 
-- **Not a chat agent.** NIKI is a pipeline that produces reviewable changes, not a conversational REPL.
+- **Not a chat agent.** NIKI is a pipeline that produces reviewable changes. The TUI lets you chat with agents during a run, or run headless via `niki run`.
 - **Not hermetic everywhere.** The `--backend worktree` option runs on your host filesystem for speed. Use `docker` for untrusted code.
 - **Not a monorepo copilot.** NIKI excels at discrete tasks (add feature, fix bug, refactor) — not infinite auto-commits.
 - **Not magic.** It still needs your API key. It still makes mistakes. But the artifacts make them visible.
@@ -44,17 +44,17 @@ Stay updated on new features (sessions, MCP, headless CI mode):
 
 ## Install
 ```bash
-# Quick install
-curl -L https://niki.ai/install | bash
-
 # Homebrew
 brew install niki
 
-# Cargo
-cargo install niki
-
 # Scoop (Windows)
 scoop install niki
+
+# Winget (Windows)
+winget install RavaniRoshan.niki
+
+# Or download a binary
+# https://github.com/RavaniRoshan/niki/releases/latest
 ```
 
 ## Links

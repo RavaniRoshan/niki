@@ -20,6 +20,7 @@ use crate::safety::SafetyProof;
 use crate::sandbox::{ActiveContainers, SandboxBackend, create_sandbox};
 
 use crate::agents::run_agent;
+use crate::agents::tester::{self, TestExecution};
 use minijinja::context;
 
 /// Serialize a CodeDiff's structured edits into SEARCH/REPLACE text so the
@@ -65,6 +66,10 @@ pub struct PipelineResult {
     /// `SingleAgent` (fast-path) or `MultiAgent` (full chain). Visible in the
     /// report so the auto-selection is self-describing, not asserted.
     pub topology: TopologyMode,
+    /// Real test-suite execution result from inside the sandbox, recorded as
+    /// verification evidence before the branch is created. `None` when no test
+    /// command could be resolved or execution was skipped.
+    pub test_execution: Option<TestExecution>,
 }
 
 /// Typed output of a single pipeline stage, used for role-specific handling.
@@ -745,6 +750,7 @@ pub async fn execute_pipeline(
             safety_proof: None,
             isolation,
             topology,
+            test_execution: None,
         });
     }
 
@@ -1186,6 +1192,11 @@ pub async fn execute_pipeline(
         _ => sandbox.get_diff().await?,
     };
 
+    // Verification in the loop: actually execute the project's test suite inside
+    // the sandbox and record the real result as part of the audit trail, *before*
+    // the branch is created. This is the "verified before you see it" guarantee.
+    let test_execution = tester::run_tests(&*sandbox, &config, &task.project_path).await;
+
     sandbox.destroy().await?;
 
     // Extract learnings from this run and save to memory
@@ -1208,6 +1219,7 @@ pub async fn execute_pipeline(
         safety_proof: None,
         isolation,
         topology,
+        test_execution,
     })
 }
 
@@ -1279,17 +1291,17 @@ mod tests {
 
     #[test]
     fn default_pipeline_includes_red_before_reviewer() {
-        // With Red/Blue on by default the classic wiring is now 5 stages:
-        // Planner → Coder → Tester → Red → Reviewer.
+        // Red/Blue is off by default — classic 4-stage pipeline:
+        // Planner → Coder → Tester → Reviewer.
         let c = NikiConfig::default();
         let s = resolve_stages(&c);
-        assert_eq!(s.len(), 5);
+        assert_eq!(s.len(), 4);
         assert!(s.iter().any(|x| x.role == AgentRole::Planner));
         assert!(s.iter().any(|x| x.role == AgentRole::Coder));
-        assert!(s.iter().any(|x| x.role == AgentRole::Red));
+        assert!(!s.iter().any(|x| x.role == AgentRole::Red));
         let roles: Vec<AgentRole> = s.iter().map(|x| x.role).collect();
         assert!(
-            roles.iter().position(|r| *r == AgentRole::Red).unwrap()
+            roles.iter().position(|r| *r == AgentRole::Tester).unwrap()
                 < roles
                     .iter()
                     .position(|r| *r == AgentRole::Reviewer)
@@ -1307,9 +1319,10 @@ mod tests {
 
     #[test]
     fn red_blue_injects_red_before_reviewer() {
-        // Red/Blue is on by default — the classic 4-stage pipeline should become
+        // Red/Blue off by default — enable to get 5-stage pipeline:
         // Planner → Coder → Tester → Red → Reviewer.
-        let c = NikiConfig::default();
+        let mut c = NikiConfig::default();
+        c.red_blue.enabled = true;
         let s = resolve_stages(&c);
         assert!(c.red_blue.enabled);
         let roles: Vec<AgentRole> = s.iter().map(|x| x.role).collect();

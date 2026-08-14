@@ -59,9 +59,10 @@ hijacked agent — not multi-tenant kernel attacks. Against that model we commit
 - **Keys stay on the host.** Provider keys are read from env/config on the host and
   are redacted from logs, reports, and artifacts. NIKI never seeds host
   `~/.aws`, `~/.ssh`, or `.env` files into the agent context.
-- **Egress is restricted, not open.** The container backend uses network
-  restrictions; a default-blocked egress with per-run allowlisting is the
-  post-launch roadmap item (matching Codex/Claude's current defaults).
+- **Egress is blocked by default.** The container backend sets `network_mode: "none"`
+  unless you opt in: `network_disabled = false` (or `network_allowlist = ["*"]`) opens
+  egress — needed when a task must fetch dependencies (e.g. `cargo fetch`, `npm install`).
+  This matches Codex/Claude's network-off sandbox default and is a core trust guarantee.
 - **Spend visibility, honesty first.** `general.spend_cap_usd` is warn-only in
   v0.3 (pre-run estimate + post-run warning); hard mid-run enforcement is
   planned. For a hard ceiling today, set one on your provider key.

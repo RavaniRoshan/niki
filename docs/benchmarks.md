@@ -26,7 +26,6 @@ plainly:
 
 ## How to evaluate NIKI yourself (reproducible)
 ```bash
-niki init                                   # pull image, write config, validate key
 niki run "Add a GET /health endpoint returning {status:'ok'}" --project ./your-repo
 niki report <id>                            # full report + artifacts
 niki dashboard <id>                          # static HTML diff + annotations

@@ -1,5 +1,5 @@
 PackageIdentifier: RavaniRoshan.niki
-PackageVersion: 0.3.0
+PackageVersion: 0.3.1
 DefaultLocale: en-US
 Publisher: RavaniRoshan
 PackageName: niki
@@ -13,7 +13,7 @@ Tags:
 Installers:
   - Architecture: x64
     InstallerType: zip
-    InstallerUrl: https://github.com/RavaniRoshan/niki/releases/download/v0.3.0/niki-x86_64-pc-windows-msvc.zip
+    InstallerUrl: https://github.com/RavaniRoshan/niki/releases/download/v0.3.1/niki-x86_64-pc-windows-msvc.zip
     InstallerSha256: 4eac59354496988ce5a94fe9c41255ae53c3dfeebb78df2d97da92e03384d2f6
     NestedInstallerType: portable
     NestedInstallerFiles:

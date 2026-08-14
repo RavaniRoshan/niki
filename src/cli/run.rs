@@ -436,6 +436,14 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 eprintln!("Warning: could not save artifact {:?}: {}", role, e);
             }
         }
+        if let Some(te) = &result.test_execution {
+            let path = artifacts_dir.join("test_execution.json");
+            if let Err(e) =
+                crate::util::write_restricted(&path, serde_json::to_string_pretty(te)?)
+            {
+                eprintln!("Warning: could not save test_execution artifact: {}", e);
+            }
+        }
     }
 
     // Generate the static HTML dashboard (diff viewer + annotations).
