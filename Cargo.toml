@@ -35,9 +35,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 
 # Docker interaction
 bollard = "0.18"
-
-# Git operations
-git2 = "0.20"
+# Git operations (local only: open/inspect repos)
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
 
 # Template rendering (for agent prompts)
 minijinja = "2"
