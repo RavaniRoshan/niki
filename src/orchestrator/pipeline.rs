@@ -118,8 +118,16 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
             let agent = &config.agents.security_auditor;
             stages.push(PipelineStageConfig {
                 role: AgentRole::SecurityAuditor,
-                provider: if provider.is_empty() { agent.provider.clone() } else { provider },
-                model: if model.is_empty() { agent.model.clone() } else { model },
+                provider: if provider.is_empty() {
+                    agent.provider.clone()
+                } else {
+                    provider
+                },
+                model: if model.is_empty() {
+                    agent.model.clone()
+                } else {
+                    model
+                },
                 skip: false,
                 max_tokens: agent.max_tokens,
                 temperature: agent.temperature,
@@ -156,15 +164,26 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
     {
         let (provider, model) = red_blue_stage_target(config);
         let agent = &config.agents.red;
-        stages.insert(pos, PipelineStageConfig {
-            role: AgentRole::Red,
-            provider: if provider.is_empty() { agent.provider.clone() } else { provider },
-            model: if model.is_empty() { agent.model.clone() } else { model },
-            skip: false,
-            max_tokens: agent.max_tokens,
-            temperature: agent.temperature,
-            fallbacks: agent.fallbacks.clone(),
-        });
+        stages.insert(
+            pos,
+            PipelineStageConfig {
+                role: AgentRole::Red,
+                provider: if provider.is_empty() {
+                    agent.provider.clone()
+                } else {
+                    provider
+                },
+                model: if model.is_empty() {
+                    agent.model.clone()
+                } else {
+                    model
+                },
+                skip: false,
+                max_tokens: agent.max_tokens,
+                temperature: agent.temperature,
+                fallbacks: agent.fallbacks.clone(),
+            },
+        );
     }
 
     stages
@@ -444,8 +463,8 @@ async fn run_parallel_coders(
                 None,
                 &mut disp,
                 &mut local_metrics,
-                0,    // max_tokens: use agent default
-                0.0,  // temperature: use agent default
+                0,   // max_tokens: use agent default
+                0.0, // temperature: use agent default
             )
             .await?;
 
@@ -629,7 +648,15 @@ async fn run_role(
     };
 
     let json = run_stage(
-        role, llm, model, provider, template, ctx, schema, display, metrics,
+        role,
+        llm,
+        model,
+        provider,
+        template,
+        ctx,
+        schema,
+        display,
+        metrics,
         false, // degrade_on_invalid: strict by default for body stages
         max_tokens,
         temperature,

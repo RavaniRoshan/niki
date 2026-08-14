@@ -219,10 +219,7 @@ model = "anthropic/claude-sonnet-4"
     let config: NikiConfig = toml::from_str(toml_str).unwrap();
     let p = config.providers.get("openrouter").unwrap();
     assert_eq!(p.api_key.as_deref(), Some("sk-or-test"));
-    assert_eq!(
-        p.base_url.as_deref(),
-        Some("https://openrouter.ai/api/v1")
-    );
+    assert_eq!(p.base_url.as_deref(), Some("https://openrouter.ai/api/v1"));
     assert_eq!(p.default_model, "anthropic/claude-sonnet-4");
     assert_eq!(config.agents.planner.provider, "openrouter");
 }

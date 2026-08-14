@@ -1,6 +1,6 @@
+use crate::config::NikiConfig;
 use anyhow::Result;
 use clap::Subcommand;
-use crate::config::NikiConfig;
 
 #[derive(Subcommand)]
 pub enum ProviderCommands {
@@ -31,24 +31,35 @@ fn handle_check() -> Result<()> {
     println!("Checking provider health...\n");
 
     let runtime = tokio::runtime::Runtime::new()?;
-    let results = runtime.block_on(
-        crate::llm::failover::check_provider_health(&config.providers)
-    );
+    let results = runtime.block_on(crate::llm::failover::check_provider_health(
+        &config.providers,
+    ));
 
     let mut all_ok = true;
     for r in &results {
         let status = if r.ok { "✓" } else { "✗" };
         let latency = format!("{}ms", r.latency_ms);
-        let model = config.providers
+        let model = config
+            .providers
             .get(&r.provider)
             .map(|p| p.default_model.as_str())
             .unwrap_or("unknown");
 
         if r.ok {
-            println!("  {} {} ({}) — {} — healthy", status, r.provider, model, latency);
+            println!(
+                "  {} {} ({}) — {} — healthy",
+                status, r.provider, model, latency
+            );
         } else {
             all_ok = false;
-            println!("  {} {} ({}) — {} — {}", status, r.provider, model, latency, r.error.as_deref().unwrap_or("unknown error"));
+            println!(
+                "  {} {} ({}) — {} — {}",
+                status,
+                r.provider,
+                model,
+                latency,
+                r.error.as_deref().unwrap_or("unknown error")
+            );
         }
     }
 

@@ -380,11 +380,13 @@ impl DockerSandbox {
                 let mut applied = false;
                 for file_path in targets {
                     if let Some(content) = contents.get(&file_path) {
-                        if let Some(new_content) = crate::sandbox::edit_format::apply_single_edit_block(
-                            content,
-                            &block.search,
-                            &block.replace,
-                        )? {
+                        if let Some(new_content) =
+                            crate::sandbox::edit_format::apply_single_edit_block(
+                                content,
+                                &block.search,
+                                &block.replace,
+                            )?
+                        {
                             contents.insert(file_path.clone(), new_content);
                             applied = true;
                             changed_files.insert(file_path);

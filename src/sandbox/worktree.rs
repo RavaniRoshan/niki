@@ -117,8 +117,7 @@ impl Sandbox for WorktreeSandbox {
             let wt = self.worktree_path.clone();
             return tokio::task::spawn_blocking(move || -> Result<()> {
                 let files = find_files_in_worktree(&wt)?;
-                let paths: Vec<std::path::PathBuf> =
-                    files.iter().map(|(p, _)| p.clone()).collect();
+                let paths: Vec<std::path::PathBuf> = files.iter().map(|(p, _)| p.clone()).collect();
                 let mut unmatched: Vec<usize> = (0..edit_blocks.len()).collect();
                 let mut changed_files: std::collections::HashSet<std::path::PathBuf> =
                     std::collections::HashSet::new();
@@ -136,7 +135,9 @@ impl Sandbox for WorktreeSandbox {
                             .iter()
                             .filter(|f| {
                                 let s = f.to_string_lossy();
-                                &s == target || s.ends_with(target) || s.ends_with(&format!("/{target}"))
+                                &s == target
+                                    || s.ends_with(target)
+                                    || s.ends_with(&format!("/{target}"))
                             })
                             .cloned()
                             .collect(),

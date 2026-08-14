@@ -59,7 +59,10 @@ const RETRY_MAX_ATTEMPTS: u32 = 4;
 /// `build` rebuilds the request on each attempt, so it must be `FnMut`. The
 /// returned `Response` is handed back to the caller for status/body handling.
 /// See research report S12.
-pub async fn send_request<F, Fut>(operation_name: &str, mut build: F) -> reqwest::Result<reqwest::Response>
+pub async fn send_request<F, Fut>(
+    operation_name: &str,
+    mut build: F,
+) -> reqwest::Result<reqwest::Response>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = reqwest::Result<reqwest::Response>>,

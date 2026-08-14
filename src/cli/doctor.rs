@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Args;
 use std::process::Command;
 
-use crate::cli::auth::{load_existing_keys, load_env_keys, PROVIDERS};
+use crate::cli::auth::{PROVIDERS, load_env_keys, load_existing_keys};
 
 #[derive(Args)]
 pub struct DoctorArgs {
@@ -57,11 +57,16 @@ pub fn handle(args: &DoctorArgs) -> Result<()> {
         }
     }
 
-    println!("\nSummary: {} checks, {} passed, {} warnings, {} failed",
+    println!(
+        "\nSummary: {} checks, {} passed, {} warnings, {} failed",
         filtered.len(),
-        filtered.iter().filter(|c| matches!(c.result, CheckResult::Pass(_))).count(),
+        filtered
+            .iter()
+            .filter(|c| matches!(c.result, CheckResult::Pass(_)))
+            .count(),
         warnings,
-        errors);
+        errors
+    );
 
     if errors > 0 {
         println!("\nSome checks failed. See messages above for details.");
@@ -98,7 +103,6 @@ fn check_install() -> Vec<Check> {
 }
 
 fn check_config() -> Vec<Check> {
-
     let project_dir = std::env::current_dir().unwrap_or_default();
     let local_path = project_dir.join("niki.toml");
     let global_path = dirs::home_dir().map(|h| h.join(".config/niki/niki.toml"));
@@ -115,9 +119,7 @@ fn check_config() -> Vec<Check> {
         Check {
             name: "global config".to_string(),
             result: match &global_path {
-                Some(p) if p.exists() => {
-                    CheckResult::Pass(format!("found at {}", p.display()))
-                }
+                Some(p) if p.exists() => CheckResult::Pass(format!("found at {}", p.display())),
                 Some(p) => CheckResult::Warn(format!("not found at {}", p.display())),
                 None => CheckResult::Fail("cannot determine home directory".to_string()),
             },
@@ -160,19 +162,19 @@ fn check_sandbox() -> Vec<Check> {
                 CheckResult::Warn("docker exists but failed to run".to_string())
             }
         }
-        Err(_) => {
-            match Command::new("podman").arg("--version").output() {
-                Ok(output) => {
-                    if output.status.success() {
-                        let version = String::from_utf8_lossy(&output.stdout);
-                        CheckResult::Pass(version.trim().to_string())
-                    } else {
-                        CheckResult::Fail("docker and podman found but both failed".to_string())
-                    }
+        Err(_) => match Command::new("podman").arg("--version").output() {
+            Ok(output) => {
+                if output.status.success() {
+                    let version = String::from_utf8_lossy(&output.stdout);
+                    CheckResult::Pass(version.trim().to_string())
+                } else {
+                    CheckResult::Fail("docker and podman found but both failed".to_string())
                 }
-                Err(_) => CheckResult::Fail("Docker or Podman not found (install one for sandbox backend)".to_string()),
             }
-        }
+            Err(_) => CheckResult::Fail(
+                "Docker or Podman not found (install one for sandbox backend)".to_string(),
+            ),
+        },
     };
 
     let git_result = match Command::new("git").arg("--version").output() {

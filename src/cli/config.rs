@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use std::fs;
 
-use crate::cli::auth::{resolve_api_key, PROVIDERS};
+use crate::cli::auth::{PROVIDERS, resolve_api_key};
 
 #[derive(Subcommand)]
 pub enum ConfigCommands {
@@ -40,7 +40,9 @@ async fn cmd_init(interactive: bool) -> Result<()> {
         println!("Created niki.toml from template.");
     }
 
-    println!("Edit it to add your API keys, or run `niki auth login` to store them securely in your OS keyring.");
+    println!(
+        "Edit it to add your API keys, or run `niki auth login` to store them securely in your OS keyring."
+    );
     Ok(())
 }
 
@@ -60,7 +62,10 @@ async fn cmd_init_interactive(target_path: &std::path::Path) -> Result<()> {
                     stdin: false,
                 })
                 .await?;
-                println!("  Stored in keyring. You can also manually set {} or edit niki.toml.", env_var);
+                println!(
+                    "  Stored in keyring. You can also manually set {} or edit niki.toml.",
+                    env_var
+                );
             }
         } else if resolve_api_key(name).is_some() {
             println!("  Key already stored in keyring for {}", name);
@@ -73,7 +78,10 @@ async fn cmd_init_interactive(target_path: &std::path::Path) -> Result<()> {
                 })
                 .await?;
             } else {
-                println!("  Skipping {} — you can add it later with `niki auth login`", name);
+                println!(
+                    "  Skipping {} — you can add it later with `niki auth login`",
+                    name
+                );
             }
         }
         println!();

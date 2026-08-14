@@ -17,7 +17,7 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 
 use anyhow::anyhow;
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 
 pub mod agents;
 pub mod artifacts;
@@ -41,9 +41,9 @@ pub mod permissions;
 pub mod recommend;
 pub mod safety;
 pub mod sandbox;
-pub mod util;
 pub mod session;
 pub mod tools;
+pub mod util;
 
 use thiserror::Error;
 use uuid::Uuid;

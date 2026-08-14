@@ -151,7 +151,8 @@ fn derive_criteria(objective: &str, survey: &SurveyResult) -> Vec<GoalCriterion>
     } else {
         criteria.push(GoalCriterion {
             label: "No new TODO/FIXME introduced".to_string(),
-            check: "! (grep -r --include='*.rs' -E 'TODO|FIXME|HACK' . 2>/dev/null | grep .)".to_string(),
+            check: "! (grep -r --include='*.rs' -E 'TODO|FIXME|HACK' . 2>/dev/null | grep .)"
+                .to_string(),
             must_pass: true,
             coverage_gate: false,
             result: None,
@@ -394,7 +395,11 @@ mod tests {
         let _guard = crate::goal::TEST_CWD_LOCK.lock().unwrap();
         let original_cwd = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
-        std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"test\"\n").unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"\n",
+        )
+        .unwrap();
         let state = GoalCreator::create(objective, scope, max).unwrap();
         std::env::set_current_dir(original_cwd).unwrap();
         state

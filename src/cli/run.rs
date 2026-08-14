@@ -438,8 +438,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         }
         if let Some(te) = &result.test_execution {
             let path = artifacts_dir.join("test_execution.json");
-            if let Err(e) =
-                crate::util::write_restricted(&path, serde_json::to_string_pretty(te)?)
+            if let Err(e) = crate::util::write_restricted(&path, serde_json::to_string_pretty(te)?)
             {
                 eprintln!("Warning: could not save test_execution artifact: {}", e);
             }
@@ -546,7 +545,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         // new branch is missing — which we propagate to abort the run rather than
         // present a completed task. The working-tree cleanliness flags remain
         // informational (NIKI intentionally applies the diff to the host working tree).
-        let proof = crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string(), true)?;
+        let proof =
+            crate::safety::prove(pre, &project_dir, &branch_name, &task.id.to_string(), true)?;
         if let Err(e) = crate::util::write_restricted(
             &task_dir.join("safety_proof.json"),
             serde_json::to_string_pretty(&proof)?,

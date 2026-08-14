@@ -132,12 +132,8 @@ impl McpManager {
 
     /// Connect to all enabled servers and discover their tools.
     pub async fn connect_all(&mut self) -> Result<()> {
-        let enabled: Vec<McpServerConfig> = self
-            .servers
-            .iter()
-            .filter(|s| s.enabled)
-            .cloned()
-            .collect();
+        let enabled: Vec<McpServerConfig> =
+            self.servers.iter().filter(|s| s.enabled).cloned().collect();
 
         for server_config in &enabled {
             match client::connect_server(server_config).await {

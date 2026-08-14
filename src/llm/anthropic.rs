@@ -80,7 +80,9 @@ impl LlmProvider for AnthropicProvider {
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
             .json(&payload);
-        let resp = super::provider::send_request("anthropic complete", || req.try_clone().unwrap().send()).await?;
+        let resp =
+            super::provider::send_request("anthropic complete", || req.try_clone().unwrap().send())
+                .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();

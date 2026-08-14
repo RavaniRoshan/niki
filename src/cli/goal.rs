@@ -8,7 +8,9 @@ use crate::cli::run::connect_container_runtime;
 use crate::config::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
 use crate::goal::runner::GoalRunner;
-use crate::goal::state::{GoalState, claim_files, create_claim, goals_dir, remove_claim_by_goal, env_dir};
+use crate::goal::state::{
+    GoalState, claim_files, create_claim, env_dir, goals_dir, remove_claim_by_goal,
+};
 use crate::sandbox::docker::ActiveContainers;
 
 #[derive(Args)]
@@ -108,7 +110,11 @@ async fn handle_new(objective: &str, scope: Option<&str>, max: u32) -> Result<()
     println!();
     println!("Criteria:");
     for (i, c) in state.criteria.iter().enumerate() {
-        let gate = if c.must_pass { "[must-pass]" } else { "[optional]" };
+        let gate = if c.must_pass {
+            "[must-pass]"
+        } else {
+            "[optional]"
+        };
         println!("  {}. {} {} — {}", i + 1, gate, c.label, c.check);
     }
     println!();
@@ -128,9 +134,7 @@ fn handle_list() -> Result<()> {
     }
 
     println!("  ID      STATUS   SLUG                                    CREATED");
-    println!(
-        "  ------- -------- --------------------------------------- -------------------"
-    );
+    println!("  ------- -------- --------------------------------------- -------------------");
     for state in &states {
         let created = state.created_at.chars().take(10).collect::<String>();
         println!(
@@ -153,9 +157,7 @@ async fn handle_status(id: Option<&str>) -> Result<()> {
             if id.is_some() {
                 println!("Goal not found.");
             } else {
-                println!(
-                    "No active goal. Create one with `niki goal new <objective>`."
-                );
+                println!("No active goal. Create one with `niki goal new <objective>`.");
             }
         }
     }
@@ -424,7 +426,9 @@ fn handle_env() -> Result<()> {
 
     if !full_path.exists() {
         println!();
-        println!("  Goals directory does not exist yet. It will be created on the first goal save.");
+        println!(
+            "  Goals directory does not exist yet. It will be created on the first goal save."
+        );
     } else {
         let goal_files: Vec<_> = std::fs::read_dir(&full_path)?
             .filter_map(|e| e.ok())

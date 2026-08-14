@@ -106,7 +106,9 @@ impl LlmProvider for OpenAiProvider {
             .header("Authorization", format!("Bearer {}", api_key))
             .header("content-type", "application/json")
             .json(&payload);
-        let resp = super::provider::send_request("openai request", || req.try_clone().unwrap().send()).await?;
+        let resp =
+            super::provider::send_request("openai request", || req.try_clone().unwrap().send())
+                .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -174,7 +176,9 @@ impl LlmProvider for OpenAiProvider {
             .header("Authorization", format!("Bearer {}", api_key))
             .header("content-type", "application/json")
             .json(&payload);
-        let resp = super::provider::send_request("openai request", || req.try_clone().unwrap().send()).await?;
+        let resp =
+            super::provider::send_request("openai request", || req.try_clone().unwrap().send())
+                .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -297,7 +301,9 @@ impl LlmProvider for OpenAiProvider {
             .header("Authorization", format!("Bearer {}", api_key))
             .header("content-type", "application/json")
             .json(&payload);
-        let resp = super::provider::send_request("openai request", || req.try_clone().unwrap().send()).await?;
+        let resp =
+            super::provider::send_request("openai request", || req.try_clone().unwrap().send())
+                .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();

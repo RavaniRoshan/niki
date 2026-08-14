@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use rpassword::prompt_password;
 use std::collections::HashMap;
@@ -47,7 +47,13 @@ fn cmd_login(provider: &Option<String>, from_stdin: bool) -> Result<()> {
                 .iter()
                 .copied()
                 .find(|(name, _, _)| *name == p)
-                .ok_or_else(|| anyhow!("Unknown provider '{}'. Available: {}", p, available_providers()))?;
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Unknown provider '{}'. Available: {}",
+                        p,
+                        available_providers()
+                    )
+                })?;
             vec![found]
         }
         None => PROVIDERS.to_vec(),
@@ -147,7 +153,11 @@ fn cmd_status() -> Result<()> {
 }
 
 fn available_providers() -> String {
-    PROVIDERS.iter().map(|(name, _, _)| *name).collect::<Vec<&str>>().join(", ")
+    PROVIDERS
+        .iter()
+        .map(|(name, _, _)| *name)
+        .collect::<Vec<&str>>()
+        .join(", ")
 }
 
 fn store_key(provider: &str, api_key: &str) -> Result<()> {

@@ -1,5 +1,7 @@
 use crate::config::ProviderConfig;
-use crate::llm::provider::{CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage, create_provider};
+use crate::llm::provider::{
+    CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage, create_provider,
+};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use futures::Stream;
@@ -145,7 +147,11 @@ impl CircuitBreaker {
 }
 
 /// A provider entry in the failover chain: (name, provider, circuit breaker).
-type ProviderEntry = (String, Arc<dyn LlmProvider>, Arc<tokio::sync::Mutex<CircuitBreaker>>);
+type ProviderEntry = (
+    String,
+    Arc<dyn LlmProvider>,
+    Arc<tokio::sync::Mutex<CircuitBreaker>>,
+);
 
 /// A provider that tries the primary, then falls back to alternatives.
 ///
@@ -175,7 +181,10 @@ impl FailoverProvider {
 
         for name in &names {
             let cfg = provider_configs.get(name).ok_or_else(|| {
-                anyhow!("Provider '{}' not configured (referenced in failover chain)", name)
+                anyhow!(
+                    "Provider '{}' not configured (referenced in failover chain)",
+                    name
+                )
             })?;
             let provider = create_provider(name, cfg)?;
             let breaker = CircuitBreaker::new(3, Duration::from_secs(60), Duration::from_secs(60));
@@ -406,11 +415,7 @@ mod tests {
 
     #[test]
     fn circuit_breaker_half_open_after_timeout() {
-        let mut cb = CircuitBreaker::new(
-            2,
-            Duration::from_secs(60),
-            Duration::from_millis(100),
-        );
+        let mut cb = CircuitBreaker::new(2, Duration::from_secs(60), Duration::from_millis(100));
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
@@ -423,11 +428,7 @@ mod tests {
 
     #[test]
     fn circuit_breaker_closes_on_success_from_half_open() {
-        let mut cb = CircuitBreaker::new(
-            2,
-            Duration::from_secs(60),
-            Duration::from_millis(100),
-        );
+        let mut cb = CircuitBreaker::new(2, Duration::from_secs(60), Duration::from_millis(100));
         cb.record_failure();
         cb.record_failure();
         assert_eq!(cb.state(), CircuitState::Open);
@@ -442,11 +443,7 @@ mod tests {
 
     #[test]
     fn circuit_breaker_reopens_on_failure_from_half_open() {
-        let mut cb = CircuitBreaker::new(
-            2,
-            Duration::from_secs(60),
-            Duration::from_millis(100),
-        );
+        let mut cb = CircuitBreaker::new(2, Duration::from_secs(60), Duration::from_millis(100));
         cb.record_failure();
         cb.record_failure();
 
@@ -460,11 +457,7 @@ mod tests {
 
     #[test]
     fn circuit_breaker_prunes_old_failures() {
-        let mut cb = CircuitBreaker::new(
-            3,
-            Duration::from_millis(100),
-            Duration::from_secs(60),
-        );
+        let mut cb = CircuitBreaker::new(3, Duration::from_millis(100), Duration::from_secs(60));
         cb.record_failure();
         cb.record_failure();
 

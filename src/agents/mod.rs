@@ -174,10 +174,7 @@ pub async fn run_agent(
         match validate_detailed(&json_content, &schema_json) {
             Ok(()) => {
                 // Schema valid — also do strict validation
-                if let Err(e) = validate_artifact(
-                    &json_content,
-                    schema_path,
-                ) {
+                if let Err(e) = validate_artifact(&json_content, schema_path) {
                     // Schema valid per field-level but strict validation failed
                     parse_error_detail = Some(e.to_string());
                 } else {
@@ -225,11 +222,7 @@ pub async fn run_agent(
                     json_content = repaired;
                     // Re-validate after local repair
                     if validate_detailed(&json_content, &schema_json).is_ok()
-                        && validate_artifact(
-                            &json_content,
-        schema_path,
-                        )
-                        .is_ok()
+                        && validate_artifact(&json_content, schema_path).is_ok()
                     {
                         break; // Fixed by local repair
                     }
@@ -301,10 +294,7 @@ pub async fn run_agent(
     );
 
     // Final validation — if still invalid, surface the error (or degrade)
-    if let Err(e) = validate_artifact(
-        &json_content,
-        schema_path,
-    ) {
+    if let Err(e) = validate_artifact(&json_content, schema_path) {
         let err_msg = e.to_string();
         if degrade_on_invalid {
             tracing::warn!(

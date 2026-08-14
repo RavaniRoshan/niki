@@ -277,19 +277,10 @@ impl McpConnection {
 /// Connect to an MCP server and discover its tools.
 pub async fn connect_server(config: &McpServerConfig) -> Result<(McpConnection, Vec<McpTool>)> {
     match &config.server_type {
-        McpServerType::Local {
-            command,
-            args,
-            env,
-        } => {
-            let mut conn = McpConnection::connect_stdio(
-                &config.name,
-                command,
-                args,
-                env,
-                config.timeout_ms,
-            )
-            .await?;
+        McpServerType::Local { command, args, env } => {
+            let mut conn =
+                McpConnection::connect_stdio(&config.name, command, args, env, config.timeout_ms)
+                    .await?;
             let tools = conn.list_tools().await?;
             Ok((conn, tools))
         }
