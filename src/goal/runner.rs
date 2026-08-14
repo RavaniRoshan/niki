@@ -181,8 +181,15 @@ impl GoalRunner {
         let results = Self::check_criteria(state);
         for (c, (label, passed)) in state.criteria.iter().zip(results.iter()) {
             let status = if *passed { "PASS" } else { "FAIL" };
-            let gate = if c.must_pass { "[must-pass]" } else { "[optional]" };
-            content.push_str(&format!("  {} {} {} (gate={})\n", status, gate, label, c.check));
+            let gate = if c.must_pass {
+                "[must-pass]"
+            } else {
+                "[optional]"
+            };
+            content.push_str(&format!(
+                "  {} {} {} (gate={})\n",
+                status, gate, label, c.check
+            ));
         }
         content.push_str("\n--- Tasks Completed ---\n");
         for t in &state.tasks {
@@ -338,7 +345,9 @@ mod tests {
         }];
 
         GoalRunner::write_completion_log(&state).unwrap();
-        let log_path = tmp.path().join(".opencode/goals/completion_log_compl123.txt");
+        let log_path = tmp
+            .path()
+            .join(".opencode/goals/completion_log_compl123.txt");
         assert!(log_path.exists());
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(content.contains("Goal Completion Report"));

@@ -341,7 +341,7 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
             safety_proof: None,
             isolation: Vec::new(),
             topology: TopologyMode::MultiAgent,
-        test_execution: None,
+            test_execution: None,
         },
         AgentRole::Reviewer,
     )
@@ -626,7 +626,7 @@ mod tests {
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::MultiAgent,
-        test_execution: None,
+            test_execution: None,
         }
     }
 

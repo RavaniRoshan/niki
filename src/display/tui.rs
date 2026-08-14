@@ -33,8 +33,8 @@ use ratatui::widgets::Paragraph;
 use super::command_palette::CommandPalette;
 use super::modal::{self, ModalAction};
 use super::onboarding::{self, OnboardingAction};
-use super::pages::{AppState, Page, PageId, PageRouter};
 use super::pages::chat;
+use super::pages::{AppState, Page, PageId, PageRouter};
 
 /// Events emitted by the pipeline/display layer for the TUI to render.
 #[derive(Debug, Clone)]
@@ -324,8 +324,8 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBu
                             if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
                                 state.modal = Some(super::pages::Modal::Confirm {
                                     title: "Quit NIKI?".to_string(),
-                                    message:
-                                        "The pipeline will continue in the background.".to_string(),
+                                    message: "The pipeline will continue in the background."
+                                        .to_string(),
                                 });
                                 dirty = true;
                             } else if router.handle_key(key, &mut state) {
@@ -355,7 +355,8 @@ fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBu
                             dirty = true;
                         }
                     }
-                }                _ => {}
+                }
+                _ => {}
             }
         }
 

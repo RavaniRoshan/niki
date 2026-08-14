@@ -364,7 +364,10 @@ fn render_verification_section(result: &PipelineResult) -> String {
     let status = if te.passed { "PASSED" } else { "FAILED" };
     let mut out = String::from("## Verification — Test Suite (executed in sandbox)\n\n");
     out.push_str(&format!("- Command: `{}`\n", te.command));
-    out.push_str(&format!("- Result: **{}** (exit code {})\n", status, te.exit_code));
+    out.push_str(&format!(
+        "- Result: **{}** (exit code {})\n",
+        status, te.exit_code
+    ));
     if let Some(note) = &te.note {
         out.push_str(&format!("- Note: {}\n", note));
     }
@@ -636,7 +639,7 @@ mod tests {
             safety_proof: proof,
             isolation: vec![],
             topology: TopologyMode::Auto,
-        test_execution: None,
+            test_execution: None,
         }
     }
 
@@ -751,7 +754,7 @@ mod tests {
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
-        test_execution: None,
+            test_execution: None,
         };
 
         let section = render_red_blue_section(&result);
@@ -800,7 +803,7 @@ mod tests {
                 },
             ],
             topology: TopologyMode::Auto,
-        test_execution: None,
+            test_execution: None,
         };
         let section = render_isolation_section(&result);
         assert!(section.contains("## Agent Isolation"));
@@ -869,7 +872,7 @@ mod tests {
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
-        test_execution: None,
+            test_execution: None,
         }
     }
 
@@ -963,7 +966,7 @@ index 3333333..4444444 100644
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
-        test_execution: None,
+            test_execution: None,
         }
     }
 

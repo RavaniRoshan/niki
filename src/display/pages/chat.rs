@@ -93,7 +93,9 @@ impl ChatPage {
             v.push(format!("{}: {}", role, text));
         }
         for s in &state.stages {
-            let body = if s.status == crate::display::pages::StageStatus::Running && !s.stream.is_empty() {
+            let body = if s.status == crate::display::pages::StageStatus::Running
+                && !s.stream.is_empty()
+            {
                 &s.stream
             } else if !s.summary.is_empty() {
                 &s.summary.join("\n")
@@ -128,7 +130,11 @@ impl ChatPage {
             } else {
                 line_text.chars().count()
             };
-            let slice: String = line_text.chars().skip(cstart).take(cend.saturating_sub(cstart)).collect();
+            let slice: String = line_text
+                .chars()
+                .skip(cstart)
+                .take(cend.saturating_sub(cstart))
+                .collect();
             out.push_str(&slice);
             if row != end_row {
                 out.push('\n');
@@ -201,8 +207,20 @@ impl Page for ChatPage {
         let width = area.width as usize;
         let mut lines: Vec<ChatLine> = Vec::new();
 
-        push_line(&mut lines, "✦ Welcome to NIKI".to_string(), usize::MAX, 0, false);
-        push_line(&mut lines, format!("  {}", state.description), usize::MAX, 0, false);
+        push_line(
+            &mut lines,
+            "✦ Welcome to NIKI".to_string(),
+            usize::MAX,
+            0,
+            false,
+        );
+        push_line(
+            &mut lines,
+            format!("  {}", state.description),
+            usize::MAX,
+            0,
+            false,
+        );
         push_line(
             &mut lines,
             format!("  Directory: {}", state.project_path.display()),
@@ -237,13 +255,20 @@ impl Page for ChatPage {
             };
             push_line(
                 &mut lines,
-                format!(" {} {} {}", role_icon(s.role), status_glyph, role_label(s.role)),
+                format!(
+                    " {} {} {}",
+                    role_icon(s.role),
+                    status_glyph,
+                    role_label(s.role)
+                ),
                 msg_index,
                 0,
                 false,
             );
 
-            let body = if s.status == crate::display::pages::StageStatus::Running && !s.stream.is_empty() {
+            let body = if s.status == crate::display::pages::StageStatus::Running
+                && !s.stream.is_empty()
+            {
                 s.stream.clone()
             } else if !s.summary.is_empty() {
                 s.summary.join("\n")
@@ -251,7 +276,13 @@ impl Page for ChatPage {
                 s.full_transcript.clone()
             };
             if body.is_empty() {
-                push_line(&mut lines, "  (no output yet)".to_string(), msg_index, 0, false);
+                push_line(
+                    &mut lines,
+                    "  (no output yet)".to_string(),
+                    msg_index,
+                    0,
+                    false,
+                );
             } else {
                 for line in body.lines() {
                     push_line(&mut lines, format!("  {}", line), msg_index, 0, false);
@@ -470,8 +501,20 @@ fn push_line(
 /// so selection math uses coordinates that match the rendered view).
 fn cache_lines(state: &mut AppState) {
     let mut lines: Vec<ChatLine> = Vec::new();
-    push_line(&mut lines, "✦ Welcome to NIKI".to_string(), usize::MAX, 0, false);
-    push_line(&mut lines, format!("  {}", state.description), usize::MAX, 0, false);
+    push_line(
+        &mut lines,
+        "✦ Welcome to NIKI".to_string(),
+        usize::MAX,
+        0,
+        false,
+    );
+    push_line(
+        &mut lines,
+        format!("  {}", state.description),
+        usize::MAX,
+        0,
+        false,
+    );
     push_line(
         &mut lines,
         format!("  Directory: {}", state.project_path.display()),
@@ -480,7 +523,13 @@ fn cache_lines(state: &mut AppState) {
         false,
     );
     if !state.branch_name.is_empty() {
-        push_line(&mut lines, format!("  Branch: {}", state.branch_name), usize::MAX, 0, false);
+        push_line(
+            &mut lines,
+            format!("  Branch: {}", state.branch_name),
+            usize::MAX,
+            0,
+            false,
+        );
     }
     push_line(&mut lines, String::new(), usize::MAX, 0, false);
 
@@ -508,15 +557,22 @@ fn cache_lines(state: &mut AppState) {
             0,
             false,
         );
-        let body = if s.status == crate::display::pages::StageStatus::Running && !s.stream.is_empty() {
-            s.stream.clone()
-        } else if !s.summary.is_empty() {
-            s.summary.join("\n")
-        } else {
-            s.full_transcript.clone()
-        };
+        let body =
+            if s.status == crate::display::pages::StageStatus::Running && !s.stream.is_empty() {
+                s.stream.clone()
+            } else if !s.summary.is_empty() {
+                s.summary.join("\n")
+            } else {
+                s.full_transcript.clone()
+            };
         if body.is_empty() {
-            push_line(&mut lines, "  (no output yet)".to_string(), msg_index, 0, false);
+            push_line(
+                &mut lines,
+                "  (no output yet)".to_string(),
+                msg_index,
+                0,
+                false,
+            );
         } else {
             for line in body.lines() {
                 push_line(&mut lines, format!("  {}", line), msg_index, 0, false);
@@ -602,7 +658,11 @@ mod tests {
     use std::path::PathBuf;
 
     fn base_state() -> AppState {
-        AppState::new("test task".to_string(), NikiConfig::default(), PathBuf::from("."))
+        AppState::new(
+            "test task".to_string(),
+            NikiConfig::default(),
+            PathBuf::from("."),
+        )
     }
 
     fn b64(s: &str) -> String {
@@ -643,7 +703,11 @@ mod tests {
         let mut state = base_state();
         state.chat_log = vec![("assistant".to_string(), "Hello, world".to_string())];
         cache_lines(&mut state);
-        let row = state.chat_lines.iter().position(|l| l.text.contains("Hello, world")).unwrap();
+        let row = state
+            .chat_lines
+            .iter()
+            .position(|l| l.text.contains("Hello, world"))
+            .unwrap();
         // line text is "● assistant: Hello, world"; "Hello" starts at char index 13
         assert_eq!(
             ChatPage::selected_text(&state, (row, 13), (row, 18)),
@@ -659,8 +723,16 @@ mod tests {
             ("user".to_string(), "World".to_string()),
         ];
         cache_lines(&mut state);
-        let hello_row = state.chat_lines.iter().position(|l| l.text.contains("Hello")).unwrap();
-        let world_row = state.chat_lines.iter().position(|l| l.text.contains("World")).unwrap();
+        let hello_row = state
+            .chat_lines
+            .iter()
+            .position(|l| l.text.contains("Hello"))
+            .unwrap();
+        let world_row = state
+            .chat_lines
+            .iter()
+            .position(|l| l.text.contains("World"))
+            .unwrap();
         // "● assistant: Hello" -> Hello at chars 13..18 ; next line "● user: World" full
         let sel = ChatPage::selected_text(&state, (hello_row, 13), (world_row, 14));
         assert_eq!(sel, "Hello\n● user: World");

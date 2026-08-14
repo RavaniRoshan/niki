@@ -361,7 +361,11 @@ fn is_private_or_reserved(ip: std::net::IpAddr) -> bool {
             let o = v6.octets();
             let is_link_local = o[0] == 0xfe && (o[1] & 0xc0) == 0x80;
             let is_unique_local = o[0] == 0xfc || o[0] == 0xfd;
-            v6.is_loopback() || v6.is_multicast() || v6.is_unspecified() || is_link_local || is_unique_local
+            v6.is_loopback()
+                || v6.is_multicast()
+                || v6.is_unspecified()
+                || is_link_local
+                || is_unique_local
         }
     }
 }

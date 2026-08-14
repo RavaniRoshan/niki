@@ -71,7 +71,10 @@ fn bg_from_colorfgbg(value: &str) -> Option<bool> {
 /// Detect the terminal background preference from `COLORFGBG`.
 /// Returns `None` when the variable is absent or unparseable.
 pub fn detect_terminal_bg() -> Option<bool> {
-    std::env::var("COLORFGBG").ok().as_deref().and_then(bg_from_colorfgbg)
+    std::env::var("COLORFGBG")
+        .ok()
+        .as_deref()
+        .and_then(bg_from_colorfgbg)
 }
 
 /// Resolve the effective mode: Auto detects from the terminal (`COLORFGBG`),
@@ -175,13 +178,13 @@ pub const DARK: Palette = Palette {
     fg_bright: Color::Rgb(0xf0, 0xf6, 0xfc), // #f0f6fc
     fg_subtle: Color::Rgb(0x6e, 0x76, 0x81), // #6e7681
 
-    success: Color::Rgb(0x4e, 0xcd, 0xc4),     // #4ecdc4 (brand teal)
-    error: Color::Rgb(0xf8, 0x71, 0x71),       // #f87171
-    warning: Color::Rgb(0xfb, 0xbf, 0x24),     // #fbbf24
-    accent: Color::Rgb(0x4e, 0xcd, 0xc4),      // #4ecdc4 (brand teal)
+    success: Color::Rgb(0x4e, 0xcd, 0xc4), // #4ecdc4 (brand teal)
+    error: Color::Rgb(0xf8, 0x71, 0x71),   // #f87171
+    warning: Color::Rgb(0xfb, 0xbf, 0x24), // #fbbf24
+    accent: Color::Rgb(0x4e, 0xcd, 0xc4),  // #4ecdc4 (brand teal)
     clay_orange: Color::Rgb(0xf5, 0x9e, 0x0b), // #f59e0b (amber)
-    cyan: Color::Rgb(0x5d, 0x8f, 0xd6),        // #5d8fd6 (brand blue)
-    purple: Color::Rgb(0x96, 0x82, 0xc8),      // #9682c8 (brand purple)
+    cyan: Color::Rgb(0x5d, 0x8f, 0xd6),    // #5d8fd6 (brand blue)
+    purple: Color::Rgb(0x96, 0x82, 0xc8),  // #9682c8 (brand purple)
 
     selection_bg: Color::Rgb(0x0d, 0x94, 0x88), // #0d9488 (teal)
     diff_add_bg: Color::Rgb(0x06, 0x4e, 0x3b),  // #064e3b

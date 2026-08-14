@@ -62,7 +62,9 @@ impl LlmProvider for OllamaProvider {
         }
 
         request = request.json(&payload);
-        let resp = super::provider::send_request("ollama request", || request.try_clone().unwrap().send()).await?;
+        let resp =
+            super::provider::send_request("ollama request", || request.try_clone().unwrap().send())
+                .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -134,7 +136,9 @@ impl LlmProvider for OllamaProvider {
         }
 
         request = request.json(&payload);
-        let resp = super::provider::send_request("ollama request", || request.try_clone().unwrap().send()).await?;
+        let resp =
+            super::provider::send_request("ollama request", || request.try_clone().unwrap().send())
+                .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();

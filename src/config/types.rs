@@ -836,12 +836,20 @@ impl Default for AgentConfig {
 impl AgentConfig {
     /// Effective max_tokens: per-agent override or global default.
     pub fn effective_max_tokens(&self) -> u32 {
-        if self.max_tokens > 0 { self.max_tokens } else { 8192 }
+        if self.max_tokens > 0 {
+            self.max_tokens
+        } else {
+            8192
+        }
     }
 
     /// Effective temperature: per-agent override or global default.
     pub fn effective_temperature(&self) -> f32 {
-        if self.temperature > 0.0 { self.temperature } else { 0.2 }
+        if self.temperature > 0.0 {
+            self.temperature
+        } else {
+            0.2
+        }
     }
 }
 
@@ -944,10 +952,7 @@ impl NikiConfig {
                     if !table.contains_key(*known) {
                         continue;
                     }
-                    if matches!(
-                        *known,
-                        "session" | "compaction" | "mcp" | "permissions"
-                    ) {
+                    if matches!(*known, "session" | "compaction" | "mcp" | "permissions") {
                         eprintln!(
                             "note: `[{}]` in {} is parsed but not yet wired to any runtime behavior — settings will be ignored for now",
                             known,

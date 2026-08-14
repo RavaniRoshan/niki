@@ -63,7 +63,9 @@ impl LlmProvider for GoogleProvider {
             .header("x-goog-api-key", api_key)
             .header("content-type", "application/json")
             .json(&payload);
-        let resp = super::provider::send_request("google complete", || req.try_clone().unwrap().send()).await?;
+        let resp =
+            super::provider::send_request("google complete", || req.try_clone().unwrap().send())
+                .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -132,7 +134,9 @@ impl LlmProvider for GoogleProvider {
             .header("x-goog-api-key", api_key)
             .header("content-type", "application/json")
             .json(&payload);
-        let resp = super::provider::send_request("google stream", || req.try_clone().unwrap().send()).await?;
+        let resp =
+            super::provider::send_request("google stream", || req.try_clone().unwrap().send())
+                .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
