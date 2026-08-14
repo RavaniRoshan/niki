@@ -4,15 +4,35 @@ All notable changes to NIKI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-08-17
+
+Launch-hardening cut (the product IS the demo).
+
+### Added
+- **Verification in the loop is now real.** The Tester actually executes your test
+  suite inside the sandbox (auto-detected `cargo test` / `npm test` / `pytest` /
+  `go test` / `rspec`, or set `[agents.tester] test_command`) and records the
+  real exit code + output as `artifacts/test_execution.json` and a
+  `## Verification` section in `report.md` — before the branch exists.
+- Sandbox image now includes a Rust toolchain (`cargo`/`rustc`) so Rust projects
+  can be verified in-sandbox.
+
+### Changed
+- `[docker] network_disabled` is the default (egress blocked by default) — this
+  was already the code default but is now documented as the differentiator it is.
+  `network_allowlist = ["*"]` re-opens egress.
+- `role_glyph` now renders a distinct glyph for the Planner so it no longer
+  collides with the Reviewer.
+
+### Security
+- `SECURITY.md` updated: default-blocked egress is shipped, not a roadmap item.
+
 ## [0.3.0] - 2026-08-18
 
 Launch cut. Focus: distribution, onboarding, and trust — the agent engine is unchanged.
 
 ### Added
-- `niki init` wizard: detects the container runtime, pulls the published sandbox
-  image, validates the API key, and runs a smoke task (target: first branch in < 5 min).
-- Prebuilt sandbox image published to `ghcr.io/ravaniRoshan/niki-sandbox` — no manual
-  `podman build` required.
+- Multi-provider support: configure different LLM providers per agent role
 - `general.spend_cap_usd` — a per-run spend ceiling. Exceeding it prints a clear
   warning so autonomous runs can't run away on cost.
 - Explicit config-trust warnings: `[session]`, `[compaction]`, `[mcp]`, `[permissions]`

@@ -7,15 +7,15 @@
 
 <div align="center">
 
-<img width="1677" height="703" alt="image" src="https://github.com/user-attachments/assets/a5ae438c-ffa9-4459-a649-96e9a07042c6" />
+<img width="1677" height="703" alt="Niki" src="assets/logo.svg" />
 
 
 <br>
 
-**Turn a sentence into a reviewable pull request.**
+**Turn a sentence into a verified pull request.**
 
 Four specialized LLM agents — **Planner → Coder → Tester → Reviewer** — collaborate inside a
-Podman or Docker sandbox and hand you a clean git branch, a diff, and a full audit trail. Your working tree is never touched.
+Podman or Docker sandbox and hand you a verified git branch, a diff, and a full audit trail. Your working tree is never touched.
 
 <br>
 
@@ -150,13 +150,17 @@ scoop install niki
 # Windows (Winget)
 winget install RavaniRoshan.niki
 
-# Any platform (cargo)
-cargo install niki
+# Or download a binary: https://github.com/RavaniRoshan/niki/releases/latest
 ```
 
-Then run `niki init` — it detects your container runtime, pulls the prebuilt sandbox image
-from `ghcr.io/ravaniRoshan/niki-sandbox`, writes `niki.toml`, validates your key, and runs a
-smoke task. **First reviewable branch in under five minutes — no manual `podman build`.**
+Then copy the example config, add your API key, and run:
+```bash
+cp niki.example.toml niki.toml   # add your key(s)
+niki run "Add a health endpoint to src/api.rs"
+```
+
+Niki runs the test suite inside the sandbox and records the real result as part of every run's audit trail.
+**First verified branch in under five minutes** once Rust, Podman/Docker, and an API key are in place.
 Requires Rust **1.85+** (MSRV) and Podman or Docker (rootless). Full docs live in `docs/`.
 
 ### Security & privacy posture

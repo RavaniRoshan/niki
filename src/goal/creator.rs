@@ -27,6 +27,13 @@ impl GoalCreator {
         };
 
         let survey = survey_codebase(scope.unwrap_or("."));
+        let scope_flex = if survey.has_package_json {
+            vec!["Cargo.toml".to_string(), "package.json".to_string()]
+        } else if survey.has_cargo {
+            vec!["Cargo.toml".to_string()]
+        } else {
+            vec!["Cargo.toml".to_string(), "package.json".to_string()]
+        };
         let criteria = derive_criteria(objective, &survey);
         let tasks = decompose_tasks(objective, &survey);
         let context_summary = build_context_summary(objective, &survey, &criteria, &tasks);
@@ -39,7 +46,7 @@ impl GoalCreator {
             branch: branch_name,
             scope: scope.unwrap_or(".").to_string(),
             scope_lock,
-            scope_flex: vec![],
+            scope_flex,
             criteria,
             tasks,
             current_task: 0,
@@ -129,7 +136,7 @@ fn derive_criteria(objective: &str, survey: &SurveyResult) -> Vec<GoalCriterion>
         criteria.push(GoalCriterion {
             label: "No TODO/FIXME markers in scope".to_string(),
             check: format!(
-                "! grep -r --include='*.rs' -c 'TODO\\|FIXME\\|HACK' {} 2>/dev/null | grep -v ':0$' | grep .",
+                "! (grep -r --include='*.rs' -E 'TODO|FIXME|HACK' {} 2>/dev/null | grep .)",
                 survey
                     .src_files
                     .first()
@@ -144,8 +151,7 @@ fn derive_criteria(objective: &str, survey: &SurveyResult) -> Vec<GoalCriterion>
     } else {
         criteria.push(GoalCriterion {
             label: "No new TODO/FIXME introduced".to_string(),
-            check: "! grep -r --include='*.rs' 'TODO\\|FIXME\\|HACK' . 2>/dev/null | grep ."
-                .to_string(),
+            check: "! (grep -r --include='*.rs' -E 'TODO|FIXME|HACK' . 2>/dev/null | grep .)".to_string(),
             must_pass: true,
             coverage_gate: false,
             result: None,
@@ -155,7 +161,7 @@ fn derive_criteria(objective: &str, survey: &SurveyResult) -> Vec<GoalCriterion>
     if survey.has_cargo {
         criteria.push(GoalCriterion {
             label: "cargo check passes".to_string(),
-            check: "cargo check 2>&1 | tail -1 | ! grep -i error".to_string(),
+            check: "! (cargo check 2>&1 | grep -iq error)".to_string(),
             must_pass: true,
             coverage_gate: false,
             result: None,
@@ -163,8 +169,7 @@ fn derive_criteria(objective: &str, survey: &SurveyResult) -> Vec<GoalCriterion>
 
         criteria.push(GoalCriterion {
             label: "Tests pass".to_string(),
-            check: "cargo test --lib 2>&1 | tail -5 | ! grep -E 'FAILED|test result: 0'"
-                .to_string(),
+            check: "! (cargo test --lib 2>&1 | grep -E 'FAILED|test result: 0')".to_string(),
             must_pass: true,
             coverage_gate: false,
             result: None,
@@ -382,6 +387,18 @@ fn generate_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    fn create_in_temp(objective: &str, scope: Option<&str>, max: u32) -> GoalState {
+        let tmp = TempDir::new().unwrap();
+        let _guard = crate::goal::TEST_CWD_LOCK.lock().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"test\"\n").unwrap();
+        let state = GoalCreator::create(objective, scope, max).unwrap();
+        std::env::set_current_dir(original_cwd).unwrap();
+        state
+    }
 
     #[test]
     fn test_slugify() {
@@ -403,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_create_basic() {
-        let state = GoalCreator::create("Fix login bug", None, 30).unwrap();
+        let state = create_in_temp("Fix login bug", None, 30);
         assert_eq!(state.objective, "Fix login bug");
         assert_eq!(state.status, GoalStatus::Active);
         assert_eq!(state.max_iterations, 30);
@@ -420,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_create_with_scope() {
-        let state = GoalCreator::create("Add feature", Some("src/goal"), 50).unwrap();
+        let state = create_in_temp("Add feature", Some("src/goal"), 50);
         assert_eq!(state.scope, "src/goal");
         assert_eq!(state.scope_lock, vec!["src/goal"]);
         assert_eq!(state.max_iterations, 50);
@@ -428,14 +445,14 @@ mod tests {
 
     #[test]
     fn test_create_no_scope() {
-        let state = GoalCreator::create("Refactor code", None, 30).unwrap();
+        let state = create_in_temp("Refactor code", None, 30);
         assert_eq!(state.scope, ".");
         assert_eq!(state.scope_lock, vec!["."]);
     }
 
     #[test]
     fn test_criteria_have_structural_check() {
-        let state = GoalCreator::create("Fix bug", None, 30).unwrap();
+        let state = create_in_temp("Fix bug", None, 30);
         let has_structural = state
             .criteria
             .iter()
@@ -445,7 +462,7 @@ mod tests {
 
     #[test]
     fn test_criteria_have_user_facing_check() {
-        let state = GoalCreator::create("Fix bug", None, 30).unwrap();
+        let state = create_in_temp("Fix bug", None, 30);
         let has_user_facing = state
             .criteria
             .iter()
@@ -455,14 +472,14 @@ mod tests {
 
     #[test]
     fn test_coverage_gate_for_all_objective() {
-        let state = GoalCreator::create("Fix all security issues", None, 30).unwrap();
+        let state = create_in_temp("Fix all security issues", None, 30);
         let has_coverage = state.criteria.iter().any(|c| c.coverage_gate);
         assert!(has_coverage, "must have coverage gate for 'all' objective");
     }
 
     #[test]
     fn test_no_coverage_gate_for_narrow_objective() {
-        let state = GoalCreator::create("Fix login bug", None, 30).unwrap();
+        let state = create_in_temp("Fix login bug", None, 30);
         let has_coverage = state.criteria.iter().any(|c| c.coverage_gate);
         assert!(
             !has_coverage,
@@ -472,7 +489,7 @@ mod tests {
 
     #[test]
     fn test_tasks_are_numbered_sequentially() {
-        let state = GoalCreator::create("Build feature", None, 30).unwrap();
+        let state = create_in_temp("Build feature", None, 30);
         for (i, task) in state.tasks.iter().enumerate() {
             assert_eq!(task.id, (i + 1) as u32);
             assert_eq!(task.status, TaskStatus::Todo);
@@ -481,19 +498,19 @@ mod tests {
 
     #[test]
     fn test_context_summary_contains_objective() {
-        let state = GoalCreator::create("Deploy to production", None, 30).unwrap();
+        let state = create_in_temp("Deploy to production", None, 30);
         assert!(state.context_summary.contains("Deploy to production"));
     }
 
     #[test]
     fn test_context_summary_contains_survey() {
-        let state = GoalCreator::create("Test objective", None, 30).unwrap();
+        let state = create_in_temp("Test objective", None, 30);
         assert!(state.context_summary.contains("Codebase survey"));
     }
 
     #[test]
     fn test_all_criteria_have_check_command() {
-        let state = GoalCreator::create("Fix all bugs", None, 30).unwrap();
+        let state = create_in_temp("Fix all bugs", None, 30);
         for c in &state.criteria {
             assert!(!c.check.is_empty(), "check command must not be empty");
             assert!(!c.label.is_empty(), "label must not be empty");
@@ -502,20 +519,20 @@ mod tests {
 
     #[test]
     fn test_max_iterations_respected() {
-        let state = GoalCreator::create("Do something", None, 5).unwrap();
+        let state = create_in_temp("Do something", None, 5);
         assert_eq!(state.max_iterations, 5);
     }
 
     #[test]
     fn test_timestamps_present() {
-        let state = GoalCreator::create("Test", None, 30).unwrap();
+        let state = create_in_temp("Test", None, 30);
         assert!(!state.created_at.is_empty());
         assert!(state.completed_at.is_none());
     }
 
     #[test]
     fn test_every_objective_gets_coverage_gate() {
-        let state = GoalCreator::create("Update every module", None, 30).unwrap();
+        let state = create_in_temp("Update every module", None, 30);
         assert!(
             state.criteria.iter().any(|c| c.coverage_gate),
             "'every' should trigger coverage gate"
@@ -524,7 +541,7 @@ mod tests {
 
     #[test]
     fn test_comprehensive_gets_coverage_gate() {
-        let state = GoalCreator::create("Comprehensive security audit", None, 30).unwrap();
+        let state = create_in_temp("Comprehensive security audit", None, 30);
         assert!(
             state.criteria.iter().any(|c| c.coverage_gate),
             "'comprehensive' should trigger coverage gate"

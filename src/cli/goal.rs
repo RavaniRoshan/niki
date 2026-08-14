@@ -8,7 +8,7 @@ use crate::cli::run::connect_container_runtime;
 use crate::config::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
 use crate::goal::runner::GoalRunner;
-use crate::goal::state::{GoalState, claim_files, create_claim, remove_claim_by_goal};
+use crate::goal::state::{GoalState, claim_files, create_claim, goals_dir, remove_claim_by_goal, env_dir};
 use crate::sandbox::docker::ActiveContainers;
 
 #[derive(Args)]
@@ -46,6 +46,8 @@ enum GoalCommands {
     },
     /// Cancel the active goal
     Cancel,
+    /// Cancel and archive the active goal (alias for cancel)
+    Clear,
     /// Run the autonomous goal loop
     Run {
         /// Goal ID to run (optional, runs active goal)
@@ -53,6 +55,8 @@ enum GoalCommands {
     },
     /// Run criteria check once without iterating
     Check,
+    /// Show environment detection info
+    Env,
 }
 
 pub async fn handle(args: &GoalArgs) -> Result<()> {
@@ -66,67 +70,52 @@ pub async fn handle(args: &GoalArgs) -> Result<()> {
         GoalCommands::Status { id } => handle_status(id.as_deref()).await,
         GoalCommands::Pause => handle_pause().await,
         GoalCommands::Resume { id } => handle_resume(id).await,
-        GoalCommands::Cancel => handle_cancel().await,
+        GoalCommands::Cancel | GoalCommands::Clear => handle_cancel().await,
         GoalCommands::Run { id } => handle_run(id.as_deref()).await,
         GoalCommands::Check => handle_check().await,
+        GoalCommands::Env => handle_env(),
     }
 }
 
 async fn handle_new(objective: &str, scope: Option<&str>, max: u32) -> Result<()> {
     println!("Creating goal: \"{}\"", objective);
 
-    let slug = slugify(objective);
-    let id = generate_id();
-    let branch_name = format!("goal/{}-{}", slug, id);
-
-    let scope_lock = match scope {
-        Some(s) => vec![s.to_string()],
-        None => vec![".".to_string()],
-    };
-
-    let state = GoalState {
-        id: id.clone(),
-        slug: format!("{}-{}", slug, id),
-        objective: objective.to_string(),
-        status: crate::goal::state::GoalStatus::Active,
-        branch: branch_name,
-        scope: scope.unwrap_or(".").to_string(),
-        scope_lock,
-        scope_flex: vec![],
-        criteria: vec![],
-        tasks: vec![],
-        current_task: 0,
-        iterations: 0,
-        budget_used: 0,
-        max_iterations: max,
-        negative_knowledge: vec![],
-        context_summary: format!("Goal: {}\nIteration 0: created.\n", objective),
-        created_at: chrono::Utc::now().to_rfc3339(),
-        completed_at: None,
-    };
-
+    let mut state = crate::goal::creator::GoalCreator::create(objective, scope, max)?;
     state.save()?;
 
-    let session_id = format!("goal-{}", id);
-    create_claim(&session_id, &id)?;
+    let session_id = format!("goal-{}", state.id);
+    create_claim(&session_id, &state.id)?;
 
+    create_git_branch(&state.branch);
+
+    let goal_dir = goals_dir();
     println!("Goal created: {}", state.slug);
     println!("  ID: {}", state.id);
     println!("  Branch: {}", state.branch);
     println!("  Status: active");
     println!("  Max iterations: {}", state.max_iterations);
     println!("  Scope: {}", state.scope);
+    println!("  Criteria: {}", state.criteria.len());
+    println!("  Tasks: {}", state.tasks.len());
     println!();
     println!("Next steps:");
     println!(
-        "  1. Review and refine criteria in .opencode/goals/{}.json",
-        state.slug
+        "  1. Review and refine criteria in {}",
+        goal_dir.join(format!("{}.json", state.slug)).display()
     );
     println!("  2. Run `niki goal status` to see progress");
-    println!(
-        "  3. Run `niki goal resume {}` to start the autonomous loop",
-        state.id
-    );
+    println!("  3. Run `niki goal run` to start the autonomous loop");
+    println!();
+    println!("Criteria:");
+    for (i, c) in state.criteria.iter().enumerate() {
+        let gate = if c.must_pass { "[must-pass]" } else { "[optional]" };
+        println!("  {}. {} {} — {}", i + 1, gate, c.label, c.check);
+    }
+    println!();
+    println!("Tasks:");
+    for t in &state.tasks {
+        println!("  [{}] {}", t.id, t.desc);
+    }
 
     Ok(())
 }
@@ -139,7 +128,9 @@ fn handle_list() -> Result<()> {
     }
 
     println!("  ID      STATUS   SLUG                                    CREATED");
-    println!("  ------- -------- --------------------------------------- -------------------");
+    println!(
+        "  ------- -------- --------------------------------------- -------------------"
+    );
     for state in &states {
         let created = state.created_at.chars().take(10).collect::<String>();
         println!(
@@ -153,23 +144,20 @@ fn handle_list() -> Result<()> {
 async fn handle_status(id: Option<&str>) -> Result<()> {
     let state = match id {
         Some(goal_id) => GoalState::find_by_id(goal_id)?,
-        None => {
-            let claims = claim_files()?;
-            if claims.is_empty() {
-                println!("No active goal. Create one with `niki goal new <objective>`.");
-                return Ok(());
-            }
-            let latest = claims
-                .into_iter()
-                .max_by_key(|c| c.claimed_at.clone())
-                .ok_or_else(|| anyhow::anyhow!("No active goal"))?;
-            GoalState::find_by_id(&latest.goal_id)?
-        }
+        None => GoalState::active_goal()?,
     };
 
     match state {
         Some(s) => print_goal_status(&s),
-        None => println!("Goal not found."),
+        None => {
+            if id.is_some() {
+                println!("Goal not found.");
+            } else {
+                println!(
+                    "No active goal. Create one with `niki goal new <objective>`."
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -217,26 +205,24 @@ fn print_goal_status(state: &GoalState) {
         } else {
             " "
         };
-        println!("  {} [{}] {}", icon, c.label, c.check);
+        let gate = if c.must_pass { "[must-pass]" } else { "[opt]" };
+        println!("  {} {} [{}] {}", icon, gate, c.label, c.check);
     }
 }
 
 async fn handle_pause() -> Result<()> {
-    let claims = claim_files()?;
-    if claims.is_empty() {
-        println!("No active goal to pause.");
-        return Ok(());
+    let state = GoalState::active_goal()?;
+    match state {
+        Some(mut s) => {
+            s.status = crate::goal::state::GoalStatus::Paused;
+            s.save()?;
+            remove_claim_by_goal(&s.id)?;
+            println!("Goal paused. Resume with `niki goal resume {}`.", s.id);
+        }
+        None => {
+            println!("No active goal to pause.");
+        }
     }
-    let latest = claims
-        .into_iter()
-        .max_by_key(|c| c.claimed_at.clone())
-        .ok_or_else(|| anyhow::anyhow!("No active goal"))?;
-    let mut state = GoalState::find_by_id(&latest.goal_id)?
-        .ok_or_else(|| anyhow::anyhow!("Goal state not found"))?;
-    state.status = crate::goal::state::GoalStatus::Paused;
-    state.save()?;
-    remove_claim_by_goal(&state.id)?;
-    println!("Goal paused. Resume with `niki goal resume {}`.", state.id);
     Ok(())
 }
 
@@ -259,42 +245,29 @@ async fn handle_resume(id: &str) -> Result<()> {
 }
 
 async fn handle_cancel() -> Result<()> {
-    let claims = claim_files()?;
-    if claims.is_empty() {
-        println!("No active goal to cancel.");
-        return Ok(());
+    let state = GoalState::active_goal()?;
+    match state {
+        Some(mut s) => {
+            s.status = crate::goal::state::GoalStatus::Cancelled;
+            s.save()?;
+            remove_claim_by_goal(&s.id)?;
+            let dir = goals_dir();
+            println!(
+                "Goal cancelled. State preserved at {}",
+                dir.join(format!("{}.json", s.slug)).display()
+            );
+        }
+        None => {
+            println!("No active goal to cancel.");
+        }
     }
-    let latest = claims
-        .into_iter()
-        .max_by_key(|c| c.claimed_at.clone())
-        .ok_or_else(|| anyhow::anyhow!("No active goal"))?;
-    let mut state = GoalState::find_by_id(&latest.goal_id)?
-        .ok_or_else(|| anyhow::anyhow!("Goal state not found"))?;
-    state.status = crate::goal::state::GoalStatus::Cancelled;
-    state.save()?;
-    remove_claim_by_goal(&state.id)?;
-    println!(
-        "Goal cancelled. State preserved at .opencode/goals/{}.json",
-        state.slug
-    );
     Ok(())
 }
 
 async fn handle_run(id: Option<&str>) -> Result<()> {
     let state = match id {
         Some(goal_id) => GoalState::find_by_id(goal_id)?,
-        None => {
-            let claims = claim_files()?;
-            if claims.is_empty() {
-                println!("No active goal. Create one with `niki goal new <objective>`.");
-                return Ok(());
-            }
-            let latest = claims
-                .into_iter()
-                .max_by_key(|c| c.claimed_at.clone())
-                .ok_or_else(|| anyhow::anyhow!("No active goal"))?;
-            GoalState::find_by_id(&latest.goal_id)?
-        }
+        None => GoalState::active_goal()?,
     };
 
     let mut state = state.ok_or_else(|| anyhow::anyhow!("Goal not found"))?;
@@ -312,7 +285,7 @@ async fn handle_run(id: Option<&str>) -> Result<()> {
     println!("  Max iterations: {}", state.max_iterations);
     println!();
 
-    let config = NikiConfig::load(std::path::Path::new(&state.scope)).unwrap_or_default();
+    let config = NikiConfig::load(std::path::Path::new(&state.scope))?;
     #[cfg(unix)]
     let docker = match connect_container_runtime().await {
         Ok(d) => Some(d),
@@ -350,24 +323,21 @@ async fn handle_run(id: Option<&str>) -> Result<()> {
 }
 
 async fn handle_check() -> Result<()> {
-    let claims = claim_files()?;
-    if claims.is_empty() {
-        println!("No active goal to check.");
-        return Ok(());
-    }
-    let latest = claims
-        .into_iter()
-        .max_by_key(|c| c.claimed_at.clone())
-        .ok_or_else(|| anyhow::anyhow!("No active goal"))?;
-    let state = GoalState::find_by_id(&latest.goal_id)?
-        .ok_or_else(|| anyhow::anyhow!("Goal state not found"))?;
+    let state = GoalState::active_goal()?;
+    let state = match state {
+        Some(s) => s,
+        None => {
+            println!("No active goal to check.");
+            return Ok(());
+        }
+    };
 
     println!("Checking criteria for goal: {}", state.slug);
     println!();
 
     let mut all_pass = true;
     for criterion in &state.criteria {
-        let output = std::process::Command::new("sh")
+        let output = std::process::Command::new("bash")
             .arg("-c")
             .arg(&criterion.check)
             .output();
@@ -380,16 +350,16 @@ async fn handle_check() -> Result<()> {
 
                 if criterion.must_pass {
                     if exit_ok && !stdout.contains("FAIL") {
-                        println!("  ✓ PASS: {}", criterion.label);
+                        println!("  ✓ PASS [must-pass]: {}", criterion.label);
                     } else {
-                        println!("  ✗ FAIL: {} — {}", criterion.label, stderr);
+                        println!("  ✗ FAIL [must-pass]: {} — {}", criterion.label, stderr);
                         all_pass = false;
                     }
                 } else {
                     if exit_ok {
-                        println!("  ✓ PASS: {}", criterion.label);
+                        println!("  ✓ PASS [optional]: {}", criterion.label);
                     } else {
-                        println!("  ✗ FAIL (optional): {} — {}", criterion.label, stderr);
+                        println!("  ✗ FAIL [optional]: {} — {}", criterion.label, stderr);
                     }
                 }
             }
@@ -410,27 +380,61 @@ async fn handle_check() -> Result<()> {
     Ok(())
 }
 
-fn slugify(text: &str) -> String {
-    text.chars()
-        .map(|c| {
-            if c.is_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
+fn create_git_branch(branch_name: &str) {
+    let result = std::process::Command::new("git")
+        .args(["checkout", "-b", branch_name])
+        .output();
+    match result {
+        Ok(out) if out.status.success() => {
+            println!("  Branch: created {}", branch_name);
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if stderr.contains("already exists") {
+                let _ = std::process::Command::new("git")
+                    .args(["checkout", branch_name])
+                    .output();
             }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .take(6)
-        .collect::<Vec<_>>()
-        .join("-")
+        }
+        Err(_) => {}
+    }
 }
 
-fn generate_id() -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    chrono::Utc::now().timestamp().hash(&mut hasher);
-    format!("{:x}", hasher.finish())[..6].to_string()
+fn handle_env() -> Result<()> {
+    use crate::goal::state::env_dir;
+    let dir = env_dir();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let full_path = cwd.join(dir);
+
+    let has_opencode = cwd.join(".opencode").exists()
+        || std::env::var("OPENCODE_SESSION_ID").is_ok()
+        || cwd.join("opencode.json").exists()
+        || cwd.join("opencode.jsonc").exists();
+    let has_kilo = cwd.join(".kilo").exists() || std::env::var("KILO_SESSION_ID").is_ok();
+    let has_claude = cwd.join(".claude").exists();
+
+    println!("Environment Detection:");
+    println!("  CWD: {}", cwd.display());
+    println!("  OpenCode: {}", if has_opencode { "yes" } else { "no" });
+    println!("  KiloCode: {}", if has_kilo { "yes" } else { "no" });
+    println!("  Claude Code: {}", if has_claude { "yes" } else { "no" });
+    println!();
+    println!("  Goals directory: {}", full_path.display());
+    println!("  Env dir: {}", dir);
+
+    if !full_path.exists() {
+        println!();
+        println!("  Goals directory does not exist yet. It will be created on the first goal save.");
+    } else {
+        let goal_files: Vec<_> = std::fs::read_dir(&full_path)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        println!("  Existing goal files: {}", goal_files.len());
+        for g in &goal_files {
+            println!("    {}", g);
+        }
+    }
+
+    Ok(())
 }

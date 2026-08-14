@@ -34,6 +34,16 @@ pub struct ExecOutput {
     pub stderr: String,
 }
 
+/// Returns true when the network allowlist is a wildcard (`"*"` or `"all"`),
+/// which means the operator explicitly wants full egress despite
+/// `network_disabled = true`.
+fn allowlist_allows_all(config: &DockerConfig) -> bool {
+    config
+        .network_allowlist
+        .iter()
+        .any(|s| s == "*" || s == "all")
+}
+
 impl DockerSandbox {
     pub async fn create(
         docker: &Docker,
@@ -107,10 +117,11 @@ impl DockerSandbox {
             } else {
                 None
             },
-            // Disabling egress is opt-in because many tasks (npm/pip/cargo install)
-            // require network. Default leaves egress on; flip `network_disabled`
-            // only for fully-offline workloads.
-            network_mode: if config.network_disabled {
+            // Egress is blocked by default (network_disabled defaults to true) — the
+            // container gets network_mode "none". Open it with `network_disabled =
+            // false` (or `network_allowlist = ["*"]`) when a task must fetch
+            // dependencies such as `cargo fetch` / `npm install` / `pip install`.
+            network_mode: if config.network_disabled && !allowlist_allows_all(config) {
                 Some("none".to_string())
             } else {
                 None

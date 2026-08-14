@@ -36,7 +36,7 @@ The key insight: each agent only sees artifacts from the previous agent, not the
 
 ### Honest limitations
 
-- **Chat UI is viewer-only today** — the TUI shows the live pipeline but doesn't accept chat input. You interact via `niki run "task"`.
+- **Chat UI accepts input today** — the TUI shows the live pipeline and lets you chat with agents. You can also run headless via `niki run "task"`.
 - **Worktree backend runs on host** — use `--backend docker` (default) for untrusted code
 - **Sessions/MCP/undo are on the roadmap** — the config sections exist but are not wired yet (we warn at load time)
 - **SWE-bench scores pending** — we're working on the eval methodology. No headline claims yet.
@@ -44,7 +44,7 @@ The key insight: each agent only sees artifacts from the previous agent, not the
 ### Try it
 
 ```bash
-cargo install niki
+brew install niki
 export ANTHROPIC_API_KEY=your_key
 niki run "Add health endpoint to src/api.rs"
 ```

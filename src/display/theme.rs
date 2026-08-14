@@ -653,7 +653,7 @@ pub fn role_color(role: crate::artifacts::types::AgentRole) -> Color {
 
 pub fn role_glyph(role: crate::artifacts::types::AgentRole) -> &'static str {
     match role {
-        crate::artifacts::types::AgentRole::Planner => "◆",
+        crate::artifacts::types::AgentRole::Planner => "◈",
         crate::artifacts::types::AgentRole::Coder => "⚡",
         crate::artifacts::types::AgentRole::Tester => "●",
         crate::artifacts::types::AgentRole::Reviewer => "◆",

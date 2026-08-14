@@ -354,6 +354,41 @@ fn render_audit_section(result: &PipelineResult) -> String {
     out
 }
 
+/// Build the "## Verification — Test Suite" section from the real sandbox test run.
+/// Returns an empty string when no test command was executed, so a run that had
+/// nothing to verify simply omits the section rather than asserting a pass.
+fn render_verification_section(result: &PipelineResult) -> String {
+    let Some(te) = &result.test_execution else {
+        return String::new();
+    };
+    let status = if te.passed { "PASSED" } else { "FAILED" };
+    let mut out = String::from("## Verification — Test Suite (executed in sandbox)\n\n");
+    out.push_str(&format!("- Command: `{}`\n", te.command));
+    out.push_str(&format!("- Result: **{}** (exit code {})\n", status, te.exit_code));
+    if let Some(note) = &te.note {
+        out.push_str(&format!("- Note: {}\n", note));
+    }
+    out.push_str("\n```\n");
+    if !te.stdout.trim().is_empty() {
+        out.push_str(te.stdout.trim());
+        out.push('\n');
+    }
+    if !te.stderr.trim().is_empty() {
+        out.push_str(&format!("--- stderr ---\n{}\n", te.stderr.trim()));
+    }
+    if te.stdout.trim().is_empty() && te.stderr.trim().is_empty() {
+        out.push_str("(no output captured)\n");
+    }
+    out.push_str("```\n");
+    if te.truncated {
+        out.push_str(
+            "\n_(output truncated in this report; full output in `artifacts/test_execution.json`)_\n",
+        );
+    }
+    out.push('\n');
+    out
+}
+
 /// Build the "## Cost & Performance" markdown section from per-agent metrics.
 fn render_cost_section(result: &PipelineResult) -> String {
     if result.metrics.is_empty() {
@@ -511,6 +546,7 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
 {{ red_blue_section }}
 {{ isolation_section }}
 {{ audit_section }}
+{{ verification_section }}
 {{ cost_section }}
 ## Final Diff
 ```diff
@@ -532,6 +568,7 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
         red_blue_section => render_red_blue_section(result),
         isolation_section => render_isolation_section(result),
         audit_section => render_audit_section(result),
+        verification_section => render_verification_section(result),
         cost_section => render_cost_section(result),
         final_diff => result.final_diff.clone(),
     })?;
@@ -599,6 +636,7 @@ mod tests {
             safety_proof: proof,
             isolation: vec![],
             topology: TopologyMode::Auto,
+        test_execution: None,
         }
     }
 
@@ -713,6 +751,7 @@ mod tests {
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
+        test_execution: None,
         };
 
         let section = render_red_blue_section(&result);
@@ -761,6 +800,7 @@ mod tests {
                 },
             ],
             topology: TopologyMode::Auto,
+        test_execution: None,
         };
         let section = render_isolation_section(&result);
         assert!(section.contains("## Agent Isolation"));
@@ -829,6 +869,7 @@ mod tests {
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
+        test_execution: None,
         }
     }
 
@@ -922,6 +963,7 @@ index 3333333..4444444 100644
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
+        test_execution: None,
         }
     }
 

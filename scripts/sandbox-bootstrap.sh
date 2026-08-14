@@ -21,7 +21,8 @@ set -eu
 NODE_MAJOR=20
 
 # git + python3 + fetch tooling via apk (no recommended packages; keeps the layer small & fast).
-apk add --no-cache git python3 ca-certificates wget xz
+# `build-base` provides the C toolchain (linker) needed by `cargo test` and native deps.
+apk add --no-cache git python3 ca-certificates wget xz build-base
 
 # Resolve the latest Node release for the requested major line.
 ARCH=$(uname -m)
@@ -51,3 +52,13 @@ git --version
 python3 --version
 node --version
 npm --version
+
+# Rust toolchain (for `cargo test` verification of Rust projects inside the sandbox).
+# Installed via rustup so a `cargo test` step can actually compile and run suites.
+wget -qO- https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+# Make cargo/rustc available on PATH for the non-login shells Niki spawns.
+ln -sf "$HOME/.cargo/bin/cargo" /usr/local/bin/cargo
+ln -sf "$HOME/.cargo/bin/rustc" /usr/local/bin/rustc
+ln -sf "$HOME/.cargo/bin/rustdoc" /usr/local/bin/rustdoc
+cargo --version
+rustc --version

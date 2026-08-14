@@ -10,7 +10,7 @@ AI coding agents write code nobody can trust. They're chatbots with keyboard acc
 Tweet 2 (demo):
 60-second demo of installing Niki and running a task:
 ```
-cargo install niki
+brew install niki
 export ANTHROPIC_API_KEY=sk-...
 niki run "Add health endpoint"
 ```
@@ -32,13 +32,13 @@ A Red agent probes the Coder's diff *before* the Reviewer. The Reviewer must rec
 
 Tweet 6 (honest limitations):
 What Niki ISN'T:
-- Not a chat agent (TUI is viewer-only; interact via `niki run "task"`)
+- Not a chat agent (TUI shows live pipeline; interact via `niki run "task"`)
 - Not hermetic everywhere (--backend worktree runs on host)
 - Not magic (still needs your API key, still makes mistakes)
 
 Tweet 7 (CTA):
 GitHub: https://github.com/RavaniRoshan/niki
-Try: cargo install niki
+Try: brew install niki
 
 HN Show thread coming tomorrow. Would love feedback on the isolated-agent approach.
 
@@ -48,7 +48,7 @@ I've been working on Niki, an open-source tool that runs four AI agents in herme
 
 The motivation: AI coding agents today are chatbots with keyboard access. The output is "trust me," and you end up reviewing every line anyway. Niki takes the code-review process seriously: the Reviewer can only see the diff, not the Coder's reasoning. A Red agent probes the diff before review. And it all runs in isolated containers.
 
-The honest version: the TUI viewer works, the pipeline produces reviewable git branches, but the chat UI is still wired-only. Sessions, MCP, and undo/redo are on the roadmap. What's shipped today already catches bugs that single-agent workflows miss.
+The honest version: the TUI viewer and chat work, the pipeline produces reviewable git branches, but sessions, MCP, and undo/redo are on the roadmap. What's shipped today already catches bugs that single-agent workflows miss.
 
 If you work on agentic coding infrastructure, I'd love to swap notes: what's your approach to independent review?
 
@@ -59,7 +59,7 @@ If you work on agentic coding infrastructure, I'd love to swap notes: what's you
 Title: "Run your first multi-agent code review with Niki (4 agents in Docker)"
 
 Content: A step-by-step tutorial:
-1. Install Niki (cargo install / brew / curl)
+1. Install Niki (brew / download binary)
 2. Configure API keys (env vars or keyring)
 3. Run a task: `niki run "Add a health endpoint"`
 4. Watch the pipeline in the TUI

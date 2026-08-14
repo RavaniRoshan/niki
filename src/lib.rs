@@ -43,6 +43,7 @@ pub mod safety;
 pub mod sandbox;
 pub mod util;
 pub mod session;
+pub mod tools;
 
 use thiserror::Error;
 use uuid::Uuid;

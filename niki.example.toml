@@ -70,6 +70,11 @@ model = "claude-sonnet-4-20250514"
 [agents.tester]
 provider = "groq"                          # Fast + cheap for test generation
 model = "llama-3.1-70b-versatile"
+# Optional: the command NIKI runs inside the sandbox to verify the change
+# (e.g. "cargo test", "npm test", "pytest", "go test ./..."). When unset,
+# NIKI auto-detects from the project layout. The real exit code + output are
+# recorded in every run's audit trail as artifacts/test_execution.json.
+# test_command = "cargo test --locked"
 # Fallback providers: if Groq is rate-limited or down, try OpenRouter, then OpenAI.
 # Only transient errors (429, 503, timeout, connection) trigger failover.
 fallbacks = ["openrouter", "openai"]
@@ -117,6 +122,27 @@ extra_packages = ["nodejs", "npm", "python3"]
 memory_limit = "2g"
 # CPU limit per container
 cpu_limit = 2.0
+# Disable outbound network egress (default: true for security).
+# Use network_allowlist for specific domains that need egress.
+network_disabled = true
+# Domain allowlist for outbound network egress. Only these domains are allowed
+# when network_disabled = true. Use "*" to allow all (equivalent to network_disabled = false).
+# network_allowlist = ["registry.npmjs.org", "pypi.org", "crates.io"]
 # Sandbox backend: "docker" (Podman/Docker, default), "worktree" (git worktree, no runtime),
 # or "cloud" (NIKI infra, beta). Override at runtime with: niki run --backend worktree
 # backend = "docker"
+
+# MCP (Model Context Protocol) — connect to external tool servers.
+# MCP tools are injected into agent prompts, extending their capabilities.
+#
+# [mcp]
+# read_only = true  # Governance: agents can only call read-only MCP tools
+# domain_allowlist = []  # Domain allowlist for web fetch tools
+#
+# [[mcp.servers]]
+# name = "filesystem"
+# type = "local"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem"]
+# enabled = true
+# timeout_ms = 5000

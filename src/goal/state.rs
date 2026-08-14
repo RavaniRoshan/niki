@@ -3,7 +3,32 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
 
-const GOALS_DIR: &str = ".opencode/goals";
+/// Detect the host agent environment and return the appropriate goals directory name.
+///
+/// Detection order (SKILL.md §0):
+/// 1. OpenCode — `.opencode/` dir or `OPENCODE_*` env or `opencode.json` exists
+/// 2. KiloCode — `.kilo/` dir or `KILO_*` env
+/// 3. Claude Code — `.claude/` dir (fallback)
+pub fn env_dir() -> &'static str {
+    env_dir_at(std::env::current_dir().unwrap_or_default())
+}
+
+fn env_dir_at(cwd: std::path::PathBuf) -> &'static str {
+    if cwd.join(".opencode").exists()
+        || std::env::var("OPENCODE_SESSION_ID").is_ok()
+        || cwd.join("opencode.json").exists()
+        || cwd.join("opencode.jsonc").exists()
+    {
+        return ".opencode/goals";
+    }
+    if cwd.join(".kilo").exists() || std::env::var("KILO_SESSION_ID").is_ok() {
+        return ".kilo/goals";
+    }
+    if cwd.join(".claude").exists() {
+        return ".claude/goals";
+    }
+    ".opencode/goals"
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoalState {
@@ -83,7 +108,9 @@ impl std::fmt::Display for TaskStatus {
 }
 
 pub fn goals_dir() -> std::path::PathBuf {
-    std::env::current_dir().unwrap_or_default().join(GOALS_DIR)
+    std::env::current_dir()
+        .map(|cwd| cwd.join(env_dir()))
+        .unwrap_or_else(|_| std::env::temp_dir().join("niki-goals"))
 }
 
 pub fn state_path(slug: &str, id: &str) -> std::path::PathBuf {
@@ -139,8 +166,7 @@ impl GoalState {
             .into_iter()
             .max_by_key(|c| c.claimed_at.clone())
             .ok_or_else(|| anyhow::anyhow!("No claim files found"))?;
-        let state = Self::load(&latest.goal_id, &latest.goal_id)?;
-        Ok(Some(state))
+        Self::find_by_id(&latest.goal_id)
     }
 
     pub fn find_by_id(id: &str) -> Result<Option<Self>> {
@@ -222,22 +248,18 @@ pub fn remove_claim_by_goal(goal_id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::goal::TEST_CWD_LOCK;
     use tempfile::TempDir;
 
-    #[test]
-    fn test_state_save_and_load() {
-        let tmp = TempDir::new().unwrap();
-        let original_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
-
-        let state = GoalState {
+    fn make_state() -> GoalState {
+        GoalState {
             id: "test12".to_string(),
             slug: "test-goal".to_string(),
             objective: "Test objective".to_string(),
             status: GoalStatus::Active,
             branch: "goal/test-goal-test12".to_string(),
-            scope: "src/".to_string(),
-            scope_lock: vec!["src/".to_string()],
+            scope: ".".to_string(),
+            scope_lock: vec![".".to_string()],
             scope_flex: vec![],
             criteria: vec![],
             tasks: vec![],
@@ -249,8 +271,17 @@ mod tests {
             context_summary: String::new(),
             created_at: Utc::now().to_rfc3339(),
             completed_at: None,
-        };
+        }
+    }
 
+    #[test]
+    fn test_state_save_and_load() {
+        let tmp = TempDir::new().unwrap();
+        let _guard = TEST_CWD_LOCK.lock().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let state = make_state();
         state.save().unwrap();
         let loaded = GoalState::load("test-goal", "test12").unwrap();
         assert_eq!(loaded.objective, "Test objective");
@@ -262,6 +293,7 @@ mod tests {
     #[test]
     fn test_claim_create_and_remove() {
         let tmp = TempDir::new().unwrap();
+        let _guard = TEST_CWD_LOCK.lock().unwrap();
         let original_cwd = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
@@ -280,6 +312,7 @@ mod tests {
     #[test]
     fn test_load_all_empty() {
         let tmp = TempDir::new().unwrap();
+        let _guard = TEST_CWD_LOCK.lock().unwrap();
         let original_cwd = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
@@ -287,5 +320,86 @@ mod tests {
         assert!(states.is_empty());
 
         std::env::set_current_dir(original_cwd).unwrap();
+    }
+
+    #[test]
+    fn test_active_goal_with_claim() {
+        let tmp = TempDir::new().unwrap();
+        let _guard = TEST_CWD_LOCK.lock().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let state = make_state();
+        state.save().unwrap();
+        create_claim("sess-test12", "test12").unwrap();
+
+        let active = GoalState::active_goal().unwrap();
+        assert!(active.is_some());
+        assert_eq!(active.unwrap().objective, "Test objective");
+
+        remove_claim("sess-test12").unwrap();
+        std::env::set_current_dir(original_cwd).unwrap();
+    }
+
+    #[test]
+    fn test_find_by_id() {
+        let tmp = TempDir::new().unwrap();
+        let _guard = TEST_CWD_LOCK.lock().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let mut state = make_state();
+        state.id = "abc123".to_string();
+        state.slug = "my-goal".to_string();
+        state.save().unwrap();
+
+        let found = GoalState::find_by_id("abc123").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().slug, "my-goal");
+
+        let not_found = GoalState::find_by_id("nonexistent").unwrap();
+        assert!(not_found.is_none());
+
+        std::env::set_current_dir(original_cwd).unwrap();
+    }
+
+    #[test]
+    fn test_env_dir_default() {
+        let tmp = TempDir::new().unwrap();
+        assert_eq!(env_dir_at(tmp.path().to_path_buf()), ".opencode/goals");
+    }
+
+    #[test]
+    fn test_env_dir_opencode() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".opencode")).unwrap();
+        assert_eq!(env_dir_at(tmp.path().to_path_buf()), ".opencode/goals");
+        std::fs::remove_dir_all(tmp.path().join(".opencode")).unwrap();
+    }
+
+    #[test]
+    fn test_env_dir_kilocode() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".kilo")).unwrap();
+        assert_eq!(env_dir_at(tmp.path().to_path_buf()), ".kilo/goals");
+        std::fs::remove_dir_all(tmp.path().join(".kilo")).unwrap();
+    }
+
+    #[test]
+    fn test_env_dir_claudecode() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".claude")).unwrap();
+        assert_eq!(env_dir_at(tmp.path().to_path_buf()), ".claude/goals");
+        std::fs::remove_dir_all(tmp.path().join(".claude")).unwrap();
+    }
+
+    #[test]
+    fn test_env_dir_opencode_wins_over_kilo() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".opencode")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".kilo")).unwrap();
+        assert_eq!(env_dir_at(tmp.path().to_path_buf()), ".opencode/goals");
+        std::fs::remove_dir_all(tmp.path().join(".opencode")).unwrap();
+        std::fs::remove_dir_all(tmp.path().join(".kilo")).unwrap();
     }
 }

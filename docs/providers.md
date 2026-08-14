@@ -135,7 +135,7 @@ Each provider supports env var overrides:
 
 1. Per-stage override: `[pipeline.stages]` → highest priority
 2. Per-agent default: `[agents.<role>]` → `provider` field
-3. Pipeline default: `[pipeline]` → `default_provider` field
+3. Pipeline default: `[pipeline]` → `default_provider` field (if configured)
 4. Fallback: `"anthropic"` (if configured)
 
 ## Testing

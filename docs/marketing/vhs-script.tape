@@ -3,7 +3,7 @@
 # Render with: vhs --renderer gif --output assets/demo.gif docs/marketing/vhs-script.tape
 # Also: vhs --renderer mp4 --output assets/demo.mp4 docs/marketing/vhs-script.tape
 
-Output "docs/marketing/vhs-script.tape"
+Output "assets/demo.gif"
 
 # Setup: set a clean terminal state
 Set Width 120
@@ -15,7 +15,7 @@ Set Theme "twilight"
 Hide
 
 # Type the install command
-Type "cargo install niki"
+Type "brew install niki"
 Enter
 # Wait for install (this is simulated - real install takes longer, but we trim)
 Wait "Finished"
