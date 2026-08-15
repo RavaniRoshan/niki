@@ -220,7 +220,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     }
     if config.general.spend_cap_usd > 0.0 {
         eprintln!(
-            "note: spend cap active — this run will warn if estimated cost exceeds ${:.2}",
+            "note: spend cap active — this run will abort before a branch is created if estimated cost exceeds ${:.2}",
             config.general.spend_cap_usd
         );
     }

@@ -172,9 +172,10 @@ Requires Rust **1.85+** (MSRV) and Podman or Docker (rootless). Full docs live i
   The `worktree` backend (no isolation) prints an explicit warning when selected.
 - **Your keys, never bundled.** BYOK only; keys are redacted from logs and reports
   (including `?key=` URL parameters and Google API keys).
-- **Spend cap is warn-only in v0.3.** `general.spend_cap_usd` surfaces estimates before and
-  after a run; it does not abort mid-run yet — hard enforcement is on the roadmap. Set a
-  remote budget cap on your provider key as the real ceiling today.
+- **Spend cap is enforced in v0.4.0+.** `general.spend_cap_usd` aborts the run *before a
+  branch is created* once cumulative estimated cost exceeds it (checked after every agent
+  stage in `src/orchestrator/pipeline.rs`). Set a remote budget cap on your provider key as
+  a backstop.
 - **Audit trail.** Per-agent artifacts, metrics, and a hermetic `safety_proof.json` land in
   `.niki/` for every run.
 
@@ -266,6 +267,17 @@ Add a dedicated, adversarial vulnerability review after the Reviewer. Its verdic
 enabled = true
 ```
 
+### Adversarial Red review (optional)
+
+An independent **Red** agent can challenge the Coder's diff before the Reviewer signs off —
+this is the product's core "agents debate" thesis. It ships **off by default** to keep the
+four-agent story and avoid an extra strong-model call per run. Enable it per project:
+
+```toml
+[red_blue]
+enabled = true
+```
+
 ### Sandbox backends
 
 NIKI defaults to Podman (rootless, no daemon) with a Docker fallback. The same `Sandbox` trait is also implemented by a git-worktree backend (no container runtime required) and a cloud backend (beta). Choose at runtime:
@@ -319,8 +331,11 @@ We'd rather be precise than hyped:
   models, your provider. There is no telemetry and no hosted service required to run locally.
 - **The `worktree` backend runs on your host.** It executes agent commands with your privileges
   and has no VM/container isolation — use the default container backend for untrusted tasks.
-- **`[session]`, `[compaction]`, `[mcp]`, and `[permissions]` are parsed but not yet wired.**
+- **`[session]`, `[compaction]`, and `[permissions]` are parsed but not yet fully wired.**
   NIKI tells you this at load instead of silently ignoring them. They are on the roadmap.
+  `[mcp]` is now wired: when `enabled = true`, configured servers connect at run start and
+  their tools are surfaced to every agent (governance defaults to read-only). The
+  agent→server tool-call execution loop is iterative.
 - **NIKI is not magic on huge, unfamiliar codebases.** Like every coding agent, it works best on
   tasks with a clear spec and a testable outcome.
 
