@@ -1,104 +1,61 @@
-# VHS Demo Script
-# 0 → running Niki in 60-90 seconds
-# Render with:  vhs --renderer gif --output assets/demo.gif docs/marketing/vhs-script.tape
-# Also:         vhs --renderer mp4 --output assets/demo.mp4 docs/marketing/vhs-script.tape
+# NIKI demo recording (v0.4.0)
+# Rendered offline: local `niki` binary + mock LLM server + `--backend worktree`.
+# No Docker/Podman needed for the pipeline; vhs runs the terminal locally via VHS_NO_SANDBOX=1.
 #
-# Launch-day render notes:
-# - Put the built binary on PATH first, e.g. `export PATH="$PWD/target/release:$PATH"`
-#   (or `brew install niki` if the formula is published).
-# - Offline / no-API-key render: start the mock LLM server
-#   (`python3 tests/integration/mock_llm.py &`) and add `--backend worktree` to the
-#   `niki run` line plus `export MOCK_LLM_PORT=8080` so no real provider key is needed.
-# - vhs renders inside its own container; run it on a machine that has the binary,
-#   Podman/Docker (or use --backend worktree), and a key or the mock server.
+#   VHS_NO_SANDBOX=1 vhs docs/marketing/vhs-script.tape
+#
+# Requires: `mock_llm.py` running on $MOCK_LLM_PORT (8080) and a seeded
+# /tmp/demo-niki (index.js = `console.log("hello");`, with niki.toml -> mock).
 
 Output "assets/demo.gif"
+Output "assets/demo.mp4"
+Set Shell "bash"
+Set Width 1200
+Set Height 600
+Set FontSize 18
+Set Theme "Twilight"
 
-# Setup: set a clean terminal state
-Set Width 120
-Set Height 40
-Set Font "JetBrainsMono Nerd Font"
-Set Theme "twilight"
-
-# Hide typing for setup commands
+# --- prepare env (hidden) ---
 Hide
-
-# Type the install command
-Type "brew install niki"
+Type "export PATH=/home/shiva/projects/niki/target/release:$PATH"
 Enter
-# Wait for install (this is simulated - real install takes longer, but we trim)
-Wait "Finished"
-Wait 1s
+Sleep 1
+Type "export MOCK_LLM_PORT=8080"
+Enter
+Sleep 1
+Show
 
-# Show the installed version
+# --- version + help ---
 Type "niki --version"
 Enter
-Wait "niki 0.4.0"
-
-# Show help
+Sleep 2
 Type "niki --help"
 Enter
-Wait "Commands:"
+Sleep 3
 
-Show
-Type "export ANTHROPIC_API_KEY=sk-ant-YOUR_KEY_HERE"
+# --- run the agent pipeline ---
+Type "cd /tmp/demo-niki"
 Enter
-Wait
-
-# Create a test project to run on
-Type "mkdir /tmp/demo-niki && cd /tmp/demo-niki"
+Sleep 1
+Type "niki run 'Add a health check endpoint that returns {status: ok}' --backend worktree --project /tmp/demo-niki"
 Enter
-
-Type "git init"
-Enter
-Wait "Initialized empty"
-
-Type "echo 'fn main() {}' > main.rs"
-Enter
-
-Type "git add . && git commit -m init"
-Enter
-Wait "main (root-commit)"
-
-Hide
-Type "niki run 'Add a health endpoint to main.rs'"
-Enter
-
-# Show the TUI pipeline running
-Wait
-Wait "Planner"
-Wait "Coder"
-Wait "Tester"
-Wait "Reviewer"
-
-Show
-Wait 3s
+Sleep 10
 Hide
 
-# Show the resulting git branch
-Type "git branch"
+# --- show the result ---
+Type "git -C /tmp/demo-niki branch"
 Enter
-Wait
-
-# Show the diff
-Type "git diff feature/"
+Sleep 2
+Type "git -C /tmp/demo-niki diff --stat"
 Enter
-Wait
-Wait "Health endpoint"
-
-# Show the report
-Type "cat .niki/report.md"
+Sleep 2
+Type "cat /tmp/demo-niki/index.js"
 Enter
-Wait
-Wait "# Niki Report"
-
-# End with a cursor prompt
+Sleep 3
+Type "head -14 /tmp/demo-niki/.niki/tasks/*/report.md"
+Enter
+Sleep 3
 Show
-Type "echo 'Review the branch with: git checkout feature/ -- '"
+Type "echo 'Review the branch: git checkout niki/<id>'"
 Enter
-
-# Screenshot for the landing page
-Screenshot "--capture-file=assets/landing-demo.png"
-
-# End
-EOF
+Sleep 3
