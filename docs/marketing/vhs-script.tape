@@ -1,7 +1,16 @@
 # VHS Demo Script
 # 0 → running Niki in 60-90 seconds
-# Render with: vhs --renderer gif --output assets/demo.gif docs/marketing/vhs-script.tape
-# Also: vhs --renderer mp4 --output assets/demo.mp4 docs/marketing/vhs-script.tape
+# Render with:  vhs --renderer gif --output assets/demo.gif docs/marketing/vhs-script.tape
+# Also:         vhs --renderer mp4 --output assets/demo.mp4 docs/marketing/vhs-script.tape
+#
+# Launch-day render notes:
+# - Put the built binary on PATH first, e.g. `export PATH="$PWD/target/release:$PATH"`
+#   (or `brew install niki` if the formula is published).
+# - Offline / no-API-key render: start the mock LLM server
+#   (`python3 tests/integration/mock_llm.py &`) and add `--backend worktree` to the
+#   `niki run` line plus `export MOCK_LLM_PORT=8080` so no real provider key is needed.
+# - vhs renders inside its own container; run it on a machine that has the binary,
+#   Podman/Docker (or use --backend worktree), and a key or the mock server.
 
 Output "assets/demo.gif"
 
