@@ -29,11 +29,15 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
+      - name: Package archive
+        run: |
+          cd "target/${{ matrix.target }}/release"
+          tar -czf "${{ github.workspace }}/niki-${{ matrix.target }}.tar.gz" niki
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: niki-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/niki
+          path: niki-${{ matrix.target }}.tar.gz
 
   release:
     name: Publish GitHub release
@@ -45,13 +49,15 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           path: artifacts
-      - name: Stage renamed binaries
+      - name: Stage archives + checksums
         run: |
           mkdir -p upload
-          cp artifacts/niki-x86_64-unknown-linux-gnu/niki upload/niki-x86_64-unknown-linux-gnu
-          cp artifacts/niki-x86_64-apple-darwin/niki      upload/niki-x86_64-apple-darwin
-          cp artifacts/niki-aarch64-apple-darwin/niki     upload/niki-aarch64-apple-darwin
-          ls -l upload
+          cp artifacts/niki-x86_64-unknown-linux-gnu/niki-x86_64-unknown-linux-gnu.tar.gz upload/
+          cp artifacts/niki-x86_64-apple-darwin/niki-x86_64-apple-darwin.tar.gz      upload/
+          cp artifacts/niki-aarch64-apple-darwin/niki-aarch64-apple-darwin.tar.gz     upload/
+          cd upload
+          sha256sum *.tar.gz > checksums.txt
+          ls -l
       - name: Remove any existing release for this tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

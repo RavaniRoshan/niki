@@ -37,12 +37,19 @@ jobs:
         with:
           components: rustfmt
       - uses: actions/setup-node@v7
+      - name: Cache cargo-audit and cargo-deny
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-audit
+            ~/.cargo/bin/cargo-deny
+          key: cargo-audit-deny-v1
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        run: command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked
       - name: Run cargo-audit (RustSec advisories)
         run: cargo audit
       - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
+        run: command -v cargo-deny >/dev/null 2>&1 || cargo install cargo-deny --locked
       - name: Run cargo-deny (advisories + licenses + sources)
         run: cargo deny check
 
