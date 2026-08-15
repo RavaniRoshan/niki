@@ -717,7 +717,8 @@ fn enforce_spend_cap(spend_cap: f64, metrics: &[StageMetric]) -> Result<()> {
             "spend cap exceeded — estimated ${:.4} > cap ${:.2}. \
              The run was stopped before any branch was created. \
              Lower the task scope or raise [general] spend_cap_usd.",
-            total, spend_cap
+            total,
+            spend_cap
         );
     }
     Ok(())
