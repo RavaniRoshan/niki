@@ -418,6 +418,7 @@ async fn run_parallel_coders(
     task_id: &Uuid,
     base_display: &AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
+    mcp_tools: &str,
 ) -> Result<Vec<CodeDiff>> {
     let mut tasks = Vec::new();
     for _ in 0..count.max(1) {
@@ -431,6 +432,7 @@ async fn run_parallel_coders(
         let containers = containers.clone();
         let task_id = *task_id;
         let mut disp = base_display.fork();
+        let mcp_tools = mcp_tools.to_string();
 
         tasks.push(tokio::spawn(async move {
             // Own worktree sandbox per coder → isolated changes.
@@ -465,6 +467,7 @@ async fn run_parallel_coders(
                 &mut local_metrics,
                 0,   // max_tokens: use agent default
                 0.0, // temperature: use agent default
+                &mcp_tools,
             )
             .await?;
 
@@ -578,6 +581,7 @@ async fn run_role(
     metrics: &mut Vec<StageMetric>,
     max_tokens: u32,
     temperature: f32,
+    mcp_tools: &str,
 ) -> Result<(String, Vec<String>, RoleOutput)> {
     let task_spec_json = serde_json::to_string_pretty(task_spec)?;
     let (template, schema) = role_prompt(role);
@@ -593,11 +597,13 @@ async fn run_role(
             project_knowledge => knowledge_str.to_string(),
             project_memory => memory_str,
             current_files => build_current_files(task_spec, project_path),
+            mcp_tools => mcp_tools.to_string(),
         },
         AgentRole::Tester => context! {
             input_artifacts => vec![task_spec_json.clone(), coder_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
             project_memory => memory_str,
+            mcp_tools => mcp_tools.to_string(),
         },
         AgentRole::Reviewer => {
             // When the Red/Blue pass ran, the Reviewer must reconcile each Red
@@ -616,6 +622,7 @@ async fn run_role(
                 input_artifacts => artifacts,
                 project_knowledge => knowledge_str.to_string(),
                 project_memory => memory_str,
+                mcp_tools => mcp_tools.to_string(),
             }
         }
         AgentRole::Red => context! {
@@ -625,6 +632,7 @@ async fn run_role(
             input_artifacts => vec![task_spec_json.clone(), coder_json.to_string(), tester_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
             project_memory => memory_str,
+            mcp_tools => mcp_tools.to_string(),
         },
         AgentRole::Synthesizer => context! {
             // In the parallel-coder flow (#3) `coder_json` carries every coder
@@ -632,11 +640,13 @@ async fn run_role(
             input_artifacts => vec![task_spec_json.clone(), coder_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
             project_memory => memory_str,
+            mcp_tools => mcp_tools.to_string(),
         },
         AgentRole::SecurityAuditor => context! {
             input_artifacts => vec![task_spec_json.clone(), coder_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
             project_memory => memory_str,
+            mcp_tools => mcp_tools.to_string(),
         },
         AgentRole::Planner => {
             // Should never happen — the Planner is run separately. Keep the
@@ -692,6 +702,27 @@ fn parse_role(role: AgentRole, json: &str) -> Result<RoleOutput> {
     })
 }
 
+/// Hard-enforce the per-run spend cap. Returns an error that aborts the pipeline
+/// before any further stages run (and therefore before a branch is produced) once
+/// the cumulative estimated cost of completed stages exceeds `[general] spend_cap_usd`.
+/// This turns the previously warn-only cap into a real stop so autonomous runs can't
+/// run away on cost (launch-plan B2).
+fn enforce_spend_cap(spend_cap: f64, metrics: &[StageMetric]) -> Result<()> {
+    if spend_cap <= 0.0 {
+        return Ok(());
+    }
+    let total: f64 = metrics.iter().map(|m| m.cost_usd).sum();
+    if total > spend_cap {
+        anyhow::bail!(
+            "spend cap exceeded — estimated ${:.4} > cap ${:.2}. \
+             The run was stopped before any branch was created. \
+             Lower the task scope or raise [general] spend_cap_usd.",
+            total, spend_cap
+        );
+    }
+    Ok(())
+}
+
 pub async fn execute_pipeline(
     task: &Task,
     config: &NikiConfig,
@@ -710,6 +741,20 @@ pub async fn execute_pipeline(
     // Per-agent context-isolation records (BUILD_PLAN 2.1). Populated as each
     // stage runs so the report can prove every agent was an independent session.
     let mut isolation: Vec<IsolationRecord> = Vec::new();
+
+    // --- MCP tool discovery (optional, launch-plan C1) ---
+    // When `[mcp] enabled = true`, connect configured servers now and surface their
+    // tools to every agent via the prompt context. The manager is wired into the
+    // runtime here; the agent→server tool-call execution loop remains a follow-up.
+    let mcp_tools: String = if config.mcp.enabled {
+        let mut mgr = crate::mcp::McpManager::new();
+        if let Err(e) = mgr.connect_all().await {
+            eprintln!("Warning: MCP connect failed: {}", e);
+        }
+        mgr.tools_for_prompt()
+    } else {
+        String::new()
+    };
 
     // Resolve the ordered, data-driven stage list.
     let stages = ensure_planner(resolve_stages(config), config);
@@ -878,6 +923,7 @@ pub async fn execute_pipeline(
                     &task.id,
                     display,
                     &mut metrics,
+                    &mcp_tools,
                 )
                 .await?;
 
@@ -927,6 +973,7 @@ pub async fn execute_pipeline(
                     &mut metrics,
                     synth_stage.max_tokens,
                     synth_stage.temperature,
+                    &mcp_tools,
                 )
                 .await?;
                 artifacts.push((AgentRole::Synthesizer, json.clone()));
@@ -991,6 +1038,7 @@ pub async fn execute_pipeline(
                         &mut metrics,
                         stage.max_tokens,
                         stage.temperature,
+                        &mcp_tools,
                     )
                     .await?;
                     artifacts.push((stage.role, json.clone()));
@@ -1005,6 +1053,7 @@ pub async fn execute_pipeline(
                     });
                     display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
                     display.update_pipeline_status();
+                    enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
 
                     match role_output {
                         RoleOutput::Tester(_) => {
@@ -1052,6 +1101,7 @@ pub async fn execute_pipeline(
                             &mut metrics,
                             stage.max_tokens,
                             stage.temperature,
+                            &mcp_tools,
                         )
                         .await?;
                         artifacts.push((stage.role, json.clone()));
@@ -1069,6 +1119,7 @@ pub async fn execute_pipeline(
                         });
                         display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
                         display.update_pipeline_status();
+                        enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
 
                         match role_output {
                             RoleOutput::Coder(diff) => {
@@ -1174,10 +1225,10 @@ pub async fn execute_pipeline(
                 display,
                 &mut metrics,
                 false, // Solo mode: strict — no degradation
-                coder_stage.max_tokens,
-                coder_stage.temperature,
-            )
-            .await?;
+                 coder_stage.max_tokens,
+                 coder_stage.temperature,
+             )
+             .await?;
             artifacts.push((AgentRole::Coder, solo_json.clone()));
             isolation.push(IsolationRecord {
                 role: AgentRole::Coder,
@@ -1195,6 +1246,7 @@ pub async fn execute_pipeline(
                 m.cost_usd,
             );
             display.update_pipeline_status();
+            enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
             // The solo Coder returns a CodeDiff; apply it so the downstream diff
             // read picks up the change.
             coder_json = solo_json;

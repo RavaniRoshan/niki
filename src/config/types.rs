@@ -330,8 +330,9 @@ impl Default for ParallelConfig {
 /// Reviewer. The Red agent independently attacks the Coder's diff; the Reviewer
 /// must then reconcile each Red challenge (uphold → request revision, or refute
 /// → justify). This is what prevents the Reviewer from silently ratifying the
-/// Coder and is enabled by default because it is the product's core thesis:
-/// *isolated* agents that genuinely challenge each other.
+/// Coder. It is **off by default (opt-in)** because it adds an extra strong-model
+/// call per run; it remains the product's core thesis — enable it via
+/// `[red_blue] enabled = true` in niki.toml.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedBlueConfig {
     #[serde(default = "default_red_blue_enabled")]
@@ -346,8 +347,8 @@ pub struct RedBlueConfig {
 
 impl Default for RedBlueConfig {
     fn default() -> Self {
-        // Red/Blue is on by default — it is the product's core thesis (isolated
-        // agents that genuinely challenge each other, not a rubber stamp).
+        // Red/Blue is OFF by default (opt-in) — see `default_red_blue_enabled`.
+        // Enable via `[red_blue] enabled = true` in niki.toml.
         Self {
             enabled: default_red_blue_enabled(),
             provider: None,
@@ -440,6 +441,36 @@ pub struct UiConfig {
     pub tips: TipsConfig,
     #[serde(default)]
     pub theme: ThemePreference,
+    #[serde(default)]
+    pub transcript: TranscriptConfig,
+}
+
+/// Transcript view configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptConfig {
+    /// Collapse completed activity blocks (default: true).
+    #[serde(default = "default_true")]
+    pub collapse_completed: bool,
+    /// Expand failed activity blocks (default: true).
+    #[serde(default = "default_true")]
+    pub expand_failures: bool,
+    /// Show intent labels on activity blocks (default: true).
+    #[serde(default = "default_true")]
+    pub show_intent_labels: bool,
+    /// Auto-collapse entire turns after completion (default: false).
+    #[serde(default)]
+    pub auto_collapse_turns: bool,
+}
+
+impl Default for TranscriptConfig {
+    fn default() -> Self {
+        Self {
+            collapse_completed: true,
+            expand_failures: true,
+            show_intent_labels: true,
+            auto_collapse_turns: false,
+        }
+    }
 }
 
 /// Tips banner configuration for the TUI.
