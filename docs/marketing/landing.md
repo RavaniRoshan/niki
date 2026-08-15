@@ -22,7 +22,7 @@ niki run "Add a health endpoint to the API"
 Planner, Coder, Tester, Reviewer run as separate agents — each in its own sandbox. They exchange artifacts, not state. The Reviewer can actually catch what the Coder misses.
 
 ### Hermetic by default
-Docker/Podman containers with dropped capabilities, read-only mounts, and a command deny-list enforced for every role. Your codebase is safe: `git push`, `rm -rf`, `curl|sh` are blocked by policy.
+Docker/Podman containers with dropped capabilities, read-only mounts, and a command deny-list enforced for every role. Force-push, `rm -rf /`, and `curl|sh` / `wget|sh` pipes are blocked by policy.
 
 ### Adversarial review built-in
 A Red agent probes the Coder's diff before the Reviewer runs. The Reviewer must reconcile each finding. This is what "independent review" actually means — not a rubber stamp.
@@ -44,18 +44,17 @@ Stay updated on new features (sessions, MCP, headless CI mode):
 
 ## Install
 ```bash
-# Homebrew
+# macOS (Homebrew)
 brew install niki
 
-# Scoop (Windows)
-scoop install niki
-
-# Winget (Windows)
-winget install RavaniRoshan.niki
+# Linux / macOS (checksum-verified)
+curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/niki/master/scripts/install.sh | bash
 
 # Or download a binary
 # https://github.com/RavaniRoshan/niki/releases/latest
 ```
+
+> Windows support (Scoop / Winget) is **planned** — NIKI runs on Linux and macOS today.
 
 ## Links
 - [GitHub](https://github.com/RavaniRoshan/niki) · [Install Guide](docs/install.md) · [Docs](docs/) · [Security Policy](SECURITY.md)

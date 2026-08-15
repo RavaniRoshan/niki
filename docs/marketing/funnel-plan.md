@@ -20,7 +20,7 @@ Target: **Rust-filtered GitHub Trending (~30–60 stars/day threshold, practitio
 Compress everything into Tue–Thu (Aug 18–20). Friday = newsletter wave with "we hit Trending".
 
 Hard dependency before the window opens:
-- [ ] Release v0.3.0 cut (tag, binaries, manifests)
+- [ ] Release v0.4.0 cut (tag, binaries, manifests)
 - [ ] `assets/demo.gif` regenerated from current TUI (vhs script)
 - [ ] README converts in 10–15s: line 1 = the positioning sentence; GIF above the fold;
       5-command quickstart; security-posture block; badges
@@ -47,7 +47,7 @@ Hard dependency before the window opens:
   top-5 = 500–2,000 signups; badge ≈ +17% ongoing signups). LaunchPact pacts 8–15.
 
 ### 2. Day 1 — Tue Aug 18 (release day, core)
-- **GitHub release** early morning ET: v0.3.0 tag, binaries, changelog, release notes with the
+- **GitHub release** early morning ET: v0.4.0 tag, binaries, changelog, release notes with the
   eval-harness disclosure manifest linked.
 - **Show HN** ~9–11am ET, within 2–4h of release: plain factual title —
   `Show HN: NIKI – sentence to reviewable PR, four sandboxed agents, BYOK` —

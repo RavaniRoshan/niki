@@ -2,7 +2,7 @@
 
 ## Pre-launch (Day -2 to Day 0)
 - [ ] Final code freeze at end of Day 0
-- [ ] Tag v0.3.0 on master
+- [ ] Tag v0.4.0 on master
 - [ ] Verify `cargo install niki` works against crates.io
 - [ ] Verify `brew install niki` formula
 - [ ] Verify `curl -L https://niki.ai/install | bash` (or https://github.com/RavaniRoshan/niki/releases)
@@ -19,7 +19,7 @@
 ## Day 0 — Truth & Release Plumbing (Morning)
 - [ ] Delete/silence skeleton config traps (DONE via goal/c4d8f1)
 - [ ] Fix package manifests (DONE via goal/c4d8f1)
-- [ ] Tag v0.3.0 (TODO)
+- [ ] Tag v0.4.0 (TODO)
 - [ ] Enable github-attestations + SBOM in release workflow (TODO)
 - [ ] Add integration tests to CI (DONE via goal/c4d8f1)
 - [ ] Run integration tests, fix failures (TODO)

@@ -141,17 +141,17 @@ niki report <id>                      # full report, or a unique short prefix
 ## Install (one line)
 
 ```bash
-# macOS / Linux (Homebrew)
+# macOS (Homebrew)
 brew install niki
 
-# Windows (Scoop)
-scoop install niki
-
-# Windows (Winget)
-winget install RavaniRoshan.niki
+# Linux / macOS (any — downloads the release archive and verifies its SHA256)
+curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/niki/master/scripts/install.sh | bash
 
 # Or download a binary: https://github.com/RavaniRoshan/niki/releases/latest
 ```
+
+> **Windows:** a native build (Scoop / Winget) is **planned** but not shipped yet.
+> Today NIKI runs on Linux and macOS (Intel + Apple Silicon).
 
 Then copy the example config, add your API key, and run:
 ```bash

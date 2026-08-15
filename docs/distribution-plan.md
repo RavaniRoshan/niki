@@ -1,5 +1,11 @@
 # NIKI Distribution & CI/CD Plan
 
+> **Status (2026-08-15):** The v0.4.0 launch ships **3 Unix targets** (Linux x86_64, macOS
+> Intel, macOS Apple Silicon) via Homebrew + a checksum-verified `curl` installer + GitHub
+> release downloads. **Windows (Scoop/Winget) is deferred** to post-launch — the items below
+> referencing Windows package managers are future work, not part of the launch. See
+> `CHANGELOG.md` (0.4.0) and `docs/claims-audit.md`.
+
 ## Goal
 
 Make NIKI (`niki` CLI) easy to install on Linux, Windows, and macOS with a reliable

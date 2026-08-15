@@ -24,7 +24,7 @@ Wait 1s
 # Show the installed version
 Type "niki --version"
 Enter
-Wait "niki 0.3.0"
+Wait "niki 0.4.0"
 
 # Show help
 Type "niki --help"
