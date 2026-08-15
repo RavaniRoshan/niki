@@ -31,7 +31,7 @@ The key insight: each agent only sees artifacts from the previous agent, not the
 
 - **No shared memory between agents** — prevents the "I'll fix it in the next message" problem where agents cover for each other's mistakes
 - **Adversarial review** — a Red agent probes the Coder's diff *before* the Reviewer. The Reviewer must reconcile each finding
-- **Hermetic by default** — every agent runs in a Docker/Podman container with dropped capabilities and a command deny-list (`git push`, `rm -rf`, `curl|sh` are blocked)
+- **Hermetic by default** — every agent runs in a Docker/Podman container with dropped capabilities and a command deny-list (force-push, `rm -rf /`, and `curl|sh` / `wget|sh` pipes are blocked)
 - **Output is always a git branch** — you review the diff in your normal workflow, not in a chat window
 
 ### Honest limitations

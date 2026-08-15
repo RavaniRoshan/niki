@@ -4,7 +4,47 @@ All notable changes to NIKI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [0.3.1] - 2026-08-17
+## [0.4.0] - 2026-08-18
+
+Launch cut.
+
+### Added
+- **Distribution narrowed to the three platforms we build and verify:** Linux (x86_64)
+  and macOS (Intel + Apple Silicon) via Homebrew, a checksum-verified `curl` installer
+  (`scripts/install.sh`), and GitHub release downloads.
+- `docs/claims-audit.md`: every headline marketing claim traced to the code that backs it.
+- Landing page (`docs/marketing/landing.html`) for GitHub Pages.
+
+### Changed
+- Homebrew formula now installs the release `.tar.gz` archives (with SHA256) for the three
+  supported targets; Windows (Scoop/Winget) deferred — docs now say "planned".
+- Honesty pass on sandbox claims: the deny-list blocks `git push --force`/`-f`, `rm -rf /`,
+  and `curl|sh` / `wget|sh` pipes — **not** plain `git push` or non-root `rm`. Copy updated.
+
+### Security
+- Repo hardening: Dependabot, CodeQL, secret scanning + push protection, branch protection
+  on `master`, `FUNDING.yml`.
+
+## [0.3.3] - 2026-08-15
+
+Release hygiene.
+
+### Changed
+- Release assets are now per-target `.tar.gz` archives plus a `checksums.txt` (SHA256) —
+  the standard Rust-CLI distribution shape.
+- CI caches `cargo-audit` / `cargo-deny` binaries instead of re-installing each run.
+
+## [0.3.2] - 2026-08-15
+
+CI / supply-chain hardening.
+
+### Changed
+- Removed the OpenSSL dependency: `reqwest` uses `rustls-tls`, `git2` vendors `libgit2`
+  (no system OpenSSL needed for the macOS x86_64 cross-build).
+- `deny.toml` license allow-list extended (ISC, CDLA-Permissive-2.0) so the supply-chain
+  gate passes; CI workflows bumped to v7.
+
+## [0.3.1] - 2026-08-14
 
 Launch-hardening cut (the product IS the demo).
 
@@ -27,7 +67,7 @@ Launch-hardening cut (the product IS the demo).
 ### Security
 - `SECURITY.md` updated: default-blocked egress is shipped, not a roadmap item.
 
-## [0.3.0] - 2026-08-18
+## [0.3.0] - 2026-08-13
 
 Launch cut. Focus: distribution, onboarding, and trust — the agent engine is unchanged.
 

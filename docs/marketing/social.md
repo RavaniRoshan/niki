@@ -24,7 +24,7 @@ Tweet 4 (differentiator 2 - hermetic):
 Every agent runs in a Docker/Podman container with:
 - Dropped capabilities
 - Read-only mounts where possible
-- Command deny-list: git push, rm -rf, curl|sh blocked
+- Command deny-list: force-push, `rm -rf /`, and `curl|sh` / `wget|sh` pipes blocked
 - Resource limits enforced
 
 Tweet 5 (differentiator 3 - adversarial):
@@ -70,7 +70,7 @@ Include: code snippets, TUI screenshot, expected output structure.
 ## Reddit posts (only where already active)
 
 ### r/rust
-Niki v0.3.0: Four Rust agents reviewing each other's code in Docker containers. Built with tokio + bollard. Each agent is a hermetic container with a command deny-list. The Reviewer only sees the diff artifact — not the Coder's internal state.
+Niki v0.4.0: Four Rust agents reviewing each other's code in Docker containers. Built with tokio + bollard. Each agent is a hermetic container with a command deny-list. The Reviewer only sees the diff artifact — not the Coder's internal state.
 
 GitHub: https://github.com/RavaniRoshan/niki
 
