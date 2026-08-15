@@ -10,6 +10,8 @@ skills-lock.json
 # Untracked directories
 examples/
 evals/
+.kilo/
+research/
 
 # Dev-only scripts (not shipped to users)
 scripts/generate_screenshots.py
