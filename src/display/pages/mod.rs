@@ -18,7 +18,9 @@ use ratatui::crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 
 // Re-export canonical types from state.rs so pages keep working with `super::X`.
-pub use crate::display::state::{AppState, ChatLine, Modal, PageId, RunState, StageInfo, StageStatus};
+pub use crate::display::state::{
+    AppState, ChatLine, Modal, PageId, RunState, StageInfo, StageStatus,
+};
 
 pub trait Page {
     fn render(&self, frame: &mut Frame, area: Rect, state: &AppState);

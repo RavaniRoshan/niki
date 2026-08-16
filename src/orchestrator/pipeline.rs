@@ -424,7 +424,9 @@ async fn run_parallel_coders(
     metrics: &mut Vec<StageMetric>,
     mcp_tools: &str,
 ) -> Result<Vec<CodeDiff>> {
-    let event_tx = base_display.tui_tx().unwrap_or_else(|| std::sync::mpsc::channel().0);
+    let event_tx = base_display
+        .tui_tx()
+        .unwrap_or_else(|| std::sync::mpsc::channel().0);
     let mut tasks = Vec::new();
     for _ in 0..count.max(1) {
         let llm = coder_llm.clone();
@@ -1227,7 +1229,6 @@ pub async fn execute_pipeline(
                     }
 
                     if has_reviewer {
-
                         if matches!(verdict, Verdict::Approved | Verdict::Rejected) {
                             break;
                         }
@@ -1329,17 +1330,22 @@ pub async fn execute_pipeline(
     // Diff-size guardrail (optional). Warns when a single run's diff grows past
     // the configured ceiling — the "smaller incremental changes" control from the
     // agentic-engineering checklist (arXiv 2603.27249 §4). Zero = unset.
-    let diff_guardwarn = (config.general.max_diff_lines > 0).then(|| {
-        let changed_lines = final_diff.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++")).count();
-        let limit = config.general.max_diff_lines as usize;
-        (changed_lines > limit).then(|| {
-            format!(
-                "Diff adds {} changed lines, exceeding guardrail general.max_diff_lines ({}).\
+    let diff_guardwarn = (config.general.max_diff_lines > 0)
+        .then(|| {
+            let changed_lines = final_diff
+                .lines()
+                .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+                .count();
+            let limit = config.general.max_diff_lines as usize;
+            (changed_lines > limit).then(|| {
+                format!(
+                    "Diff adds {} changed lines, exceeding guardrail general.max_diff_lines ({}).\
                  Prefer smaller incremental PRs; the Reviewer was nudged toward a tighter delta.",
-                changed_lines, limit
-            )
+                    changed_lines, limit
+                )
+            })
         })
-    }).flatten();
+        .flatten();
 
     // Verification in the loop: actually execute the project's test suite inside
     // the sandbox and record the real result as part of the audit trail, *before*

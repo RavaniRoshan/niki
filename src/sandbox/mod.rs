@@ -15,7 +15,8 @@ use crate::permissions::{Permission, PermissionChecker, PermissionConfig, Permis
 /// (which the headless sandbox treats as allow — interactive prompting is a
 /// TUI concern). With an empty deny list this is a no-op (behavior-preserving).
 pub(crate) fn build_permission_checker(policy: &SecurityPolicyConfig) -> PermissionChecker {
-    let mut rules: std::collections::HashMap<String, PermissionRule> = std::collections::HashMap::new();
+    let mut rules: std::collections::HashMap<String, PermissionRule> =
+        std::collections::HashMap::new();
     for denied in &policy.denied_commands {
         rules.insert(
             format!("deny:{}", denied),
@@ -134,39 +135,46 @@ pub fn check_command_policy(cmd: &[&str], policy: &SecurityPolicyConfig) -> Resu
 ///
 /// `policy` is the security policy for this sandbox's agent role; commands
 /// executed via `exec` are checked against it when a role is supplied.
- pub async fn create_sandbox(
-     backend: SandboxBackend,
-     docker: Option<&Docker>,
-     agent_role: AgentRole,
-     source_repo: &Path,
-     task_id: &Uuid,
-     config: &DockerConfig,
-     policy: SecurityPolicyConfig,
-     containers: ActiveContainers,
-     event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
- ) -> Result<Box<dyn Sandbox>> {
-     match backend {
-         SandboxBackend::Docker => {
-             let d = docker.ok_or_else(|| {
-                 NikiError::Config("Docker backend selected but Docker is not available".into())
-             })?;
-             Ok(Box::new(
-                 DockerSandbox::create(
-                     d,
-                     agent_role,
-                     source_repo,
-                     task_id,
-                     config,
-                     policy,
-                     containers,
-                     event_tx,
-                 )
-                 .await?,
-             ))
-         }
-         SandboxBackend::Worktree => Ok(Box::new(
-             worktree::WorktreeSandbox::create(agent_role, source_repo, task_id, config, policy, event_tx)
+pub async fn create_sandbox(
+    backend: SandboxBackend,
+    docker: Option<&Docker>,
+    agent_role: AgentRole,
+    source_repo: &Path,
+    task_id: &Uuid,
+    config: &DockerConfig,
+    policy: SecurityPolicyConfig,
+    containers: ActiveContainers,
+    event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
+) -> Result<Box<dyn Sandbox>> {
+    match backend {
+        SandboxBackend::Docker => {
+            let d = docker.ok_or_else(|| {
+                NikiError::Config("Docker backend selected but Docker is not available".into())
+            })?;
+            Ok(Box::new(
+                DockerSandbox::create(
+                    d,
+                    agent_role,
+                    source_repo,
+                    task_id,
+                    config,
+                    policy,
+                    containers,
+                    event_tx,
+                )
                 .await?,
+            ))
+        }
+        SandboxBackend::Worktree => Ok(Box::new(
+            worktree::WorktreeSandbox::create(
+                agent_role,
+                source_repo,
+                task_id,
+                config,
+                policy,
+                event_tx,
+            )
+            .await?,
         )),
     }
 }

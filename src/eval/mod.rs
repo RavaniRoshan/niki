@@ -291,7 +291,7 @@ pub fn score_result(result: &PipelineResult, defect: &SeededDefect) -> RunOutcom
 fn empty_result() -> PipelineResult {
     let id = Uuid::new_v4();
     PipelineResult {
-    diff_guardwarn: None,
+        diff_guardwarn: None,
         task_id: id,
         state: PipelineState::new(id),
         final_diff: String::new(),
@@ -351,7 +351,7 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
     .map(|v| v.verdict)
     .unwrap_or(Verdict::Approved);
     Ok(PipelineResult {
-    diff_guardwarn: None,
+        diff_guardwarn: None,
         task_id: id,
         state: PipelineState::new(id),
         final_diff: String::new(),

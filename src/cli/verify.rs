@@ -37,11 +37,20 @@ pub fn handle(args: &VerifyArgs) -> Result<()> {
         println!("Screenshot captured: {}", screenshot_path.display());
     } else {
         println!("Note: No screenshot tool available in this environment.");
-        println!("      Screenshot intent recorded at: {}", screenshot_path.display());
+        println!(
+            "      Screenshot intent recorded at: {}",
+            screenshot_path.display()
+        );
         println!("\nTo enable visual verification, install one of:");
         println!("  - scrot (scrot -s {})", screenshot_path.display());
-        println!("  - gnome-screenshot (gnome-screenshot -f {})", screenshot_path.display());
-        println!("  - ImageMagick (import -window root {})", screenshot_path.display());
+        println!(
+            "  - gnome-screenshot (gnome-screenshot -f {})",
+            screenshot_path.display()
+        );
+        println!(
+            "  - ImageMagick (import -window root {})",
+            screenshot_path.display()
+        );
     }
 
     // Record verification intent

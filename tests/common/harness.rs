@@ -142,9 +142,17 @@ impl TestHarness {
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
         let cancel = Arc::new(AtomicBool::new(false));
-        execute_pipeline(&task, &self.config, None, &mut display, containers, false, cancel)
-            .await
-            .expect("pipeline should succeed")
+        execute_pipeline(
+            &task,
+            &self.config,
+            None,
+            &mut display,
+            containers,
+            false,
+            cancel,
+        )
+        .await
+        .expect("pipeline should succeed")
     }
 
     pub async fn run_pipeline_dry(&self) -> niki::orchestrator::pipeline::PipelineResult {
@@ -156,9 +164,17 @@ impl TestHarness {
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
         let cancel = Arc::new(AtomicBool::new(false));
-        execute_pipeline(&task, &self.config, None, &mut display, containers, true, cancel)
-            .await
-            .expect("pipeline should succeed")
+        execute_pipeline(
+            &task,
+            &self.config,
+            None,
+            &mut display,
+            containers,
+            true,
+            cancel,
+        )
+        .await
+        .expect("pipeline should succeed")
     }
 
     pub async fn run_pipeline_expect_fail(&self) -> anyhow::Error {
@@ -170,9 +186,17 @@ impl TestHarness {
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
         let cancel = Arc::new(AtomicBool::new(false));
-        execute_pipeline(&task, &self.config, None, &mut display, containers, false, cancel)
-            .await
-            .unwrap_err()
+        execute_pipeline(
+            &task,
+            &self.config,
+            None,
+            &mut display,
+            containers,
+            false,
+            cancel,
+        )
+        .await
+        .unwrap_err()
     }
 
     pub fn write_niki_toml(&self) {

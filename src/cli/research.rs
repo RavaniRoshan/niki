@@ -92,13 +92,18 @@ fn extract_search_results(html: &str, max: usize) -> Vec<SearchResult> {
         let title = cap[2].trim().to_string();
 
         // Try to extract snippet
-        let snippet_re = regex::Regex::new(r#"<a[^>]+class="result__snippet"[^>]*>([^<]+)</a>"#).unwrap();
+        let snippet_re =
+            regex::Regex::new(r#"<a[^>]+class="result__snippet"[^>]*>([^<]+)</a>"#).unwrap();
         let snippet = snippet_re
             .captures(html)
             .map(|m| m[1].trim().to_string())
             .unwrap_or_default();
 
-        results.push(SearchResult { title, url, snippet });
+        results.push(SearchResult {
+            title,
+            url,
+            snippet,
+        });
     }
 
     results

@@ -212,7 +212,11 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // Opt-in rich TUI. Must be enabled before any display call so the banner
     // and subsequent events are routed to the render thread.
     if args.tui {
-        display.enable_tui(task.description.clone(), task.project_path.clone(), cancel.clone());
+        display.enable_tui(
+            task.description.clone(),
+            task.project_path.clone(),
+            cancel.clone(),
+        );
     }
 
     if !args.quiet {

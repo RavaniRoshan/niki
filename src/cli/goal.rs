@@ -79,10 +79,10 @@ pub async fn handle(args: &GoalArgs) -> Result<()> {
         GoalCommands::Resume { id } => handle_resume(id).await,
         GoalCommands::Cancel | GoalCommands::Clear => handle_cancel().await,
         GoalCommands::Run { id } => handle_run(id.as_deref()).await,
-    GoalCommands::Check => handle_check().await,
-    GoalCommands::Env => handle_env(),
-    GoalCommands::Fork { id } => handle_fork(id.as_deref()).await,
-}
+        GoalCommands::Check => handle_check().await,
+        GoalCommands::Env => handle_env(),
+        GoalCommands::Fork { id } => handle_fork(id.as_deref()).await,
+    }
 }
 
 async fn handle_new(objective: &str, scope: Option<&str>, max: u32) -> Result<()> {
