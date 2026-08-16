@@ -29,7 +29,7 @@ set. The original copy ("`git push`, `rm -rf`, `curl|sh` are blocked by policy")
 | "`rm -rf` … blocked" | Blocks `rm -rf /` and `rm -rf /*` only | "`rm -rf /` (root) is blocked" |
 | "`curl|sh` blocked" | Blocks `curl \| sh`, `curl \| bash`, `wget \| sh`, `wget \| bash` | accurate — keep |
 
-**Action taken:** landing.md, show-hn.md, social.md, ph-assets.md, and README now use the
+**Action taken:** show-hn.md, social.md, ph-assets.md, and README now use the
 narrowed wording. The Homebrew/Scoop/Winget "Windows" claims were removed (Windows is not
 built — see `release.yml`, which produces 3 Unix targets only).
 
