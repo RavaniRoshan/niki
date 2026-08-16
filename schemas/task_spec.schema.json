@@ -30,6 +30,11 @@
     "estimated_complexity": {
       "type": "string",
       "enum": ["low", "medium", "high"]
+    },
+    "uncertainties": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "Risks, open questions, or assumptions made under time pressure."
     }
   },
   "required": [

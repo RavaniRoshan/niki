@@ -6,6 +6,7 @@ use niki::sandbox::SandboxBackend;
 use niki::sandbox::docker::ActiveContainers;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -140,7 +141,8 @@ impl TestHarness {
         };
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
-        execute_pipeline(&task, &self.config, None, &mut display, containers, false)
+        let cancel = Arc::new(AtomicBool::new(false));
+        execute_pipeline(&task, &self.config, None, &mut display, containers, false, cancel)
             .await
             .expect("pipeline should succeed")
     }
@@ -153,7 +155,8 @@ impl TestHarness {
         };
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
-        execute_pipeline(&task, &self.config, None, &mut display, containers, true)
+        let cancel = Arc::new(AtomicBool::new(false));
+        execute_pipeline(&task, &self.config, None, &mut display, containers, true, cancel)
             .await
             .expect("pipeline should succeed")
     }
@@ -166,7 +169,8 @@ impl TestHarness {
         };
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
-        execute_pipeline(&task, &self.config, None, &mut display, containers, false)
+        let cancel = Arc::new(AtomicBool::new(false));
+        execute_pipeline(&task, &self.config, None, &mut display, containers, false, cancel)
             .await
             .unwrap_err()
     }

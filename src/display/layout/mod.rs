@@ -223,13 +223,13 @@ fn render_pipeline_page(state: &AppState, _width: usize) -> Vec<Line<'static>> {
     )));
     lines.push(Line::from(""));
 
-    if state.pipeline.stages.is_empty() {
+    if state.stages.is_empty() {
         lines.push(Line::from(Span::styled(
             "No stages yet...",
             theme::text_dim(),
         )));
     } else {
-        for stage in &state.pipeline.stages {
+        for stage in &state.stages {
             let (icon, color) = match stage.status {
                 crate::display::state::StageStatus::Running => ("◐", theme::primary()),
                 crate::display::state::StageStatus::Done => ("✓", theme::success()),
@@ -340,7 +340,7 @@ fn render_cost_page(state: &AppState, _width: usize) -> Vec<Line<'static>> {
     )));
     lines.push(Line::from(""));
 
-    for stage in &state.pipeline.stages {
+    for stage in &state.stages {
         let role_name = format!("{:?}", stage.role);
         lines.push(Line::from(Span::styled(
             format!(
