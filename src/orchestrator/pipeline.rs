@@ -70,6 +70,10 @@ pub struct PipelineResult {
     /// verification evidence before the branch is created. `None` when no test
     /// command could be resolved or execution was skipped.
     pub test_execution: Option<TestExecution>,
+    /// Diff-size guardrail notice (BUILD_PLAN 1.1 control): when `general.max_diff_lines`
+    /// is set and the produced diff exceeds it, this holds a plain-English warning
+    /// surfaced in `report.md`. `None` = on or under the limit (or the limit is unset).
+    pub diff_guardwarn: Option<String>,
 }
 
 /// Typed output of a single pipeline stage, used for role-specific handling.
@@ -420,6 +424,9 @@ async fn run_parallel_coders(
     metrics: &mut Vec<StageMetric>,
     mcp_tools: &str,
 ) -> Result<Vec<CodeDiff>> {
+    let event_tx = base_display
+        .tui_tx()
+        .unwrap_or_else(|| std::sync::mpsc::channel().0);
     let mut tasks = Vec::new();
     for _ in 0..count.max(1) {
         let llm = coder_llm.clone();
@@ -433,6 +440,7 @@ async fn run_parallel_coders(
         let task_id = *task_id;
         let mut disp = base_display.fork();
         let mcp_tools = mcp_tools.to_string();
+        let event_tx = event_tx.clone();
 
         tasks.push(tokio::spawn(async move {
             // Own worktree sandbox per coder → isolated changes.
@@ -445,6 +453,7 @@ async fn run_parallel_coders(
                 &config.docker,
                 role_policy(AgentRole::Coder, &config),
                 containers,
+                event_tx.clone(),
             )
             .await?;
             sandbox.ensure_tools(&required_tools(&config)).await?;
@@ -468,6 +477,7 @@ async fn run_parallel_coders(
                 0,   // max_tokens: use agent default
                 0.0, // temperature: use agent default
                 &mcp_tools,
+                config_max_diff_lines(&config),
             )
             .await?;
 
@@ -582,6 +592,7 @@ async fn run_role(
     max_tokens: u32,
     temperature: f32,
     mcp_tools: &str,
+    max_diff_lines: Option<usize>,
 ) -> Result<(String, Vec<String>, RoleOutput)> {
     let task_spec_json = serde_json::to_string_pretty(task_spec)?;
     let (template, schema) = role_prompt(role);
@@ -618,10 +629,22 @@ async fn run_role(
             if !red_json.is_empty() {
                 artifacts.push(red_json.to_string());
             }
+            let diff_guardrail_hint = max_diff_lines.and_then(|m| {
+                if m > 0 {
+                    Some(format!(
+                        "Diff-size guardrail is active (`general.max_diff_lines = {}`): lean toward tighter, \
+                         more reviewable deltas and flag oversized changes as a review concern.",
+                        m
+                    ))
+                } else {
+                    None
+                }
+            });
             context! {
                 input_artifacts => artifacts,
                 project_knowledge => knowledge_str.to_string(),
                 project_memory => memory_str,
+                diff_guardrail_hint => diff_guardrail_hint.clone(),
                 mcp_tools => mcp_tools.to_string(),
             }
         }
@@ -724,6 +747,18 @@ fn enforce_spend_cap(spend_cap: f64, metrics: &[StageMetric]) -> Result<()> {
     Ok(())
 }
 
+/// Translate `[general] max_diff_lines` into the `Option<usize>` the body stages expect.
+/// `0` means "off" (None); any positive value passes through, enabling the Reviewer
+/// diff-size nudge and the post-run guardrail rendered in report.md.
+fn config_max_diff_lines(config: &NikiConfig) -> Option<usize> {
+    let lines = config.general.max_diff_lines;
+    if lines > 0 {
+        Some(lines as usize)
+    } else {
+        None
+    }
+}
+
 pub async fn execute_pipeline(
     task: &Task,
     config: &NikiConfig,
@@ -731,6 +766,7 @@ pub async fn execute_pipeline(
     display: &mut AgenticDisplay,
     containers: ActiveContainers,
     dry_run: bool,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<PipelineResult> {
     // 1. Index Project
     let knowledge = index_project(&task.project_path, config).await?;
@@ -756,6 +792,11 @@ pub async fn execute_pipeline(
     } else {
         String::new()
     };
+
+    let event_tx = display.tui_tx().unwrap_or_else(|| {
+        let (tx, _) = std::sync::mpsc::channel();
+        tx
+    });
 
     // Resolve the ordered, data-driven stage list.
     let stages = ensure_planner(resolve_stages(config), config);
@@ -816,6 +857,7 @@ pub async fn execute_pipeline(
             task_id: task.id,
             state,
             final_diff: String::new(),
+            diff_guardwarn: None,
             verdict: Verdict::Approved,
             revision_rounds: 0,
             artifacts,
@@ -827,7 +869,7 @@ pub async fn execute_pipeline(
         });
     }
 
-    // 2. Initialize Sandbox (backend chosen by config: docker / worktree / cloud)
+    // 2. Initialize Sandbox (backend chosen by config: docker / worktree)
     // `containers` is an Arc and is cloned here so the parallel-coder path below
     // can hand its own clone to each per-coder worktree sandbox.
     let planner_policy = role_policy(AgentRole::Planner, config);
@@ -840,6 +882,7 @@ pub async fn execute_pipeline(
         &config.docker,
         planner_policy,
         containers.clone(),
+        event_tx.clone(),
     )
     .await?;
 
@@ -975,6 +1018,7 @@ pub async fn execute_pipeline(
                     synth_stage.max_tokens,
                     synth_stage.temperature,
                     &mcp_tools,
+                    config_max_diff_lines(config),
                 )
                 .await?;
                 artifacts.push((AgentRole::Synthesizer, json.clone()));
@@ -1040,6 +1084,7 @@ pub async fn execute_pipeline(
                         stage.max_tokens,
                         stage.temperature,
                         &mcp_tools,
+                        config_max_diff_lines(config),
                     )
                     .await?;
                     artifacts.push((stage.role, json.clone()));
@@ -1074,6 +1119,11 @@ pub async fn execute_pipeline(
                 }
             } else {
                 while round < max_rounds {
+                    // Cooperative cancellation: the TUI (or any holder of the
+                    // flag) can abort the run between revision rounds.
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Err(crate::NikiError::Cancelled.into());
+                    }
                     for stage in &body_stages {
                         let cache_key = if stage.fallbacks.is_empty() {
                             stage.provider.clone()
@@ -1103,6 +1153,7 @@ pub async fn execute_pipeline(
                             stage.max_tokens,
                             stage.temperature,
                             &mcp_tools,
+                            config_max_diff_lines(config),
                         )
                         .await?;
                         artifacts.push((stage.role, json.clone()));
@@ -1171,6 +1222,10 @@ pub async fn execute_pipeline(
                             }
                             RoleOutput::Planner(_) => unreachable!("planner is handled separately"),
                         }
+                    }
+
+                    if matches!(verdict, Verdict::RevisionNeeded) {
+                        display.revision_requested(round, max_rounds, &[]);
                     }
 
                     if has_reviewer {
@@ -1265,12 +1320,32 @@ pub async fn execute_pipeline(
 
     // Read the resulting diff. For the Docker backend the patch was applied to the
     // bind-mounted host project, so we read the host working tree directly. For
-    // worktree/cloud the change lives only in the sandbox copy, so we read it from
+    // worktree the change lives only in the sandbox copy, so we read it from
     // there (the run step applies it back to the host before committing).
     let final_diff = match config.docker.backend {
         SandboxBackend::Docker => crate::output::git::working_tree_diff(&task.project_path),
         _ => sandbox.get_diff().await?,
     };
+
+    // Diff-size guardrail (optional). Warns when a single run's diff grows past
+    // the configured ceiling — the "smaller incremental changes" control from the
+    // agentic-engineering checklist (arXiv 2603.27249 §4). Zero = unset.
+    let diff_guardwarn = (config.general.max_diff_lines > 0)
+        .then(|| {
+            let changed_lines = final_diff
+                .lines()
+                .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+                .count();
+            let limit = config.general.max_diff_lines as usize;
+            (changed_lines > limit).then(|| {
+                format!(
+                    "Diff adds {} changed lines, exceeding guardrail general.max_diff_lines ({}).\
+                 Prefer smaller incremental PRs; the Reviewer was nudged toward a tighter delta.",
+                    changed_lines, limit
+                )
+            })
+        })
+        .flatten();
 
     // Verification in the loop: actually execute the project's test suite inside
     // the sandbox and record the real result as part of the audit trail, *before*
@@ -1292,6 +1367,7 @@ pub async fn execute_pipeline(
         task_id: task.id,
         state,
         final_diff,
+        diff_guardwarn,
         verdict,
         revision_rounds: round,
         artifacts,
@@ -1483,6 +1559,7 @@ mod tests {
             acceptance_criteria: vec![],
             constraints: vec![],
             estimated_complexity: c,
+            uncertainties: None,
         }
     }
 

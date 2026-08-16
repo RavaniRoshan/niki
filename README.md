@@ -91,9 +91,9 @@ NIKI takes a different path. Work is split across **independent agents that can'
 
 ## How it works
 
-```mermaid
-flowchart LR
-    U([niki run &quot;task&quot;]) --> P
+ ```mermaid
+ flowchart LR
+     U([niki run "task"]) --> P
 
     subgraph Sandbox [ Podman/Docker sandbox · /workspace bind-mount ]
         direction LR
@@ -193,6 +193,8 @@ NIKI ships with **no bundled gateway** — by default it talks to the official A
 [general]
 max_revision_rounds = 3        # Reviewer → Coder feedback loops before forced completion
 output_dir = ".niki"           # where task artifacts are written
+spend_cap_usd = 5.0            # hard ceiling: NIKI aborts if est. cost exceeds this mid-run
+max_diff_lines = 200           # guardrail: reviewer is nudged toward tighter deltas if the diff exceeds this
 
 # Per-agent model assignment — mix providers freely
 [agents.planner]
@@ -280,23 +282,30 @@ enabled = true
 
 ### Sandbox backends
 
-NIKI defaults to Podman (rootless, no daemon) with a Docker fallback. The same `Sandbox` trait is also implemented by a git-worktree backend (no container runtime required) and a cloud backend (beta). Choose at runtime:
+NIKI defaults to Podman (rootless, no daemon) with a Docker fallback. The same `Sandbox` trait is also implemented by a git-worktree backend (no container runtime required). Choose at runtime:
 
 ```bash
 niki run "..." --backend worktree   # git worktree + local process, no container runtime
-niki run "..." --backend cloud      # NIKI infra (beta; needs NIKI_CLOUD_ENDPOINT)
 ```
 
 ## CLI Reference
 
 | Command | Description |
 |---|---|
-| `niki run <description>` | Run the full pipeline on a task. Key flags: `--project`, `--branch`, `--max-rounds`, `--backend`, `--cloud`, `--dry-run`, `--quiet`, `--verbose`, `--tui`, `--<agent>-model`. |
+| `niki run <description>` | Run the full pipeline on a task. Key flags: `--project`, `--branch`, `--max-rounds`, `--backend`, `--dry-run`, `--quiet`, `--verbose`, `--tui`, `--<agent>-model`. |
 | `niki status` | Show the current/most recent task — status, branch, verdict, revisions. Accepts `--project`. |
 | `niki report [id]` | Print a completed task's report. Accepts a full UUID **or a unique short prefix**; `--project`. |
 | `niki recommend` | Print per-agent model recommendations with cost/quality tradeoffs (depends on cost analytics). |
 | `niki dashboard [id]` | Generate or locate the static HTML dashboard (diff viewer + Reviewer/Security annotations) for a task. |
 | `niki config` | Manage configuration. |
+| `niki doctor` | Run diagnostics to verify installation and config. Accepts `--category` (install, config, providers, sandbox, security). |
+| `niki eval` | Run the NIKI-vs-baseline evaluation harness on a seeded-defect dataset. |
+| `niki smoke` | Smoke test: run a trivial task to verify your setup works end-to-end. |
+| `niki chat` | Interactive chat session (TUI). Start a persistent NIKI session with a project. |
+| `niki auth` | Manage API credentials (login, logout, status). |
+| `niki providers` | View and check LLM provider configurations. |
+| `niki memory` | View and manage agent memory (learned patterns from past runs). |
+| `niki goal` | Manage persistent goals (autonomous goal runner). |
 
 Run `niki <command> --help` for the full flag list.
 
@@ -306,7 +315,7 @@ Run `niki <command> --help` for the full flag list.
 src/
 ├── agents/        # Planner, Coder, Tester, Reviewer
 ├── orchestrator/  # pipeline sequencing + task state
-├── sandbox/       # Sandbox trait: Podman/Docker / git-worktree / cloud backends
+├── sandbox/       # Sandbox trait: Podman/Docker / git-worktree backends
 ├── llm/           # provider clients (anthropic, openai, google, ollama)
 ├── output/        # git branch/commit, patch, report generation
 ├── artifacts/     # typed artifacts + JSON-schema validation
@@ -349,8 +358,8 @@ We'd rather be precise than hyped:
 - [x] **External source ingestion** — project doc globs + external URLs as agent context via `[knowledge]`.
 - [x] **Rich terminal TUI** — `ratatui` panels, restyled as an agentic transcript (`niki run --tui`).
 - [x] **Dashboard** — static HTML diff viewer with inline Reviewer/Security annotations (`niki dashboard`).
-- [x] **Alternative sandboxing** — `git worktree` isolation + a `Sandbox` trait (Podman/Docker / Worktree / Cloud backends).
-- [ ] **Cloud execution (beta)** — the `cloud` backend is a drop-in seam gated behind `NIKI_CLOUD_ENDPOINT`; full infra ships later.
+- [x] **Alternative sandboxing** — `git worktree` isolation + a `Sandbox` trait (Podman/Docker / Worktree backends).
+- [ ] **Cloud execution (beta)** — a `Sandbox` trait seam so agents can run on NIKI infra later; not wired in this build.
 - [x] **Per-agent model recommendations** — `niki recommend` with cost/quality tradeoffs per role.
 - [x] **Agentic terminal UI** — ⏺ bullets, ⎿ connectors, sparkle spinner, ⏵⏵ mode line.
 

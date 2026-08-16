@@ -94,6 +94,9 @@ pub enum NikiError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Task was cancelled by the user")]
+    Cancelled,
+
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 

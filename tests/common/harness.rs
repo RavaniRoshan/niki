@@ -6,6 +6,7 @@ use niki::sandbox::SandboxBackend;
 use niki::sandbox::docker::ActiveContainers;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -140,9 +141,18 @@ impl TestHarness {
         };
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
-        execute_pipeline(&task, &self.config, None, &mut display, containers, false)
-            .await
-            .expect("pipeline should succeed")
+        let cancel = Arc::new(AtomicBool::new(false));
+        execute_pipeline(
+            &task,
+            &self.config,
+            None,
+            &mut display,
+            containers,
+            false,
+            cancel,
+        )
+        .await
+        .expect("pipeline should succeed")
     }
 
     pub async fn run_pipeline_dry(&self) -> niki::orchestrator::pipeline::PipelineResult {
@@ -153,9 +163,18 @@ impl TestHarness {
         };
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
-        execute_pipeline(&task, &self.config, None, &mut display, containers, true)
-            .await
-            .expect("pipeline should succeed")
+        let cancel = Arc::new(AtomicBool::new(false));
+        execute_pipeline(
+            &task,
+            &self.config,
+            None,
+            &mut display,
+            containers,
+            true,
+            cancel,
+        )
+        .await
+        .expect("pipeline should succeed")
     }
 
     pub async fn run_pipeline_expect_fail(&self) -> anyhow::Error {
@@ -166,9 +185,18 @@ impl TestHarness {
         };
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
-        execute_pipeline(&task, &self.config, None, &mut display, containers, false)
-            .await
-            .unwrap_err()
+        let cancel = Arc::new(AtomicBool::new(false));
+        execute_pipeline(
+            &task,
+            &self.config,
+            None,
+            &mut display,
+            containers,
+            false,
+            cancel,
+        )
+        .await
+        .unwrap_err()
     }
 
     pub fn write_niki_toml(&self) {

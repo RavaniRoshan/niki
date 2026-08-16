@@ -13,11 +13,15 @@
 //! - **Copy an entire message**: `y` (outside copy-mode) copies the full raw
 //!   source of the focused message (not the wrapped view).
 //!
-//! Clipboard transport is OSC 52 with tmux/screen wrapping detection; this works
-//! over SSH and in modern terminals.
+//! ## Progressive disclosure
+//!
+//! Each agent stage is a collapsible node (Claude Code / Kimi-style):
+//! - **Collapsed** (done stages, default): a one-line disclosure summary.
+//! - **Expanded** (running stages, or toggled with `Enter` / click): the full
+//!   markdown-rendered transcript, including syntax-highlighted code blocks.
 
 use ratatui::Frame;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -25,22 +29,12 @@ use ratatui::widgets::Paragraph;
 use std::io::Write;
 
 use crate::artifacts::types::AgentRole;
-use crate::display::pages::{AppState, Page};
+use crate::display::chat::markdown::render_markdown;
+use crate::display::chat::message::MessageRenderConfig;
+use crate::display::input::InputHandler;
+use crate::display::pages::{AppState, ChatLine, Page, StageStatus};
+use crate::display::state::InputAction;
 use crate::display::theme;
-
-/// One rendered chat row, with enough metadata to map screen coordinates back
-/// to the original source text for accurate copying.
-#[derive(Debug, Clone, Default)]
-pub struct ChatLine {
-    /// Visible text (may be a wrapped slice of the source).
-    pub text: String,
-    /// Index into the message source list this row belongs to (`usize::MAX` = chrome).
-    pub msg_index: usize,
-    /// Offset of `text` within that message's source string.
-    pub char_start: usize,
-    /// True if this row is part of the input box (not copyable as a message).
-    pub is_input: bool,
-}
 
 fn role_label(role: AgentRole) -> &'static str {
     match role {
@@ -78,11 +72,25 @@ fn role_icon(role: AgentRole) -> &'static str {
     }
 }
 
+fn status_glyph(status: &StageStatus) -> &'static str {
+    match status {
+        StageStatus::Running => "…",
+        StageStatus::Done => "✓",
+        StageStatus::Failed => "✗",
+        StageStatus::Queued => "•",
+    }
+}
+
 pub struct ChatPage;
 
 impl ChatPage {
     pub fn new() -> Self {
         Self
+    }
+
+    /// Plain-text (copyable) representation of a rendered line.
+    fn line_text(l: &Line<'static>) -> String {
+        l.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
     /// Build the list of copyable source strings (one per visible message),
@@ -93,9 +101,7 @@ impl ChatPage {
             v.push(format!("{}: {}", role, text));
         }
         for s in &state.stages {
-            let body = if s.status == crate::display::pages::StageStatus::Running
-                && !s.stream.is_empty()
-            {
+            let body = if s.status == StageStatus::Running && !s.stream.is_empty() {
                 &s.stream
             } else if !s.summary.is_empty() {
                 &s.summary.join("\n")
@@ -159,13 +165,17 @@ impl ChatPage {
         }
         let row = ev.row.saturating_sub(area.y) as usize;
         let col = ev.column.saturating_sub(area.x) as usize;
+        let total = state.chat_lines.len();
+        let visible = area.height as usize;
+        let offset = scroll_offset(total, visible);
+        let abs_row = offset + row;
         match ev.kind {
             MouseEventKind::Down(_) => {
-                state.chat_sel_anchor = Some((row, col));
+                state.chat_sel_anchor = Some((abs_row, col));
             }
             MouseEventKind::Drag(_) => {
                 if let Some(anchor) = state.chat_sel_anchor {
-                    let text = ChatPage::selected_text(state, anchor, (row, col));
+                    let text = ChatPage::selected_text(state, anchor, (abs_row, col));
                     if !text.is_empty() {
                         copy_to_clipboard(&text);
                         state.chat_copied = Some("copied selection".to_string());
@@ -174,12 +184,19 @@ impl ChatPage {
             }
             MouseEventKind::Up(_) => {
                 if let Some(anchor) = state.chat_sel_anchor.take() {
-                    let text = Self::selected_text(state, anchor, (row, col));
+                    let text = Self::selected_text(state, anchor, (abs_row, col));
                     if !text.is_empty() {
                         copy_to_clipboard(&text);
                         state.chat_copied = Some("copied selection".to_string());
-                    } else if let Some(line) = state.chat_lines.get(row) {
-                        if line.msg_index != usize::MAX {
+                    } else if let Some(line) = state.chat_lines.get(abs_row) {
+                        if let Some(stage_idx) = line.header_stage {
+                            // Click on a stage header toggles disclosure.
+                            if state.expanded_stages.contains(&stage_idx) {
+                                state.expanded_stages.remove(&stage_idx);
+                            } else {
+                                state.expanded_stages.insert(stage_idx);
+                            }
+                        } else if line.msg_index != usize::MAX {
                             Self::copy_message(state, line.msg_index);
                         }
                     }
@@ -196,6 +213,15 @@ impl Default for ChatPage {
     }
 }
 
+/// Scroll offset (bottom-anchored) for `total` lines in `visible` rows.
+fn scroll_offset(total: usize, visible: usize) -> usize {
+    if total > visible {
+        total.saturating_sub(visible)
+    } else {
+        0
+    }
+}
+
 impl Page for ChatPage {
     fn render(&self, frame: &mut Frame, area: Rect, state: &AppState) {
         let bg = theme::bg_color();
@@ -205,143 +231,26 @@ impl Page for ChatPage {
         );
 
         let width = area.width as usize;
-        let mut lines: Vec<ChatLine> = Vec::new();
+        // Remember the render width so handle_key's cached lines match wrapping.
+        state.chat_width.set(width);
 
-        push_line(
-            &mut lines,
-            "✦ Welcome to NIKI".to_string(),
-            usize::MAX,
-            0,
-            false,
-        );
-        push_line(
-            &mut lines,
-            format!("  {}", state.description),
-            usize::MAX,
-            0,
-            false,
-        );
-        push_line(
-            &mut lines,
-            format!("  Directory: {}", state.project_path.display()),
-            usize::MAX,
-            0,
-            false,
-        );
-        if !state.branch_name.is_empty() {
-            push_line(
-                &mut lines,
-                format!("  Branch: {}", state.branch_name),
-                usize::MAX,
-                0,
-                false,
-            );
-        }
-        push_line(&mut lines, String::new(), usize::MAX, 0, false);
+        let lines = build_chat_lines(state, width);
 
-        for (i, (role, text)) in state.chat_log.iter().enumerate() {
-            push_line(&mut lines, format!("● {}: {}", role, text), i, 0, false);
-        }
-
-        let base = state.chat_log.len();
-        for (i, s) in state.stages.iter().enumerate() {
-            let msg_index = base + i;
-            let _color = role_color(s.role);
-            let status_glyph = match s.status {
-                crate::display::pages::StageStatus::Running => "…",
-                crate::display::pages::StageStatus::Done => "✓",
-                crate::display::pages::StageStatus::Failed => "✗",
-                crate::display::pages::StageStatus::Queued => "•",
-            };
-            push_line(
-                &mut lines,
-                format!(
-                    " {} {} {}",
-                    role_icon(s.role),
-                    status_glyph,
-                    role_label(s.role)
-                ),
-                msg_index,
-                0,
-                false,
-            );
-
-            let body = if s.status == crate::display::pages::StageStatus::Running
-                && !s.stream.is_empty()
-            {
-                s.stream.clone()
-            } else if !s.summary.is_empty() {
-                s.summary.join("\n")
-            } else {
-                s.full_transcript.clone()
-            };
-            if body.is_empty() {
-                push_line(
-                    &mut lines,
-                    "  (no output yet)".to_string(),
-                    msg_index,
-                    0,
-                    false,
-                );
-            } else {
-                for line in body.lines() {
-                    push_line(&mut lines, format!("  {}", line), msg_index, 0, false);
-                }
-            }
-            push_line(&mut lines, String::new(), usize::MAX, 0, false);
-        }
-
-        for (note, _color) in &state.notes {
-            push_line(&mut lines, format!("  {}", note), usize::MAX, 0, false);
-        }
-
-        push_line(&mut lines, "─".repeat(width.min(200)), usize::MAX, 0, false);
-
-        if state.finished {
-            push_line(
-                &mut lines,
-                "● NIKI — pipeline finished. Review the branch.".to_string(),
-                usize::MAX,
-                0,
-                false,
-            );
-        }
-
-        let prompt = if state.chat_copy_mode { "COPY " } else { "> " };
-        let before = &state.chat_input[..state.chat_cursor.min(state.chat_input.len())];
-        let cursor_char = state
-            .chat_input
-            .chars()
-            .nth(state.chat_cursor)
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| " ".to_string());
-        let after = &state.chat_input[state.chat_cursor.min(state.chat_input.len())..];
-        let input_display = format!("{}{}{}{}", prompt, before, cursor_char, after);
-        push_line(&mut lines, input_display, usize::MAX, 0, true);
-
-        let hint = if state.chat_copy_mode {
-            "[copy-mode] arrows move · Space mark · y yank · c char · Esc cancel"
-        } else {
-            "type + Enter to send · Tab pages · v copy-mode · y copy message · drag to select"
-        };
-        push_line(&mut lines, hint.to_string(), usize::MAX, 0, false);
-
-        let total = lines.len();
         let visible = area.height as usize;
-        let offset = if total > visible {
-            total.saturating_sub(visible)
-        } else {
-            0
-        };
+        let offset = scroll_offset(lines.len(), visible);
 
         let mut rendered: Vec<Line> = Vec::with_capacity(visible);
         for line in lines.iter().skip(offset).take(visible) {
-            let style = if line.is_input {
+            let base_style = if line.is_input {
                 Style::default().fg(theme::primary())
             } else {
                 Style::default().fg(theme::fg_color())
             };
-            rendered.push(Line::from(Span::styled(line.text.clone(), style)));
+            if let Some(rich) = &line.rich {
+                rendered.push(rich.clone());
+            } else {
+                rendered.push(Line::from(Span::styled(line.text.clone(), base_style)));
+            }
         }
         while rendered.len() < visible {
             rendered.push(Line::from(""));
@@ -351,7 +260,7 @@ impl Page for ChatPage {
     }
 
     fn handle_key(&mut self, key: KeyEvent, state: &mut AppState) -> bool {
-        cache_lines(state);
+        build_chat_lines_into(state);
 
         if state.chat_copy_mode {
             match key.code {
@@ -409,71 +318,122 @@ impl Page for ChatPage {
             }
         }
 
-        match key.code {
-            KeyCode::Char('v') if key.modifiers == KeyModifiers::NONE => {
-                state.chat_copy_mode = true;
-                state.chat_cursor_pos = (0, 0);
+        // Enter on a stage header toggles expand/collapse (progressive disclosure).
+        if key.code == KeyCode::Enter {
+            let (row, _col) = state.chat_cursor_pos;
+            if let Some(line) = state.chat_lines.get(row) {
+                if let Some(stage_idx) = line.header_stage {
+                    if state.expanded_stages.contains(&stage_idx) {
+                        state.expanded_stages.remove(&stage_idx);
+                    } else {
+                        state.expanded_stages.insert(stage_idx);
+                    }
+                    return true;
+                }
+            }
+        }
+
+        // Delegate to InputHandler (unified input system).
+        let handler = InputHandler::new();
+        match handler.handle_insert(&mut state.input_state, key) {
+            InputAction::Submit(text) => {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    if trimmed == "/undo" {
+                        let output = std::process::Command::new("git")
+                            .args(["revert", "--no-commit", "HEAD~1"])
+                            .output();
+                        let msg = match output {
+                            Ok(out) if out.status.success() => {
+                                "Undid last change (git revert --no-commit HEAD~1)".to_string()
+                            }
+                            Ok(out) => {
+                                format!("Undo failed: {}", String::from_utf8_lossy(&out.stderr))
+                            }
+                            Err(e) => format!("Undo error: {}", e),
+                        };
+                        state.chat_log.push(("system".to_string(), msg));
+                    } else if trimmed == "/redo" {
+                        let output = std::process::Command::new("git")
+                            .args(["cherry-pick", "--no-commit", "HEAD@{1}"])
+                            .output();
+                        let msg = match output {
+                            Ok(out) if out.status.success() => {
+                                "Redid last undone change (git cherry-pick HEAD@{1})".to_string()
+                            }
+                            Ok(out) => {
+                                format!("Redo failed: {}", String::from_utf8_lossy(&out.stderr))
+                            }
+                            Err(e) => format!("Redo error: {}", e),
+                        };
+                        state.chat_log.push(("system".to_string(), msg));
+                    } else {
+                        state
+                            .chat_log
+                            .push(("user".to_string(), trimmed.to_string()));
+                    }
+                }
                 true
             }
-            KeyCode::Char('y') if key.modifiers == KeyModifiers::NONE => {
-                let idx = if state.chat_cursor_pos.0 < state.chat_lines.len() {
-                    state.chat_lines[state.chat_cursor_pos.0].msg_index
-                } else {
-                    usize::MAX
+            InputAction::ToggleCommandPalette => {
+                state.show_command_palette = !state.show_command_palette;
+                true
+            }
+            InputAction::ToggleTheme => {
+                let new_pref = match state.config.ui.theme {
+                    crate::config::types::ThemePreference::Dark => {
+                        crate::config::types::ThemePreference::Light
+                    }
+                    crate::config::types::ThemePreference::Light => {
+                        crate::config::types::ThemePreference::Auto
+                    }
+                    crate::config::types::ThemePreference::Auto => {
+                        crate::config::types::ThemePreference::Dark
+                    }
                 };
-                if idx != usize::MAX {
-                    ChatPage::copy_message(state, idx);
+                let mode = match new_pref {
+                    crate::config::types::ThemePreference::Dark => {
+                        crate::display::theme::ThemeMode::Dark
+                    }
+                    crate::config::types::ThemePreference::Light => {
+                        crate::display::theme::ThemeMode::Light
+                    }
+                    crate::config::types::ThemePreference::Auto => {
+                        crate::display::theme::ThemeMode::Auto
+                    }
+                };
+                crate::display::theme::set_mode(mode);
+                state.config.ui.theme = new_pref;
+                true
+            }
+            InputAction::Quit => {
+                state.modal = Some(crate::display::pages::Modal::Confirm {
+                    title: "Quit".into(),
+                    message: "Exit NIKI?".into(),
+                });
+                true
+            }
+            InputAction::Navigate(page) => {
+                state.current_page = page;
+                true
+            }
+            InputAction::ScrollUp => {
+                state.scroll_offset = state.scroll_offset.saturating_sub(1);
+                true
+            }
+            InputAction::ScrollDown => {
+                state.scroll_offset += 1;
+                true
+            }
+            InputAction::ToggleExpand(stage_idx) => {
+                if state.expanded_stages.contains(&stage_idx) {
+                    state.expanded_stages.remove(&stage_idx);
+                } else {
+                    state.expanded_stages.insert(stage_idx);
                 }
                 true
             }
-            KeyCode::Enter => {
-                if !state.chat_input.trim().is_empty() {
-                    state
-                        .chat_log
-                        .push(("user".to_string(), state.chat_input.trim().to_string()));
-                    state.chat_input.clear();
-                    state.chat_cursor = 0;
-                }
-                true
-            }
-            KeyCode::Char(c) => {
-                let idx = state.chat_cursor.min(state.chat_input.len());
-                state.chat_input.insert(idx, c);
-                state.chat_cursor += 1;
-                true
-            }
-            KeyCode::Backspace => {
-                if state.chat_cursor > 0 {
-                    state.chat_cursor -= 1;
-                    state.chat_input.remove(state.chat_cursor);
-                }
-                true
-            }
-            KeyCode::Delete => {
-                if state.chat_cursor < state.chat_input.len() {
-                    state.chat_input.remove(state.chat_cursor);
-                }
-                true
-            }
-            KeyCode::Left => {
-                state.chat_cursor = state.chat_cursor.saturating_sub(1);
-                true
-            }
-            KeyCode::Right => {
-                if state.chat_cursor < state.chat_input.len() {
-                    state.chat_cursor += 1;
-                }
-                true
-            }
-            KeyCode::Home => {
-                state.chat_cursor = 0;
-                true
-            }
-            KeyCode::End => {
-                state.chat_cursor = state.chat_input.len();
-                true
-            }
-            _ => false,
+            InputAction::None => false,
         }
     }
 
@@ -482,31 +442,61 @@ impl Page for ChatPage {
     }
 }
 
-fn push_line(
-    lines: &mut Vec<ChatLine>,
-    text: String,
-    msg_index: usize,
-    _char_start: usize,
-    is_input: bool,
-) {
-    lines.push(ChatLine {
-        text,
-        msg_index,
-        char_start: 0,
-        is_input,
-    });
+/// Render markdown `body` as indented (2-space) rich+plain rows.
+fn markdown_rows(body: &str, width: usize) -> Vec<ChatLine> {
+    if body.trim().is_empty() {
+        return Vec::new();
+    }
+    let inner = width.saturating_sub(2).max(20);
+    let cfg = MessageRenderConfig::from_theme(inner);
+    let rendered = render_markdown(body, inner, &cfg);
+    let mut out = Vec::with_capacity(rendered.len());
+    for l in rendered {
+        let plain = ChatPage::line_text(&l);
+        let mut spans = vec![Span::styled("  ".to_string(), Style::default())];
+        spans.extend(l.spans);
+        out.push(ChatLine {
+            text: format!("  {}", plain),
+            rich: Some(Line::from(spans)),
+            msg_index: usize::MAX,
+            char_start: 0,
+            is_input: false,
+            header_stage: None,
+        });
+    }
+    out
 }
 
-/// Rebuild `state.chat_lines` from current state (called at the start of handle_key
-/// so selection math uses coordinates that match the rendered view).
-fn cache_lines(state: &mut AppState) {
+/// One-line disclosure summary for a collapsed stage.
+fn disclosure_summary(s: &crate::display::pages::StageInfo) -> String {
+    if !s.summary.is_empty() {
+        if let Some(first) = s.summary.iter().find(|x| !x.trim().is_empty()) {
+            return first.clone();
+        }
+    }
+    if !s.full_transcript.is_empty() {
+        if let Some(first) = s.full_transcript.lines().find(|x| !x.trim().is_empty()) {
+            return first.to_string();
+        }
+    }
+    if s.status == StageStatus::Running {
+        return "(streaming…)".to_string();
+    }
+    "(no output)".to_string()
+}
+
+/// Build the full list of chat rows from state.
+pub fn build_chat_lines(state: &AppState, width: usize) -> Vec<ChatLine> {
     let mut lines: Vec<ChatLine> = Vec::new();
+
     push_line(
         &mut lines,
         "✦ Welcome to NIKI".to_string(),
         usize::MAX,
         0,
         false,
+        None,
+        None,
     );
     push_line(
         &mut lines,
@@ -514,6 +504,8 @@ fn cache_lines(state: &mut AppState) {
         usize::MAX,
         0,
         false,
+        None,
+        None,
     );
     push_line(
         &mut lines,
@@ -521,6 +513,8 @@ fn cache_lines(state: &mut AppState) {
         usize::MAX,
         0,
         false,
+        None,
+        None,
     );
     if !state.branch_name.is_empty() {
         push_line(
@@ -529,61 +523,128 @@ fn cache_lines(state: &mut AppState) {
             usize::MAX,
             0,
             false,
+            None,
+            None,
         );
     }
-    push_line(&mut lines, String::new(), usize::MAX, 0, false);
+    push_line(&mut lines, String::new(), usize::MAX, 0, false, None, None);
 
     for (i, (role, text)) in state.chat_log.iter().enumerate() {
-        push_line(&mut lines, format!("● {}: {}", role, text), i, 0, false);
+        push_line(
+            &mut lines,
+            format!("● {}: {}", role, text),
+            i,
+            0,
+            false,
+            None,
+            None,
+        );
     }
 
     let base = state.chat_log.len();
     for (i, s) in state.stages.iter().enumerate() {
         let msg_index = base + i;
+        let is_running = s.status == StageStatus::Running;
+        let is_expanded = is_running || state.expanded_stages.contains(&i);
+
+        let disclosure = if is_expanded { "▾" } else { "▸" };
+        let mut header_text = format!(
+            " {} {} {} {}",
+            disclosure,
+            status_glyph(&s.status),
+            role_icon(s.role),
+            role_label(s.role)
+        );
+        if s.status == StageStatus::Done {
+            header_text.push_str(&format!(
+                "  {} tok · ${:.4}",
+                s.input_tokens + s.output_tokens,
+                s.cost_usd
+            ));
+        }
+        let header_rich = Line::from(vec![
+            Span::styled(
+                format!(" {} ", disclosure),
+                Style::default().fg(theme::text_dim()),
+            ),
+            Span::styled(
+                format!("{} ", status_glyph(&s.status)),
+                Style::default().fg(role_color(s.role)),
+            ),
+            Span::styled(
+                format!("{} ", role_icon(s.role)),
+                Style::default()
+                    .fg(role_color(s.role))
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            ),
+            Span::styled(
+                role_label(s.role),
+                Style::default()
+                    .fg(role_color(s.role))
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            ),
+        ]);
         push_line(
             &mut lines,
-            format!(
-                " {} {} {}",
-                role_icon(s.role),
-                match s.status {
-                    crate::display::pages::StageStatus::Running => "…",
-                    crate::display::pages::StageStatus::Done => "✓",
-                    crate::display::pages::StageStatus::Failed => "✗",
-                    crate::display::pages::StageStatus::Queued => "•",
-                },
-                role_label(s.role)
-            ),
+            header_text,
             msg_index,
             0,
             false,
+            Some(header_rich),
+            Some(i),
         );
-        let body =
-            if s.status == crate::display::pages::StageStatus::Running && !s.stream.is_empty() {
-                s.stream.clone()
-            } else if !s.summary.is_empty() {
-                s.summary.join("\n")
-            } else {
-                s.full_transcript.clone()
-            };
-        if body.is_empty() {
+
+        if is_expanded {
+            let mut parts: Vec<String> = Vec::new();
+            if !s.summary.is_empty() {
+                parts.push(s.summary.join("\n"));
+            }
+            if is_running && !s.stream.is_empty() {
+                parts.push(s.stream.clone());
+            } else if !s.full_transcript.is_empty() {
+                parts.push(s.full_transcript.clone());
+            }
+            let body = parts.join("\n\n");
+            for mut row in markdown_rows(&body, width) {
+                row.msg_index = msg_index;
+                lines.push(row);
+            }
+        } else {
             push_line(
                 &mut lines,
-                "  (no output yet)".to_string(),
+                format!("  └ {}", disclosure_summary(s)),
                 msg_index,
                 0,
                 false,
+                None,
+                None,
             );
-        } else {
-            for line in body.lines() {
-                push_line(&mut lines, format!("  {}", line), msg_index, 0, false);
-            }
         }
-        push_line(&mut lines, String::new(), usize::MAX, 0, false);
+        push_line(&mut lines, String::new(), usize::MAX, 0, false, None, None);
     }
-    for (note, _c) in &state.notes {
-        push_line(&mut lines, format!("  {}", note), usize::MAX, 0, false);
+
+    for (note, _color) in &state.notes {
+        push_line(
+            &mut lines,
+            format!("  {}", note),
+            usize::MAX,
+            0,
+            false,
+            None,
+            None,
+        );
     }
-    push_line(&mut lines, "─".repeat(40), usize::MAX, 0, false);
+
+    push_line(
+        &mut lines,
+        "─".repeat(width.min(200)),
+        usize::MAX,
+        0,
+        false,
+        None,
+        None,
+    );
+
     if state.finished {
         push_line(
             &mut lines,
@@ -591,11 +652,76 @@ fn cache_lines(state: &mut AppState) {
             usize::MAX,
             0,
             false,
+            None,
+            None,
         );
     }
-    push_line(&mut lines, "> ".to_string(), usize::MAX, 0, true);
-    push_line(&mut lines, String::new(), usize::MAX, 0, false);
-    state.chat_lines = lines;
+
+    let prompt = match state.input_state.mode {
+        crate::display::state::InputMode::Shell => "! ",
+        _ => {
+            if state.chat_copy_mode {
+                "COPY "
+            } else {
+                "> "
+            }
+        }
+    };
+    let buf = &state.input_state.buffer;
+    let cursor_pos = state.input_state.cursor_pos.min(buf.len());
+    let before = &buf[..cursor_pos];
+    let cursor_char = buf[cursor_pos..]
+        .chars()
+        .next()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| " ".to_string());
+    let after_start = cursor_pos + cursor_char.chars().count();
+    let after = &buf[after_start.min(buf.len())..];
+    let input_display = format!("{}{}{}{}", prompt, before, cursor_char, after);
+    push_line(&mut lines, input_display, usize::MAX, 0, true, None, None);
+
+    let hint = if state.chat_copy_mode {
+        "[copy-mode] arrows move · Space mark · y yank · c char · Esc cancel"
+    } else {
+        "type + Enter to send · Tab pages · Enter expand · v copy-mode · y copy message · drag to select"
+    };
+    push_line(
+        &mut lines,
+        hint.to_string(),
+        usize::MAX,
+        0,
+        false,
+        None,
+        None,
+    );
+
+    lines
+}
+
+/// Rebuild `state.chat_lines` from current state (called at the start of
+/// handle_key so selection/toggle math uses coordinates that match the view).
+fn build_chat_lines_into(state: &mut AppState) {
+    let width = state.chat_width.get();
+    state.chat_lines = build_chat_lines(state, width);
+}
+
+fn push_line(
+    lines: &mut Vec<ChatLine>,
+    text: String,
+    msg_index: usize,
+    _char_start: usize,
+    is_input: bool,
+    rich: Option<Line<'static>>,
+    header_stage: Option<usize>,
+) {
+    lines.push(ChatLine {
+        text,
+        rich,
+        msg_index,
+        char_start: 0,
+        is_input,
+        header_stage,
+    });
 }
 
 /// Copy `text` to the system clipboard via OSC 52 (with tmux/screen wrapping).
@@ -681,34 +807,117 @@ mod tests {
     }
 
     #[test]
-    fn cache_lines_builds_header_and_messages() {
+    fn build_lines_header_and_messages() {
         let mut state = base_state();
         state.chat_log = vec![
             ("user".to_string(), "hello".to_string()),
             ("assistant".to_string(), "world".to_string()),
         ];
-        cache_lines(&mut state);
+        state.chat_lines = build_chat_lines(&state, 80);
         let lines: Vec<&str> = state.chat_lines.iter().map(|l| l.text.as_str()).collect();
         assert!(lines.iter().any(|l| l.contains("Welcome to NIKI")));
         assert!(lines.iter().any(|l| l.contains("test task")));
-        // first chat_log line: "● user: hello"
         assert!(lines.iter().any(|l| l.contains("● user: hello")));
         assert!(lines.iter().any(|l| l.contains("● assistant: world")));
-        // last visible line before the input prompt is the separator "---"
-        assert!(lines.iter().any(|l| *l == "─".repeat(40).as_str()));
+        assert!(lines.iter().any(|l| *l == "─".repeat(80).as_str()));
+    }
+
+    #[test]
+    fn collapsed_stage_shows_disclosure_summary() {
+        let mut state = base_state();
+        state.stages = vec![crate::display::pages::StageInfo {
+            role: AgentRole::Coder,
+            status: StageStatus::Done,
+            stream: String::new(),
+            full_transcript: "long transcript\nsecond line".to_string(),
+            input_tokens: 10,
+            output_tokens: 20,
+            cost_usd: 0.001,
+            latency_ms: 100,
+            summary: vec!["did the thing".to_string()],
+            start: None,
+        }];
+        state.chat_lines = build_chat_lines(&state, 80);
+        assert!(
+            state
+                .chat_lines
+                .iter()
+                .any(|l| l.text.contains("did the thing"))
+        );
+        assert!(
+            !state
+                .chat_lines
+                .iter()
+                .any(|l| l.text.contains("long transcript"))
+        );
+        let header = state
+            .chat_lines
+            .iter()
+            .find(|l| l.text.contains("Coder"))
+            .unwrap();
+        assert_eq!(header.header_stage, Some(0));
+    }
+
+    #[test]
+    fn expanded_stage_shows_markdown_body() {
+        let mut state = base_state();
+        state.expanded_stages.insert(0);
+        state.stages = vec![crate::display::pages::StageInfo {
+            role: AgentRole::Coder,
+            status: StageStatus::Done,
+            stream: String::new(),
+            full_transcript: "```rust\nfn main() {}\n```".to_string(),
+            input_tokens: 10,
+            output_tokens: 20,
+            cost_usd: 0.001,
+            latency_ms: 100,
+            summary: vec!["did the thing".to_string()],
+            start: None,
+        }];
+        state.chat_lines = build_chat_lines(&state, 80);
+        assert!(
+            state
+                .chat_lines
+                .iter()
+                .any(|l| l.text.contains("fn main()"))
+        );
+        assert!(state.chat_lines.iter().any(|l| l.rich.is_some()));
+    }
+
+    #[test]
+    fn running_stage_is_always_expanded() {
+        let mut state = base_state();
+        state.stages = vec![crate::display::pages::StageInfo {
+            role: AgentRole::Planner,
+            status: StageStatus::Running,
+            stream: "planning now".to_string(),
+            full_transcript: String::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: 0.0,
+            latency_ms: 0,
+            summary: vec![],
+            start: None,
+        }];
+        state.chat_lines = build_chat_lines(&state, 80);
+        assert!(
+            state
+                .chat_lines
+                .iter()
+                .any(|l| l.text.contains("planning now"))
+        );
     }
 
     #[test]
     fn selected_text_within_single_message() {
         let mut state = base_state();
         state.chat_log = vec![("assistant".to_string(), "Hello, world".to_string())];
-        cache_lines(&mut state);
+        state.chat_lines = build_chat_lines(&state, 80);
         let row = state
             .chat_lines
             .iter()
             .position(|l| l.text.contains("Hello, world"))
             .unwrap();
-        // line text is "● assistant: Hello, world"; "Hello" starts at char index 13
         assert_eq!(
             ChatPage::selected_text(&state, (row, 13), (row, 18)),
             "Hello"
@@ -722,7 +931,7 @@ mod tests {
             ("assistant".to_string(), "Hello".to_string()),
             ("user".to_string(), "World".to_string()),
         ];
-        cache_lines(&mut state);
+        state.chat_lines = build_chat_lines(&state, 80);
         let hello_row = state
             .chat_lines
             .iter()
@@ -733,7 +942,6 @@ mod tests {
             .iter()
             .position(|l| l.text.contains("World"))
             .unwrap();
-        // "● assistant: Hello" -> Hello at chars 13..18 ; next line "● user: World" full
         let sel = ChatPage::selected_text(&state, (hello_row, 13), (world_row, 14));
         assert_eq!(sel, "Hello\n● user: World");
     }
@@ -742,9 +950,8 @@ mod tests {
     fn selected_text_skips_input_lines() {
         let mut state = base_state();
         state.chat_log = vec![("assistant".to_string(), "data".to_string())];
-        cache_lines(&mut state);
+        state.chat_lines = build_chat_lines(&state, 80);
         let input_idx = state.chat_lines.iter().position(|l| l.is_input).unwrap();
-        // selecting a range that includes an input line still omits it
         let sel = ChatPage::selected_text(&state, (0, 0), (input_idx, 10));
         assert!(!sel.contains("> "));
     }
