@@ -190,7 +190,10 @@ pub fn handle(args: &MemoryArgs) -> Result<()> {
                 println!("Memory recall for '{}':\n", query);
                 for entry in results.iter().take(*limit) {
                     println!("  [{}] {}", &entry.timestamp[..10], entry.task);
-                    println!("    {}", entry.content.chars().take(200).collect::<String>());
+                    println!(
+                        "    {}",
+                        entry.content.chars().take(200).collect::<String>()
+                    );
                     println!();
                 }
             }

@@ -10,7 +10,9 @@ use crate::config::NikiConfig;
 /// stable, human-readable set rather than user-supplied full URLs (which may
 /// embed path secrets).
 fn url_host(url: &str) -> Option<String> {
-    let stripped = url.trim_start_matches("https://").trim_start_matches("http://");
+    let stripped = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
     stripped.split('/').next().map(str::to_string)
 }
 
@@ -209,7 +211,9 @@ fn check_security_for(cfg: &NikiConfig) -> Vec<Check> {
         result: if disabled || allowlist.is_empty() {
             CheckResult::Pass("blocked by default (network_disabled=true)".to_string())
         } else if allowlist == &["*".to_string()] {
-            CheckResult::Warn("egress open to all hosts (network_disabled=false, allowlist=['*'])".to_string())
+            CheckResult::Warn(
+                "egress open to all hosts (network_disabled=false, allowlist=['*'])".to_string(),
+            )
         } else {
             CheckResult::Warn(format!("egress allowlist: {}", allowlist.join(", ")))
         },
@@ -235,7 +239,11 @@ fn check_security_for(cfg: &NikiConfig) -> Vec<Check> {
                 "no providers/URLs configured (no outbound calls until you add keys)".to_string(),
             )
         } else {
-            CheckResult::Pass(format!("{} host(s) max: {}", outbound.len(), outbound.join(", ")))
+            CheckResult::Pass(format!(
+                "{} host(s) max: {}",
+                outbound.len(),
+                outbound.join(", ")
+            ))
         },
     });
 
@@ -243,7 +251,8 @@ fn check_security_for(cfg: &NikiConfig) -> Vec<Check> {
     checks.push(Check {
         name: "secret redaction".to_string(),
         result: CheckResult::Pass(
-            "always-on: provider keys redacted from logs, reports, artifacts (provider.rs)".to_string(),
+            "always-on: provider keys redacted from logs, reports, artifacts (provider.rs)"
+                .to_string(),
         ),
     });
 
@@ -321,9 +330,18 @@ mod tests {
 
     #[test]
     fn url_host_extracts_authority() {
-        assert_eq!(url_host("https://api.openai.com/v1"), Some("api.openai.com".to_string()));
-        assert_eq!(url_host("http://localhost:11434"), Some("localhost:11434".to_string()));
-        assert_eq!(url_host("github.com/readme"), Some("github.com".to_string()));
+        assert_eq!(
+            url_host("https://api.openai.com/v1"),
+            Some("api.openai.com".to_string())
+        );
+        assert_eq!(
+            url_host("http://localhost:11434"),
+            Some("localhost:11434".to_string())
+        );
+        assert_eq!(
+            url_host("github.com/readme"),
+            Some("github.com".to_string())
+        );
         assert_eq!(url_host("not a url"), Some("not a url".to_string()));
         assert_eq!(url_host(""), Some("".to_string()));
     }
@@ -379,4 +397,3 @@ mod tests {
         assert!(matches!(img.result, CheckResult::Warn(_)));
     }
 }
-

@@ -59,7 +59,7 @@ impl WorktreeSandbox {
         .map_err(|e| anyhow!("worktree spawn failed: {e}"))?;
 
         match status {
-            Ok(s) if s.success() =>             Ok(Self {
+            Ok(s) if s.success() => Ok(Self {
                 worktree_path: wt,
                 agent_role,
                 task_id: task_id.to_string(),
@@ -224,10 +224,7 @@ impl Sandbox for WorktreeSandbox {
             let full = cmd.join(" ");
             match self.permission_checker.check_command(&full) {
                 crate::permissions::Permission::Deny => {
-                    return Err(anyhow!(
-                        "Command denied by permission policy: '{}'",
-                        full
-                    ));
+                    return Err(anyhow!("Command denied by permission policy: '{}'", full));
                 }
                 crate::permissions::Permission::Ask => {
                     let (response_tx, response_rx) = std::sync::mpsc::channel();
@@ -242,10 +239,7 @@ impl Sandbox for WorktreeSandbox {
                         })
                         .unwrap_or(PermissionAction::Deny);
                         if matches!(action, PermissionAction::Deny) {
-                            return Err(anyhow!(
-                                "Command denied by user: '{}'",
-                                full
-                            ));
+                            return Err(anyhow!("Command denied by user: '{}'", full));
                         }
                     }
                 }

@@ -54,7 +54,11 @@ pub fn save_chat_session(project_path: &Path, session: &ChatSession) -> bool {
 /// Populate `state` with a resumed session's chat log / notes / model.
 pub fn apply_session(state: &mut AppState, session: ChatSession) {
     state.chat_log = session.chat_log;
-    state.notes = session.notes.into_iter().map(|note| (note, ratatui::style::Color::Yellow)).collect();
+    state.notes = session
+        .notes
+        .into_iter()
+        .map(|note| (note, ratatui::style::Color::Yellow))
+        .collect();
     if !session.model.is_empty() {
         state.model = session.model;
     }
@@ -115,7 +119,9 @@ mod tests {
     fn snapshot_captures_state() {
         let config = NikiConfig::default();
         let mut state = AppState::new("task".to_string(), config, PathBuf::from("."));
-        state.chat_log.push(("user".to_string(), "hello".to_string()));
+        state
+            .chat_log
+            .push(("user".to_string(), "hello".to_string()));
         state.model = "m".to_string();
         state.revision_round = 3;
         let snap = snapshot(&state);

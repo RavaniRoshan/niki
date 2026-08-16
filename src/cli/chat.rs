@@ -5,7 +5,7 @@ use std::sync::mpsc;
 
 use crate::config::NikiConfig;
 use crate::display::tui::DisplayEvent;
-use crate::llm::provider::{create_provider, LlmProvider};
+use crate::llm::provider::{LlmProvider, create_provider};
 
 #[derive(Args)]
 pub struct ChatArgs {
@@ -19,9 +19,7 @@ pub struct ChatArgs {
 }
 
 /// Build a provider from the configured providers map (first entry wins).
-fn build_provider(
-    config: &NikiConfig,
-) -> Option<(Box<dyn LlmProvider>, String)> {
+fn build_provider(config: &NikiConfig) -> Option<(Box<dyn LlmProvider>, String)> {
     let (name, pc) = config.providers.iter().next()?;
     let provider = create_provider(name, pc).ok()?;
     let model = if pc.default_model.is_empty() {
@@ -34,11 +32,7 @@ fn build_provider(
 
 /// Process a submitted user message: ask the LLM and stream the reply back into
 /// the chat session as an assistant turn (Phase 6 — user messages mid-session).
-fn process_message(
-    tx: &mpsc::Sender<DisplayEvent>,
-    config: &NikiConfig,
-    user_text: &str,
-) {
+fn process_message(tx: &mpsc::Sender<DisplayEvent>, config: &NikiConfig, user_text: &str) {
     let reply = match build_provider(config) {
         Some((provider, model)) => {
             let rt = match tokio::runtime::Runtime::new() {
@@ -53,7 +47,9 @@ fn process_message(
             rt.block_on(async {
                 let req = crate::llm::provider::CompletionRequest {
                     model,
-                    system_prompt: "You are NIKI, a concise coding assistant embedded in a terminal chat.".to_string(),
+                    system_prompt:
+                        "You are NIKI, a concise coding assistant embedded in a terminal chat."
+                            .to_string(),
                     user_message: user_text.to_string(),
                     max_tokens: 1024,
                     temperature: 0.7,
@@ -65,7 +61,10 @@ fn process_message(
                 }
             })
         }
-        None => "(offline) no LLM provider configured — message received but no response generated.".to_string(),
+        None => {
+            "(offline) no LLM provider configured — message received but no response generated."
+                .to_string()
+        }
     };
     send_assistant(tx, reply);
 }

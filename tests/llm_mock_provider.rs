@@ -225,8 +225,8 @@ async fn nvidia_nim_live_chat() {
     cfg.api_key = Some(api_key);
     cfg.base_url = Some("https://integrate.api.nvidia.com/v1".to_string());
 
-    let provider = niki::llm::provider::create_provider("nvidia", &cfg)
-        .expect("create nvidia provider");
+    let provider =
+        niki::llm::provider::create_provider("nvidia", &cfg).expect("create nvidia provider");
     let req = niki::llm::provider::CompletionRequest {
         model: "meta/llama-3.1-8b-instruct".to_string(),
         system_prompt: "You are NIKI, a concise coding assistant.".to_string(),

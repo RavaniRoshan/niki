@@ -536,10 +536,7 @@ impl Sandbox for DockerSandbox {
                         })
                         .unwrap_or(PermissionAction::Deny);
                         if matches!(action, PermissionAction::Deny) {
-                            return Err(anyhow::anyhow!(
-                                "Command denied by user: '{}'",
-                                full
-                            ));
+                            return Err(anyhow::anyhow!("Command denied by user: '{}'", full));
                         }
                     }
                 }

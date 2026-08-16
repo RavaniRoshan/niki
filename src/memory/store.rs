@@ -172,7 +172,7 @@ fn memory_path(project_dir: &Path, role: AgentRole) -> PathBuf {
     project_dir
         .join(".niki")
         .join("memory")
-         .join(format!("{}.json", role_name))
+        .join(format!("{}.json", role_name))
 }
 
 // ── Phase 15: Hierarchical memory (user + team) ──────────────────────────────
@@ -255,7 +255,11 @@ pub fn append_team_memory(project_dir: &Path, task: &str, content: String) -> Re
 }
 
 /// Render hierarchical memory for prompt injection (user > team > project role).
-pub fn render_hierarchical_memory(project_dir: &Path, role: AgentRole, max_entries: usize) -> String {
+pub fn render_hierarchical_memory(
+    project_dir: &Path,
+    role: AgentRole,
+    max_entries: usize,
+) -> String {
     let mut parts = Vec::new();
 
     // User memory (highest precedence)

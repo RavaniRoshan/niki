@@ -344,8 +344,12 @@ impl Page for ChatPage {
                             .args(["revert", "--no-commit", "HEAD~1"])
                             .output();
                         let msg = match output {
-                            Ok(out) if out.status.success() => "Undid last change (git revert --no-commit HEAD~1)".to_string(),
-                            Ok(out) => format!("Undo failed: {}", String::from_utf8_lossy(&out.stderr)),
+                            Ok(out) if out.status.success() => {
+                                "Undid last change (git revert --no-commit HEAD~1)".to_string()
+                            }
+                            Ok(out) => {
+                                format!("Undo failed: {}", String::from_utf8_lossy(&out.stderr))
+                            }
                             Err(e) => format!("Undo error: {}", e),
                         };
                         state.chat_log.push(("system".to_string(), msg));
@@ -354,13 +358,19 @@ impl Page for ChatPage {
                             .args(["cherry-pick", "--no-commit", "HEAD@{1}"])
                             .output();
                         let msg = match output {
-                            Ok(out) if out.status.success() => "Redid last undone change (git cherry-pick HEAD@{1})".to_string(),
-                            Ok(out) => format!("Redo failed: {}", String::from_utf8_lossy(&out.stderr)),
+                            Ok(out) if out.status.success() => {
+                                "Redid last undone change (git cherry-pick HEAD@{1})".to_string()
+                            }
+                            Ok(out) => {
+                                format!("Redo failed: {}", String::from_utf8_lossy(&out.stderr))
+                            }
                             Err(e) => format!("Redo error: {}", e),
                         };
                         state.chat_log.push(("system".to_string(), msg));
                     } else {
-                        state.chat_log.push(("user".to_string(), trimmed.to_string()));
+                        state
+                            .chat_log
+                            .push(("user".to_string(), trimmed.to_string()));
                     }
                 }
                 true
@@ -371,14 +381,26 @@ impl Page for ChatPage {
             }
             InputAction::ToggleTheme => {
                 let new_pref = match state.config.ui.theme {
-                    crate::config::types::ThemePreference::Dark => crate::config::types::ThemePreference::Light,
-                    crate::config::types::ThemePreference::Light => crate::config::types::ThemePreference::Auto,
-                    crate::config::types::ThemePreference::Auto => crate::config::types::ThemePreference::Dark,
+                    crate::config::types::ThemePreference::Dark => {
+                        crate::config::types::ThemePreference::Light
+                    }
+                    crate::config::types::ThemePreference::Light => {
+                        crate::config::types::ThemePreference::Auto
+                    }
+                    crate::config::types::ThemePreference::Auto => {
+                        crate::config::types::ThemePreference::Dark
+                    }
                 };
                 let mode = match new_pref {
-                    crate::config::types::ThemePreference::Dark => crate::display::theme::ThemeMode::Dark,
-                    crate::config::types::ThemePreference::Light => crate::display::theme::ThemeMode::Light,
-                    crate::config::types::ThemePreference::Auto => crate::display::theme::ThemeMode::Auto,
+                    crate::config::types::ThemePreference::Dark => {
+                        crate::display::theme::ThemeMode::Dark
+                    }
+                    crate::config::types::ThemePreference::Light => {
+                        crate::display::theme::ThemeMode::Light
+                    }
+                    crate::config::types::ThemePreference::Auto => {
+                        crate::display::theme::ThemeMode::Auto
+                    }
                 };
                 crate::display::theme::set_mode(mode);
                 state.config.ui.theme = new_pref;
@@ -648,19 +670,15 @@ pub fn build_chat_lines(state: &AppState, width: usize) -> Vec<ChatLine> {
     let buf = &state.input_state.buffer;
     let cursor_pos = state.input_state.cursor_pos.min(buf.len());
     let before = &buf[..cursor_pos];
-    let cursor_char = buf[cursor_pos..].chars().next().map(|c| c.to_string()).unwrap_or_else(|| " ".to_string());
+    let cursor_char = buf[cursor_pos..]
+        .chars()
+        .next()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| " ".to_string());
     let after_start = cursor_pos + cursor_char.chars().count();
     let after = &buf[after_start.min(buf.len())..];
     let input_display = format!("{}{}{}{}", prompt, before, cursor_char, after);
-    push_line(
-        &mut lines,
-        input_display,
-        usize::MAX,
-        0,
-        true,
-        None,
-        None,
-    );
+    push_line(&mut lines, input_display, usize::MAX, 0, true, None, None);
 
     let hint = if state.chat_copy_mode {
         "[copy-mode] arrows move · Space mark · y yank · c char · Esc cancel"
@@ -820,15 +838,23 @@ mod tests {
             start: None,
         }];
         state.chat_lines = build_chat_lines(&state, 80);
-        assert!(state
+        assert!(
+            state
+                .chat_lines
+                .iter()
+                .any(|l| l.text.contains("did the thing"))
+        );
+        assert!(
+            !state
+                .chat_lines
+                .iter()
+                .any(|l| l.text.contains("long transcript"))
+        );
+        let header = state
             .chat_lines
             .iter()
-            .any(|l| l.text.contains("did the thing")));
-        assert!(!state
-            .chat_lines
-            .iter()
-            .any(|l| l.text.contains("long transcript")));
-        let header = state.chat_lines.iter().find(|l| l.text.contains("Coder")).unwrap();
+            .find(|l| l.text.contains("Coder"))
+            .unwrap();
         assert_eq!(header.header_stage, Some(0));
     }
 
@@ -849,10 +875,12 @@ mod tests {
             start: None,
         }];
         state.chat_lines = build_chat_lines(&state, 80);
-        assert!(state
-            .chat_lines
-            .iter()
-            .any(|l| l.text.contains("fn main()")));
+        assert!(
+            state
+                .chat_lines
+                .iter()
+                .any(|l| l.text.contains("fn main()"))
+        );
         assert!(state.chat_lines.iter().any(|l| l.rich.is_some()));
     }
 
@@ -872,10 +900,12 @@ mod tests {
             start: None,
         }];
         state.chat_lines = build_chat_lines(&state, 80);
-        assert!(state
-            .chat_lines
-            .iter()
-            .any(|l| l.text.contains("planning now")));
+        assert!(
+            state
+                .chat_lines
+                .iter()
+                .any(|l| l.text.contains("planning now"))
+        );
     }
 
     #[test]

@@ -769,9 +769,7 @@ impl AppState {
 
     /// Whether any pipeline stage is currently running.
     pub fn has_running_stage(&self) -> bool {
-        self.stages
-            .iter()
-            .any(|s| s.status == StageStatus::Running)
+        self.stages.iter().any(|s| s.status == StageStatus::Running)
     }
 }
 
