@@ -91,9 +91,9 @@ NIKI takes a different path. Work is split across **independent agents that can'
 
 ## How it works
 
-```mermaid
-flowchart LR
-    U([niki run &quot;task&quot;]) --> P
+ ```mermaid
+ flowchart LR
+     U([niki run "task"]) --> P
 
     subgraph Sandbox [ Podman/Docker sandbox · /workspace bind-mount ]
         direction LR
