@@ -23,5 +23,5 @@ pub use command_menu::render_command_menu;
 pub use input_box::render_input_box;
 pub use permission::render_permission_modal;
 pub use progress::render_progress_bar;
-pub use spinner::{Spinner, SpinnerStyle};
+pub use spinner::{Spinner, SpinnerState, SpinnerStyle};
 pub use status_bar::render_status_bar;
