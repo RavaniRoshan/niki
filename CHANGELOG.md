@@ -13,7 +13,6 @@ Launch cut.
   and macOS (Intel + Apple Silicon) via Homebrew, a checksum-verified `curl` installer
   (`scripts/install.sh`), and GitHub release downloads.
 - `docs/claims-audit.md`: every headline marketing claim traced to the code that backs it.
-- Landing page (`docs/marketing/landing.html`) for GitHub Pages.
 
 ### Changed
 - Homebrew formula now installs the release `.tar.gz` archives (with SHA256) for the three
@@ -79,7 +78,7 @@ Launch cut. Focus: distribution, onboarding, and trust — the agent engine is u
   are parsed but **not yet wired**; NIKI now says so at load instead of silently
   ignoring them.
 - `assets/logo.svg` recolored to the teal brand (`#0d9488`) to match the TUI.
-- `docs/benchmarks.md` (honest eval-harness notes) and a static landing page.
+- `docs/benchmarks.md` (honest eval-harness notes).
 
 ### Changed
 - Package manifests (Homebrew, Scoop, Winget) now target `v0.3.0`; Winget license

@@ -112,10 +112,9 @@ public disclosure.
 
 ### Machine-readable security policy
 
-This repository ships `/.well-known/security.txt` (RFC 9116) via GitHub Pages:
+Security advisories are tracked via GitHub Security Advisories:
 
-- **Canonical URL:** https://niki.dev/.well-known/security.txt
-- **Repository copy:** `.well-known/security.txt`
+- **Report a vulnerability:** https://github.com/RavaniRoshan/niki/security/advisories/new
 
 If you prefer GitHub's built-in advisory flow, you can also use
 <https://github.com/RavaniRoshan/niki/security/advisories/new>.
