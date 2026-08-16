@@ -291,6 +291,7 @@ pub fn score_result(result: &PipelineResult, defect: &SeededDefect) -> RunOutcom
 fn empty_result() -> PipelineResult {
     let id = Uuid::new_v4();
     PipelineResult {
+        diff_guardwarn: None,
         task_id: id,
         state: PipelineState::new(id),
         final_diff: String::new(),
@@ -331,6 +332,7 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
     let id = Uuid::new_v4();
     let verdict = find_artifact(
         &PipelineResult {
+            diff_guardwarn: None,
             task_id: id,
             state: PipelineState::new(id),
             final_diff: String::new(),
@@ -349,6 +351,7 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
     .map(|v| v.verdict)
     .unwrap_or(Verdict::Approved);
     Ok(PipelineResult {
+        diff_guardwarn: None,
         task_id: id,
         state: PipelineState::new(id),
         final_diff: String::new(),
@@ -404,6 +407,7 @@ pub async fn run_case_live(
         description: case.description.clone(),
         project_path: project_dir.to_path_buf(),
     };
+    let niki_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let niki_res = execute_pipeline(
         &niki_task,
         &niki_cfg,
@@ -411,6 +415,7 @@ pub async fn run_case_live(
         &mut display,
         containers.clone(),
         false,
+        niki_cancel.clone(),
     )
     .await?;
 
@@ -419,6 +424,7 @@ pub async fn run_case_live(
         description: case.description.clone(),
         project_path: project_dir.to_path_buf(),
     };
+    let base_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let base_res = execute_pipeline(
         &base_task,
         &base_cfg,
@@ -426,6 +432,7 @@ pub async fn run_case_live(
         &mut display,
         containers.clone(),
         false,
+        base_cancel.clone(),
     )
     .await?;
 
@@ -616,6 +623,7 @@ mod tests {
     fn result_from(parts: &[(AgentRole, &str)]) -> PipelineResult {
         let id = Uuid::new_v4();
         PipelineResult {
+            diff_guardwarn: None,
             task_id: id,
             state: PipelineState::new(id),
             final_diff: String::new(),
