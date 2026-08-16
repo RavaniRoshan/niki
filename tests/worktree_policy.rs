@@ -5,6 +5,7 @@ use niki::config::{DockerConfig, SecurityPolicyConfig};
 use niki::sandbox::docker::ActiveContainers;
 use niki::sandbox::{Sandbox, SandboxBackend, create_sandbox};
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
@@ -14,17 +15,19 @@ async fn create_worktree_sandbox(
     repo_path: &std::path::Path,
     policy: SecurityPolicyConfig,
 ) -> Result<niki::sandbox::worktree::WorktreeSandbox, anyhow::Error> {
+    let (tx, _) = mpsc::channel();
     niki::sandbox::worktree::WorktreeSandbox::create(
         AgentRole::Coder,
         repo_path,
         &Uuid::new_v4(),
         &DockerConfig::default(),
         policy,
+        tx,
     )
     .await
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn worktree_sandbox_stores_policy_for_coder_role() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path();
@@ -81,7 +84,7 @@ async fn worktree_sandbox_stores_policy_for_coder_role() {
     let _ = sandbox.destroy().await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn worktree_sandbox_enforces_role_specific_policy() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path();
@@ -131,7 +134,7 @@ async fn worktree_sandbox_enforces_role_specific_policy() {
     let _ = sandbox.destroy().await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn worktree_sandbox_skips_policy_when_role_is_none() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path();
@@ -174,7 +177,7 @@ async fn worktree_sandbox_skips_policy_when_role_is_none() {
     let _ = sandbox.destroy().await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn worktree_sandbox_custom_timeout_is_respected() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path();
@@ -224,7 +227,7 @@ async fn worktree_sandbox_custom_timeout_is_respected() {
     let _ = sandbox.destroy().await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn create_sandbox_worktree_backed() {
     let dir = TempDir::new().unwrap();
     let repo = dir.path();
@@ -257,6 +260,7 @@ async fn create_sandbox_worktree_backed() {
 
     let policy = SecurityPolicyConfig::default();
     let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
+    let (tx, _) = mpsc::channel();
     let sandbox = create_sandbox(
         SandboxBackend::Worktree,
         None,
@@ -266,6 +270,7 @@ async fn create_sandbox_worktree_backed() {
         &DockerConfig::default(),
         policy,
         containers,
+        tx,
     )
     .await;
 

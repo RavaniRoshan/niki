@@ -18,6 +18,14 @@ pub enum Permission {
     Deny,
 }
 
+/// User response to a permission prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PermissionAction {
+    Allow,
+    Deny,
+}
+
 /// A permission rule with optional pattern matching.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionRule {
