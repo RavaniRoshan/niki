@@ -1,0 +1,4 @@
+Policy: https://github.com/RavaniRoshan/niki/security/policy
+Contact: https://github.com/RavaniRoshan/niki/security/advisories/new
+Preferred-Languages: en
+Expires: 2027-08-16T00:00:00.000Z

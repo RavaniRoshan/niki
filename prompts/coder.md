@@ -30,6 +30,12 @@ preserve their existing code and produce edits that modify them **in place**.
 
 {{ current_files }}
 
+## Uncertainties (be specific)
+After your implementation, list any risks, open questions, or assumptions made under time
+pressure in the `uncertainties` array. Be concrete and actionable — "need to verify X" is
+better than "may have issues". If you are confident there are no uncertainties, set the
+field to `null`.
+
 ## Output Requirements
 You MUST output a single valid JSON object conforming to this schema:
 

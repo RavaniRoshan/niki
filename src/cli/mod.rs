@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod chat;
 pub mod config;
 pub mod dashboard;
 pub mod doctor;
@@ -8,5 +9,8 @@ pub mod memory;
 pub mod providers;
 pub mod recommend;
 pub mod report;
+pub mod research;
 pub mod run;
+pub mod smoke;
 pub mod status;
+pub mod verify;

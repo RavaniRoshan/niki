@@ -99,14 +99,10 @@ pub struct RunArgs {
     #[arg(long)]
     pub reviewer_model: Option<String>,
 
-    /// Sandbox backend: docker (container), worktree (git worktree + local process,
-    /// no Docker), or cloud (NIKI infra, beta). Overrides [docker] backend in config.
+    /// Sandbox backend: docker (container) or worktree (git worktree + local
+    /// process, no Docker). Overrides [docker] backend in config.
     #[arg(long, value_enum)]
     pub backend: Option<BackendArg>,
-
-    /// Shortcut for `--backend cloud` — run the pipeline on NIKI's cloud infra (beta).
-    #[arg(long)]
-    pub cloud: bool,
 
     /// Run the Planner only and show the spec without executing
     #[arg(long)]
@@ -131,7 +127,6 @@ pub struct RunArgs {
 pub enum BackendArg {
     Docker,
     Worktree,
-    Cloud,
 }
 
 impl From<BackendArg> for crate::sandbox::SandboxBackend {
@@ -139,7 +134,6 @@ impl From<BackendArg> for crate::sandbox::SandboxBackend {
         match b {
             BackendArg::Docker => crate::sandbox::SandboxBackend::Docker,
             BackendArg::Worktree => crate::sandbox::SandboxBackend::Worktree,
-            BackendArg::Cloud => crate::sandbox::SandboxBackend::Cloud,
         }
     }
 }
@@ -180,33 +174,14 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         config.agents.reviewer.model = m.clone();
     }
 
-    // Resolve the sandbox backend: explicit --backend / --cloud wins, otherwise
-    // fall back to [docker] backend in config (default: docker).
-    let backend = if args.cloud {
-        SandboxBackend::Cloud
-    } else if let Some(b) = args.backend {
+    // Resolve the sandbox backend: explicit --backend wins, otherwise fall
+    // back to [docker] backend in config (default: docker).
+    let backend = if let Some(b) = args.backend {
         b.into()
     } else {
         config.docker.backend
     };
     config.docker.backend = backend;
-
-    // Cloud execution is a beta scaffold: the trait seam exists so the
-    // orchestrator can target NIKI infra unchanged, but the real remote executor
-    // needs infra + credentials that aren't part of a local build. Fail fast here
-    // with a clear message rather than burning Planner tokens and erroring
-    // mid-pipeline. The `NIKI_CLOUD_ENDPOINT` env var is the seam: when a future
-    // build wires up a real endpoint it can bypass this guard.
-    if matches!(backend, SandboxBackend::Cloud) && env::var("NIKI_CLOUD_ENDPOINT").is_err() {
-        eprintln!(
-            "Cloud execution (beta) is not available in this build.\n\
-             The architecture supports it — the `cloud` sandbox backend implements the same\n\
-             trait as Docker/worktree — but running agents on NIKI infrastructure requires\n\
-             infra + credentials that ship separately.\n\n\
-             To run locally without Docker, use:  niki run \"<task>\" --backend worktree"
-        );
-        std::process::exit(2);
-    }
 
     let uses_docker = matches!(backend, SandboxBackend::Docker);
 
@@ -232,11 +207,12 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     };
 
     let mut display = AgenticDisplay::new();
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     // Opt-in rich TUI. Must be enabled before any display call so the banner
     // and subsequent events are routed to the render thread.
     if args.tui {
-        display.enable_tui(task.description.clone(), task.project_path.clone());
+        display.enable_tui(task.description.clone(), task.project_path.clone(), cancel.clone());
     }
 
     if !args.quiet {
@@ -361,9 +337,9 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         });
     }
 
-    // Only connect to a container runtime when the chosen backend needs it. The
-    // worktree and cloud backends never touch Podman/Docker, so they run without
-    // a daemon. The dry-run path also skips the daemon ping (it never creates a sandbox).
+    // Only connect to a container runtime when the Docker backend is in use. The
+    // worktree backend never touches Podman/Docker, so it runs without a daemon.
+    // The dry-run path also skips the daemon ping (it never creates a sandbox).
     #[cfg(unix)]
     let docker = if uses_docker && !args.dry_run {
         let d = connect_container_runtime()
@@ -402,6 +378,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         &mut display,
         containers.clone(),
         args.dry_run,
+        cancel.clone(),
     )
     .await
     {
@@ -508,10 +485,10 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         eprintln!("Failed to generate patch: {}", e);
     }
 
-    // For non-Docker backends the change still lives inside the sandbox copy (a
-    // separate git worktree or a cloud VM), so `working_tree_diff` on the host
-    // would be empty. Apply the sandbox's diff to the host working tree first; the
-    // Docker backend already wrote through the bind mount and skips this step.
+    // For the worktree backend the change still lives inside the sandbox copy (a
+    // separate git worktree), so `working_tree_diff` on the host would be empty.
+    // Apply the sandbox's diff to the host working tree first; the Docker backend
+    // already wrote through the bind mount and skips this step.
     if !uses_docker
         && !result.final_diff.trim().is_empty()
         && let Err(e) =
