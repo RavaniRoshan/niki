@@ -93,18 +93,18 @@ NIKI takes a different path. Work is split across **independent agents that can'
 
 ```mermaid
 flowchart LR
-    U([niki run "task"]) --> P
+    U(["niki run &quot;task&quot;"]) --> P
 
-    subgraph Sandbox [ Podman/Docker sandbox · /workspace bind-mount ]
+    subgraph Sandbox["Podman/Docker sandbox · /workspace bind-mount"]
         direction LR
-        P[◈ Planner] -->|TaskSpec| C[⟠ Coder]
-        C -->|unified diff| T[◉ Tester]
-        T -->|test results| R[◆ Reviewer]
+        P["◈ Planner"] -->|TaskSpec| C["⟠ Coder"]
+        C -->|unified diff| T["◉ Tester"]
+        T -->|test results| R["◆ Reviewer"]
         R -.->|request changes| C
     end
 
-    R -->|approve| G[[git branch niki/id]]
-    G --> A[/changes.patch · report.md · artifacts/*.json/]
+    R -->|approve| G[["git branch niki/id"]]
+    G --> A["changes.patch · report.md · artifacts/*.json"]
 ```
 
 1. **Planner** reads the task plus current file contents and produces a `TaskSpec` — which files to touch, and the approach.
