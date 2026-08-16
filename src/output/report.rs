@@ -530,6 +530,59 @@ fn render_cost_section(result: &PipelineResult) -> String {
     out
 }
 
+/// Render the post-run "Watch items" section from the Coder's and Planner's
+/// uncertainty signals. Returns empty when no agent surfaced uncertainties
+/// (the fields are `Option<Vec<String>>` and default to `None`).
+fn render_watch_items_section(result: &PipelineResult) -> String {
+    let mut items: Vec<String> = Vec::new();
+
+    // Planner uncertainties (from TaskSpec)
+    if let Some((_, spec_json)) = result
+        .artifacts
+        .iter()
+        .find(|(r, _)| *r == AgentRole::Planner)
+        && let Ok(spec) = serde_json::from_str::<crate::artifacts::types::TaskSpec>(spec_json)
+        && let Some(u) = spec.uncertainties
+    {
+        for item in u {
+            items.push(format!("- [Planner] {}", item));
+        }
+    }
+
+    // Coder uncertainties (from CodeDiff)
+    if let Some((_, diff_json)) = result
+        .artifacts
+        .iter()
+        .find(|(r, _)| *r == AgentRole::Coder)
+        && let Ok(diff) = serde_json::from_str::<crate::artifacts::types::CodeDiff>(diff_json)
+        && let Some(u) = diff.uncertainties
+    {
+        for item in u {
+            items.push(format!("- [Coder] {}", item));
+        }
+    }
+
+    if items.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("## Watch items\n\n");
+    out.push_str("_The following risks, open questions, or assumptions were surfaced by the agents during this run._\n\n");
+    out.push_str(&items.join("\n"));
+    out.push('\n');
+    out
+}
+
+/// Render the diff-size guardrail section. Surfaces the post-run
+/// `diff_guardwarn` signal produced in `pipeline.rs` so reviewers see the
+/// "smaller incremental PRs" control as a verifiable line, not a hand-wave
+/// (agentic-engineering checklist, arXiv 2603.27249 §4).
+pub fn render_guardrail_section(result: &PipelineResult) -> String {
+    match &result.diff_guardwarn {
+        Some(msg) => format!("## Diff-Size Guardrail\n\n{}\n", msg),
+        None => String::new(),
+    }
+}
+
 pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult) -> Result<()> {
     let mut env = Environment::new();
 
@@ -547,10 +600,12 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
 
 {{ safety_section }}
 {{ red_blue_section }}
-{{ isolation_section }}
+ {{ isolation_section }}
 {{ audit_section }}
 {{ verification_section }}
 {{ cost_section }}
+{{ guardrail_section }}
+{{ watch_items_section }}
 ## Final Diff
 ```diff
 {{ final_diff }}
@@ -573,6 +628,8 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
         audit_section => render_audit_section(result),
         verification_section => render_verification_section(result),
         cost_section => render_cost_section(result),
+        guardrail_section => render_guardrail_section(result),
+        watch_items_section => render_watch_items_section(result),
         final_diff => result.final_diff.clone(),
     })?;
 
@@ -619,6 +676,7 @@ mod tests {
 
     fn result_with_proof(proof: Option<SafetyProof>) -> PipelineResult {
         PipelineResult {
+            diff_guardwarn: None,
             task_id: Uuid::nil(),
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::from("+hello"),
@@ -741,6 +799,7 @@ mod tests {
         .to_string();
 
         let result = PipelineResult {
+            diff_guardwarn: None,
             task_id: Uuid::nil(),
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::from("+x"),
@@ -774,6 +833,7 @@ mod tests {
     #[test]
     fn renders_isolation_section_with_proof() {
         let result = PipelineResult {
+            diff_guardwarn: None,
             task_id: Uuid::nil(),
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::new(),
@@ -862,6 +922,7 @@ mod tests {
             artifacts.push((AgentRole::SecurityAuditor, j.to_string()));
         }
         PipelineResult {
+            diff_guardwarn: None,
             task_id: Uuid::nil(),
             state: PipelineState::new(Uuid::nil()),
             final_diff: diff.to_string(),
@@ -956,6 +1017,7 @@ index 3333333..4444444 100644
 
     fn cost_result(metrics: Vec<StageMetric>) -> PipelineResult {
         PipelineResult {
+            diff_guardwarn: None,
             task_id: Uuid::nil(),
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::new(),
@@ -1076,5 +1138,40 @@ index 3333333..4444444 100644
     fn renders_empty_cost_section_when_no_metrics() {
         let result = cost_result(vec![]);
         assert!(render_cost_section(&result).is_empty());
+    }
+
+    #[test]
+    fn renders_watch_items_when_uncertainties_present() {
+        let spec = crate::artifacts::types::TaskSpec {
+            summary: "test".into(),
+            approach: "test".into(),
+            files_to_modify: vec![],
+            acceptance_criteria: vec![],
+            constraints: vec![],
+            estimated_complexity: crate::artifacts::types::Complexity::Low,
+            uncertainties: Some(vec!["need to verify X".into()]),
+        };
+        let diff = crate::artifacts::types::CodeDiff {
+            edits: vec![],
+            files_changed: vec![],
+            implementation_notes: "test".into(),
+            spec_adherence: "test".into(),
+            uncertainties: Some(vec!["may break Y".into()]),
+        };
+        let mut result = cost_result(vec![]);
+        result.artifacts = vec![
+            (AgentRole::Planner, serde_json::to_string(&spec).unwrap()),
+            (AgentRole::Coder, serde_json::to_string(&diff).unwrap()),
+        ];
+        let section = render_watch_items_section(&result);
+        assert!(section.contains("## Watch items"));
+        assert!(section.contains("[Planner] need to verify X"));
+        assert!(section.contains("[Coder] may break Y"));
+    }
+
+    #[test]
+    fn renders_empty_watch_items_when_no_uncertainties() {
+        let result = cost_result(vec![]);
+        assert!(render_watch_items_section(&result).is_empty());
     }
 }
