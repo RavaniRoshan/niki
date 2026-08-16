@@ -7,33 +7,8 @@ use uuid::Uuid;
 use crate::NikiError;
 use crate::artifacts::types::AgentRole;
 use crate::config::{DockerConfig, SecurityPolicyConfig};
-use crate::permissions::{Permission, PermissionChecker, PermissionConfig, PermissionRule};
 
-/// Build a [`PermissionChecker`] from a security policy so the dead-island
-/// granular permission system actually gates command execution. Denied
-/// commands become `Deny` rules; everything else falls through to `Ask`
-/// (which the headless sandbox treats as allow — interactive prompting is a
-/// TUI concern). With an empty deny list this is a no-op (behavior-preserving).
-pub(crate) fn build_permission_checker(policy: &SecurityPolicyConfig) -> PermissionChecker {
-    let mut rules: std::collections::HashMap<String, PermissionRule> = std::collections::HashMap::new();
-    for denied in &policy.denied_commands {
-        rules.insert(
-            format!("deny:{}", denied),
-            PermissionRule {
-                permission: Permission::Deny,
-                pattern: Some(denied.clone()),
-            },
-        );
-    }
-    PermissionChecker::new(PermissionConfig {
-        tools: crate::permissions::ToolPermissions::default(),
-        rules,
-        auto_approve: false,
-        external_directory: Permission::Ask,
-        doom_loop: Permission::Ask,
-    })
-}
-
+pub mod cloud;
 pub mod docker;
 pub mod edit_format;
 pub mod worktree;
@@ -49,14 +24,16 @@ pub enum SandboxBackend {
     Docker,
     /// Lightweight `git worktree` + local process isolation — no Docker required.
     Worktree,
+    /// Run agents on NIKI's infrastructure (beta; requires NIKI infra).
+    Cloud,
 }
 
 /// Abstraction over an isolated execution environment for one agent stage.
 ///
-/// `DockerSandbox` (container) and `WorktreeSandbox` (git worktree + local
-/// process) implement this. The orchestrator talks only to the trait, so the
-/// backends are interchangeable — this is what makes alternative sandboxing (#8)
-/// a drop-in change.
+/// `DockerSandbox` (container), `WorktreeSandbox` (git worktree + local process)
+/// and `CloudSandbox` (NIKI infra) all implement this. The orchestrator talks
+/// only to the trait, so backends are interchangeable — this is what makes
+/// alternative sandboxing (#8) and cloud execution (#9) drop-in changes.
 #[async_trait]
 pub trait Sandbox: Send + Sync {
     /// Fail fast if any required tool binary is missing from the sandbox.
@@ -130,43 +107,44 @@ pub fn check_command_policy(cmd: &[&str], policy: &SecurityPolicyConfig) -> Resu
 }
 
 /// Create the sandbox for `backend`. `docker` is only required for the Docker
-/// backend (pass `None` for worktree).
+/// backend (pass `None` for worktree/cloud).
 ///
 /// `policy` is the security policy for this sandbox's agent role; commands
 /// executed via `exec` are checked against it when a role is supplied.
- pub async fn create_sandbox(
-     backend: SandboxBackend,
-     docker: Option<&Docker>,
-     agent_role: AgentRole,
-     source_repo: &Path,
-     task_id: &Uuid,
-     config: &DockerConfig,
-     policy: SecurityPolicyConfig,
-     containers: ActiveContainers,
-     event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
- ) -> Result<Box<dyn Sandbox>> {
-     match backend {
-         SandboxBackend::Docker => {
-             let d = docker.ok_or_else(|| {
-                 NikiError::Config("Docker backend selected but Docker is not available".into())
-             })?;
-             Ok(Box::new(
-                 DockerSandbox::create(
-                     d,
-                     agent_role,
-                     source_repo,
-                     task_id,
-                     config,
-                     policy,
-                     containers,
-                     event_tx,
-                 )
-                 .await?,
-             ))
-         }
-         SandboxBackend::Worktree => Ok(Box::new(
-             worktree::WorktreeSandbox::create(agent_role, source_repo, task_id, config, policy, event_tx)
+pub async fn create_sandbox(
+    backend: SandboxBackend,
+    docker: Option<&Docker>,
+    agent_role: AgentRole,
+    source_repo: &Path,
+    task_id: &Uuid,
+    config: &DockerConfig,
+    policy: SecurityPolicyConfig,
+    containers: ActiveContainers,
+) -> Result<Box<dyn Sandbox>> {
+    match backend {
+        SandboxBackend::Docker => {
+            let d = docker.ok_or_else(|| {
+                NikiError::Config("Docker backend selected but Docker is not available".into())
+            })?;
+            Ok(Box::new(
+                DockerSandbox::create(
+                    d,
+                    agent_role,
+                    source_repo,
+                    task_id,
+                    config,
+                    policy,
+                    containers,
+                )
                 .await?,
+            ))
+        }
+        SandboxBackend::Worktree => Ok(Box::new(
+            worktree::WorktreeSandbox::create(agent_role, source_repo, task_id, config, policy)
+                .await?,
+        )),
+        SandboxBackend::Cloud => Ok(Box::new(
+            cloud::CloudSandbox::create(agent_role, source_repo, task_id, config, policy).await?,
         )),
     }
 }
@@ -283,36 +261,5 @@ mod tests {
     fn reviewer_policy_allows_git_show() {
         let policy = crate::config::types::default_reviewer_policy();
         assert!(check_command_policy(&["git", "show", "HEAD"], &policy).is_ok());
-    }
-
-    #[test]
-    fn permission_checker_maps_denied_commands_to_deny() {
-        // The dead-island PermissionChecker must actually gate commands derived
-        // from the security policy. A denied command maps to Permission::Deny.
-        let policy = test_policy();
-        let checker = build_permission_checker(&policy);
-        assert_eq!(
-            checker.check_command("git push --force origin main"),
-            crate::permissions::Permission::Deny
-        );
-        assert_eq!(
-            checker.check_command("rm -rf /"),
-            crate::permissions::Permission::Deny
-        );
-    }
-
-    #[test]
-    fn permission_checker_allows_unlisted_commands() {
-        // Empty deny list (default config) => nothing blocked (behavior-preserving).
-        let policy = SecurityPolicyConfig {
-            allowed_commands: vec![],
-            denied_commands: vec![],
-            max_exec_seconds: 300,
-        };
-        let checker = build_permission_checker(&policy);
-        assert_eq!(
-            checker.check_command("ls -la"),
-            crate::permissions::Permission::Ask
-        );
     }
 }

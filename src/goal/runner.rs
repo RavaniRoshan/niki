@@ -59,7 +59,6 @@ impl GoalRunner {
                 project_path: PathBuf::from(&state.scope),
             };
 
-            let goal_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             match execute_pipeline(
                 &pipeline_task,
                 config,
@@ -67,7 +66,6 @@ impl GoalRunner {
                 display,
                 containers.clone(),
                 false,
-                goal_cancel.clone(),
             )
             .await
             {
@@ -266,8 +264,6 @@ mod tests {
             context_summary: String::new(),
             created_at: chrono::Utc::now().to_rfc3339(),
             completed_at: None,
-            drift: None,
-            fork_dir: None,
         }
     }
 

@@ -31,12 +31,7 @@
       }
     },
     "implementation_notes": { "type": "string" },
-    "spec_adherence": { "type": "string" },
-    "uncertainties": {
-      "type": ["array", "null"],
-      "items": { "type": "string" },
-      "description": "Risks, open questions, or assumptions made under time pressure."
-    }
+    "spec_adherence": { "type": "string" }
   },
   "required": [
     "edits",

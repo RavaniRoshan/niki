@@ -70,7 +70,7 @@ pub fn working_tree_diff(repo_path: &Path) -> String {
 }
 
 /// Apply a unified diff (produced by the sandbox `get_diff`) to the host working
-/// tree. Used for the worktree backend, where the change lives only inside
+/// tree. Used for the worktree/cloud backends, where the change lives only inside
 /// the sandbox copy and must be replayed onto the host before we commit the
 /// `niki/<id>` branch. Mirrors the Docker sandbox's `apply_patch` (git apply,
 /// with a `patch -p1` fallback) and normalizes line endings / trailing newline

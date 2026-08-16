@@ -39,11 +39,6 @@ Rubber-stamping the Coder while ignoring the Red critique is a failure of your r
 {{ project_memory }}
 {% endif %}
 
-{% if diff_guardrail_hint %}
-## Diff-Size Guardrail
-{{ diff_guardrail_hint }}
-{% endif %}
-
 ## Output Requirements
 You MUST output a single valid JSON object conforming to this schema:
 

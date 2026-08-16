@@ -126,6 +126,7 @@ pub enum FrameTarget {
 }
 
 /// High-performance rendering engine with cell-level diffing.
+#[allow(dead_code)] // compiled but unreachable until chat UI is wired
 pub struct RenderEngine {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     front: CellBuffer,
@@ -161,11 +162,6 @@ impl RenderEngine {
     /// Mark the engine as needing a redraw.
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
-    }
-
-    /// Mark the front buffer as up to date after a successful render.
-    pub fn mark_clean_for_render(&mut self) {
-        self.dirty = false;
     }
 
     /// Set the frame target (high for streaming, low for idle).
