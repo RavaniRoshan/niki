@@ -60,6 +60,17 @@ pub fn current_mode() -> ThemeMode {
     }
 }
 
+/// Cycle to the next theme and return its preference string.
+pub fn next_theme() -> &'static str {
+    let next = match current_mode() {
+        ThemeMode::Auto => ThemeMode::Dark,
+        ThemeMode::Dark => ThemeMode::Light,
+        ThemeMode::Light => ThemeMode::Auto,
+    };
+    set_mode(next);
+    next.as_str()
+}
+
 /// Interpret the `COLORFGBG` background index (xterm-family convention:
 /// background index >= 8 means a light terminal background).
 fn bg_from_colorfgbg(value: &str) -> Option<bool> {

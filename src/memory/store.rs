@@ -172,7 +172,129 @@ fn memory_path(project_dir: &Path, role: AgentRole) -> PathBuf {
     project_dir
         .join(".niki")
         .join("memory")
-        .join(format!("{}.json", role_name))
+         .join(format!("{}.json", role_name))
+}
+
+// ── Phase 15: Hierarchical memory (user + team) ──────────────────────────────
+
+/// Load user-level memory from `.niki/memory/user.json`.
+pub fn load_user_memory(project_dir: &Path) -> Vec<MemoryEntry> {
+    let path = project_dir.join(".niki").join("memory").join("user.json");
+    if !path.exists() {
+        return Vec::new();
+    }
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<MemoryEntry>>(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Save user-level memory to `.niki/memory/user.json`.
+pub fn save_user_memory(project_dir: &Path, entries: &[MemoryEntry]) -> Result<()> {
+    let dir = project_dir.join(".niki").join("memory");
+    fs::create_dir_all(&dir)?;
+    let path = dir.join("user.json");
+    let json = serde_json::to_string_pretty(entries)?;
+    fs::write(&path, json)?;
+    Ok(())
+}
+
+/// Append a user memory entry.
+pub fn append_user_memory(project_dir: &Path, task: &str, content: String) -> Result<()> {
+    let mut entries = load_user_memory(project_dir);
+    entries.push(MemoryEntry {
+        timestamp: Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        task: task.to_string(),
+        tags: vec!["user".to_string()],
+        content,
+        branch: None,
+    });
+    // Keep bounded
+    if entries.len() > 100 {
+        entries.drain(..entries.len() - 100);
+    }
+    save_user_memory(project_dir, &entries)
+}
+
+/// Load team-level memory from `.niki/memory/team.json`.
+pub fn load_team_memory(project_dir: &Path) -> Vec<MemoryEntry> {
+    let path = project_dir.join(".niki").join("memory").join("team.json");
+    if !path.exists() {
+        return Vec::new();
+    }
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<MemoryEntry>>(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Save team-level memory to `.niki/memory/team.json`.
+pub fn save_team_memory(project_dir: &Path, entries: &[MemoryEntry]) -> Result<()> {
+    let dir = project_dir.join(".niki").join("memory");
+    fs::create_dir_all(&dir)?;
+    let path = dir.join("team.json");
+    let json = serde_json::to_string_pretty(entries)?;
+    fs::write(&path, json)?;
+    Ok(())
+}
+
+/// Append a team memory entry.
+pub fn append_team_memory(project_dir: &Path, task: &str, content: String) -> Result<()> {
+    let mut entries = load_team_memory(project_dir);
+    entries.push(MemoryEntry {
+        timestamp: Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        task: task.to_string(),
+        tags: vec!["team".to_string()],
+        content,
+        branch: None,
+    });
+    if entries.len() > 100 {
+        entries.drain(..entries.len() - 100);
+    }
+    save_team_memory(project_dir, &entries)
+}
+
+/// Render hierarchical memory for prompt injection (user > team > project role).
+pub fn render_hierarchical_memory(project_dir: &Path, role: AgentRole, max_entries: usize) -> String {
+    let mut parts = Vec::new();
+
+    // User memory (highest precedence)
+    let user = load_user_memory(project_dir);
+    if !user.is_empty() {
+        let mut out = String::from("## User Memory\n\n");
+        for entry in user.iter().rev().take(max_entries) {
+            out.push_str(&format!(
+                "- [{}] {}: {}\n",
+                &entry.timestamp[..10],
+                entry.task.chars().take(50).collect::<String>(),
+                entry.content.chars().take(200).collect::<String>(),
+            ));
+        }
+        parts.push(out);
+    }
+
+    // Team memory
+    let team = load_team_memory(project_dir);
+    if !team.is_empty() {
+        let mut out = String::from("## Team Memory\n\n");
+        for entry in team.iter().rev().take(max_entries) {
+            out.push_str(&format!(
+                "- [{}] {}: {}\n",
+                &entry.timestamp[..10],
+                entry.task.chars().take(50).collect::<String>(),
+                entry.content.chars().take(200).collect::<String>(),
+            ));
+        }
+        parts.push(out);
+    }
+
+    // Project role memory
+    let project = render_memory_for_prompt(project_dir, role, max_entries);
+    if !project.is_empty() {
+        parts.push(project);
+    }
+
+    parts.join("\n")
 }
 
 #[cfg(test)]

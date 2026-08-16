@@ -28,7 +28,7 @@ In scope:
 
 - Sandbox escape that allows code to affect the host outside the workspace.
 - Command-injection or privilege-escalation in any backend (`docker`,
-  `worktree`, `cloud`).
+  `worktree`).
 - Secret leakage (API keys) into logs, artifacts, or prompts.
 - Prompt-injection paths that lead to arbitrary host command execution.
 - Supply-chain issues in our release/build pipeline.
@@ -63,12 +63,17 @@ hijacked agent — not multi-tenant kernel attacks. Against that model we commit
   unless you opt in: `network_disabled = false` (or `network_allowlist = ["*"]`) opens
   egress — needed when a task must fetch dependencies (e.g. `cargo fetch`, `npm install`).
   This matches Codex/Claude's network-off sandbox default and is a core trust guarantee.
-- **Spend visibility, honesty first.** `general.spend_cap_usd` is warn-only in
-  v0.3 (pre-run estimate + post-run warning); hard mid-run enforcement is
-  planned. For a hard ceiling today, set one on your provider key.
-- **Supply chain.** Releases ship SHA-pinned CI and dependency audits
-  (cargo-audit/deny); digest-pinned sandbox image pulls and Sigstore signing of
-  the GHCR image are the immediate post-launch items.
+- **Spend visibility, honesty first.** `general.spend_cap_usd` is a
+  hard mid-run ceiling: a pre-run estimate is printed and NIKI aborts the run if
+  the cumulative estimated cost over the cap before any further stage executes
+  (pipeline.rs). For an additional hard ceiling at the provider, set one on your
+  key.
+- **Supply chain.** Releases ship from a `cargo-dist` pipeline with dependency
+  audits enforced as a CI gate (cargo-audit `cargo deny check` on every build,
+  see ci.yml); releases produce SHA-256 checksums for every artifact.
+  Digest-pinned sandbox image pulls and Sigstore signing of the GHCR image are
+  the immediate post-launch items (the bundled Docker image currently follows a
+  tag pull, noted as a TODO in `docker/Dockerfile`).
 
 ## Trust boundaries by backend
 
@@ -76,7 +81,6 @@ hijacked agent — not multi-tenant kernel attacks. Against that model we commit
 |---------|-----------|-------------|
 | `docker` / `podman` | Container sandbox with dropped capabilities, read-only mounts where possible, resource limits | LLM code is **untrusted**; host is protected by container boundaries |
 | `worktree` | Git worktree on host filesystem | LLM code runs **directly on the host**; no sandbox boundary — use only in single-user, trusted environments |
-| `cloud` | Remote container (Upstash Box or similar) | LLM code is **untrusted**; host is not involved |
 
 ### Worktree backend security considerations
 
@@ -105,3 +109,13 @@ you trust the task description and the project contents.
 
 We ask researchers to give us a reasonable window to fix issues before any
 public disclosure.
+
+### Machine-readable security policy
+
+This repository ships `/.well-known/security.txt` (RFC 9116) via GitHub Pages:
+
+- **Canonical URL:** https://niki.dev/.well-known/security.txt
+- **Repository copy:** `.well-known/security.txt`
+
+If you prefer GitHub's built-in advisory flow, you can also use
+<https://github.com/RavaniRoshan/niki/security/advisories/new>.

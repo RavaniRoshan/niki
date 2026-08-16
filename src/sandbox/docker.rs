@@ -1,5 +1,6 @@
 use crate::artifacts::types::AgentRole;
 use crate::config::DockerConfig;
+use crate::permissions::PermissionAction;
 use crate::sandbox::Sandbox;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -25,6 +26,8 @@ pub struct DockerSandbox {
     docker: Docker,
     containers: ActiveContainers,
     policy: crate::config::SecurityPolicyConfig,
+    permission_checker: crate::permissions::PermissionChecker,
+    event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
 }
 
 #[derive(Debug)]
@@ -53,6 +56,7 @@ impl DockerSandbox {
         config: &DockerConfig,
         policy: crate::config::SecurityPolicyConfig,
         containers: ActiveContainers,
+        event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
     ) -> Result<Self> {
         let container_name = format!(
             "niki-{}-{}-{:?}",
@@ -165,7 +169,9 @@ impl DockerSandbox {
             workspace_path,
             docker: docker.clone(),
             containers,
-            policy,
+            policy: policy.clone(),
+            permission_checker: crate::sandbox::build_permission_checker(&policy),
+            event_tx,
         })
     }
 
@@ -216,6 +222,7 @@ impl DockerSandbox {
             config,
             policy,
             containers,
+            std::sync::mpsc::channel().0,
         )
         .await
     }
@@ -506,6 +513,38 @@ impl Sandbox for DockerSandbox {
         // F1: Enforce security policy when a role is supplied.
         if role.is_some() {
             crate::sandbox::check_command_policy(cmd, &self.policy)?;
+            // F1b: Enforce granular permission policy (dead-island PermissionChecker).
+            let full = cmd.join(" ");
+            match self.permission_checker.check_command(&full) {
+                crate::permissions::Permission::Deny => {
+                    return Err(anyhow::anyhow!(
+                        "Command denied by permission policy: '{}'",
+                        full
+                    ));
+                }
+                crate::permissions::Permission::Ask => {
+                    let (response_tx, response_rx) = std::sync::mpsc::channel();
+                    let request = crate::display::tui::DisplayEvent::PermissionRequest {
+                        command: full.clone(),
+                        response_tx,
+                    };
+                    if self.event_tx.send(request).is_err() {
+                        // No TUI listening — fall back to Allow (headless mode).
+                    } else {
+                        let action = tokio::task::block_in_place(|| {
+                            response_rx.recv_timeout(std::time::Duration::from_secs(5))
+                        })
+                        .unwrap_or(PermissionAction::Deny);
+                        if matches!(action, PermissionAction::Deny) {
+                            return Err(anyhow::anyhow!(
+                                "Command denied by user: '{}'",
+                                full
+                            ));
+                        }
+                    }
+                }
+                crate::permissions::Permission::Allow => {}
+            }
         }
         // F3: Enforce exec timeout.
         let timeout = std::time::Duration::from_secs(self.policy.max_exec_seconds);

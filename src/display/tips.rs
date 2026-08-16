@@ -54,6 +54,7 @@ const TIPS: &[&str] = &[
     "Check the Help page (?) for a full keyboard shortcut reference",
 ];
 
+#[derive(Debug)]
 pub struct TipsBanner {
     current_index: usize,
     last_rotate: Instant,

@@ -54,6 +54,7 @@ pub struct TaskSpec {
     pub acceptance_criteria: Vec<String>, // Specific, testable criteria
     pub constraints: Vec<String>,         // Things to avoid or be careful about
     pub estimated_complexity: Complexity,
+    pub uncertainties: Option<Vec<String>>, // Things the Coder is not sure about — risks, open questions, assumptions made under time pressure.
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +89,7 @@ pub struct CodeDiff {
     pub files_changed: Vec<ChangedFile>,
     pub implementation_notes: String, // Coder's explanation of decisions made
     pub spec_adherence: String,       // How the implementation maps to the spec
+    pub uncertainties: Option<Vec<String>>, // Things the Coder is unsure about — risks, open questions, or assumptions made under time pressure.
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -355,7 +357,7 @@ pub enum RedDisposition {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IsolationRecord {
     pub role: AgentRole,
-    /// The sandbox backend the agent executed in (Docker container / git worktree / cloud).
+    /// The sandbox backend the agent executed in (Docker container / git worktree).
     pub backend: crate::sandbox::SandboxBackend,
     /// The roles whose *published artifacts* this agent received as context.
     /// This is the complete set of prior agents it could have "seen" — and it is
