@@ -1,0 +1,39 @@
+---
+title: Tester Agent
+description: The Tester agent role, test synthesis, and in-container test execution.
+sidebar:
+  order: 4
+  label: Tester Agent
+---
+
+# The Tester Agent (`◉`)
+
+The **Tester** verifies that the Coder's modifications actually work in practice.
+
+Unlike tools that rely on hypothetical code analysis, NIKI's Tester generates test suites and **executes real commands inside the sandbox container**.
+
+---
+
+## What the Tester Does
+
+1. **Test Generation:** Writes unit and integration test cases targeting the new functionality, edge cases, and boundary conditions.
+2. **Containerized Execution:** Runs the project's real test runner (e.g. `npm test`, `cargo test`, `pytest`) inside the isolated container.
+3. **Execution Analysis:** Captures stdout, stderr, exit codes, and duration.
+4. **Artifact Production:** Formats the test run into a `TestReport` JSON artifact containing:
+   * Total tests run, passed, and failed.
+   * Captured failure traces.
+   * Coverage assessment.
+
+---
+
+## Cost Optimization Tip
+
+Because the Tester's primary job is generating standard test boilerplate and verifying test runner outputs, you can often use faster and more economical models here:
+
+```toml
+[agents.tester]
+provider    = "openai"
+model       = "gpt-4o-mini"
+max_tokens  = 4096
+temperature = 0.1
+```

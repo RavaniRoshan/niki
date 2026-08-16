@@ -1,0 +1,96 @@
+/**
+ * NIKI Design Tokens — theme.css
+ * Canonical source: token.md (NIKI Design Tokens)
+ * Applied to Blume documentation site runtime.
+ */
+
+:root {
+  /* Tier 1 & Tier 2: Neutrals (Light Mode) */
+  --blume-background: #f8fafc;
+  --blume-foreground: #1e293b;
+  --blume-muted: #f1f5f9;
+  --blume-muted-foreground: #64748b;
+  --blume-border: #cbd5e1;
+
+  /* Signature Accents (Light Mode) */
+  --blume-accent: #0d9488;
+  --blume-accent-foreground: #ffffff;
+  --blume-action: #4a6fa5;
+  --blume-action-foreground: #ffffff;
+
+  /* Code & Diff Highlighting (Light Mode) */
+  --blume-code-background: #ffffff;
+  --blume-code-add: rgba(13, 148, 136, 0.12);
+  --blume-code-add-border: #0d9488;
+  --blume-code-remove: rgba(220, 38, 38, 0.12);
+  --blume-code-remove-border: #dc2626;
+  --blume-code-highlight: rgba(74, 111, 165, 0.12);
+  --blume-code-highlight-border: #4a6fa5;
+
+  /* Layout & Geometry */
+  --blume-radius: 0.5rem;
+  --blume-content-width: 48rem;
+
+  /* Typography */
+  --blume-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* NIKI Agent Role Tokens */
+  --niki-agent-planner: #0891b2;
+  --niki-agent-coder: #7c3aed;
+  --niki-agent-tester: #d97706;
+  --niki-agent-reviewer: #0d9488;
+  --niki-agent-red: #ef4444;
+  --niki-agent-security: #059669;
+  --niki-purple: #7c5fc0;
+  --niki-amber: #d97706;
+  --niki-teal: #0d9488;
+}
+
+:root[data-theme="dark"] {
+  /* Tier 1 & Tier 2: Neutrals (Dark Mode) */
+  --blume-background: #010409;
+  --blume-foreground: #e6edf3;
+  --blume-muted: #161b22;
+  --blume-muted-foreground: #8b949e;
+  --blume-border: #30363d;
+
+  /* Signature Accents (Dark Mode) */
+  --blume-accent: #4ecdc4;
+  --blume-accent-foreground: #010409;
+  --blume-action: #5d8fd6;
+  --blume-action-foreground: #ffffff;
+
+  /* Code & Diff Highlighting (Dark Mode) */
+  --blume-code-background: #0d1117;
+  --blume-code-add: rgba(78, 205, 196, 0.15);
+  --blume-code-add-border: #4ecdc4;
+  --blume-code-remove: rgba(248, 113, 113, 0.15);
+  --blume-code-remove-border: #f87171;
+  --blume-code-highlight: rgba(93, 143, 214, 0.16);
+  --blume-code-highlight-border: #5d8fd6;
+
+  /* NIKI Agent Role Tokens (Dark Mode) */
+  --niki-agent-planner: #38bdf8;
+  --niki-agent-coder: #9682c8;
+  --niki-agent-tester: #f59e0b;
+  --niki-agent-reviewer: #4ecdc4;
+  --niki-agent-red: #ff6b6b;
+  --niki-agent-security: #34d399;
+  --niki-purple: #9682c8;
+  --niki-amber: #f59e0b;
+  --niki-teal: #4ecdc4;
+}
+
+/* NIKI Custom UI Enhancements */
+.blume-agent-badge-planner {
+  color: var(--niki-agent-planner);
+}
+.blume-agent-badge-coder {
+  color: var(--niki-agent-coder);
+}
+.blume-agent-badge-tester {
+  color: var(--niki-agent-tester);
+}
+.blume-agent-badge-reviewer {
+  color: var(--niki-agent-reviewer);
+}

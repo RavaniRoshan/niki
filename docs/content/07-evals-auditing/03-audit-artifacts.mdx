@@ -1,0 +1,36 @@
+---
+title: Audit Artifacts
+description: Understanding the generated artifacts, patches, and metrics in .niki/.
+sidebar:
+  order: 3
+  label: Audit Artifacts
+---
+
+# Audit Artifacts
+
+Every task creates a directory `.niki/tasks/<task-id>/` containing all generated artifacts:
+
+```text
+.niki/tasks/6d281d6d-3184-482a-89aa-403332152861/
+├── task_spec.json        # Planner output
+├── code_diff.json        # Coder hunks
+├── test_report.json      # Tester output & test runner logs
+├── review_verdict.json   # Reviewer scores & revision loops
+├── safety_proof.json     # Sandbox deny-list & capability proof
+├── changes.patch         # Unified git patch
+└── report.md             # Rendered human report
+```
+
+---
+
+## Inspecting Artifacts
+
+You can inspect the generated files with any standard JSON tool, or use the built-in NIKI commands:
+
+```bash
+# Print formatted report
+niki report <task-id>
+
+# Open visual diff dashboard
+niki dashboard <task-id>
+```

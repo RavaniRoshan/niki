@@ -1,0 +1,74 @@
+---
+title: Installation
+description: Install NIKI on macOS, Linux, or build from source.
+sidebar:
+  order: 4
+  label: Installation
+---
+
+# Installation
+
+Install NIKI using your preferred method.
+
+---
+
+## One-Line Install Script (macOS / Linux)
+
+Downloads the official release binary and verifies its SHA-256 checksum:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/niki/master/scripts/install.sh | bash
+```
+
+---
+
+## Homebrew (macOS)
+
+```bash
+brew install niki
+```
+
+---
+
+## Cargo Binstall / Crates.io
+
+If you already have Rust and `cargo-binstall` installed:
+
+```bash
+cargo binstall niki
+```
+
+Or install from source with Cargo:
+
+```bash
+cargo install --locked niki
+```
+
+---
+
+## Build from Source
+
+```bash
+git clone https://github.com/RavaniRoshan/niki.git
+cd niki
+cargo build --release
+sudo cp target/release/niki /usr/local/bin/
+```
+
+---
+
+## Verifying the Installation
+
+Run `niki doctor` to verify that your system dependencies, container socket, and provider credentials are ready:
+
+```bash
+niki doctor
+```
+
+```text
+✓ Rust toolchain: 1.85.0
+✓ Podman / Docker socket: Connected (rootless)
+✓ Sandbox image: niki-sandbox:24.04 present
+✓ LLM Providers: Anthropic (claude-sonnet-4), OpenAI (gpt-4o-mini)
+✓ OS Keyring: Available
+```

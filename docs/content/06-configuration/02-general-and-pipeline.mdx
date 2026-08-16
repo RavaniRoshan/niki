@@ -1,0 +1,56 @@
+---
+title: General & Pipeline
+description: Configuring [general], [pipeline], and [knowledge] tables in niki.toml.
+sidebar:
+  order: 2
+  label: General & Pipeline
+---
+
+# `[general]`, `[pipeline]`, and `[knowledge]`
+
+Core operational settings for pipeline limits and context ingestion.
+
+---
+
+## `[general]` Table
+
+```toml
+[general]
+max_revision_rounds = 3      # Maximum Reviewer -> Coder feedback iterations
+output_dir          = ".niki"# Directory where task artifacts and patches land
+spend_cap_usd       = 5.0    # Hard dollar spend ceiling per task execution
+max_diff_lines      = 200    # Soft limit to encourage tight, focused diffs
+```
+
+---
+
+## `[pipeline]` Table
+
+Customize the execution topology and stages:
+
+```toml
+[pipeline]
+topology                    = "Auto" # "Auto" | "MultiAgent" | "SingleAgent"
+single_agent_max_complexity = "Low"  # Complexity threshold for single-agent fast path
+max_revision_rounds         = 3
+
+stages = [
+  { role = "planner",  provider = "anthropic", model = "claude-sonnet-4-20250514" },
+  { role = "coder",    provider = "anthropic", model = "claude-sonnet-4-20250514" },
+  { role = "tester",   provider = "openai",    model = "gpt-4o-mini" },
+  { role = "reviewer", provider = "anthropic", model = "claude-sonnet-4-20250514" }
+]
+```
+
+---
+
+## `[knowledge]` Table
+
+Include extra project documentation or remote documentation pages into agent prompts:
+
+```toml
+[knowledge]
+doc_globs        = ["docs/**/*.md", "README.md", "ARCHITECTURE.md"]
+urls             = ["https://example.com/api-spec.md"]
+max_source_chars = 8000 # Truncation limit per document
+```

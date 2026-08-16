@@ -1,0 +1,27 @@
+---
+title: Worktree Backend
+description: Host-level execution using isolated Git worktrees without containers.
+sidebar:
+  order: 3
+  label: Worktree Backend
+---
+
+# Worktree Backend
+
+In environments where Docker or Podman cannot run (such as certain constrained CI runners or machines without virtualization support), NIKI provides a fallback **Worktree Backend**.
+
+```bash
+niki run "Refactor helper functions" --backend worktree
+```
+
+---
+
+## How It Works
+
+1. NIKI creates an isolated Git worktree under `.niki/worktrees/<task-id>`.
+2. Code modifications and tests run as direct host processes inside that worktree directory.
+3. Once completed, NIKI converts the worktree commit into the target `niki/<id>` branch and cleans up the temporary directory.
+
+<Callout type="warning">
+  **Security Notice:** The `worktree` backend executes commands directly with your user account privileges without container isolation or capability dropping. Only use this mode with trusted codebases and verified LLM endpoints.
+</Callout>

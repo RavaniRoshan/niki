@@ -1,0 +1,44 @@
+---
+title: Providers Overview
+description: BYOK multi-provider routing and architecture in NIKI.
+sidebar:
+  order: 1
+  label: Providers Overview
+---
+
+# BYOK & Multi-Provider Architecture
+
+NIKI is built with a **Bring Your Own Keys (BYOK)** philosophy. You are never locked into a single model vendor or proprietary proxy.
+
+Each agent role in the pipeline can be mapped to an entirely different provider and model:
+
+```toml
+# Mix providers freely across roles
+[agents.planner]
+provider = "anthropic"
+model    = "claude-sonnet-4-20250514"
+
+[agents.coder]
+provider = "anthropic"
+model    = "claude-sonnet-4-20250514"
+
+[agents.tester]
+provider = "openai"
+model    = "gpt-4o-mini"
+
+[agents.reviewer]
+provider = "anthropic"
+model    = "claude-sonnet-4-20250514"
+```
+
+---
+
+## Supported Providers
+
+* **Anthropic:** Claude 3.5 Sonnet, Claude 3.7 Sonnet, Claude 3.5 Haiku.
+* **OpenAI:** GPT-4o, GPT-4o-mini, o1, o3-mini.
+* **OpenRouter:** Universal gateway accessing hundreds of models with unified billing.
+* **NVIDIA NIM & Together AI:** Fast inference on open-weights models (DeepSeek-R1, Llama-3.3-70B, Qwen-2.5-Coder).
+* **Groq:** Ultra-low latency inference for quick Tester and single-agent passes.
+* **Google Gemini:** Gemini 1.5 Pro, Gemini 2.0 Flash.
+* **Ollama:** 100% offline, local GPU inference.

@@ -1,0 +1,40 @@
+---
+title: niki run
+description: Command reference, flags, and options for niki run.
+sidebar:
+  order: 2
+  label: niki run
+---
+
+# `niki run`
+
+Executes an end-to-end task through the multi-agent pipeline.
+
+```bash
+niki run <DESCRIPTION> [OPTIONS]
+```
+
+---
+
+## Arguments
+
+* `<DESCRIPTION>`: Natural language description of the coding task, feature, or bug fix.
+
+---
+
+## Options & Flags
+
+| Flag | Type | Description | Default |
+|---|---|---|---|
+| `--project <PATH>` | Path | Path to target project repository | `.` |
+| `--branch <NAME>` | String | Explicit custom output branch name | `niki/<task-id>` |
+| `--backend <KIND>` | `docker` \| `worktree` | Sandbox execution backend | `docker` |
+| `--max-rounds <N>` | Integer | Maximum revision rounds between Reviewer and Coder | `3` |
+| `--planner-model <M>` | String | Override model for the Planner stage | Config value |
+| `--coder-model <M>` | String | Override model for the Coder stage | Config value |
+| `--tester-model <M>` | String | Override model for the Tester stage | Config value |
+| `--reviewer-model <M>` | String | Override model for the Reviewer stage | Config value |
+| `--dry-run` | Flag | Generate plan and diff without applying or committing | `false` |
+| `--tui` | Flag | Launch interactive rich terminal dashboard | `false` |
+| `--quiet` | Flag | Suppress progress output and print only final branch/verdict | `false` |
+| `--verbose` | Flag | Enable debug-level execution traces | `false` |

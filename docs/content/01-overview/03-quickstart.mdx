@@ -1,0 +1,88 @@
+---
+title: Quickstart
+description: Get up and running with NIKI in under 5 minutes.
+sidebar:
+  order: 3
+  label: Quickstart
+---
+
+# Quickstart
+
+Get your first verified branch with NIKI in under five minutes.
+
+---
+
+## Prerequisites
+
+1. **Rust:** Rust 1.85+ (2024 edition) installed.
+2. **Container Engine:** [Podman](https://podman.io) (recommended) or [Docker](https://docs.docker.com/get-docker/) running in rootless mode.
+3. **LLM API Key:** At least one API key from Anthropic, OpenAI, OpenRouter, Google, or a local Ollama instance.
+
+---
+
+## Step 1: Build the Sandbox Image
+
+NIKI executes code and test suites inside a hardened container image with `git`, `node`, `npm`, `python3`, `rustc`, and `cargo` pre-installed.
+
+```bash
+# Build sandbox image using Podman or Docker
+podman build -t niki-sandbox:24.04 -f docker/Dockerfile .
+# or: docker build -t niki-sandbox:24.04 -f docker/Dockerfile .
+```
+
+---
+
+## Step 2: Configure Your API Key
+
+Create `niki.toml` in your project root or set environment variables:
+
+```bash
+cp niki.example.toml niki.toml
+```
+
+Set your API key via environment variable (takes precedence over config file):
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+# or export OPENAI_API_KEY=sk-...
+# or export GOOGLE_API_KEY=AIza...
+```
+
+---
+
+## Step 3: Run Your First Task
+
+Describe what you want to implement in plain English:
+
+```bash
+niki run "Add a GET /health endpoint returning { status: 'ok', uptime }" --project ./my-app
+```
+
+Watch the pipeline execute across all four stages:
+
+```text
+ ◈ ⟠ ◉ ◆   NIKI
+   "Add a GET /health endpoint…"
+
+ [Planner]   Done — Spec: 1 file to modify
+ [Coder]     Done — Changed 1 file · src/api.rs [modified]
+ [Tester]    Done — 8/8 tests passed
+ [Reviewer]  Done — Approved · correctness 10/10 · quality 9/10 · coverage 10/10
+ [NIKI]      Task complete — Branch: niki/6d281d6d · Verdict: Approved · Revisions: 0
+```
+
+---
+
+## Step 4: Review and Merge
+
+Switch to the generated branch in your target project to inspect the code:
+
+```bash
+git -C ./my-app switch niki/6d281d6d
+```
+
+View the complete decision audit report:
+
+```bash
+niki report 6d281d6d
+```

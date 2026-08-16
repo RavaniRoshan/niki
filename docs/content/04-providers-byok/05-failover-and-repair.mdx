@@ -1,0 +1,38 @@
+---
+title: Failovers & JSON Repair
+description: Resilient model fallbacks, rate limit retries, and automatic schema repair.
+sidebar:
+  order: 5
+  label: Failovers & JSON Repair
+---
+
+# Failover Chains & Automatic JSON Repair
+
+Production agent pipelines must withstand upstream API outages, transient rate limits (HTTP 429), and syntax errors in LLM JSON generation.
+
+---
+
+## Fallback Failover Chains
+
+You can define ordered fallback model lists per agent role in `niki.toml`. If the primary model returns a 5xx server error, rate limit timeout, or fails after retries, NIKI seamlessly fails over to the next configured fallback:
+
+```toml
+[agents.planner]
+provider  = "anthropic"
+model     = "claude-sonnet-4-20250514"
+fallbacks = [
+  { provider = "openai", model = "gpt-4o" },
+  { provider = "openrouter", model = "deepseek/deepseek-r1" }
+]
+```
+
+---
+
+## Automatic JSON Repair
+
+Agents frequently return markdown-wrapped JSON code fences (` ```json `), trailing commas, or unescaped quotes.
+
+NIKI includes a deterministic AST-based JSON repair engine:
+1. Strips markdown fences, preamble text, and comments.
+2. Fixes trailing commas and missing bracket closures.
+3. Attempts multi-pass schema re-parsing before triggering an agent retry prompt.
