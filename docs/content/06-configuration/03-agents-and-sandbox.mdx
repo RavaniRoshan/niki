@@ -1,0 +1,50 @@
+---
+title: Agents & Docker
+description: Configuring [agents.*], [docker], and [security] tables in niki.toml.
+sidebar:
+  order: 3
+  label: Agents & Docker
+---
+
+# `[agents]` and `[docker]`
+
+Configure agent model parameters and container sandbox constraints.
+
+---
+
+## `[agents.<role>]` Table
+
+Roles: `planner`, `coder`, `tester`, `reviewer`, `synthesizer`, `security_auditor`, `red`.
+
+```toml
+[agents.planner]
+provider     = "anthropic"
+model        = "claude-sonnet-4-20250514"
+max_tokens   = 8192
+temperature  = 0.2
+fallbacks    = [
+  { provider = "openai", model = "gpt-4o" }
+]
+
+[agents.tester]
+provider     = "openai"
+model        = "gpt-4o-mini"
+test_command = "npm test -- --bail" # Explicit test runner override
+```
+
+---
+
+## `[docker]` Table
+
+```toml
+[docker]
+backend          = "docker"             # "docker" or "podman"
+base_image       = "niki-sandbox:24.04" # Container base image
+memory_limit     = "2g"                 # Max memory
+cpu_limit        = 2.0                  # Max CPU cores
+pids_limit       = 512                  # Max processes
+cap_drop_all     = true                 # Drops Linux capabilities
+network_disabled = true                 # Isolates network egress
+readonly_rootfs  = false                # Prevents rootfs mutation
+extra_packages   = ["nodejs", "npm", "python3"]
+```

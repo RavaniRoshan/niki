@@ -1,0 +1,49 @@
+---
+title: status, report, dashboard
+description: Inspecting task status, reading reports, and opening review dashboards.
+sidebar:
+  order: 3
+  label: status, report, dashboard
+---
+
+# `status`, `report`, and `dashboard`
+
+Inspect task executions, audit decisions, and view visual diffs.
+
+---
+
+## `niki status`
+
+Displays the live or most recent task status, current active stage, revision counts, and generated branch names.
+
+```bash
+niki status
+```
+
+---
+
+## `niki report`
+
+Renders the complete `report.md` decision trail for a task. Accepts full task UUIDs or unique short prefixes.
+
+```bash
+# View report for latest task
+niki report
+
+# View report for specific task prefix
+niki report 6d281d6d
+```
+
+---
+
+## `niki dashboard`
+
+Generates or opens a standalone, static HTML visual diff and review dashboard in your default browser.
+
+```bash
+# Open interactive diff dashboard for latest task
+niki dashboard
+
+# Output path to HTML file without opening browser
+niki dashboard --path-only
+```

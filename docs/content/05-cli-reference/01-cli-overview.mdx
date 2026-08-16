@@ -1,0 +1,43 @@
+---
+title: CLI Overview
+description: Complete inventory of all 16 NIKI CLI commands.
+sidebar:
+  order: 1
+  label: CLI Overview
+---
+
+# NIKI CLI Command Overview
+
+NIKI ships with 16 top-level CLI commands organized into 4 logical categories:
+
+---
+
+## 1. Pipeline & Task Execution
+* **`niki run <task>`**: Execute an end-to-end multi-agent coding task.
+* **`niki status`**: Display status, current stage, and verdict of the active or latest task.
+* **`niki report [id]`**: Render the markdown decision trail report.
+* **`niki dashboard [id]`**: Launch or locate the visual HTML diff & review dashboard.
+
+---
+
+## 2. Configuration, Auth & Diagnostics
+* **`niki config`**: Initialize or validate configuration files and export JSON schemas.
+* **`niki auth`**: Manage secure credentials stored in the OS keyring (`login`, `logout`, `status`).
+* **`niki providers`**: Health check all configured LLM provider connections.
+* **`niki doctor`**: Complete system diagnostic suite across dependencies, containers, and permissions.
+* **`niki recommend`**: AI-assisted model recommendation based on cost/reasoning tradeoffs.
+
+---
+
+## 3. Autonomous Agents & Memory
+* **`niki goal`**: Autonomous long-running goal runner with self-healing and drift recovery.
+* **`niki memory`**: Inspect, query, tag, or prune hierarchical cross-session project memory.
+* **`niki research <query>`**: Autonomous web search & cited technical summary generator.
+
+---
+
+## 4. Interactive TUI, Benchmarking & Verification
+* **`niki chat`**: Interactive terminal chat interface with streaming markdown and slash commands.
+* **`niki smoke`**: End-to-end smoke testing harness for pipeline verification.
+* **`niki eval`**: Benchmark NIKI on seeded defect datasets.
+* **`niki verify`**: Visual screenshot regression testing and manifest tracking.

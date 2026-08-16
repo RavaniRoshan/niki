@@ -1,0 +1,51 @@
+---
+title: Local Ollama
+description: Running NIKI 100% offline with local GPU inference.
+sidebar:
+  order: 4
+  label: Local Ollama
+---
+
+# Local Offline Inference with Ollama
+
+Run NIKI completely offline without sending any code or prompts to external cloud providers.
+
+---
+
+## 1. Start Ollama
+
+Ensure Ollama is running locally:
+
+```bash
+ollama serve
+ollama pull qwen2.5-coder:32b
+```
+
+---
+
+## 2. Configure `niki.toml`
+
+Point provider configuration to your local Ollama endpoint:
+
+```toml
+[providers.ollama]
+base_url      = "http://localhost:11434/v1"
+api_key       = "ollama"  # placeholder string required by client
+default_model = "qwen2.5-coder:32b"
+
+[agents.planner]
+provider = "ollama"
+model    = "qwen2.5-coder:32b"
+
+[agents.coder]
+provider = "ollama"
+model    = "qwen2.5-coder:32b"
+
+[agents.tester]
+provider = "ollama"
+model    = "qwen2.5-coder:32b"
+
+[agents.reviewer]
+provider = "ollama"
+model    = "qwen2.5-coder:32b"
+```

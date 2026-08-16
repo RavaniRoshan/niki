@@ -1,0 +1,38 @@
+---
+title: Benchmarks & Evals
+description: Running niki eval against seeded defect datasets and regression suites.
+sidebar:
+  order: 2
+  label: Benchmarks & Evals
+---
+
+# Benchmarks & Evaluations
+
+Test NIKI against real-world defect benchmarks using `niki eval`.
+
+---
+
+## Dataset Format (`evals/dataset.toml`)
+
+Evaluations are driven by transparent dataset files defining target tasks, test assertions, and difficulty levels:
+
+```toml
+[[tasks]]
+id          = "defect-001"
+category    = "api-endpoint"
+difficulty  = "Medium"
+description = "Add pagination to GET /items endpoint with limit and offset query parameters."
+test_file   = "tests/api_pagination_test.js"
+```
+
+---
+
+## Running Evaluations
+
+```bash
+# Run 5 seeded evaluations
+niki eval --dataset evals/dataset.toml --limit 5
+
+# Benchmark with live provider execution and output report
+niki eval --dataset evals/dataset.toml --live --out evals/report.json
+```

@@ -1,0 +1,53 @@
+---
+title: Specialized Agents
+description: Red Agent debate, Parallel Coders, and Security Auditor.
+sidebar:
+  order: 6
+  label: Specialized Agents
+---
+
+# Specialized & Opt-In Agents
+
+Beyond the core 4-agent pipeline, NIKI supports advanced specialized agent stages configured in `niki.toml`.
+
+---
+
+## 1. Red/Blue Adversarial Agent (`[red_blue]`)
+
+When enabled, a **Red Agent** inspects the Coder's diff before the Reviewer sees it. Its sole goal is to find edge-case vulnerabilities, silent logic flaws, and performance hazards.
+
+The Reviewer is then required to explicitly evaluate, uphold, or refute each of the Red Agent's challenges.
+
+```toml
+[red_blue]
+enabled  = true
+provider = "anthropic"
+model    = "claude-sonnet-4-20250514"
+```
+
+---
+
+## 2. Parallel Coders & Synthesizer (`[parallel]`)
+
+For complex architectural tasks, NIKI can spawn $N$ concurrent Coder agents working independently in isolated Git worktrees.
+
+A **Synthesizer** agent then merges the best ideas and approaches from all solutions into a single unified diff.
+
+```toml
+[parallel]
+enabled     = true
+coder_count = 3
+```
+
+---
+
+## 3. Security Auditor (`[security]`)
+
+A dedicated security pass that scans diffs for hardcoded secrets, injection vectors, unauthorized file access, and memory safety issues before tests or commits execute.
+
+```toml
+[security]
+enabled  = true
+provider = "anthropic"
+model    = "claude-sonnet-4-20250514"
+```

@@ -1,0 +1,41 @@
+---
+title: Spend Caps & Auth
+description: Mid-run spend ceilings, cost protection, and OS keyring credentials.
+sidebar:
+  order: 5
+  label: Spend Caps & Auth
+---
+
+# Spend Caps & Authentication
+
+NIKI provides built-in cost controls and secure credential management.
+
+---
+
+## Mid-Run Spend Cap (`spend_cap_usd`)
+
+To prevent runaway LLM costs or unexpected loop charges, NIKI tracks token consumption after every agent stage.
+
+If the estimated cumulative cost exceeds `general.spend_cap_usd`, NIKI immediately aborts the run, avoids creating broken git branches, and outputs a diagnostic error:
+
+```toml
+[general]
+spend_cap_usd = 2.50 # Aborts run if cost exceeds $2.50 USD
+```
+
+---
+
+## OS Keyring Credential Storage
+
+Rather than storing plaintext API keys in your repository or configuration files, use `niki auth login` to store credentials in your operating system's native secure keyring (Apple Keychain, Windows Credential Manager, Linux Secret Service):
+
+```bash
+# Log in to a provider securely
+niki auth login --provider anthropic
+
+# Check status of saved credentials
+niki auth status
+
+# Log out / remove key
+niki auth logout --provider anthropic
+```

@@ -1,0 +1,44 @@
+---
+title: Docker & Podman Sandbox
+description: Hardened container execution, resource limits, and network isolation.
+sidebar:
+  order: 2
+  label: Docker & Podman Sandbox
+---
+
+# Docker & Podman Sandbox
+
+NIKI's primary execution backend runs in rootless Podman or Docker containers.
+
+---
+
+## Configuration (`[docker]`)
+
+Control memory quotas, CPU limits, capabilities, and network behavior in `niki.toml`:
+
+```toml
+[docker]
+backend          = "docker"              # "docker" or "podman"
+base_image       = "niki-sandbox:24.04"  # base image
+memory_limit     = "2g"                  # memory limit
+cpu_limit        = 2.0                   # max CPU cores
+pids_limit       = 512                   # max child processes (fork bomb guard)
+cap_drop_all     = true                  # drops all Linux capabilities
+network_disabled = true                  # blocks all outbound network traffic
+readonly_rootfs  = false                 # enables read-only root filesystem
+extra_packages   = ["nodejs", "npm", "python3"]
+```
+
+---
+
+## Network Egress Control
+
+By default, `network_disabled = true` prevents agent-generated code from sending outbound network requests or exfiltrating data.
+
+If your tests require downloading dependencies or reaching specific staging servers, configure a strict `network_allowlist`:
+
+```toml
+[docker]
+network_disabled  = false
+network_allowlist = ["registry.npmjs.org", "crates.io", "pypi.org"]
+```

@@ -1,0 +1,66 @@
+---
+title: Advanced Tables
+description: Configuring [goal], [mcp], [ui], [session], and [compaction] in niki.toml.
+sidebar:
+  order: 4
+  label: Advanced Tables
+---
+
+# Advanced Configuration Tables
+
+Advanced operational tables in `niki.toml`.
+
+---
+
+## `[goal]` Table
+
+Autonomous multi-step goal execution:
+
+```toml
+[goal]
+max_iterations = 25
+branch_prefix  = "niki-goal/"
+state_dir      = ".niki/goals"
+fail_fast      = false
+retry_attempts = 3
+retry_delay_ms = 1000
+```
+
+---
+
+## `[mcp]` Table
+
+Integrate external Model Context Protocol tool servers into NIKI agents:
+
+```toml
+[mcp]
+enabled    = true
+timeout_ms = 30000
+
+[[mcp.servers]]
+name    = "github"
+command = "npx"
+args    = ["-y", "@modelcontextprotocol/server-github"]
+env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_..." }
+```
+
+---
+
+## `[ui]`, `[session]`, and `[compaction]`
+
+```toml
+[ui]
+theme      = "auto" # "auto" | "dark" | "light"
+tips       = true
+transcript = true
+
+[session]
+enabled      = true
+max_sessions = 50
+auto_save    = true
+
+[compaction]
+enabled         = true
+threshold_pct   = 85 # Trigger compaction when 85% of model context is filled
+reserved_tokens = 4096
+```

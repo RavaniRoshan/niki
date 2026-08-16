@@ -1,0 +1,39 @@
+---
+title: Security Architecture
+description: The defense-in-depth isolation and security posture of NIKI.
+sidebar:
+  order: 1
+  label: Security Architecture
+---
+
+# Security Architecture & Posture
+
+NIKI treats all repositories and agent-generated commands as untrusted input.
+
+To protect developer machines and production codebases, NIKI enforces a strict multi-layer defense-in-depth security model:
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                      Host Environment                       │
+│  - OS Keyring for credentials (never bundled in repo)       │
+│  - Spend Caps enforced mid-run ($USD ceiling)               │
+│  - Clean Git branch separation (main branch untouched)      │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Bind-mount copy
+┌──────────────────────────────▼──────────────────────────────┐
+│            Rootless Podman / Docker Container               │
+│  - Dropped Linux Capabilities (`CapDrop ALL`)               │
+│  - PID Limit (512 max processes)                            │
+│  - Memory & CPU quotas (2GB RAM, 2.0 Cores)                 │
+│  - Blocked network egress by default                        │
+│  - Global command deny-list (`curl | sh`, `rm -rf /`)       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Security Invariants
+
+1. **Zero Telemetry:** NIKI makes zero background tracking or telemetry requests. Network outbound calls are strictly limited to your designated LLM endpoints.
+2. **Secret Redaction:** API keys, passwords, and sensitive environment variables are automatically masked and redacted from logs, JSON artifacts, and markdown reports.
+3. **No Root Privileges:** All containerized operations run under an unprivileged, non-root user account inside rootless Podman/Docker.

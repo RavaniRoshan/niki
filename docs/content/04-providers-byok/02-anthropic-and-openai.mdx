@@ -1,0 +1,47 @@
+---
+title: Anthropic & OpenAI
+description: Configuring Anthropic Claude and OpenAI models in NIKI.
+sidebar:
+  order: 2
+  label: Anthropic & OpenAI
+---
+
+# Anthropic & OpenAI Setup
+
+Anthropic and OpenAI provide the foundational high-reasoning models for NIKI.
+
+---
+
+## Anthropic Configuration
+
+Set your environment variable:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-api03-..."
+```
+
+Or configure in `niki.toml`:
+
+```toml
+[providers.anthropic]
+api_key       = "sk-ant-..."
+default_model = "claude-sonnet-4-20250514"
+```
+
+---
+
+## OpenAI Configuration
+
+Set your environment variable:
+
+```bash
+export OPENAI_API_KEY="sk-proj-..."
+```
+
+Or configure in `niki.toml`:
+
+```toml
+[providers.openai]
+api_key       = "sk-..."
+default_model = "gpt-4o"
+```

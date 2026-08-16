@@ -1,0 +1,38 @@
+---
+title: Configuration Guide
+description: Understanding niki.toml format, precedence, and IDE schema integration.
+sidebar:
+  order: 1
+  label: Configuration Guide
+---
+
+# `niki.toml` Configuration Guide
+
+NIKI reads configuration from `niki.toml` located in the root of your repository.
+
+---
+
+## Precedence Order
+
+NIKI resolves configuration values using strict precedence:
+
+1. **CLI Flags** (e.g. `--planner-model claude-sonnet-4-20250514`, `--backend worktree`)
+2. **Environment Variables** (e.g. `ANTHROPIC_API_KEY`, `OPENAI_MODEL`)
+3. **OS Keyring** (`niki auth login`)
+4. **Project `niki.toml`** in current working directory
+5. **Built-in Defaults**
+
+---
+
+## IDE Schema Integration
+
+To enable schema validation, hover docs, and autocompletion in VS Code, add the schema comment at the top of your `niki.toml`:
+
+```toml
+#:schema https://raw.githubusercontent.com/RavaniRoshan/niki/master/schemas/niki.schema.json
+
+[general]
+max_revision_rounds = 3
+output_dir          = ".niki"
+spend_cap_usd       = 5.0
+```

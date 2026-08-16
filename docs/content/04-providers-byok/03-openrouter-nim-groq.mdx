@@ -1,0 +1,50 @@
+---
+title: OpenRouter, NIM & Groq
+description: Configuring alternative cloud inference providers in NIKI.
+sidebar:
+  order: 3
+  label: OpenRouter, NIM & Groq
+---
+
+# OpenRouter, NVIDIA NIM & Groq
+
+NIKI supports any OpenAI-compatible provider through custom `base_url` settings.
+
+---
+
+## OpenRouter
+
+OpenRouter routes to hundreds of open and proprietary models under a single API key:
+
+```toml
+[providers.openrouter]
+base_url      = "https://openrouter.ai/api/v1"
+api_key       = "sk-or-v1-..."
+default_model = "deepseek/deepseek-r1"
+```
+
+---
+
+## NVIDIA NIM
+
+Run enterprise accelerated open models with NVIDIA NIM:
+
+```toml
+[providers.nvidia]
+base_url      = "https://integrate.api.nvidia.com/v1"
+api_key       = "nvapi-..."
+default_model = "meta/llama-3.3-70b-instruct"
+```
+
+---
+
+## Groq
+
+Ultra-low latency inference for high-speed coding passes:
+
+```toml
+[providers.groq]
+base_url      = "https://api.groq.com/openai/v1"
+api_key       = "gsk_..."
+default_model = "llama-3.3-70b-versatile"
+```

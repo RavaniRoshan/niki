@@ -1,0 +1,26 @@
+---
+title: Proof, Not Promises
+description: The transparency and verification standard behind NIKI.
+sidebar:
+  order: 1
+  label: Proof, Not Promises
+---
+
+# "Proof, Not Promises" Audit Standard
+
+In the AI coding ecosystem, benchmark numbers are often exaggerated, cherry-picked, or run on contrived toy tasks.
+
+NIKI operates under a strict principle: **Proof, Not Promises**.
+
+---
+
+## The Audit Trail
+
+Every time NIKI runs, it produces a cryptographic and auditable record in `.niki/`:
+
+1. **`report.md`**: Human-readable executive summary of the decisions, scores, and revisions.
+2. **`changes.patch`**: Exact unified diff applied to the working tree.
+3. **`safety_proof.json`**: Manifest certifying which deny-list checks, capability drops, and spend caps were validated.
+4. **`test_execution.json`**: In-container execution transcripts containing real exit codes and test runner outputs.
+
+No task is considered complete until all four artifacts are generated.

@@ -1,0 +1,45 @@
+---
+title: Troubleshooting
+description: Diagnosing common container socket errors, provider timeouts, and permissions.
+sidebar:
+  order: 4
+  label: Troubleshooting
+---
+
+# Troubleshooting & FAQ
+
+Common diagnostic solutions and answers to frequent questions.
+
+---
+
+## 1. Container Socket Not Found
+
+**Symptom:** `Error: Could not connect to Podman/Docker socket`
+
+**Solution:**
+* **Podman:** Ensure the user socket is running:
+  ```bash
+  systemctl --user enable --now podman.socket
+  export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"
+  ```
+* **Docker:** Ensure Docker Desktop or dockerd is running and your user is in the `docker` group.
+
+---
+
+## 2. Spend Cap Exceeded Mid-Run
+
+**Symptom:** `Error: Spend cap exceeded ($2.50 USD ceiling reached)`
+
+**Solution:**
+* Increase `general.spend_cap_usd` in `niki.toml`.
+* Switch high-frequency stages (like `agents.tester`) to more cost-effective models (`gpt-4o-mini`, `claude-3-5-haiku`).
+
+---
+
+## 3. Rate Limit Errors (HTTP 429)
+
+**Symptom:** `Error: Provider rate limit exceeded`
+
+**Solution:**
+* Define `fallbacks` for the agent role in `niki.toml`.
+* Configure exponential backoff and jitter options in your provider settings.

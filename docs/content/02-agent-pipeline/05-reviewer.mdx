@@ -1,0 +1,40 @@
+---
+title: Reviewer Agent
+description: The Reviewer agent role, multi-criteria scoring, and revision control.
+sidebar:
+  order: 5
+  label: Reviewer Agent
+---
+
+# The Reviewer Agent (`◆`)
+
+The **Reviewer** acts as the senior software engineering lead on the pipeline. It evaluates the combined output of the Planner, Coder, and Tester before any code is committed.
+
+---
+
+## Evaluation Criteria & Scoring
+
+The Reviewer scores the change across 4 core dimensions on a scale from 1 to 10:
+
+1. **Correctness (1–10):** Does the code accurately satisfy all requirements without introducing regressions?
+2. **Code Quality (1–10):** Is the code idiomatic, clean, maintainable, and conformant with the project's conventions?
+3. **Test Coverage (1–10):** Are edge cases, error conditions, and happy paths adequately verified?
+4. **Spec Adherence (1–10):** Did the Coder follow the constraints defined in the `TaskSpec`?
+
+---
+
+## Verdicts & Revision Loops
+
+The Reviewer issues one of three verdicts in its `ReviewVerdict` artifact:
+
+* **`Approved`:** The code meets quality and correctness thresholds. NIKI commits the branch and writes `report.md`.
+* **`RevisionNeeded`:** Issues were discovered. The Reviewer provides specific actionable feedback and kicks off revision round $N+1$ back to the Coder (up to `general.max_revision_rounds`).
+* **`Rejected`:** Fundamental architectural flaw or irreparable defect. The task terminates with a descriptive audit report.
+
+```toml
+[agents.reviewer]
+provider    = "anthropic"
+model       = "claude-sonnet-4-20250514"
+max_tokens  = 8192
+temperature = 0.1
+```

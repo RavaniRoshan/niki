@@ -1,0 +1,32 @@
+---
+title: Coder Agent
+description: The Coder agent role, CodeDiff generation, and hunk-based editing.
+sidebar:
+  order: 3
+  label: Coder Agent
+---
+
+# The Coder Agent (`⟠`)
+
+The **Coder** receives the `TaskSpec` produced by the Planner and generates precise code modifications.
+
+---
+
+## What the Coder Does
+
+1. **Focused Implementation:** Implements only the files and modifications specified in the `TaskSpec`. It is instructed not to introduce unsolicited refactors or unrelated changes.
+2. **Unified Diff Generation:** Emits structured search/replace hunks (`CodeDiff`) with exact indentation and context lines.
+3. **Spec Adherence Check:** Explains how each change satisfies the specific acceptance criteria defined by the Planner.
+4. **Handling Feedback:** When the Reviewer rejects a draft or requests changes, the Coder receives the `ReviewFeedback` artifact and writes a targeted revision without starting from scratch.
+
+---
+
+## Recommended Configuration
+
+```toml
+[agents.coder]
+provider    = "anthropic"
+model       = "claude-sonnet-4-20250514"
+max_tokens  = 8192
+temperature = 0.2
+```

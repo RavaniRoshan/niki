@@ -1,0 +1,61 @@
+---
+title: Pipeline Overview
+description: Architecture of the NIKI multi-agent pipeline and artifact contracts.
+sidebar:
+  order: 1
+  label: Pipeline Overview
+---
+
+# Multi-Agent Pipeline Overview
+
+At the heart of NIKI is an autonomous pipeline where each stage is handled by a specialized LLM agent.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant P as ◈ Planner
+    participant C as ⟠ Coder
+    participant T as ◉ Tester
+    participant R as ◆ Reviewer
+    participant Git as Git Repo
+
+    User->>P: niki run "Task Description"
+    Note over P: Inspects workspace & files
+    P->>C: TaskSpec (JSON)
+    Note over C: Writes unified diff
+    C->>T: CodeDiff (JSON)
+    Note over T: Generates & executes tests in container
+    T->>R: TestReport (JSON)
+    Note over R: Audits correctness, quality, coverage
+    alt Revision Needed
+        R-->>C: ReviewFeedback (JSON)
+        Note over C: Adjusts diff based on reviewer feedback
+    else Approved
+        R->>Git: Commit to niki/<id> branch
+        Git-->>User: Report, Patch & Artifacts
+    end
+```
+
+---
+
+## Artifact Contract
+
+Agents never exchange unstructured conversation logs. Every stage takes a validated JSON input and produces a validated JSON output:
+
+| Producer | Consumer | Artifact | Schema / Purpose |
+|---|---|---|---|
+| **Planner** | Coder | `TaskSpec` | Problem summary, files to touch, approach, acceptance criteria, constraints |
+| **Coder** | Tester, Sandbox | `CodeDiff` | Search/replace hunk edits, rationale, spec adherence verification |
+| **Tester** | Reviewer | `TestReport` | Synthesized tests, test execution results, pass/fail status, coverage summary |
+| **Reviewer** | Orchestrator, Coder | `ReviewVerdict` | Approved / RevisionNeeded / Rejected, quality scores, granular feedback |
+
+---
+
+## Topology Modes
+
+In `niki.toml`, you can configure how tasks route through the pipeline:
+
+* **`Auto` (Default):** Evaluates task complexity during the planning stage. Low-complexity, single-line or documentation fixes take a fast-path single-agent route, while multi-file or architectural changes run the full 4-agent pipeline.
+* **`MultiAgent`:** Strictly forces all tasks through the full Planner → Coder → Tester → Reviewer sequence.
+* **`SingleAgent`:** Runs Coder solo without formal Tester/Reviewer revision loops.

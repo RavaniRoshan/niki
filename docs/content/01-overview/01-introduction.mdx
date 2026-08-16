@@ -1,0 +1,25 @@
+---
+title: Introduction
+description: Overview of NIKI and its multi-agent architecture.
+sidebar:
+  order: 1
+  label: Introduction
+---
+
+# Introduction to NIKI
+
+NIKI is an autonomous, hermetic multi-agent coding engine written in Rust (2024 edition).
+
+It is designed to solve a fundamental problem in AI-assisted software development: **the babysitting tax of single-agent chat interfaces**.
+
+Instead of interacting in a single long conversation where a single LLM writes code, overlooks bugs, and confirms its own assumptions, NIKI runs an autonomous multi-stage pipeline of role-isolated agents inside an unprivileged container.
+
+---
+
+## Core Tenets
+
+1. **Multi-Agent, Not Monolithic:** Planning, coding, test synthesis, and code review are separate agents with isolated system prompts, role constraints, and independent model selections.
+2. **Context Isolation:** Agents do not share chat history. They communicate strictly through structured, typed JSON schemas (`TaskSpec`, `CodeDiff`, `TestReport`, `ReviewVerdict`).
+3. **Hermetic Sandboxing:** All code modifications and test executions occur inside an ephemeral rootless container bind-mounted to a temporary copy of your repository.
+4. **Git Branch Output:** The output of every run is a real Git branch (`niki/<id>`) containing a conventional commit, unified diff (`changes.patch`), and an audit trail (`report.md`).
+5. **BYOK (Bring Your Own Keys):** No bundled gateways or lock-in. Connect directly to Anthropic, OpenAI, OpenRouter, NVIDIA NIM, Together AI, Groq, DeepSeek, Google Gemini, or run offline with Ollama.

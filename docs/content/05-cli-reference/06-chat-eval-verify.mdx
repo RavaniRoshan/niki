@@ -1,0 +1,53 @@
+---
+title: chat, eval, verify
+description: Interactive TUI chat session, benchmarking harness, and screenshot verification.
+sidebar:
+  order: 6
+  label: chat, eval, verify
+---
+
+# `chat`, `eval`, and `verify`
+
+Interactive terminal interfaces, seeded benchmarks, and visual verification.
+
+---
+
+## `niki chat`
+
+Launches a terminal user interface (TUI) powered by `ratatui` for interactive pair programming:
+
+```bash
+niki chat
+```
+
+### Supported Slash Commands
+* `/compact`: Compact session history to save token context.
+* `/model`: Switch models or providers on the fly.
+* `/cost`: Inspect session token usage and estimated spend.
+* `/memory store <fact>`: Persist context into project memory.
+* `/undo` / `/redo`: Revert or reapply previous agent steps.
+* `/export`: Export session transcript to markdown.
+
+---
+
+## `niki eval`
+
+Runs NIKI against standardized or custom defect datasets to benchmark accuracy and revision efficiency:
+
+```bash
+# Run evaluation harness against dataset
+niki eval --dataset evals/dataset.toml --limit 5
+
+# Output machine-readable JSON metrics
+niki eval --dataset evals/dataset.toml --format json --out results.json
+```
+
+---
+
+## `niki verify`
+
+Performs visual UI regression testing by comparing rendered screenshots against baselines:
+
+```bash
+niki verify "Check that the navbar aligns properly on mobile screens" --baseline assets/baseline.png
+```

@@ -1,0 +1,71 @@
+---
+title: config, auth, doctor
+description: Managing settings, credentials, provider health, and diagnostics.
+sidebar:
+  order: 4
+  label: config, auth, doctor
+---
+
+# `config`, `auth`, and `doctor`
+
+Manage project settings, provider credentials, and system diagnostics.
+
+---
+
+## `niki config`
+
+Initialize a new configuration or generate JSON schema definitions for IDE auto-completion.
+
+```bash
+# Interactive configuration setup wizard
+niki config init --interactive
+
+# Print JSON Schema for niki.toml (useful for VS Code / JetBrains schemas)
+niki config schema
+```
+
+---
+
+## `niki auth`
+
+Secure credential management integrated with your operating system keyring.
+
+```bash
+# Log in to a provider
+niki auth login --provider anthropic
+
+# Pipe API key via standard input (CI/CD safe)
+echo "$MY_KEY" | niki auth login --provider openai --stdin
+
+# Check authenticated provider status
+niki auth status
+
+# Log out and erase stored key
+niki auth logout --provider anthropic
+```
+
+---
+
+## `niki doctor`
+
+Runs comprehensive environment diagnostics to detect misconfigurations before running tasks.
+
+```bash
+# Run all diagnostic checks
+niki doctor
+
+# Check specific category
+niki doctor --category sandbox
+niki doctor --category providers
+```
+
+---
+
+## `niki recommend`
+
+Analyzes your project or task and recommends the optimal model distribution across roles based on cost, reasoning, and latency preferences.
+
+```bash
+niki recommend --preference balanced
+niki recommend --role planner --task "Migrate database schema"
+```
