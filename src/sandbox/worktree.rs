@@ -6,7 +6,6 @@ use uuid::Uuid;
 
 use crate::artifacts::types::AgentRole;
 use crate::config::{DockerConfig, SecurityPolicyConfig};
-use crate::permissions::PermissionAction;
 use crate::sandbox::{ExecOutput, Sandbox, check_command_policy};
 
 /// Lightweight sandbox using a `git worktree` of the project plus local
@@ -21,8 +20,6 @@ pub struct WorktreeSandbox {
     pub agent_role: AgentRole,
     task_id: String,
     policy: SecurityPolicyConfig,
-    permission_checker: crate::permissions::PermissionChecker,
-    event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
 }
 
 impl WorktreeSandbox {
@@ -32,7 +29,6 @@ impl WorktreeSandbox {
         task_id: &Uuid,
         _config: &DockerConfig,
         policy: SecurityPolicyConfig,
-        event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
     ) -> Result<Self> {
         let base = source_repo.join(".niki-worktrees");
         std::fs::create_dir_all(&base)?;
@@ -59,13 +55,11 @@ impl WorktreeSandbox {
         .map_err(|e| anyhow!("worktree spawn failed: {e}"))?;
 
         match status {
-            Ok(s) if s.success() =>             Ok(Self {
+            Ok(s) if s.success() => Ok(Self {
                 worktree_path: wt,
                 agent_role,
                 task_id: task_id.to_string(),
-                policy: policy.clone(),
-                permission_checker: crate::sandbox::build_permission_checker(&policy),
-                event_tx,
+                policy,
             }),
             _ => Err(anyhow!(
                 "Failed to create git worktree at {} (is the project a git repo?)",
@@ -220,37 +214,6 @@ impl Sandbox for WorktreeSandbox {
         // F1: Enforce security policy when a role is supplied.
         if role.is_some() {
             check_command_policy(cmd, &self.policy)?;
-            // F1b: Enforce granular permission policy (dead-island PermissionChecker).
-            let full = cmd.join(" ");
-            match self.permission_checker.check_command(&full) {
-                crate::permissions::Permission::Deny => {
-                    return Err(anyhow!(
-                        "Command denied by permission policy: '{}'",
-                        full
-                    ));
-                }
-                crate::permissions::Permission::Ask => {
-                    let (response_tx, response_rx) = std::sync::mpsc::channel();
-                    let request = crate::display::tui::DisplayEvent::PermissionRequest {
-                        command: full.clone(),
-                        response_tx,
-                    };
-                    if self.event_tx.send(request).is_err() {
-                    } else {
-                        let action = tokio::task::block_in_place(|| {
-                            response_rx.recv_timeout(std::time::Duration::from_secs(5))
-                        })
-                        .unwrap_or(PermissionAction::Deny);
-                        if matches!(action, PermissionAction::Deny) {
-                            return Err(anyhow!(
-                                "Command denied by user: '{}'",
-                                full
-                            ));
-                        }
-                    }
-                }
-                crate::permissions::Permission::Allow => {}
-            }
         }
         let wt = self.worktree_path.clone();
         let cmd: Vec<String> = cmd.iter().map(|s| s.to_string()).collect();

@@ -51,14 +51,6 @@ enum Commands {
     Providers(niki::cli::providers::ProvidersArgs),
     /// Run diagnostics to verify installation and configuration
     Doctor(niki::cli::doctor::DoctorArgs),
-    /// Interactive chat session (TUI)
-    Chat(niki::cli::chat::ChatArgs),
-    /// Run a smoke test: quick pipeline check to verify your setup works end-to-end
-    Smoke(niki::cli::smoke::SmokeArgs),
-    /// Search the web and return a cited summary
-    Research(niki::cli::research::ResearchArgs),
-    /// Capture a screenshot for visual verification
-    Verify(niki::cli::verify::VerifyArgs),
 }
 
 #[tokio::main]
@@ -87,10 +79,6 @@ async fn main() -> Result<()> {
         Commands::Auth { command } => niki::cli::auth::handle(command).await?,
         Commands::Providers(args) => niki::cli::providers::handle(args)?,
         Commands::Doctor(args) => niki::cli::doctor::handle(args)?,
-        Commands::Chat(args) => niki::cli::chat::handle(args).await?,
-        Commands::Smoke(args) => niki::cli::smoke::handle(args).await?,
-        Commands::Research(args) => niki::cli::research::handle(args).await?,
-        Commands::Verify(args) => niki::cli::verify::handle(args)?,
     }
 
     Ok(())

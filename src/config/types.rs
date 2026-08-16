@@ -737,21 +737,10 @@ pub struct GeneralConfig {
     #[serde(default = "default_output_dir")]
     pub output_dir: String,
     /// Optional per-run spend ceiling in USD. `0.0` (default) means unlimited.
-    /// When set, NIKI aborts the run if the cumulative estimated cost exceeds
-    /// it before executing the next stage — a hard mid-run guard, not a warning.
+    /// When set, `niki run` prints a warning if the run's estimated cost exceeds it,
+    /// so autonomous runs can't run away on cost. See launch-plan item G9.
     #[serde(default)]
     pub spend_cap_usd: f64,
-    /// Safety guardrail against a single agent runaway. When non-zero, NIKI warns
-    /// in `report.md` if the produced diff exceeds this many changed lines — the
-    /// "encourage smaller incremental changes" control from the agentic-engineering
-    /// checklist. `0` (default) = no limit. The Reviewer is also nudged toward
-    /// smaller diffs when this is set.
-    #[serde(default = "default_max_diff_lines")]
-    pub max_diff_lines: u32,
-}
-
-fn default_max_diff_lines() -> u32 {
-    0
 }
 
 impl Default for GeneralConfig {
@@ -760,7 +749,6 @@ impl Default for GeneralConfig {
             max_revision_rounds: 3,
             output_dir: ".niki".to_string(),
             spend_cap_usd: 0.0,
-            max_diff_lines: 0,
         }
     }
 }
@@ -925,8 +913,8 @@ pub struct DockerConfig {
     /// writable. Adds an extra tamper-resistance layer.
     #[serde(default)]
     pub readonly_rootfs: bool,
-    /// Sandbox backend: `docker` (container, default), or `worktree` (git worktree +
-    /// local process, no Docker).
+    /// Sandbox backend: `docker` (container, default), `worktree` (git worktree +
+    /// local process, no Docker), or `cloud` (NIKI infra, beta).
     #[serde(default)]
     pub backend: SandboxBackend,
 }
@@ -1313,9 +1301,7 @@ impl NikiConfig {
                     "type": "object",
                     "properties": {
                         "max_revision_rounds": {"type": "integer", "default": 3},
-                        "output_dir": {"type": "string", "default": ".niki"},
-                        "spend_cap_usd": {"type": "number", "default": 0.0, "description": "Hard per-run USD ceiling; aborts before the next stage if exceeded."},
-                        "max_diff_lines": {"type": "integer", "default": 0, "description": "Diff-size guardrail; reviewer nudged toward tighter deltas and report.md flags overflows."}
+                        "output_dir": {"type": "string", "default": ".niki"}
                     }
                 },
                 "providers": {
@@ -1348,7 +1334,7 @@ impl NikiConfig {
                         "extra_packages": {"type": "array", "items": {"type": "string"}},
                         "memory_limit": {"type": "string"},
                         "cpu_limit": {"type": "number"},
-                        "backend": {"type": "string", "enum": ["docker", "worktree"]}
+                        "backend": {"type": "string", "enum": ["docker", "worktree", "cloud"]}
                     }
                 },
                 "pipeline": {"type": "object"},

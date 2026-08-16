@@ -1,54 +1,20 @@
-//! Canonical application state for the TUI.
+//! Reactive state management for the conversational chat interface.
 //!
-//! Single source of truth: all views (chat, pages, overlays) read from this state.
-//! Events are dispatched through `apply_display_event()`, triggering re-renders.
+//! Replaces the imperative `apply_event()` pattern with a reactive Store pattern:
+//! - Centralized `AppState` with all UI state
+//! - `Store` manages state mutations and subscriber notifications
+//! - Events are dispatched through the store, triggering re-renders
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use chrono::{DateTime, Utc};
 use ratatui::style::Color;
-use ratatui::text::Line;
 
 use crate::artifacts::types::AgentRole;
 use crate::config::NikiConfig;
-use crate::display::onboarding::OnboardingModal;
 use crate::display::theme;
-use crate::display::tips::TipsBanner;
 use crate::display::tui::DisplayEvent;
-use crate::permissions::PermissionAction;
-
-/// One rendered chat row, with metadata for screen-to-source mapping.
-#[derive(Debug, Clone, Default)]
-pub struct ChatLine {
-    /// Visible plain text (used for copy/selection and screen mapping).
-    pub text: String,
-    /// Rich (markdown-rendered) line, if available. Falls back to `text`.
-    pub rich: Option<Line<'static>>,
-    /// Index into the message source list this row belongs to (`usize::MAX` = chrome).
-    pub msg_index: usize,
-    /// Offset of `text` within that message's source string.
-    pub char_start: usize,
-    /// True if this row is part of the input box (not copyable as a message).
-    pub is_input: bool,
-    /// If this row is a stage header, the stage index it toggles (progressive
-    /// disclosure). `None` for non-toggleable chrome/content rows.
-    pub header_stage: Option<usize>,
-}
-
-/// Modal overlay types.
-#[derive(Debug, Clone)]
-pub enum Modal {
-    Confirm {
-        title: String,
-        message: String,
-    },
-    Error {
-        stage: String,
-        message: String,
-        hint: String,
-    },
-}
 
 /// View mode — chat or page-based.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -58,7 +24,7 @@ pub enum ViewMode {
     Page(PageId),
 }
 
-/// Page identifiers.
+/// Page identifiers (re-exported from pages module for convenience).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PageId {
     Run,
@@ -72,47 +38,9 @@ pub enum PageId {
     Config,
     Help,
     TestLog,
-    Chat,
 }
 
 impl PageId {
-    pub fn all() -> &'static [PageId] {
-        &[
-            PageId::Run,
-            PageId::Pipeline,
-            PageId::Agents,
-            PageId::Diff,
-            PageId::Verdict,
-            PageId::Cost,
-            PageId::Artifacts,
-            PageId::History,
-            PageId::Config,
-            PageId::Help,
-            PageId::TestLog,
-            PageId::Chat,
-        ]
-    }
-
-    pub fn index(&self) -> usize {
-        Self::all().iter().position(|p| p == self).unwrap_or(0)
-    }
-
-    pub fn from_key(c: char) -> Option<PageId> {
-        match c {
-            'p' => Some(PageId::Pipeline),
-            'a' => Some(PageId::Agents),
-            'd' => Some(PageId::Diff),
-            'v' => Some(PageId::Verdict),
-            'c' => Some(PageId::Cost),
-            'f' => Some(PageId::Artifacts),
-            'h' => Some(PageId::History),
-            ',' => Some(PageId::Config),
-            '?' => Some(PageId::Help),
-            'l' => Some(PageId::TestLog),
-            _ => None,
-        }
-    }
-
     pub fn title(&self) -> &'static str {
         match self {
             PageId::Run => "run",
@@ -126,24 +54,6 @@ impl PageId {
             PageId::Config => "config",
             PageId::Help => "help",
             PageId::TestLog => "test_log",
-            PageId::Chat => "chat",
-        }
-    }
-
-    pub fn key_hint(&self) -> &'static str {
-        match self {
-            PageId::Run => "",
-            PageId::Pipeline => "p",
-            PageId::Agents => "a",
-            PageId::Diff => "d",
-            PageId::Verdict => "v",
-            PageId::Cost => "c",
-            PageId::Artifacts => "f",
-            PageId::History => "h",
-            PageId::Config => ",",
-            PageId::Help => "?",
-            PageId::TestLog => "l",
-            PageId::Chat => "tab",
         }
     }
 }
@@ -175,8 +85,6 @@ pub enum InputAction {
     ScrollUp,
     /// Scroll down in chat.
     ScrollDown,
-    /// Toggle expand/collapse of the stage at the cursor.
-    ToggleExpand(usize),
 }
 
 /// Autocomplete state for @ file completion.
@@ -348,12 +256,11 @@ pub enum SystemLevel {
 }
 
 /// Permission request from the agent.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PermissionRequest {
     pub tool_name: String,
     pub command: String,
     pub description: String,
-    pub response_tx: std::sync::mpsc::Sender<PermissionAction>,
 }
 
 /// Slash command definition.
@@ -377,18 +284,13 @@ pub enum CommandAction {
     CycleTheme,
     Help,
     Quit,
-    Undo,
-    Redo,
 }
 
 /// The main application state — single source of truth for the UI.
 #[derive(Debug)]
-/// Canonical application state — single source of truth for the TUI.
 pub struct AppState {
     /// Current view mode (chat or page).
     pub view: ViewMode,
-    /// Current page (for page navigation; mirrors view when ViewMode::Page).
-    pub current_page: PageId,
     /// Scroll offset for chat view.
     pub scroll_offset: usize,
     /// Auto-scroll to bottom on new messages.
@@ -433,8 +335,8 @@ pub struct AppState {
     pub paused: bool,
     /// Background task count.
     pub background_tasks: usize,
-    /// Pipeline stages (flat — the canonical stage list).
-    pub stages: Vec<StageInfo>,
+    /// Pipeline state (for page view).
+    pub pipeline: PipelineState,
     /// Run state for page view.
     pub run_state: RunState,
     /// Revision round.
@@ -457,43 +359,12 @@ pub struct AppState {
     pub artifacts_dir: Option<PathBuf>,
     /// Whether pipeline finished.
     pub finished: bool,
-    /// Pipeline start time.
-    pub start_time: Option<std::time::Instant>,
-    // --- Chat view state (ported from pages::AppState) ---
-    /// Current chat input text.
-    pub chat_input: String,
-    /// Chat input cursor position.
-    pub chat_cursor: usize,
-    /// Whether chat copy mode is active (v key).
-    pub chat_copy_mode: bool,
-    /// Anchor position for selection.
-    pub chat_sel_anchor: Option<(usize, usize)>,
-    /// Current chat cursor position (row, col).
-    pub chat_cursor_pos: (usize, usize),
-    /// Last copied text.
-    pub chat_copied: Option<String>,
-    /// Rendered chat lines.
-    pub chat_lines: Vec<ChatLine>,
-    /// Chat log — (role, text) pairs.
-    pub chat_log: Vec<(String, String)>,
-    /// Stages expanded in chat view (by index). Collapsed by default.
-    pub expanded_stages: std::collections::HashSet<usize>,
-    /// Last rendered content width for the chat view (kept in sync by render()).
-    /// Interior-mutable because `Page::render` borrows state immutably.
-    pub chat_width: std::cell::Cell<usize>,
-    // --- Config and UI chrome ---
-    /// Pipeline configuration.
-    pub config: NikiConfig,
-    /// Active modal overlay.
-    pub modal: Option<Modal>,
-    /// Onboarding state.
-    pub onboarding: Option<OnboardingModal>,
-    /// Whether onboarding is complete.
-    pub onboarded: bool,
-    /// Tips banner state.
-    pub tips: TipsBanner,
-    /// Whether the command palette is visible.
-    pub show_command_palette: bool,
+}
+
+/// Pipeline state for page view.
+#[derive(Debug, Clone, Default)]
+pub struct PipelineState {
+    pub stages: Vec<StageInfo>,
 }
 
 /// Stage information (mirrors existing StageInfo).
@@ -535,11 +406,8 @@ pub enum RunState {
 impl AppState {
     /// Create a new AppState with default values.
     pub fn new(description: String, config: NikiConfig, project_path: PathBuf) -> Self {
-        let tips_enabled = config.ui.tips.enabled;
-        let tips_rotation = config.ui.tips.rotation_seconds;
         Self {
             view: ViewMode::Chat,
-            current_page: PageId::Run,
             scroll_offset: 0,
             auto_scroll: true,
             messages: Vec::new(),
@@ -562,9 +430,9 @@ impl AppState {
             tick: 0,
             paused: false,
             background_tasks: 0,
-            stages: Vec::new(),
+            pipeline: PipelineState::default(),
             run_state: RunState::Idle,
-            revision_round: 0,
+            revision_round: 1,
             max_revision_rounds: config.general.max_revision_rounds,
             description,
             notes: Vec::new(),
@@ -574,23 +442,6 @@ impl AppState {
             test_log: None,
             artifacts_dir: None,
             finished: false,
-            start_time: None,
-            chat_input: String::new(),
-            chat_cursor: 0,
-            chat_copy_mode: false,
-            chat_sel_anchor: None,
-            chat_cursor_pos: (0, 0),
-            chat_copied: None,
-            chat_lines: Vec::new(),
-            chat_log: Vec::new(),
-            expanded_stages: std::collections::HashSet::new(),
-            chat_width: std::cell::Cell::new(80),
-            config,
-            modal: None,
-            onboarding: None,
-            onboarded: false,
-            tips: TipsBanner::new(tips_enabled, tips_rotation),
-            show_command_palette: false,
         }
     }
 
@@ -599,17 +450,14 @@ impl AppState {
         theme::bg_color()
     }
 
-    /// Apply a DisplayEvent to update pipeline-related state.
+    /// Apply a legacy DisplayEvent to update pipeline-related state.
     pub fn apply_display_event(&mut self, ev: DisplayEvent) {
         match ev {
             DisplayEvent::Banner { description } => {
                 self.description = description;
             }
             DisplayEvent::StageStart { role } => {
-                if self.start_time.is_none() {
-                    self.start_time = Some(std::time::Instant::now());
-                }
-                self.stages.push(StageInfo {
+                self.pipeline.stages.push(StageInfo {
                     role,
                     status: StageStatus::Running,
                     stream: String::new(),
@@ -625,6 +473,7 @@ impl AppState {
             }
             DisplayEvent::StageToken { role, token } => {
                 if let Some(s) = self
+                    .pipeline
                     .stages
                     .iter_mut()
                     .rev()
@@ -647,6 +496,7 @@ impl AppState {
                 latency_ms,
             } => {
                 if let Some(s) = self
+                    .pipeline
                     .stages
                     .iter_mut()
                     .rev()
@@ -663,6 +513,7 @@ impl AppState {
             }
             DisplayEvent::StageFailed { role, error } => {
                 if let Some(s) = self
+                    .pipeline
                     .stages
                     .iter_mut()
                     .rev()
@@ -704,9 +555,6 @@ impl AppState {
             DisplayEvent::BranchName(name) => {
                 self.branch_name = name;
             }
-            DisplayEvent::ChatMessage { role, text } => {
-                self.chat_log.push((role, text));
-            }
             DisplayEvent::StageTotals {
                 input_tokens,
                 output_tokens,
@@ -714,6 +562,7 @@ impl AppState {
                 latency_ms,
             } => {
                 if let Some(s) = self
+                    .pipeline
                     .stages
                     .iter_mut()
                     .rev()
@@ -729,9 +578,6 @@ impl AppState {
                 self.finished = true;
                 self.run_state = RunState::AwaitingApproval;
             }
-            DisplayEvent::PermissionRequest { .. } => {
-                // The TUI layer sets `show_permission_modal` and handles the response.
-            }
         }
     }
 
@@ -746,32 +592,13 @@ impl AppState {
         let mut out_t = 0u32;
         let mut cost = 0.0f64;
         let mut ms = 0u64;
-        for s in &self.stages {
+        for s in &self.pipeline.stages {
             in_t += s.input_tokens;
             out_t += s.output_tokens;
             cost += s.cost_usd;
             ms += s.latency_ms;
         }
         (in_t, out_t, cost, ms)
-    }
-
-    /// Alias for apply_display_event (compatibility with tui.rs).
-    pub fn apply_event(&mut self, ev: DisplayEvent) {
-        self.apply_display_event(ev);
-    }
-
-    /// Get the currently running stage, if any.
-    pub fn active_stage(&self) -> Option<&StageInfo> {
-        self.stages
-            .iter()
-            .find(|s| s.status == StageStatus::Running)
-    }
-
-    /// Whether any pipeline stage is currently running.
-    pub fn has_running_stage(&self) -> bool {
-        self.stages
-            .iter()
-            .any(|s| s.status == StageStatus::Running)
     }
 }
 
@@ -822,16 +649,6 @@ fn default_commands() -> Vec<Command> {
             name: "/theme".to_string(),
             description: "Cycle theme".to_string(),
             action: CommandAction::CycleTheme,
-        },
-        Command {
-            name: "/undo".to_string(),
-            description: "Undo last agent change (git revert)".to_string(),
-            action: CommandAction::Undo,
-        },
-        Command {
-            name: "/redo".to_string(),
-            description: "Redo last undone change".to_string(),
-            action: CommandAction::Redo,
         },
     ]
 }

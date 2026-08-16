@@ -44,9 +44,6 @@ pub struct AgenticDisplay {
     tui_thread: Option<JoinHandle<()>>,
     /// Role currently streaming tokens (for routing `stream_token` to the TUI).
     current_role: Option<AgentRole>,
-    /// Optional cancellation flag shared with the pipeline so a TUI quit can
-    /// abort the run (Phase 6 — runtime interactivity).
-    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 fn role_label(role: AgentRole) -> &'static str {
@@ -74,7 +71,6 @@ impl AgenticDisplay {
             tui: None,
             tui_thread: None,
             current_role: None,
-            cancel: None,
         }
     }
 
@@ -97,23 +93,16 @@ impl AgenticDisplay {
             tui: self.tui.clone(),
             tui_thread: None,
             current_role: None,
-            cancel: None,
         }
     }
 
     /// Enable the rich terminal TUI. Spawns the render thread; subsequent
     /// display calls forward events to it instead of printing inline.
-    pub fn enable_tui(
-        &mut self,
-        description: String,
-        project_path: PathBuf,
-        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    ) {
+    pub fn enable_tui(&mut self, description: String, project_path: PathBuf) {
         if !self.is_tty {
             return;
         }
-        self.cancel = Some(cancel.clone());
-        let (tx, handle) = spawn_tui(description, project_path, cancel);
+        let (tx, handle) = spawn_tui(description, project_path);
         self.tui = Some(tx);
         self.tui_thread = Some(handle);
     }
@@ -133,11 +122,6 @@ impl AgenticDisplay {
         if let Some(tx) = &self.tui {
             let _ = tx.send(ev);
         }
-    }
-
-    /// Get a clone of the TUI event sender (for wiring into sandbox permission prompts).
-    pub fn tui_tx(&self) -> Option<Sender<DisplayEvent>> {
-        self.tui.clone()
     }
 
     /// Send the branch name to the TUI for the status line.
@@ -494,23 +478,6 @@ impl AgenticDisplay {
             });
             self.emit(DisplayEvent::CostJson(cost_json.to_string()));
 
-            // Cumulative token/cost totals for the status line and Cost page.
-            self.emit(DisplayEvent::StageTotals {
-                input_tokens: total_in,
-                output_tokens: total_out,
-                cost_usd: total_cost,
-                latency_ms: total_ms,
-            });
-
-            // Feed the Tester artifact to the TestLog page.
-            if let Some((_, test_json)) = result
-                .artifacts
-                .iter()
-                .find(|(r, _)| *r == AgentRole::Tester)
-            {
-                self.emit(DisplayEvent::TestLogContent(test_json.clone()));
-            }
-
             // Find the reviewer artifact for the report page.
             if let Some((_, json)) = result
                 .artifacts
@@ -554,33 +521,6 @@ impl AgenticDisplay {
             return;
         }
         crate::display::completion::render_failure(error, _state, &self.theme, self.is_tty);
-    }
-
-    /// Emit cumulative token/cost totals (feeds the status line + Cost page).
-    /// Mirrors the per-stage [`DisplayEvent::StageDone`] totals but is emitted
-    /// once for the whole run.
-    pub fn stage_totals(
-        &self,
-        input_tokens: u32,
-        output_tokens: u32,
-        cost_usd: f64,
-        latency_ms: u64,
-    ) {
-        if self.tui.is_some() {
-            self.emit(DisplayEvent::StageTotals {
-                input_tokens,
-                output_tokens,
-                cost_usd,
-                latency_ms,
-            });
-        }
-    }
-
-    /// Emit the Tester artifact as the TestLog page content.
-    pub fn test_log_content(&self, content: &str) {
-        if self.tui.is_some() {
-            self.emit(DisplayEvent::TestLogContent(content.to_string()));
-        }
     }
 
     fn clear_streaming_output(&mut self) {

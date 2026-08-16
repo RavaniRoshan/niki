@@ -6,12 +6,10 @@ max_revision_rounds = 3
 # Task output directory (relative to project root)
 output_dir = ".niki"
 # Optional per-run spend ceiling in USD. 0.0 = unlimited.
-# Hard mid-run ceiling: NIKI prints a pre-run estimate and aborts the run if the
-# cumulative estimated cost exceeds this amount before executing the next stage.
+# WARNING (v0.3): this is warn-only — NIKI prints a pre-run estimate and a
+# post-run warning when the cap is exceeded, but does NOT abort mid-run.
+# Set a hard budget/limit on your provider key as the real ceiling today.
 spend_cap_usd = 0.0
-# Optional diff-size guardrail: when non-zero, the Reviewer is nudged toward tighter
-# deltas and report.md flags diffs that exceed this many added lines. 0 = off.
-max_diff_lines = 0
 
 [providers.anthropic]
 api_key = "sk-ant-..."               # Or set ANTHROPIC_API_KEY env var
@@ -130,8 +128,8 @@ network_disabled = true
 # Domain allowlist for outbound network egress. Only these domains are allowed
 # when network_disabled = true. Use "*" to allow all (equivalent to network_disabled = false).
 # network_allowlist = ["registry.npmjs.org", "pypi.org", "crates.io"]
-# Sandbox backend: "docker" (container, default) or "worktree" (git worktree + local
-# process, no container runtime). Override at runtime with: niki run --backend worktree
+# Sandbox backend: "docker" (Podman/Docker, default), "worktree" (git worktree, no runtime),
+# or "cloud" (NIKI infra, beta). Override at runtime with: niki run --backend worktree
 # backend = "docker"
 
 # MCP (Model Context Protocol) — connect to external tool servers.

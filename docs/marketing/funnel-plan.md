@@ -1,6 +1,6 @@
 # NIKI Launch Funnel Plan — Aug 18, 2026
 
-Source: `research/niki-ph-launch-deep.md` (deep research report with adversarial verification).
+Source: `research/niki-launch-aug18-2026-wide-research.md` (SQ4/SQ7 + adversarial verification).
 Ground rule: every public claim must be reproducible from the repo (harness, commands, numbers).
 One overclaim derails the launch; 2026 punishes hype and rewards self-restraint.
 

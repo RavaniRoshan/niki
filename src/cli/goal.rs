@@ -59,11 +59,6 @@ enum GoalCommands {
     Check,
     /// Show environment detection info
     Env,
-    /// Fork a goal — writes artifacts and marks status as Drifting
-    Fork {
-        /// Goal ID to fork (optional, forks active goal)
-        id: Option<String>,
-    },
 }
 
 pub async fn handle(args: &GoalArgs) -> Result<()> {
@@ -79,10 +74,9 @@ pub async fn handle(args: &GoalArgs) -> Result<()> {
         GoalCommands::Resume { id } => handle_resume(id).await,
         GoalCommands::Cancel | GoalCommands::Clear => handle_cancel().await,
         GoalCommands::Run { id } => handle_run(id.as_deref()).await,
-    GoalCommands::Check => handle_check().await,
-    GoalCommands::Env => handle_env(),
-    GoalCommands::Fork { id } => handle_fork(id.as_deref()).await,
-}
+        GoalCommands::Check => handle_check().await,
+        GoalCommands::Env => handle_env(),
+    }
 }
 
 async fn handle_new(objective: &str, scope: Option<&str>, max: u32) -> Result<()> {
@@ -446,28 +440,5 @@ fn handle_env() -> Result<()> {
         }
     }
 
-    Ok(())
-}
-
-async fn handle_fork(id: Option<&str>) -> Result<()> {
-    let mut state = match id {
-        Some(goal_id) => GoalState::find_by_id(goal_id)?,
-        None => GoalState::active_goal()?,
-    };
-    let state = match state {
-        Some(s) => s,
-        None => {
-            println!("No goal found to fork.");
-            return Ok(());
-        }
-    };
-
-    let fork_dir = state.fork()?;
-    println!("Fork artifacts written to: {}", fork_dir.display());
-    println!("  goal.md");
-    println!("  progress.json");
-    println!("  drift.jsonl");
-    println!("  environment.lock");
-    println!("  open-questions.md");
     Ok(())
 }

@@ -13,7 +13,6 @@ pub mod logo;
 pub mod modal;
 pub mod onboarding;
 pub mod pages;
-pub mod persistence;
 pub mod pipeline_status;
 pub mod state;
 pub mod theme;

@@ -57,8 +57,6 @@ impl GoalCreator {
             context_summary,
             created_at: chrono::Utc::now().to_rfc3339(),
             completed_at: None,
-            drift: None,
-            fork_dir: None,
         };
 
         Ok(state)

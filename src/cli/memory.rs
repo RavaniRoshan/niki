@@ -62,21 +62,6 @@ pub enum MemoryCommands {
         #[arg(long)]
         force: bool,
     },
-    /// Store a fact in user memory (overrides team/project memory for this user).
-    Store {
-        /// Key for the memory entry.
-        key: String,
-        /// Value to store.
-        value: String,
-    },
-    /// Recall memory entries matching a query across all levels.
-    Recall {
-        /// Query string to match against task/description.
-        query: String,
-        /// Maximum results.
-        #[arg(short, long, default_value_t = 10)]
-        limit: usize,
-    },
 }
 
 pub fn handle(args: &MemoryArgs) -> Result<()> {
@@ -165,33 +150,6 @@ pub fn handle(args: &MemoryArgs) -> Result<()> {
                     println!("Cleared {:?} memory.", r);
                 } else {
                     println!("No memory file for {:?}.", r);
-                }
-            }
-        }
-        MemoryCommands::Store { key, value } => {
-            crate::memory::append_user_memory(&project, key, value.clone())?;
-            println!("Stored in user memory: {} = {}", key, value);
-        }
-        MemoryCommands::Recall { query, limit } => {
-            let user = crate::memory::load_user_memory(&project);
-            let team = crate::memory::load_team_memory(&project);
-            let mut results: Vec<_> = user
-                .into_iter()
-                .filter(|e| e.task.contains(query) || e.content.contains(query))
-                .collect();
-            results.extend(
-                team.into_iter()
-                    .filter(|e| e.task.contains(query) || e.content.contains(query)),
-            );
-
-            if results.is_empty() {
-                println!("No memory entries match '{}'.", query);
-            } else {
-                println!("Memory recall for '{}':\n", query);
-                for entry in results.iter().take(*limit) {
-                    println!("  [{}] {}", &entry.timestamp[..10], entry.task);
-                    println!("    {}", entry.content.chars().take(200).collect::<String>());
-                    println!();
                 }
             }
         }

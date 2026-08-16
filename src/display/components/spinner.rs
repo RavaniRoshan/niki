@@ -109,12 +109,6 @@ impl SpinnerState {
         Self { tick: 0 }
     }
 
-    /// Create a spinner seeded with a tick counter (for deterministic
-    /// frame selection from app state).
-    pub fn with_tick(tick: usize) -> Self {
-        Self { tick }
-    }
-
     /// Advance the tick.
     pub fn advance(&mut self) {
         self.tick = self.tick.wrapping_add(1);

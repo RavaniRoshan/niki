@@ -14,11 +14,8 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use tokio::sync::oneshot;
-
 use crate::artifacts::types::AgentRole;
 use crate::display::theme;
-use crate::permissions::PermissionAction;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{
@@ -38,7 +35,6 @@ use super::modal::{self, ModalAction};
 use super::onboarding::{self, OnboardingAction};
 use super::pages::chat;
 use super::pages::{AppState, Page, PageId, PageRouter};
-use super::persistence;
 
 /// Events emitted by the pipeline/display layer for the TUI to render.
 #[derive(Debug, Clone)]
@@ -82,21 +78,12 @@ pub enum DisplayEvent {
     Final,
     /// Branch name from the pipeline (fixes the never-populated branch_name).
     BranchName(String),
-    /// A chat message submitted/typed into the session (user or assistant turn).
-    /// Used by `niki chat` to render the running conversation.
-    ChatMessage { role: String, text: String },
     /// Total token/cost info for the status line.
     StageTotals {
         input_tokens: u32,
         output_tokens: u32,
         cost_usd: f64,
         latency_ms: u64,
-    },
-    /// A permission prompt from the sandbox — the TUI should render a modal
-    /// and send the user's choice back through `response_tx`.
-    PermissionRequest {
-        command: String,
-        response_tx: std::sync::mpsc::Sender<PermissionAction>,
     },
 }
 
@@ -117,19 +104,13 @@ impl Drop for RestoreGuard {
 pub fn spawn_tui(
     description: String,
     project_path: PathBuf,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> (Sender<DisplayEvent>, JoinHandle<()>) {
     let (tx, rx) = mpsc::channel();
-    let handle = std::thread::spawn(move || run_tui(rx, description, project_path, cancel));
+    let handle = std::thread::spawn(move || run_tui(rx, description, project_path));
     (tx, handle)
 }
 
-fn run_tui(
-    rx: Receiver<DisplayEvent>,
-    description: String,
-    project_path: PathBuf,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-) {
+fn run_tui(rx: Receiver<DisplayEvent>, description: String, project_path: PathBuf) {
     let _guard = RestoreGuard;
 
     if enable_raw_mode().is_err() {
@@ -157,7 +138,7 @@ fn run_tui(
         Err(_) => return,
     };
 
-     // Initial full draw
+    // Initial full draw
     let _ = terminal.draw(|f| {
         let area = f.area();
         f.render_widget(
@@ -201,26 +182,16 @@ fn run_tui(
         state.onboarding = Some(onboarding::OnboardingModal::new());
     }
 
-    // Drive rendering through the high-performance RenderEngine: dirty-flag
-    // redraws, 60fps during streaming / 30fps idle, and CSI 2026
-    // synchronized output for flicker-free updates.
-    let mut engine = crate::display::engine::RenderEngine::new(terminal, sync_capable);
-    engine.mark_dirty();
+    // Dirty-flag rendering: only redraw when state changes.
+    // Cap at ~30 FPS (33ms) to avoid busy-looping while keeping spinner lively.
+    let mut dirty = true;
     let mut last_render = std::time::Instant::now();
+    let min_frame_interval = Duration::from_millis(33);
 
     loop {
-        // Adapt frame target: 60fps while a stage is streaming, else 30fps idle.
-        let target = if state.has_running_stage() {
-            crate::display::engine::FrameTarget::High
-        } else {
-            crate::display::engine::FrameTarget::Low
-        };
-        engine.set_target(target);
-        let interval = Duration::from_millis(engine.frame_interval_ms());
-
         // Check if we need to redraw
         let now = std::time::Instant::now();
-        if engine.needs_render() && now.duration_since(last_render) >= interval {
+        if dirty && now.duration_since(last_render) >= min_frame_interval {
             state.tick = state.tick.wrapping_add(1);
 
             if sync_capable {
@@ -231,8 +202,7 @@ fn run_tui(
             }
 
             let s = &state;
-            if engine
-                .terminal_mut()
+            if terminal
                 .draw(|f| render(f, s, &router, &command_palette))
                 .is_err()
             {
@@ -246,7 +216,7 @@ fn run_tui(
                 );
             }
 
-            engine.mark_clean_for_render();
+            dirty = false;
             last_render = now;
         }
 
@@ -264,7 +234,7 @@ fn run_tui(
                                     state.onboarded = true;
                                 }
                                 state.onboarding = None;
-                                engine.mark_dirty();
+                                dirty = true;
                             }
                         }
                     } else if let Some(ref modal) = state.modal {
@@ -272,49 +242,37 @@ fn run_tui(
                         match modal::handle_modal_key(key, modal) {
                             ModalAction::Dismiss => {
                                 state.modal = None;
-                                engine.mark_dirty();
+                                dirty = true;
                             }
                             ModalAction::Confirm => {
                                 state.modal = None;
                                 if key.code == KeyCode::Enter {
-                                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
                                     break;
                                 }
-                                engine.mark_dirty();
+                                dirty = true;
                             }
                             ModalAction::Retry => {
                                 state.modal = None;
-                                engine.mark_dirty();
+                                dirty = true;
                             }
                             ModalAction::Config => {
                                 state.modal = None;
                                 state.current_page = PageId::Config;
-                                engine.mark_dirty();
+                                dirty = true;
                             }
                             ModalAction::Skip => {
                                 state.modal = None;
-                                engine.mark_dirty();
+                                dirty = true;
                             }
-                             ModalAction::None => {}
-                         }
-                     } else if state.show_permission_modal {
-                         if let Some(req) = state.permission_request.take() {
-                             let action = match key.code {
-                                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => PermissionAction::Allow,
-                                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => PermissionAction::Deny,
-                                 _ => PermissionAction::Deny,
-                             };
-                             let _ = req.response_tx.send(action);
-                             state.show_permission_modal = false;
-                             engine.mark_dirty();
-                         }
-                     } else if state.show_command_palette {
+                            ModalAction::None => {}
+                        }
+                    } else if state.show_command_palette {
                         // Command palette takes priority
                         if command_palette.handle_key(key, &mut state) {
                             state.show_command_palette = false;
-                            engine.mark_dirty();
+                            dirty = true;
                         } else {
-                            engine.mark_dirty();
+                            dirty = true;
                         }
                     } else if key.code == KeyCode::Tab
                         && !key.modifiers.contains(KeyModifiers::CONTROL)
@@ -325,12 +283,12 @@ fn run_tui(
                         } else {
                             PageId::Chat
                         };
-                        engine.mark_dirty();
+                        dirty = true;
                     } else if state.current_page == PageId::Chat {
                         // Chat view owns all key handling (input + copy-mode).
                         let mut page = chat::ChatPage::new();
                         if page.handle_key(key, &mut state) {
-                            engine.mark_dirty();
+                            dirty = true;
                         }
                     } else {
                         // Ctrl-P opens command palette (global, from any page)
@@ -339,7 +297,7 @@ fn run_tui(
                         {
                             state.show_command_palette = true;
                             command_palette = CommandPalette::new();
-                            engine.mark_dirty();
+                            dirty = true;
                         } else if key.modifiers.contains(KeyModifiers::CONTROL)
                             && key.code == KeyCode::Char('t')
                         {
@@ -360,7 +318,7 @@ fn run_tui(
                             state.config.ui.theme = new_pref;
                             // Persist to config file
                             let _ = crate::config::types::NikiConfig::save_theme(new_pref);
-                            engine.mark_dirty();
+                            dirty = true;
                         } else if state.current_page == PageId::Run {
                             // On Run page: q/Esc shows quit confirm modal
                             if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
@@ -369,21 +327,21 @@ fn run_tui(
                                     message: "The pipeline will continue in the background."
                                         .to_string(),
                                 });
-                                engine.mark_dirty();
+                                dirty = true;
                             } else if router.handle_key(key, &mut state) {
-                                engine.mark_dirty();
+                                dirty = true;
                             }
                         } else {
                             // On sub-pages: page-specific key handling
                             if router.handle_key(key, &mut state) {
-                                engine.mark_dirty();
+                                dirty = true;
                             }
                         }
                     }
                 }
-                 Ok(Event::Mouse(mouse)) => {
-                     if state.current_page == PageId::Chat {
-                         if let Ok(size) = engine.terminal().size() {
+                Ok(Event::Mouse(mouse)) => {
+                    if state.current_page == PageId::Chat {
+                        if let Ok(size) = terminal.size() {
                             let full = ratatui::layout::Rect::new(0, 0, size.width, size.height);
                             let chunks = Layout::default()
                                 .direction(Direction::Vertical)
@@ -394,7 +352,7 @@ fn run_tui(
                                 ])
                                 .split(full);
                             chat::ChatPage::handle_mouse(&mut state, mouse, chunks[1]);
-                            engine.mark_dirty();
+                            dirty = true;
                         }
                     }
                 }
@@ -406,7 +364,7 @@ fn run_tui(
         match rx.recv_timeout(Duration::from_millis(16)) {
             Ok(ev) => {
                 state.apply_event(ev);
-                engine.mark_dirty();
+                dirty = true;
                 // Drain any other queued events this tick
                 while let Ok(ev) = rx.try_recv() {
                     state.apply_event(ev);
@@ -418,7 +376,7 @@ fn run_tui(
     }
 
     state.finished = true;
-    let _ = engine.terminal_mut().draw(|f| render(f, &state, &router, &command_palette));
+    let _ = terminal.draw(|f| render(f, &state, &router, &command_palette));
 
     // End synchronized update on exit
     if sync_capable {
@@ -455,238 +413,77 @@ fn detect_synchronized_output() -> bool {
     false
 }
 
-/// Run the TUI in interactive chat mode (no pipeline events).
-/// Used by `niki chat` — the channel is held by the caller so it never disconnects.
-pub fn run_chat(
-    rx: Receiver<DisplayEvent>,
-    description: String,
-    project_path: PathBuf,
-    on_submit: Option<mpsc::Sender<String>>,
-) {
-    let _guard = RestoreGuard;
-
-    if enable_raw_mode().is_err() {
-        return;
-    }
-    let mut stdout = io::stdout();
-    let _ = execute!(stdout, EnterAlternateScreen, EnableMouseCapture);
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).expect("failed to create terminal");
-
-    let sync_capable = detect_synchronized_output();
-
-    let config = crate::config::NikiConfig::load(&project_path).unwrap_or_default();
-    let mut state = AppState::new(description, config, project_path.clone());
-    state.current_page = PageId::Chat;
-
-    if onboarding::should_show_onboarding(&project_path) {
-        state.onboarding = Some(onboarding::OnboardingModal::new());
-    } else {
-        state.onboarded = onboarding::load_state(&project_path);
-    }
-
-    let mut command_palette = CommandPalette::new();
-    let mut router = PageRouter::new();
-
-    let mut last_frame = std::time::Instant::now();
-    let min_frame_interval = std::time::Duration::from_millis(33);
-    let mut needs_render = true;
-
-    // Resume persisted chat session (Phase 8 — persistence + resume).
-    if let Some(session) = persistence::load_chat_session(&project_path) {
-        persistence::apply_session(&mut state, session);
-        needs_render = true;
-    }
-
-    loop {
-        if needs_render {
-            state.tick();
-            if sync_capable {
-                let _ = execute!(io::stdout(), ratatui::crossterm::terminal::BeginSynchronizedUpdate);
-            }
-            terminal.draw(|f| render(f, &state, &router, &command_palette)).ok();
-            if sync_capable {
-                let _ = execute!(io::stdout(), ratatui::crossterm::terminal::EndSynchronizedUpdate);
-            }
-            needs_render = false;
-            last_frame = std::time::Instant::now();
-        }
-
-        let timeout = min_frame_interval.saturating_sub(last_frame.elapsed());
-        if event::poll(timeout).unwrap_or(false) {
-            if let Ok(Event::Key(key)) = event::read() {
-                if let Some(ref mut onboard) = state.onboarding {
-                    match onboard.handle_key(key) {
-                        OnboardingAction::None => {}
-                        OnboardingAction::Skip | OnboardingAction::Finish => {
-                            if onboard.dont_show_again {
-                                onboarding::persist_state(&project_path);
-                                state.onboarded = true;
-                            }
-                            state.onboarding = None;
-                            needs_render = true;
-                        }
-                    }
-                    continue;
-                }
-
-                if let Some(ref modal) = state.modal.clone() {
-                    match modal::handle_modal_key(key, modal) {
-                        ModalAction::Dismiss | ModalAction::Skip => { state.modal = None; needs_render = true; }
-                        ModalAction::Confirm | ModalAction::Retry => { break; }
-                        ModalAction::Config => { state.current_page = PageId::Config; state.modal = None; needs_render = true; }
-                        ModalAction::None => {}
-                    }
-                    continue;
-                }
-
-                if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                    state.show_command_palette = !state.show_command_palette;
-                    if state.show_command_palette {
-                        command_palette = CommandPalette::new();
-                    }
-                    needs_render = true;
-                    continue;
-                }
-                if state.show_command_palette {
-                    if command_palette.handle_key(key, &mut state) {
-                        state.show_command_palette = false;
-                        needs_render = true;
-                    }
-                    continue;
-                }
-
-                if key.code == KeyCode::Tab {
-                    state.current_page = match state.current_page {
-                        PageId::Chat => PageId::Run,
-                        _ => PageId::Chat,
-                    };
-                    needs_render = true;
-                    continue;
-                }
-
-                if state.current_page == PageId::Chat {
-                    let before = state.chat_log.len();
-                    let mut chat_page = chat::ChatPage::new();
-                    chat_page.handle_key(key, &mut state);
-                    needs_render = true;
-                     // Forward any newly submitted user message to the session
-                     // processor (Phase 6 — user messages mid-session).
-                     if state.chat_log.len() > before {
-                         if let Some((role, text)) = state.chat_log.last() {
-                             if role == "user" {
-                                 if let Some(tx) = &on_submit {
-                                     let _ = tx.send(text.clone());
-                                 }
-                             }
-                         }
-                     }
-                     persistence::save_chat_session(&project_path, &persistence::snapshot(&state));
-                     continue;
-                }
-
-                match key.code {
-                    KeyCode::Char('t') if key.modifiers.is_empty() => {
-                        let new_pref = match state.config.ui.theme {
-                            crate::config::types::ThemePreference::Dark => crate::config::types::ThemePreference::Light,
-                            crate::config::types::ThemePreference::Light => crate::config::types::ThemePreference::Auto,
-                            crate::config::types::ThemePreference::Auto => crate::config::types::ThemePreference::Dark,
-                        };
-                        let mode = match new_pref {
-                            crate::config::types::ThemePreference::Dark => theme::ThemeMode::Dark,
-                            crate::config::types::ThemePreference::Light => theme::ThemeMode::Light,
-                            crate::config::types::ThemePreference::Auto => theme::ThemeMode::Auto,
-                        };
-                        theme::set_mode(mode);
-                        state.config.ui.theme = new_pref;
-                        needs_render = true;
-                    }
-                    KeyCode::Char('q') => {
-                        state.modal = Some(crate::display::pages::Modal::Confirm {
-                            title: "Quit".into(), message: "Exit NIKI?".into(),
-                        });
-                        needs_render = true;
-                    }
-                    _ => {
-                        if router.handle_key(key, &mut state) { needs_render = true; }
-                    }
-                }
-            } else if let Ok(Event::Mouse(mouse)) = event::read() {
-                if state.current_page == PageId::Chat {
-                    let size = terminal.size().unwrap_or(ratatui::layout::Size { width: 80, height: 24 });
-                    chat::ChatPage::handle_mouse(&mut state, mouse, Rect::new(0, 0, size.width, size.height));
-                    needs_render = true;
-                }
-            } else if let Ok(Event::Resize(_, _)) = event::read() {
-                needs_render = true;
-            }
-        }
-
-        while let Ok(ev) = rx.try_recv() {
-            state.apply_event(ev);
-            needs_render = true;
-        }
-
-        if last_frame.elapsed() >= min_frame_interval { needs_render = true; }
-    }
-
-    // Phase 8 — persist the final chat session on exit (resume next time).
-    persistence::save_chat_session(&project_path, &persistence::snapshot(&state));
-
-    let _ = disable_raw_mode();
-    let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
-    if sync_capable {
-        let _ = execute!(io::stdout(), ratatui::crossterm::terminal::EndSynchronizedUpdate);
-    }
-}
-
 fn render_status_line(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {
-    // Delegate to the shared status-bar component (was dead-island component, now
-    // wired into the live loop). It reads the canonical AppState fields.
-    super::components::status_bar::render_status_bar(frame, state, area);
-}
+    let (in_tokens, out_tokens, cost, _) = state.totals();
 
-/// Render a spinner + running-stage + progress indicator in the status area while
-/// a pipeline stage is active (ties the dead spinner/progress component to the
-/// live render loop).
-fn render_activity_spinner(
-    frame: &mut ratatui::Frame,
-    area: ratatui::layout::Rect,
-    state: &AppState,
-) {
-    use ratatui::text::Line;
-    let running = state
-        .stages
-        .iter()
-        .filter(|s| s.status == crate::display::state::StageStatus::Running)
-        .count();
-    let done = state
-        .stages
-        .iter()
-        .filter(|s| s.status == crate::display::state::StageStatus::Done)
-        .count();
-    let total = state.stages.len();
-    let progress = if total > 0 { done as f64 / total as f64 } else { 0.0 };
-    let bar = crate::display::components::render_progress_bar(
-        frame,
-        area,
-        progress,
-        (area.width as usize).saturating_sub(24),
-    );
-    let spinner = crate::display::components::SpinnerState::with_tick(state.tick);
-    let mut spans = vec![spinner.render()];
-    spans.push(ratatui::text::Span::styled(
-        format!(" running ({} stage{})", running, if running == 1 { "" } else { "s" }),
-        ratatui::style::Style::default().fg(crate::display::theme::text_dim()),
-    ));
-    spans.push(ratatui::text::Span::styled(
-        "  ".to_string(),
-        ratatui::style::Style::default(),
-    ));
-    spans.extend(bar.spans);
+    let duration = state
+        .start_time
+        .map(|s| {
+            let elapsed = s.elapsed().as_secs();
+            if elapsed > 0 {
+                format!("  {}s ", format_duration(elapsed))
+            } else {
+                String::new()
+            }
+        })
+        .unwrap_or_default();
+
+    let model_info = if !state.stages.is_empty() {
+        let active_stage = state.active_stage();
+        if let Some(stage) = active_stage {
+            let cfg = match stage.role {
+                crate::artifacts::types::AgentRole::Planner => &state.config.agents.planner,
+                crate::artifacts::types::AgentRole::Coder => &state.config.agents.coder,
+                crate::artifacts::types::AgentRole::Tester => &state.config.agents.tester,
+                crate::artifacts::types::AgentRole::Reviewer => &state.config.agents.reviewer,
+                crate::artifacts::types::AgentRole::Synthesizer => &state.config.agents.synthesizer,
+                crate::artifacts::types::AgentRole::SecurityAuditor => {
+                    &state.config.agents.security_auditor
+                }
+                crate::artifacts::types::AgentRole::Red => &state.config.agents.red,
+            };
+            format!("  {} ", cfg.model)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    let branch_display = if state.branch_name.is_empty() {
+        "niki/xxxxx".to_string()
+    } else {
+        state.branch_name.clone()
+    };
+
+    let cost_display = format!("  ${:.4} ", cost);
+    let token_display = format!("  I/O {}/{} ", in_tokens, out_tokens);
+
+    let status_line = Line::from(vec![
+        Span::styled(
+            format!("  {}", branch_display),
+            Style::default()
+                .fg(theme::fg_color())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(&model_info, Style::default().fg(theme::fg_dim())),
+        Span::styled(&token_display, Style::default().fg(theme::fg_dim())),
+        Span::styled(&cost_display, Style::default().fg(theme::GREEN())),
+        Span::styled(&duration, Style::default().fg(theme::fg_dim())),
+        Span::styled(" ctrl-t theme ", Style::default().fg(theme::fg_dim())),
+    ]);
+
+    let bg = theme::bg_elevated();
+    let status_block = ratatui::widgets::Block::default().style(Style::default().bg(bg));
+    frame.render_widget(status_block, area);
     frame.render_widget(
-        ratatui::widgets::Paragraph::new(Line::from(spans)),
-        ratatui::layout::Rect::new(area.x, area.y, area.width, 1),
+        ratatui::widgets::Paragraph::new(status_line),
+        ratatui::layout::Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        },
     );
 }
 
@@ -747,28 +544,6 @@ fn render(
     // Render command palette overlay if present
     if state.show_command_palette {
         super::command_palette::render_command_palette(frame, command_palette, size);
-    }
-
-    // Render slash command menu overlay if present (was dead component — now live)
-    if state.show_command_menu {
-        super::components::render_command_menu(frame, size, state);
-    }
-
-    // Render @ file autocomplete overlay if present (was dead component — now live)
-    if state.input_state.autocomplete.is_some() {
-        super::components::render_autocomplete(frame, size, state);
-    }
-
-    // Render permission modal overlay if present (was dead component — now live)
-    if state.show_permission_modal {
-        if let Some(ref req) = state.permission_request {
-            super::components::render_permission_modal(frame, req, size, state);
-        }
-    }
-
-    // Render a spinner/progress indicator while stages are running
-    if state.has_running_stage() {
-        render_activity_spinner(frame, size, state);
     }
 }
 

@@ -27,10 +27,9 @@ jobs:
       - uses: actions/checkout@v7
       - name: Stage landing page as site root
         run: |
-          mkdir -p _site .well-known
+          mkdir -p _site
           cp docs/marketing/landing.html _site/index.html
           cp -r assets _site/assets
-          cp .well-known/security.txt _site/.well-known/security.txt
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
