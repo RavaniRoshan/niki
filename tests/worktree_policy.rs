@@ -210,8 +210,10 @@ async fn worktree_sandbox_custom_timeout_is_respected() {
         .status()
         .unwrap();
 
-    let mut policy = SecurityPolicyConfig::default();
-    policy.max_exec_seconds = 1;
+    let policy = SecurityPolicyConfig {
+        max_exec_seconds: 1,
+        ..Default::default()
+    };
     let sandbox = create_worktree_sandbox(repo, policy).await.unwrap();
 
     // A command that sleeps longer than the timeout should be killed.

@@ -12,8 +12,10 @@ fn default_policy_has_reasonable_exec_timeout() {
 
 #[test]
 fn policy_with_short_timeout_will_timeout_quickly() {
-    let mut policy = SecurityPolicyConfig::default();
-    policy.max_exec_seconds = 1;
+    let policy = SecurityPolicyConfig {
+        max_exec_seconds: 1,
+        ..Default::default()
+    };
     assert_eq!(policy.max_exec_seconds, 1);
 }
 
@@ -66,8 +68,10 @@ fn deny_list_commands_blocked_immediately_not_timeout() {
 
 #[test]
 fn timeout_duration_from_policy() {
-    let mut policy = SecurityPolicyConfig::default();
-    policy.max_exec_seconds = 10;
+    let policy = SecurityPolicyConfig {
+        max_exec_seconds: 10,
+        ..Default::default()
+    };
     let duration = Duration::from_secs(policy.max_exec_seconds);
     assert_eq!(duration, Duration::from_secs(10));
 }

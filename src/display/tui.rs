@@ -14,8 +14,6 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use tokio::sync::oneshot;
-
 use crate::artifacts::types::AgentRole;
 use crate::display::theme;
 use crate::permissions::PermissionAction;
@@ -29,8 +27,7 @@ use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::style::Style;
 use ratatui::widgets::Paragraph;
 
 use super::command_palette::CommandPalette;
@@ -130,8 +127,12 @@ struct RestoreGuard;
 impl Drop for RestoreGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
-        let _ = execute!(io::stdout(), DisableMouseCapture);
+        let _ = execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            ratatui::crossterm::event::DisableBracketedPaste
+        );
     }
 }
 
@@ -162,8 +163,12 @@ fn run_tui(
     if execute!(io::stdout(), EnterAlternateScreen).is_err() {
         return;
     }
-    // Enable mouse capture so the chat view can offer drag-to-select + auto-copy.
-    let _ = execute!(io::stdout(), EnableMouseCapture);
+    // Enable mouse capture and bracketed paste mode
+    let _ = execute!(
+        io::stdout(),
+        EnableMouseCapture,
+        ratatui::crossterm::event::EnableBracketedPaste
+    );
 
     // Best-effort DEC 2026 synchronized output — eliminates flicker on
     // supporting terminals (kitty, Ghostty, xterm.js ≥6.0, newer tmux).
@@ -620,6 +625,10 @@ fn run_tui(
                         }
                     }
                 }
+                Ok(Event::Paste(pasted)) => {
+                    state.input_state.insert_str(&pasted);
+                    engine.mark_dirty();
+                }
                 Ok(Event::Resize(_, _)) => {
                     // Terminal was resized — force a re-render so the layout
                     // reflows to the new dimensions (ratatui re-samples size on draw).
@@ -699,7 +708,12 @@ pub fn run_chat(
         return;
     }
     let mut stdout = io::stdout();
-    let _ = execute!(stdout, EnterAlternateScreen, EnableMouseCapture);
+    let _ = execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        ratatui::crossterm::event::EnableBracketedPaste
+    );
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).expect("failed to create terminal");
 
@@ -881,6 +895,9 @@ pub fn run_chat(
                     );
                     needs_render = true;
                 }
+            } else if let Ok(Event::Paste(pasted)) = event::read() {
+                state.input_state.insert_str(&pasted);
+                needs_render = true;
             } else if let Ok(Event::Resize(_, _)) = event::read() {
                 needs_render = true;
             }
@@ -900,7 +917,12 @@ pub fn run_chat(
     persistence::save_chat_session(&project_path, &persistence::snapshot(&state));
 
     let _ = disable_raw_mode();
-    let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+    let _ = execute!(
+        io::stdout(),
+        LeaveAlternateScreen,
+        DisableMouseCapture,
+        ratatui::crossterm::event::DisableBracketedPaste
+    );
     if sync_capable {
         let _ = execute!(
             io::stdout(),
@@ -967,16 +989,6 @@ fn render_activity_spinner(
     );
 }
 
-fn format_duration(secs: u64) -> String {
-    if secs < 60 {
-        format!("{}s", secs)
-    } else if secs < 3600 {
-        format!("{}m{}s", secs / 60, secs % 60)
-    } else {
-        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
-    }
-}
-
 fn render(
     frame: &mut ratatui::Frame,
     state: &AppState,
@@ -992,18 +1004,21 @@ fn render(
     let bg_block = ratatui::widgets::Block::default().style(Style::default().bg(theme::bg_color()));
     frame.render_widget(bg_block, size);
 
-    // Main layout: logo + page content + status line
+    // Main layout: adaptive header + page content + status line
+    let header_height = super::logo::preferred_logo_height(size.width, size.height);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8), // logo (6 lines + 2 padding)
-            Constraint::Min(5),    // page content
-            Constraint::Length(1), // status line (footer meta)
+            Constraint::Length(header_height), // adaptive logo / single-line header
+            Constraint::Min(5),                // page content
+            Constraint::Length(1),             // status line (footer meta)
         ])
         .split(size);
 
-    // Render logo in the top area
-    super::logo::render_logo(frame, chunks[0]);
+    // Render adaptive header in the top area if allocated
+    if header_height > 0 {
+        super::logo::render_adaptive_header(frame, chunks[0], state);
+    }
 
     // Render the current page in the content area
     match state.current_page {

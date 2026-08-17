@@ -37,6 +37,10 @@ impl WorktreeSandbox {
     ) -> Result<Self> {
         let base = source_repo.join(".niki-worktrees");
         std::fs::create_dir_all(&base)?;
+
+        // Prune stale worktrees from crashed or interrupted prior runs (>24h old)
+        let _ = cleanup_stale_worktrees(source_repo, std::time::Duration::from_secs(86400));
+
         let wt = base.join(task_id.to_string());
         if wt.exists() {
             let _ = std::fs::remove_dir_all(&wt);
@@ -250,18 +254,26 @@ impl Sandbox for WorktreeSandbox {
         let wt = self.worktree_path.clone();
         let cmd: Vec<String> = cmd.iter().map(|s| s.to_string()).collect();
         let timeout = std::time::Duration::from_secs(self.policy.max_exec_seconds);
-        // F3: Enforce exec timeout.
+        // F3: Enforce exec timeout and process group isolation.
         tokio::time::timeout(
             timeout,
             tokio::task::spawn_blocking(move || -> Result<ExecOutput> {
-                let output = Command::new(&cmd[0])
-                    .args(&cmd[1..])
-                    .current_dir(&wt)
-                    .output()?;
+                let mut c = Command::new(&cmd[0]);
+                c.args(&cmd[1..]).current_dir(&wt);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::CommandExt;
+                    c.process_group(0);
+                }
+                let output = c.output()?;
+                let raw_stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let raw_stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let stdout = crate::sandbox::truncate_head_tail(&raw_stdout, 1500, 65536);
+                let stderr = crate::sandbox::truncate_head_tail(&raw_stderr, 1500, 65536);
                 Ok(ExecOutput {
                     exit_code: output.status.code().unwrap_or(0) as i64,
-                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                    stdout,
+                    stderr,
                 })
             }),
         )
@@ -338,4 +350,56 @@ fn find_files_in_worktree(wt: &Path) -> Result<Vec<(std::path::PathBuf, String)>
     }
 
     Ok(result)
+}
+
+/// Scan the `.niki-worktrees` directory for stale worktrees older than `max_age` and prune them.
+pub fn cleanup_stale_worktrees(source_repo: &Path, max_age: std::time::Duration) -> usize {
+    let base = source_repo.join(".niki-worktrees");
+    if !base.is_dir() {
+        return 0;
+    }
+
+    let Ok(entries) = std::fs::read_dir(&base) else {
+        return 0;
+    };
+
+    let mut cleaned = 0;
+    let now = std::time::SystemTime::now();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let is_stale = entry
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| now.duration_since(t).ok())
+                .map(|dur| dur > max_age)
+                .unwrap_or(false);
+
+            if is_stale {
+                let _ = Command::new("git")
+                    .arg("-C")
+                    .arg(source_repo)
+                    .arg("worktree")
+                    .arg("remove")
+                    .arg("--force")
+                    .arg(&path)
+                    .status();
+                let _ = std::fs::remove_dir_all(&path);
+                cleaned += 1;
+            }
+        }
+    }
+
+    if cleaned > 0 {
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(source_repo)
+            .arg("worktree")
+            .arg("prune")
+            .status();
+    }
+
+    cleaned
 }

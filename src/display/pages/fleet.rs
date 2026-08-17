@@ -1,10 +1,10 @@
 //! Fleet dashboard — mission control for multiple autonomous missions.
 
-use ratatui::widgets::Widget;
+use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::Widget;
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::buffer::Buffer;
 
 use crate::mission::{AttentionPriority, Mission, MissionStatus};
 
@@ -16,27 +16,40 @@ pub struct FleetState {
 
 impl FleetState {
     pub fn new(missions: Vec<Mission>) -> Self {
-        Self { missions, selected: 0 }
+        Self {
+            missions,
+            selected: 0,
+        }
     }
 
     pub fn select_next(&mut self) {
-        if self.selected + 1 < self.missions.len() { self.selected += 1; }
+        if self.selected + 1 < self.missions.len() {
+            self.selected += 1;
+        }
     }
     pub fn select_prev(&mut self) {
-        if self.selected > 0 { self.selected -= 1; }
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
     }
     pub fn select_left(&mut self, cols: usize) {
         self.selected = self.selected.saturating_sub(cols);
     }
     pub fn select_right(&mut self, cols: usize) {
         let new = self.selected + cols;
-        if new < self.missions.len() { self.selected = new; }
+        if new < self.missions.len() {
+            self.selected = new;
+        }
     }
 }
 
 pub fn render_fleet(fleet: &FleetState, area: ratatui::layout::Rect, buf: &mut Buffer) {
     // Header
-    let running = fleet.missions.iter().filter(|m| m.status == MissionStatus::Running).count();
+    let running = fleet
+        .missions
+        .iter()
+        .filter(|m| m.status == MissionStatus::Running)
+        .count();
     let total = fleet.missions.len();
     let total_cost: f64 = fleet.missions.iter().map(|m| m.cost_usd).sum();
 
@@ -44,15 +57,34 @@ pub fn render_fleet(fleet: &FleetState, area: ratatui::layout::Rect, buf: &mut B
         " NIKI / FLEET  {} missions · {} active · ${:.2}",
         total, running, total_cost
     );
-    let header = Paragraph::new(header_text)
-        .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
-    header.render(ratatui::layout::Rect { x: area.x, y: area.y, width: area.width, height: 1 }, buf);
+    let header = Paragraph::new(header_text).style(
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    );
+    header.render(
+        ratatui::layout::Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        },
+        buf,
+    );
 
     // Mission grid (2 columns)
     if fleet.missions.is_empty() {
         let empty = Paragraph::new("No missions. Start one from Chat (press Tab).")
             .style(Style::default().fg(Color::DarkGray));
-        empty.render(ratatui::layout::Rect { x: area.x + 2, y: area.y + 2, width: area.width.saturating_sub(4), height: 1 }, buf);
+        empty.render(
+            ratatui::layout::Rect {
+                x: area.x + 2,
+                y: area.y + 2,
+                width: area.width.saturating_sub(4),
+                height: 1,
+            },
+            buf,
+        );
         return;
     }
 
@@ -65,21 +97,47 @@ pub fn render_fleet(fleet: &FleetState, area: ratatui::layout::Rect, buf: &mut B
         let row = i / cols;
         let x = area.x + col as u16 * (card_w + 2);
         let y = area.y + 2 + row as u16 * (card_h + 1);
-        if y + card_h > area.y + area.height.saturating_sub(1) { break; }
+        if y + card_h > area.y + area.height.saturating_sub(1) {
+            break;
+        }
 
-        let card_area = ratatui::layout::Rect { x, y, width: card_w, height: card_h };
+        let card_area = ratatui::layout::Rect {
+            x,
+            y,
+            width: card_w,
+            height: card_h,
+        };
         let is_selected = i == fleet.selected;
         render_mission_card(mission, card_area, buf, is_selected);
     }
 
     // Footer
-    let footer = Paragraph::new(" ↑↓ Navigate · Enter Open · P Pause · R Resume · K Kill · V Diff · Esc Back")
-        .style(Style::default().fg(Color::DarkGray));
-    footer.render(ratatui::layout::Rect { x: area.x, y: area.y + area.height.saturating_sub(1), width: area.width, height: 1 }, buf);
+    let footer = Paragraph::new(
+        " ↑↓ Navigate · Enter Open · P Pause · R Resume · K Kill · V Diff · Esc Back",
+    )
+    .style(Style::default().fg(Color::DarkGray));
+    footer.render(
+        ratatui::layout::Rect {
+            x: area.x,
+            y: area.y + area.height.saturating_sub(1),
+            width: area.width,
+            height: 1,
+        },
+        buf,
+    );
 }
 
-fn render_mission_card(mission: &Mission, area: ratatui::layout::Rect, buf: &mut Buffer, selected: bool) {
-    let border_style = if selected { Style::default().fg(Color::Cyan) } else { Style::default().fg(Color::DarkGray) };
+fn render_mission_card(
+    mission: &Mission,
+    area: ratatui::layout::Rect,
+    buf: &mut Buffer,
+    selected: bool,
+) {
+    let border_style = if selected {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
 
     let status_color = match mission.status {
         MissionStatus::Running => Color::Green,
@@ -119,20 +177,30 @@ fn render_mission_card(mission: &Mission, area: ratatui::layout::Rect, buf: &mut
 
     let lines = vec![
         Line::from(vec![
-            Span::styled(format!("{}{}", status_icon, attention), Style::default().fg(status_color)),
-            Span::raw(" "),
-            Span::styled(mission.status.status_str(), Style::default().fg(status_color)),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled(format!("{} agents", mission.sessions.len()), Style::default().fg(Color::DarkGray)),
-        ]),
-        Line::from(vec![
             Span::styled(
-                format!("{}% · ${:.2} · {}", (mission.progress * 100.0) as u16, mission.cost_usd, elapsed),
-                Style::default().fg(Color::DarkGray),
+                format!("{}{}", status_icon, attention),
+                Style::default().fg(status_color),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                mission.status.status_str(),
+                Style::default().fg(status_color),
             ),
         ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            format!("{} agents", mission.sessions.len()),
+            Style::default().fg(Color::DarkGray),
+        )]),
+        Line::from(vec![Span::styled(
+            format!(
+                "{}% · ${:.2} · {}",
+                (mission.progress * 100.0) as u16,
+                mission.cost_usd,
+                elapsed
+            ),
+            Style::default().fg(Color::DarkGray),
+        )]),
     ];
 
     let paragraph = Paragraph::new(lines).block(block);
@@ -141,9 +209,13 @@ fn render_mission_card(mission: &Mission, area: ratatui::layout::Rect, buf: &mut
 
 fn format_duration(d: std::time::Duration) -> String {
     let secs = d.as_secs();
-    if secs < 60 { format!("{}s", secs) }
-    else if secs < 3600 { format!("{}m {:02}s", secs / 60, secs % 60) }
-    else { format!("{}h {:02}m", secs / 3600, (secs % 3600) / 60) }
+    if secs < 60 {
+        format!("{}s", secs)
+    } else if secs < 3600 {
+        format!("{}m {:02}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h {:02}m", secs / 3600, (secs % 3600) / 60)
+    }
 }
 
 #[cfg(test)]

@@ -79,14 +79,16 @@ impl InputHandler {
                 state.history_next();
                 InputAction::None
             }
-            KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL)
-                || key.modifiers.contains(KeyModifiers::ALT) =>
+            KeyCode::Left
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    || key.modifiers.contains(KeyModifiers::ALT) =>
             {
                 state.move_word_left();
                 InputAction::None
             }
-            KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL)
-                || key.modifiers.contains(KeyModifiers::ALT) =>
+            KeyCode::Right
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    || key.modifiers.contains(KeyModifiers::ALT) =>
             {
                 state.move_word_right();
                 InputAction::None
@@ -449,7 +451,10 @@ mod tests {
         // Plain Enter still submits.
         state.buffer = "line1\nline2".to_string();
         state.cursor_pos = 11;
-        let action = handler.handle_key(&mut state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let action = handler.handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
         assert!(matches!(action, InputAction::Submit(_)));
     }
 

@@ -1,3 +1,5 @@
+#![allow(dead_code, clippy::wrong_self_convention)]
+
 use serde_json::json;
 use std::fs::File;
 use std::path::PathBuf;

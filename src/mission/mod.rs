@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use tokio::sync::RwLock;
 
@@ -238,11 +238,7 @@ impl MissionStore {
     }
 
     /// Create a new mission and emit MissionCreated.
-    pub async fn create(
-        &self,
-        description: String,
-        model: String,
-    ) -> MissionId {
+    pub async fn create(&self, description: String, model: String) -> MissionId {
         let id_num = self.next_id.fetch_add(1, Ordering::Relaxed);
         let id = MissionId(format!("mission-{}", id_num));
         let mission = Mission::new(id.clone(), description.clone(), model);
@@ -319,12 +315,7 @@ impl AgentStore {
         }
     }
 
-    pub async fn create(
-        &self,
-        id: AgentId,
-        session_id: SessionId,
-        role: String,
-    ) {
+    pub async fn create(&self, id: AgentId, session_id: SessionId, role: String) {
         let agent = Agent {
             id: id.clone(),
             session_id,

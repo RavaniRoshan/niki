@@ -82,7 +82,7 @@ fn test_request_structured_default_fallback() {
     };
 
     // Just verify the method compiles and has the right type
-    provider.request_structured(request, &schema);
+    let _fut = provider.request_structured(request, &schema);
 }
 
 #[test]

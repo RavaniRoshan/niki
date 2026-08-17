@@ -347,7 +347,7 @@ mod tests {
         let config = test_config();
         let input = "- item 1\n- item 2";
         let lines = render_markdown(input, 80, &config);
-        assert!(lines.len() >= 1);
+        assert!(!lines.is_empty());
         // Should contain list items
         assert!(
             lines

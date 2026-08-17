@@ -1,146 +1,105 @@
-# NIKI Design Tokens — `token.md` (single source of truth)
+# NIKI Design Tokens — `token.md` (Single Source of Truth)
 
-> **Provenance:** Colors extracted from the NIKI brand image (TUI screenshot). The palette
-> uses three signature accents: teal (#4ecdc4) for hero/success, purple (#9682c8) for
-> agent status, and blue (#5d8fd6) for structural elements. This file is the canonical
-> source for every design token in NIKI (TUI, README, landing page, marketing kit).
-> Today the TUI reads `src/display/theme.rs` directly; promote this file to a build-time
-> source (e.g. a `tokens/token.md` consumed by a small generator that emits `tokens.rs`)
-> so one edit flows everywhere. See research report §"Design tokens" for the migration plan.
+> **Design Direction:** Warm Terracotta & Cream Studio Aesthetic (Claude Code / Anthropic Inspired).
+> **Dominant Palette:** Warm Light-Brown / Terracotta Clay (`#CC785C`, `#D4A373`) and Off-White / Cream (`#FAF8F5`, `#E6DFD5`) over Warm Charcoal Espresso (`#1A1716`, `#201D1D`).
+> **Accent Rule:** Green (`#4EBE82`) is strictly reserved for minimal interactive indicators — such as active thinking spinners, model generation activity, and final completion checkmarks `✓`. It is NEVER used as a primary structural or background color.
 
-## Tier 1 — Primitives (raw values, private to the theme module)
+---
 
-These are the only hardcoded hex values. Everything below resolves to these.
+## Tier 1 — Primitives
 
-```
-# Midnight Teal primitives (extracted from brand image)
-TEAL_500   = #4ecdc4   # brand teal (hero accent)
-TEAL_600   = #0d9488   # brand teal (darkened for light bg)
-AMBER_500  = #f59e0b   # warm accent (dark)
-AMBER_600  = #d97706   # warm accent (light)
-CYAN_500   = #5d8fd6   # brand blue (header, badges)
-PURPLE_500 = #9682c8   # brand purple (Coder/Tester)
-CLAY_500   = #f59e0b
+These are the canonical raw color values. All semantic and component tokens resolve to these primitives.
 
-# Status
-SUCCESS_500 = #4ecdc4   SUCCESS_600 = #0d9488
-ERROR_500   = #f87171   ERROR_600   = #dc2626
-WARNING_500 = #fbbf24   WARNING_600 = #d97706
+```ini
+# ── Warm Earth & Clay Primitives (Dominant Accents) ───────────
+CLAY_500     = #cc785c   # signature warm terracotta / clay (hero brand accent)
+CLAY_600     = #b85c38   # deep terracotta (light-mode hero / high contrast)
+CLAY_400     = #d48b70   # light clay / hover highlight
+SAND_500     = #d4a373   # warm sand / secondary accent / planner
+SAND_600     = #b58352   # dark sand for light backgrounds
+AMBER_500    = #e09f3e   # warm golden amber / user prompt / warnings
 
-# Neutrals — dark
-BG_DEEP_DARK   = #010409
-BG_BASE_DARK   = #0d1117
-BG_ELEVATED_DARK = #161b22
-BG_SURFACE_DARK = #1c2128
-BORDER_BASE_DARK = #30363d
-BORDER_DIM_DARK  = #21262d
-FG_DARK       = #e6edf3
-FG_DIM_DARK   = #8b949e
-FG_BRIGHT_DARK= #f0f6fc
-FG_SUBTLE_DARK= #6e7681
+# ── Off-White & Cream Primitives (Dominant Foregrounds) ─────────
+CREAM_100    = #faf8f5   # pure cream off-white (bright text / headers)
+CREAM_200    = #f3efea   # soft cream (body text)
+CREAM_300    = #e6dfd5   # muted sand-cream (dim labels / subtext)
+CREAM_400    = #c4bbb0   # stone cream (secondary meta / borders)
+CREAM_500    = #8a8480   # warm ash (subtle line numbers / paths)
 
-# Neutrals — light
-BG_DEEP_LIGHT   = #0f172a
-BG_BASE_LIGHT   = #f8fafc
-BG_ELEVATED_LIGHT = #ffffff
-BG_SURFACE_LIGHT = #f1f5f9
-BORDER_BASE_LIGHT = #cbd5e1
-BORDER_DIM_LIGHT  = #e2e8f0
-FG_LIGHT       = #1e293b
-FG_DIM_LIGHT   = #64748b
-FG_BRIGHT_LIGHT= #0f172a
-FG_SUBTLE_LIGHT= #94a3b8
+# ── Warm Charcoal & Espresso Primitives (Dark Mode Base) ───────
+ESPRESSO_900 = #141211   # deep void / terminal backdrop behind panels
+ESPRESSO_800 = #1a1716   # base app canvas (dark mode background)
+ESPRESSO_700 = #201d1d   # card & input surface background
+ESPRESSO_600 = #282423   # elevated panels / modals / dropdowns
+ESPRESSO_500 = #383330   # base borders & dividers
+ESPRESSO_400 = #48423e   # hover borders / active focus
 
-# Agent role hues (dark)
-AGENT_RED_DARK    = #ff6b6b
-AGENT_BLUE_DARK   = #38bdf8
-AGENT_GREEN_DARK  = #34d399
-AGENT_YELLOW_DARK = #f59e0b
-AGENT_PURPLE_DARK = #a78bfa
-AGENT_ORANGE_DARK = #fb923c
-AGENT_PINK_DARK   = #f472b6
-AGENT_CYAN_DARK   = #22d3ee
+# ── Light Mode Warm Paper Primitives ───────────────────────────
+PAPER_50     = #fdfcfc   # clean warm paper (light mode background)
+PAPER_100    = #f8f5f2   # elevated card surface (light mode)
+PAPER_200    = #f1ece6   # input & panel background (light mode)
+PAPER_300    = #e5ded5   # base borders (light mode)
+INK_900      = #1f1b1a   # deep espresso ink (primary text light)
+INK_700      = #423d3b   # body ink (light mode)
+INK_500      = #756d69   # muted ink (light mode)
 
-# Agent role hues (light) — darkened for contrast
-AGENT_RED_LIGHT    = #ef4444
-AGENT_BLUE_LIGHT   = #0891b2
-AGENT_GREEN_LIGHT  = #059669
-AGENT_YELLOW_LIGHT = #d97706
-AGENT_PURPLE_LIGHT = #7c3aed
-AGENT_ORANGE_LIGHT = #c2410c
-AGENT_PINK_LIGHT   = #be185d
-AGENT_CYAN_LIGHT   = #0e7490
+# ── Minimal Interactive Accents (STRICTLY CONSTRAINED) ─────────
+# Reserved only for active thinking/loading spinners and pass checkmarks
+THINKING_GREEN = #4ebe82 # model thinking spinner / live token pulse
+SUCCESS_GREEN  = #34d399 # test passed / checkmark ✓
+ERROR_CORAL    = #e76f51 # failed test / syntax error / blocker
+INFO_BLUE      = #6a9bcc # external link / git branch badge
 ```
 
-## Tier 2 — Semantic tokens (mode-aware, public API)
+---
 
-| Token | Dark | Light | Role / usage |
+## Tier 2 — Semantic Tokens (Mode-Aware)
+
+| Token | Dark Mode (`#1a1716`) | Light Mode (`#fdfcfc`) | Usage & Role |
 |---|---|---|---|
-| `bg.deep` | `#010409` | `#0f172a` | terminal void / behind panels |
-| `bg.base` | `#0d1117` | `#f8fafc` | app background |
-| `bg.elevated` | `#161b22` | `#ffffff` | cards, modals |
-| `bg.surface` | `#1c2128` | `#f1f5f9` | panels, inputs |
-| `border.base` | `#30363d` | `#cbd5e1` | default borders |
-| `border.focus` | `#4ecdc4` | `#0d9488` | focused element border (brand teal) |
-| `border.dim` | `#21262d` | `#e2e8f0` | subtle dividers |
-| `text.primary` | `#e6edf3` | `#1e293b` | body text |
-| `text.strong` | `#f0f6fc` | `#0f172a` | bold/emphasis |
-| `text.dim` | `#8b949e` | `#64748b` | secondary text |
-| `text.muted` | `#6e7681` | `#94a3b8` | counters, URLs |
-| `accent.primary` | `#4ecdc4` | `#0d9488` | brand teal, focus, interactive |
-| `accent.secondary` | `#f59e0b` | `#d97706` | highlights, secondary action |
-| `accent.cyan` | `#5d8fd6` | `#4a6fa5` | links, info (brand blue) |
-| `accent.purple` | `#9682c8` | `#7c5fc0` | logo/sparkle (brand purple) |
-| `status.success` | `#4ecdc4` | `#0d9488` | checkmarks (brand teal) |
-| `status.error` | `#f87171` | `#dc2626` | errors |
-| `status.warning` | `#fbbf24` | `#d97706` | warnings |
-| `prompt.cursor` | `#4ecdc4` (reversed) | `#0d9488` (reversed) | input cursor |
-| `prompt.border` | `#4ecdc4` | `#0d9488` | input box border |
-| `diff.add` (fg) | `#4ecdc4` | `#0d9488` | added lines |
-| `diff.del` (fg) | `#f87171` | `#dc2626` | removed lines |
-| `diff.add.bg` | `rgba(78,205,196,.15)` | `rgba(13,148,136,.12)` | added line bg |
-| `diff.del.bg` | `rgba(248,113,113,.15)` | `rgba(220,38,38,.12)` | removed line bg |
-| `role.user` | `#f59e0b` | `#d97706` | user messages |
-| `role.assistant` | `#4ecdc4` | `#0d9488` | assistant messages |
-| `role.system` | `#8b949e` | `#64748b` | system messages |
+| `bg.canvas` | `#1a1716` (ESPRESSO_800) | `#fdfcfc` (PAPER_50) | Main TUI screen background |
+| `bg.surface` | `#201d1d` (ESPRESSO_700) | `#f8f5f2` (PAPER_100) | Message cards, tool call boxes |
+| `bg.input` | `#282423` (ESPRESSO_600) | `#f1ece6` (PAPER_200) | User input bar background |
+| `bg.modal` | `#201d1d` (ESPRESSO_700) | `#ffffff` | Overlays, command palette, popup menus |
+| `border.subtle` | `#383330` (ESPRESSO_500) | `#e5ded5` (PAPER_300) | Subtle container frames, box-drawing |
+| `border.focus` | `#cc785c` (CLAY_500) | `#b85c38` (CLAY_600) | Active input border, focused message |
+| `text.hero` | `#faf8f5` (CREAM_100) | `#1f1b1a` (INK_900) | NIKI 3D Logo, headers, strong emphasis |
+| `text.body` | `#f3efea` (CREAM_200) | `#423d3b` (INK_700) | Primary chat and transcript text |
+| `text.dim` | `#e6dfd5` (CREAM_300) | `#756d69` (INK_500) | Secondary metadata, agent descriptions |
+| `text.muted` | `#8a8480` (CREAM_500) | `#9e948f` | Timestamps, durations, token counts |
+| `brand.primary` | `#cc785c` (CLAY_500) | `#b85c38` (CLAY_600) | Terracotta brand accent, prompt symbol `>` |
+| `brand.secondary` | `#d4a373` (SAND_500) | `#b58352` (SAND_600) | Pill badges, secondary highlights |
+| `state.thinking` | `#4ebe82` (THINKING_GREEN) | `#2d9f67` | **Blinking/spinning "Thinking..." tag ONLY** |
+| `state.success` | `#34d399` (SUCCESS_GREEN) | `#059669` | **Checkmark `✓`, test pass count ONLY** |
+| `state.error` | `#e76f51` (ERROR_CORAL) | `#c94a29` | Error alerts, failed assertions |
 
-### Agent role colors (semantic -> primitive above)
+---
 
-Planner, Coder, Tester, Reviewer + any user-defined stages map to the 8 agent hues
-(`role_color()` in `theme.rs`). Keep order stable so a stage is the same color every run.
+## Tier 3 — Component & Agent Mapping
 
-## Tier 3 — Component tokens (widget-level, resolved from Tier 2)
+### Agent Hierarchy & Visual Signatures
 
-| Token | Resolves to | Used by |
-|---|---|---|
-| `chat.input.bg` | `bg.surface` | chat input box |
-| `chat.input.border` | `prompt.border` | chat input box |
-| `chat.cursor` | `prompt.cursor` | input cursor |
-| `status_bar.bg` | `bg.elevated` | bottom status line |
-| `tab.active.fg` | `accent.primary` | active tab |
-| `modal.border` | `border.focus` | permission/confirm modals |
-| `spinner` | `accent.purple` (conflict, see below) | loading animation |
-| `autocomplete.bg` | `bg.elevated` | (future) completion dropdown |
-| `scrollbar.thumb` | `border.focus` | (future) scrollbar |
-| `selection.bg` | `accent.primary` | copy selection highlight |
+| Agent Role | Glyph | Visual Color | Purpose |
+|---|---|---|---|
+| **Planner** | `◈` | `#d4a373` (Warm Sand) | Architecture & TaskSpec planning |
+| **Coder** | `⟠` | `#cc785c` (Terracotta Clay) | Unified diff & file implementation |
+| **Tester** | `◉` | `#e6dfd5` (Cream Stone) | Test execution & verification |
+| **Reviewer** | `◆` | `#e09f3e` (Warm Amber) | Code review & audit verdict |
 
-## Conflicts — resolution status (verified 2026-08-13)
+### Interactive UI Elements
 
-1. **Logo vs TUI brand mismatch — RESOLVED.** `assets/logo.svg` is teal `#0d9488`, matching the TUI brand.
-2. **Spinner color — RESOLVED.** `theme::claude()` (spinners, status dot, logo) now returns `accent.primary` (teal). `accent.purple` remains reserved for the shell prompt marker (`theme::shell()`).
-3. **`text.muted` mis-map — RESOLVED.** `text_muted()` now returns `fg_subtle` (`#6e7681` dark / `#94a3b8` light) per the Tier 2 table.
-4. **Missing tokens — RESOLVED.** `text_strong()`, `autocomplete_bg()`, `scrollbar_thumb()`, `shimmer()` added to `theme.rs` (aliases per Tier 3 table).
-5. **Dead compound styles — RESOLVED (removed).** `clay_accent`, `status_ok/err/warn`, `footer_style`, `block_border`, `dim_style`, `accent_style` removed from `theme.rs`; surviving styles: `header_style`, `status_running`, `block_border_active`.
-6. **`ThemeMode::Auto` light detection — RESOLVED.** `resolved_mode()` interprets `COLORFGBG` (background index ≥ 8 → light), falling back to Dark when absent.
+- **Input Prompt:** Prompt cursor `|` in `#cc785c` (Clay), input box surface `#282423` with rounded pill badges `[sandbox]` and `[podman]` in `#383330`.
+- **Status Bar & Shortcuts:** Monospace labels in `#faf8f5` with action descriptions in `#8a8480` (`tab toggle view   ctrl-p commands   esc quit`).
+- **Diff Display:**
+  - Added lines: Background `rgba(78, 190, 130, 0.12)`, text `#e6dfd5` with subtle `+` prefix.
+  - Deleted lines: Background `rgba(231, 111, 81, 0.12)`, text `#8a8480` with `-` prefix.
+- **Thinking / Generation Spinner:** Minimal spinning dot `⠋` or sparkle `✦` in `#4ebe82` accompanied by muted text `"Thinking..."`.
 
-## Accessibility
+---
 
-- Target WCAG 2.0 AA (4.5:1 normal text, 3:1 large/UI). The dark palette passes for all
-  text/neutral pairs; verify amber-on-light (`#d97706` on `#f8fafc`) for small text.
-- Respect `NO_COLOR` and `TERM=dumb`. Provide a "bare mode" for screen readers.
+## Typography & Geometry Specs
 
-## Spinner / glyph set (keep consistent everywhere)
-
-- Stages: ◈ Planner · ⟠ Coder · ◉ Tester · ◆ Reviewer
-- Spin: moon `◐ ◓ ◑ ◒`; sparkle `✦`; dot `●`; done `✓`; fail `✗`
-- Borders: `╭─╮│╰─╯` (use rounded box-drawing, not ASCII `+-|`)
+- **Monospace Family:** `Berkeley Mono`, `JetBrains Mono`, `IBM Plex Mono`
+- **Box Drawing:** Single rounded box lines: `╭ ─ ╮ │ ╰ ─ ╯`
+- **Corner Radius:** 8px–12px on web / clean rounded UTF-8 glyphs in TUI
+- **Spacing Scale:** 4px (xs), 8px (sm), 12px (md), 16px (lg), 24px (xl)

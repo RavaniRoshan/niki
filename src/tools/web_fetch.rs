@@ -7,7 +7,6 @@ use std::time::Duration;
 pub struct WebFetchTool {
     client: Client,
     domain_allowlist: Vec<String>,
-    timeout: Duration,
 }
 
 /// Result of a web fetch operation.
@@ -32,7 +31,6 @@ impl WebFetchTool {
         Self {
             client,
             domain_allowlist,
-            timeout: Duration::from_secs(30),
         }
     }
 

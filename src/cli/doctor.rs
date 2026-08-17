@@ -171,7 +171,7 @@ fn check_security() -> Vec<Check> {
     // single warning rather than crashing `niki doctor`.
     match NikiConfig::load(&project_dir).ok() {
         Some(cfg) => {
-            let mut checks = check_security_for(&cfg);
+            let checks = check_security_for(&cfg);
             // Replace the unloadable-config fallback with a concrete pass once
             // config loaded; check_security_for already assumes a loaded config.
             checks

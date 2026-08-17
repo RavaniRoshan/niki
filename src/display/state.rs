@@ -243,6 +243,14 @@ impl InputState {
         self.last_typed_at = Some(Instant::now());
     }
 
+    /// Insert a sanitized string (normalizing CRLF and CR line endings) at the cursor position.
+    pub fn insert_str(&mut self, s: &str) {
+        let normalized = s.replace("\r\n", "\n").replace('\r', "\n");
+        self.buffer.insert_str(self.cursor_pos, &normalized);
+        self.cursor_pos += normalized.len();
+        self.last_typed_at = Some(Instant::now());
+    }
+
     /// Delete the character before the cursor (backspace).
     pub fn delete_back(&mut self) -> bool {
         if self.cursor_pos > 0 {
@@ -485,6 +493,12 @@ pub enum CommandAction {
     Redo,
     Rewind,
     Steer,
+    Doctor,
+    Review,
+    Context,
+    Config,
+    Init,
+    TerminalSetup,
 }
 
 /// The main application state — single source of truth for the UI.
@@ -616,6 +630,18 @@ pub struct AppState {
     pub session_view: Option<crate::display::pages::session::SessionState>,
     /// Id of the mission selected in the Fleet grid.
     pub selected_mission: Option<crate::mission::MissionId>,
+    /// Whether deductive thinking blocks are expanded globally (toggled via Ctrl+O).
+    pub show_thinking: bool,
+    /// Timestamp of last Esc keypress for double-Esc rewind shortcut.
+    pub last_esc_time: Option<std::time::Instant>,
+    /// Total session input tokens.
+    pub input_tokens: usize,
+    /// Total session output tokens.
+    pub output_tokens: usize,
+    /// Total session cache-read tokens.
+    pub cache_read_tokens: usize,
+    /// Total session cache-write tokens.
+    pub cache_write_tokens: usize,
 }
 
 /// Stage information (mirrors existing StageInfo).
@@ -721,6 +747,12 @@ impl AppState {
             fleet: crate::display::pages::fleet::FleetState::new(Vec::new()),
             session_view: None,
             selected_mission: None,
+            show_thinking: false,
+            last_esc_time: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
         }
     }
 
@@ -987,44 +1019,64 @@ fn default_commands() -> Vec<Command> {
             action: CommandAction::Help,
         },
         Command {
+            name: "/doctor".to_string(),
+            description: "Check providers, auth, and sandbox health".to_string(),
+            action: CommandAction::Doctor,
+        },
+        Command {
+            name: "/review".to_string(),
+            description: "Trigger code review audit on workspace changes".to_string(),
+            action: CommandAction::Review,
+        },
+        Command {
+            name: "/diff".to_string(),
+            description: "Show unified diff of current changes".to_string(),
+            action: CommandAction::ShowDiff,
+        },
+        Command {
             name: "/compact".to_string(),
             description: "Compact conversation context".to_string(),
             action: CommandAction::Compact,
         },
         Command {
             name: "/clear".to_string(),
-            description: "Clear conversation".to_string(),
+            description: "Clear conversation history".to_string(),
             action: CommandAction::Clear,
         },
         Command {
             name: "/cost".to_string(),
-            description: "Show cost breakdown".to_string(),
+            description: "Show token usage & cost breakdown".to_string(),
             action: CommandAction::ShowCost,
         },
         Command {
-            name: "/diff".to_string(),
-            description: "Show current diff".to_string(),
-            action: CommandAction::ShowDiff,
+            name: "/context".to_string(),
+            description: "Show context window utilization".to_string(),
+            action: CommandAction::Context,
         },
         Command {
             name: "/model".to_string(),
-            description: "Switch model".to_string(),
+            description: "Switch active LLM model".to_string(),
             action: CommandAction::SwitchModel(String::new()),
         },
         Command {
-            name: "/pipeline".to_string(),
-            description: "Show pipeline status".to_string(),
-            action: CommandAction::ShowPipeline,
-        },
-        Command {
-            name: "/tui".to_string(),
-            description: "Switch TUI mode".to_string(),
-            action: CommandAction::SwitchTuiMode,
+            name: "/config".to_string(),
+            description: "Open configuration settings".to_string(),
+            action: CommandAction::Config,
         },
         Command {
             name: "/theme".to_string(),
-            description: "Cycle theme".to_string(),
+            description: "Cycle color theme (dark/light/auto)".to_string(),
             action: CommandAction::CycleTheme,
+        },
+        Command {
+            name: "/init".to_string(),
+            description: "Scan project and initialize .niki configuration".to_string(),
+            action: CommandAction::Init,
+        },
+        Command {
+            name: "/terminal-setup".to_string(),
+            description: "Guide terminal truecolor & OSC 52 clipboard setup".to_string(),
+            action: CommandAction::TerminalSetup,
         },
         Command {
             name: "/undo".to_string(),
@@ -1043,7 +1095,7 @@ fn default_commands() -> Vec<Command> {
         },
         Command {
             name: "/steer".to_string(),
-            description: "Send a correction to the running agent".to_string(),
+            description: "Send a live correction to the running agent".to_string(),
             action: CommandAction::Steer,
         },
     ]
@@ -1234,5 +1286,13 @@ mod tests {
         assert_eq!(PageId::Run.title(), "run");
         assert_eq!(PageId::Pipeline.title(), "pipeline");
         assert_eq!(PageId::Help.title(), "help");
+    }
+
+    #[test]
+    fn input_state_insert_str_normalizes_crlf() {
+        let mut input = InputState::new();
+        input.insert_str("line1\r\nline2\rline3\nline4");
+        assert_eq!(input.buffer, "line1\nline2\nline3\nline4");
+        assert_eq!(input.cursor_pos, input.buffer.len());
     }
 }
