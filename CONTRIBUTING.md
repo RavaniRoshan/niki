@@ -28,6 +28,29 @@ The `--backend worktree` path needs neither.
 - Prefer typed `NikiError` over bare `.unwrap()` on user-facing paths.
 - Add tests for new behavior; do not lower coverage without reason.
 
+## Extending Niki
+
+### Adding a tool
+
+1. Implement the `Tool` trait in `src/runtime/mod.rs`.
+2. Register it in `build_baseline_registry()` with a `ToolDef` (id, description, category, risk level, permissions).
+3. Add tests for the tool's `execute()` method.
+4. Update the tool list in `docs/content/` if it changes the public API.
+
+### Writing prompts
+
+Agent prompts live in `prompts/*.md` as Minijinja templates. Each template receives a context object with task description, file contents, schema, and prior artifacts. The template renders into a system prompt sent to the LLM.
+
+To modify an agent's behavior, edit its prompt file. To add a new agent role, create a new prompt file, a JSON schema in `schemas/`, and wire it in `src/orchestrator/pipeline.rs`.
+
+### Customizing pipeline topology
+
+Add a `[pipeline]` section to `niki.toml` to define your own ordered stages. Each stage binds an `AgentRole` to a provider/model. See `docs/content/06-configuration/02-general-and-pipeline.mdx` for the full reference.
+
+### Adding a provider
+
+Implement the `LlmProvider` trait in `src/llm/provider.rs`. Add a match arm in `create_provider()` in `src/llm/mod.rs`. See `src/llm/anthropic.rs` for a reference implementation.
+
 ## Reporting bugs
 
 Use the bug-report issue template. Include: OS, NIKI version (`niki --version`),
