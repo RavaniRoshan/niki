@@ -17,6 +17,7 @@ async fn nvidia_nim_live_chat() {
         max_tokens: 128,
         temperature: 0.7,
         json_schema: None,
+        tools: None,
     };
     let resp = provider.complete(req).await.expect("LLM call");
     assert!(resp.usage.output_tokens > 0, "should produce output tokens");

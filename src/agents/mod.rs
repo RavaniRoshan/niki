@@ -61,6 +61,7 @@ pub async fn run_agent(
         max_tokens,
         temperature,
         json_schema: None,
+        tools: None,
     };
 
     display.agent_start(role);

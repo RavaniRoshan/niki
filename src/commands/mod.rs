@@ -9,6 +9,49 @@ use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+/// Palette category for a command — used to group commands in the palette
+/// and command menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CommandCategory {
+    /// Context / memory management (compact, cost).
+    Context,
+    /// Session lifecycle (sessions, undo, redo).
+    Session,
+    /// File operations (export).
+    Files,
+    /// Version control.
+    Git,
+    /// Agent control (steer, spawn).
+    Agent,
+    /// App / system (help, theme, quit).
+    System,
+}
+
+impl CommandCategory {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CommandCategory::Context => "context",
+            CommandCategory::Session => "session",
+            CommandCategory::Files => "files",
+            CommandCategory::Git => "git",
+            CommandCategory::Agent => "agent",
+            CommandCategory::System => "system",
+        }
+    }
+
+    /// All categories, in palette display order.
+    pub fn all() -> &'static [CommandCategory] {
+        &[
+            CommandCategory::Context,
+            CommandCategory::Session,
+            CommandCategory::Files,
+            CommandCategory::Git,
+            CommandCategory::Agent,
+            CommandCategory::System,
+        ]
+    }
+}
+
 /// A custom slash command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlashCommand {
@@ -17,11 +60,56 @@ pub struct SlashCommand {
     pub template: String,
     pub agent: Option<String>,
     pub model: Option<String>,
+    /// Optional logical group (e.g. "session", "context") for the command menu.
+    pub group: Option<String>,
+    /// Aliases that also resolve to this command (e.g. "u" → "undo").
+    pub aliases: Vec<String>,
+    /// Palette category.
+    pub category: CommandCategory,
+}
+
+impl SlashCommand {
+    /// Builder helper for a basic command (no group/aliases, System category).
+    pub fn basic(name: &str, description: &str, template: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            description: description.to_string(),
+            template: template.to_string(),
+            agent: None,
+            model: None,
+            group: None,
+            aliases: Vec::new(),
+            category: CommandCategory::System,
+        }
+    }
+
+    /// Builder helper with group + category + aliases.
+    pub fn with_meta(
+        name: &str,
+        description: &str,
+        template: &str,
+        group: &str,
+        category: CommandCategory,
+        aliases: &[&str],
+    ) -> Self {
+        Self {
+            name: name.to_string(),
+            description: description.to_string(),
+            template: template.to_string(),
+            agent: None,
+            model: None,
+            group: Some(group.to_string()),
+            aliases: aliases.iter().map(|a| a.to_string()).collect(),
+            category,
+        }
+    }
 }
 
 /// Manages custom slash commands.
 pub struct CommandRegistry {
     commands: HashMap<String, SlashCommand>,
+    /// Maps alias → canonical command name.
+    alias_map: HashMap<String, String>,
 }
 
 impl CommandRegistry {
@@ -29,19 +117,32 @@ impl CommandRegistry {
     pub fn new() -> Self {
         let mut registry = Self {
             commands: HashMap::new(),
+            alias_map: HashMap::new(),
         };
         registry.register_builtins();
         registry
     }
 
-    /// Register a custom command.
+    /// Register a custom command (also wires up its aliases).
     pub fn register(&mut self, cmd: SlashCommand) {
+        for alias in &cmd.aliases {
+            self.alias_map.insert(alias.clone(), cmd.name.clone());
+        }
         self.commands.insert(cmd.name.clone(), cmd);
     }
 
-    /// Get a command by name (without leading /).
+    /// Resolve a command name (or alias) to its canonical name.
+    pub fn resolve_alias(&self, name: &str) -> String {
+        self.alias_map
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
+    }
+
+    /// Get a command by name (or alias).
     pub fn get(&self, name: &str) -> Option<&SlashCommand> {
-        self.commands.get(name)
+        let canonical = self.resolve_alias(name);
+        self.commands.get(&canonical)
     }
 
     /// List all available commands.
@@ -49,6 +150,34 @@ impl CommandRegistry {
         let mut cmds: Vec<_> = self.commands.values().collect();
         cmds.sort_by(|a, b| a.name.cmp(&b.name));
         cmds
+    }
+
+    /// All logical groups present in the registry, in insertion-stable order.
+    pub fn groups(&self) -> Vec<String> {
+        let mut groups: Vec<String> = self
+            .commands
+            .values()
+            .filter_map(|c| c.group.clone())
+            .collect();
+        groups.sort();
+        groups.dedup();
+        groups
+    }
+
+    /// Commands belonging to a given group.
+    pub fn by_group(&self, group: &str) -> Vec<&SlashCommand> {
+        self.commands
+            .values()
+            .filter(|c| c.group.as_deref() == Some(group))
+            .collect()
+    }
+
+    /// Commands in a given palette category.
+    pub fn by_category(&self, category: CommandCategory) -> Vec<&SlashCommand> {
+        self.commands
+            .values()
+            .filter(|c| c.category == category)
+            .collect()
     }
 
     /// Load commands from a directory of markdown files.
@@ -79,6 +208,9 @@ impl CommandRegistry {
             template: content.to_string(),
             agent: None,
             model: None,
+            group: Some("custom".to_string()),
+            aliases: Vec::new(),
+            category: CommandCategory::System,
         })
     }
 
@@ -92,77 +224,86 @@ impl CommandRegistry {
     /// Register built-in commands.
     fn register_builtins(&mut self) {
         let builtins = vec![
-            SlashCommand {
-                name: "help".to_string(),
-                description: "Show help information".to_string(),
-                template: "Show all available commands and their usage.".to_string(),
-                agent: None,
-                model: None,
-            },
-            SlashCommand {
-                name: "compact".to_string(),
-                description: "Compact conversation context".to_string(),
-                template: "Please summarize the conversation so far to reduce context usage."
-                    .to_string(),
-                agent: None,
-                model: None,
-            },
-            SlashCommand {
-                name: "clear".to_string(),
-                description: "Clear conversation".to_string(),
-                template: "".to_string(),
-                agent: None,
-                model: None,
-            },
-            SlashCommand {
-                name: "cost".to_string(),
-                description: "Show cost breakdown".to_string(),
-                template: "What is the total cost and token usage for this session?".to_string(),
-                agent: None,
-                model: None,
-            },
-            SlashCommand {
-                name: "model".to_string(),
-                description: "Switch or show current model".to_string(),
-                template: "".to_string(),
-                agent: None,
-                model: None,
-            },
-            SlashCommand {
-                name: "sessions".to_string(),
-                description: "List saved sessions".to_string(),
-                template: "".to_string(),
-                agent: None,
-                model: None,
-            },
-            SlashCommand {
-                name: "undo".to_string(),
-                description: "Undo last change".to_string(),
-                template: "".to_string(),
-                agent: None,
-                model: None,
-            },
-            SlashCommand {
-                name: "redo".to_string(),
-                description: "Redo last undone change".to_string(),
-                template: "".to_string(),
-                agent: None,
-                model: None,
-            },
-            SlashCommand {
-                name: "rewind".to_string(),
-                description: "Rewind to previous checkpoint".to_string(),
-                template: "".to_string(),
-                agent: None,
-                model: None,
-            },
-            SlashCommand {
-                name: "export".to_string(),
-                description: "Export conversation to markdown".to_string(),
-                template: "".to_string(),
-                agent: None,
-                model: None,
-            },
+            SlashCommand::with_meta(
+                "help",
+                "Show help information",
+                "Show all available commands and their usage.",
+                "system",
+                CommandCategory::System,
+                &["?"],
+            ),
+            SlashCommand::with_meta(
+                "compact",
+                "Compact conversation context",
+                "Please summarize the conversation so far to reduce context usage.",
+                "context",
+                CommandCategory::Context,
+                &["c"],
+            ),
+            SlashCommand::with_meta(
+                "clear",
+                "Clear conversation",
+                "",
+                "session",
+                CommandCategory::Session,
+                &["cls"],
+            ),
+            SlashCommand::with_meta(
+                "cost",
+                "Show cost breakdown",
+                "What is the total cost and token usage for this session?",
+                "context",
+                CommandCategory::Context,
+                &["$"],
+            ),
+            SlashCommand::with_meta(
+                "model",
+                "Switch or show current model",
+                "",
+                "session",
+                CommandCategory::Session,
+                &["m"],
+            ),
+            SlashCommand::with_meta(
+                "sessions",
+                "List saved sessions",
+                "",
+                "session",
+                CommandCategory::Session,
+                &[],
+            ),
+            SlashCommand::with_meta(
+                "undo",
+                "Undo last change",
+                "",
+                "session",
+                CommandCategory::Session,
+                &["u"],
+            ),
+            SlashCommand::with_meta(
+                "redo",
+                "Redo last undone change",
+                "",
+                "session",
+                CommandCategory::Session,
+                &["r"],
+            ),
+            SlashCommand::with_meta(
+                "rewind",
+                "Rewind to previous checkpoint",
+                "",
+                "session",
+                CommandCategory::Session,
+                &["rw"],
+            ),
+            SlashCommand::with_meta(
+                "export",
+                "Export conversation to markdown",
+                "",
+                "files",
+                CommandCategory::Files,
+                &["e"],
+            ),
         ];
         for cmd in builtins {
             self.register(cmd);
@@ -211,8 +352,40 @@ mod tests {
             template: "Review the following code: $ARGUMENTS".to_string(),
             agent: None,
             model: None,
+            group: Some("agent".to_string()),
+            aliases: vec!["rv".to_string()],
+            category: CommandCategory::Agent,
         });
         let expanded = registry.expand("review", "src/main.rs");
         assert_eq!(expanded.unwrap(), "Review the following code: src/main.rs");
+    }
+
+    #[test]
+    fn command_aliases_resolve() {
+        let registry = CommandRegistry::new();
+        // "u" is the alias for "undo".
+        assert_eq!(registry.resolve_alias("u"), "undo");
+        assert_eq!(registry.get("u").unwrap().name, "undo");
+        // Unknown names resolve to themselves.
+        assert_eq!(registry.resolve_alias("nope"), "nope");
+    }
+
+    #[test]
+    fn command_groups_and_categories() {
+        let registry = CommandRegistry::new();
+        let groups = registry.groups();
+        assert!(groups.contains(&"session".to_string()));
+        assert!(groups.contains(&"context".to_string()));
+        let session_cmds = registry.by_group("session");
+        assert!(session_cmds.iter().any(|c| c.name == "undo"));
+        let context_cmds = registry.by_category(CommandCategory::Context);
+        assert!(context_cmds.iter().any(|c| c.name == "compact"));
+    }
+
+    #[test]
+    fn command_category_strings() {
+        assert_eq!(CommandCategory::Session.as_str(), "session");
+        assert_eq!(CommandCategory::Context.as_str(), "context");
+        assert_eq!(CommandCategory::all().len(), 6);
     }
 }

@@ -136,6 +136,7 @@ impl LlmProvider for OpenAiProvider {
                 input_tokens,
                 output_tokens,
             },
+            tool_calls: Vec::new(),
         })
     }
 
@@ -331,6 +332,7 @@ impl LlmProvider for OpenAiProvider {
                 input_tokens,
                 output_tokens,
             },
+            tool_calls: Vec::new(),
         })
     }
 }

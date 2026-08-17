@@ -112,6 +112,7 @@ impl LlmProvider for MockProvider {
                             input_tokens: response.input_tokens.unwrap_or(0),
                             output_tokens: response.output_tokens.unwrap_or(0),
                         },
+                        tool_calls: Vec::new(),
                     });
                 }
                 _ => Err(anyhow!("unknown error kind '{}': {}", err.kind, msg)),
@@ -124,6 +125,7 @@ impl LlmProvider for MockProvider {
                     input_tokens: response.input_tokens.unwrap_or(0),
                     output_tokens: response.output_tokens.unwrap_or(0),
                 },
+                tool_calls: Vec::new(),
             })
         }
     }

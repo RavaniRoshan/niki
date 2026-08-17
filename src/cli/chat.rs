@@ -54,6 +54,7 @@ fn process_message(tx: &mpsc::Sender<DisplayEvent>, config: &NikiConfig, user_te
                     max_tokens: 1024,
                     temperature: 0.7,
                     json_schema: None,
+                    tools: None,
                 };
                 match provider.complete(req).await {
                     Ok(resp) => resp.content,

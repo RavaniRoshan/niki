@@ -110,6 +110,7 @@ impl LlmProvider for AnthropicProvider {
                 input_tokens,
                 output_tokens,
             },
+            tool_calls: Vec::new(),
         })
     }
 
