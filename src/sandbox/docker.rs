@@ -54,6 +54,7 @@ impl DockerSandbox {
         source_repo: &Path,
         task_id: &Uuid,
         config: &DockerConfig,
+        niki_config: &crate::config::NikiConfig,
         policy: crate::config::SecurityPolicyConfig,
         containers: ActiveContainers,
         event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
@@ -170,7 +171,7 @@ impl DockerSandbox {
             docker: docker.clone(),
             containers,
             policy: policy.clone(),
-            permission_checker: crate::sandbox::build_permission_checker(&policy),
+            permission_checker: crate::sandbox::build_permission_checker(&policy, niki_config),
             event_tx,
         })
     }
@@ -210,6 +211,7 @@ impl DockerSandbox {
         _source_sandbox: &DockerSandbox,
         task_id: &Uuid,
         config: &DockerConfig,
+        niki_config: &crate::config::NikiConfig,
         policy: crate::config::SecurityPolicyConfig,
         containers: ActiveContainers,
     ) -> Result<Self> {
@@ -220,6 +222,7 @@ impl DockerSandbox {
             Path::new("."),
             task_id,
             config,
+            niki_config,
             policy,
             containers,
             std::sync::mpsc::channel().0,

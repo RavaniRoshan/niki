@@ -6,15 +6,30 @@ use uuid::Uuid;
 
 use crate::NikiError;
 use crate::artifacts::types::AgentRole;
-use crate::config::{DockerConfig, SecurityPolicyConfig};
+use crate::config::{DockerConfig, NikiConfig, SecurityPolicyConfig};
 use crate::permissions::{Permission, PermissionChecker, PermissionConfig, PermissionRule};
+
+/// Map a config permission string ("allow"/"ask"/"deny") to the `Permission` enum.
+fn parse_permission(s: &str) -> Permission {
+    match s.to_lowercase().as_str() {
+        "allow" => Permission::Allow,
+        "deny" => Permission::Deny,
+        _ => Permission::Ask,
+    }
+}
 
 /// Build a [`PermissionChecker`] from a security policy so the dead-island
 /// granular permission system actually gates command execution. Denied
 /// commands become `Deny` rules; everything else falls through to `Ask`
 /// (which the headless sandbox treats as allow — interactive prompting is a
 /// TUI concern). With an empty deny list this is a no-op (behavior-preserving).
-pub(crate) fn build_permission_checker(policy: &SecurityPolicyConfig) -> PermissionChecker {
+///
+/// `[permissions]` config rules are merged on top of the deny-list rules, and
+/// `auto_approve` is taken from config instead of being hardcoded.
+pub(crate) fn build_permission_checker(
+    policy: &SecurityPolicyConfig,
+    config: &NikiConfig,
+) -> PermissionChecker {
     let mut rules: std::collections::HashMap<String, PermissionRule> =
         std::collections::HashMap::new();
     for denied in &policy.denied_commands {
@@ -26,10 +41,25 @@ pub(crate) fn build_permission_checker(policy: &SecurityPolicyConfig) -> Permiss
             },
         );
     }
+    // Merge [permissions] rules from config.
+    for (i, rc) in config.permissions.rules.iter().enumerate() {
+        let key = if rc.action.is_empty() {
+            format!("rule_{}", i)
+        } else {
+            rc.action.clone()
+        };
+        rules.insert(
+            key,
+            PermissionRule {
+                permission: parse_permission(&rc.permission),
+                pattern: rc.pattern.clone(),
+            },
+        );
+    }
     PermissionChecker::new(PermissionConfig {
         tools: crate::permissions::ToolPermissions::default(),
         rules,
-        auto_approve: false,
+        auto_approve: config.permissions.auto_approve,
         external_directory: Permission::Ask,
         doom_loop: Permission::Ask,
     })
@@ -142,6 +172,7 @@ pub async fn create_sandbox(
     source_repo: &Path,
     task_id: &Uuid,
     config: &DockerConfig,
+    niki_config: &NikiConfig,
     policy: SecurityPolicyConfig,
     containers: ActiveContainers,
     event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
@@ -158,6 +189,7 @@ pub async fn create_sandbox(
                     source_repo,
                     task_id,
                     config,
+                    niki_config,
                     policy,
                     containers,
                     event_tx,
@@ -171,6 +203,7 @@ pub async fn create_sandbox(
                 source_repo,
                 task_id,
                 config,
+                niki_config,
                 policy,
                 event_tx,
             )
@@ -293,12 +326,15 @@ mod tests {
         assert!(check_command_policy(&["git", "show", "HEAD"], &policy).is_ok());
     }
 
+    use crate::config::types::NikiConfig;
+
     #[test]
     fn permission_checker_maps_denied_commands_to_deny() {
         // The dead-island PermissionChecker must actually gate commands derived
         // from the security policy. A denied command maps to Permission::Deny.
         let policy = test_policy();
-        let checker = build_permission_checker(&policy);
+        let config = NikiConfig::default();
+        let checker = build_permission_checker(&policy, &config);
         assert_eq!(
             checker.check_command("git push --force origin main"),
             crate::permissions::Permission::Deny
@@ -317,7 +353,8 @@ mod tests {
             denied_commands: vec![],
             max_exec_seconds: 300,
         };
-        let checker = build_permission_checker(&policy);
+        let config = NikiConfig::default();
+        let checker = build_permission_checker(&policy, &config);
         assert_eq!(
             checker.check_command("ls -la"),
             crate::permissions::Permission::Ask

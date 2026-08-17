@@ -33,6 +33,7 @@ pub async fn run_agent(
     degrade_on_invalid: bool,
     max_tokens: u32,
     temperature: f32,
+    steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<(String, TokenUsage, u32, u32)> {
     let mut env = Environment::new();
     let template_content = crate::load_asset(&format!("prompts/{}", template_name))?;
@@ -141,6 +142,21 @@ pub async fn run_agent(
             Err(e) => {
                 display.agent_failed(role, &e.to_string());
                 return Err(e);
+            }
+        }
+
+        // T12: Check for /steer corrections between chunks.
+        if let Some(arc) = steer_rx {
+            if let Ok(mut guard) = arc.lock() {
+                if let Some(msg) = guard.take() {
+                    tracing::info!(target: "niki::agent", role = ?role, "steer correction: {}", msg);
+                    let _ = display.tui_tx().map(|tx| {
+                        tx.send(crate::display::tui::DisplayEvent::ChatMessage {
+                            role: "system".to_string(),
+                            text: format!("[steer] {}", msg),
+                        })
+                    });
+                }
             }
         }
     }

@@ -1,5 +1,6 @@
 use crate::artifacts::types::{AgentRole, ArtifactEnvelope, ReviewFeedback};
 use crate::llm::provider::TokenUsage;
+use crate::memory::compression::ContextBudget;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -9,11 +10,15 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineState {
     pub task_id: Uuid,
+    pub context_budget: ContextBudget,
 }
 
 impl PipelineState {
     pub fn new(task_id: Uuid) -> Self {
-        Self { task_id }
+        Self {
+            task_id,
+            context_budget: ContextBudget::new(200_000),
+        }
     }
 
     pub fn set_artifact<T: Serialize>(

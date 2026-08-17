@@ -154,6 +154,7 @@ impl Session {
 /// Manages multiple sessions for a project.
 pub struct SessionManager {
     sessions_dir: PathBuf,
+    project_path: PathBuf,
 }
 
 impl SessionManager {
@@ -161,6 +162,7 @@ impl SessionManager {
     pub fn new(project_path: &Path) -> Self {
         Self {
             sessions_dir: project_path.join(".niki").join("sessions"),
+            project_path: project_path.to_path_buf(),
         }
     }
 
@@ -218,10 +220,137 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Load the "current" session, returning `None` if it doesn't exist.
+    pub fn load_current(&self) -> Result<Option<Session>> {
+        match self.load(CURRENT_SESSION_ID) {
+            Ok(session) => Ok(Some(session)),
+            Err(e) => {
+                if e.downcast_ref::<std::io::Error>()
+                    .map(|e| e.kind() == std::io::ErrorKind::NotFound)
+                    .unwrap_or(false)
+                {
+                    Ok(None)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Save the "current" session to disk.
+    pub fn save_current(&self, session: &Session) -> Result<()> {
+        self.save(session)
+    }
+
+    /// Load the current session (mutably), returning a new default session if none exists.
+    pub fn load_or_create_current(&self) -> Result<Session> {
+        match self.load_current()? {
+            Some(session) => Ok(session),
+            None => {
+                let session = Session::new(
+                    self.project_path.clone(),
+                    "unknown".to_string(),
+                    "unknown".to_string(),
+                );
+                self.save_current(&session)?;
+                Ok(session)
+            }
+        }
+    }
+
+    /// Create a checkpoint in the current session, then save.
+    pub fn create_checkpoint(&self, label: &str, git_commit: Option<String>) -> Result<()> {
+        let mut session = self.load_or_create_current()?;
+        session.create_checkpoint(label, git_commit);
+        self.save_current(&session)?;
+        Ok(())
+    }
+
+    /// Undo the current session: load, undo, save. Returns `true` if undo succeeded.
+    pub fn undo(&self) -> Result<bool> {
+        match self.load_current()? {
+            Some(mut session) => {
+                let result = session.undo();
+                if result {
+                    self.save_current(&session)?;
+                }
+                Ok(result)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Redo the current session: load, redo, save. Returns `true` if redo succeeded.
+    pub fn redo(&self) -> Result<bool> {
+        match self.load_current()? {
+            Some(mut session) => {
+                let result = session.redo();
+                if result {
+                    self.save_current(&session)?;
+                }
+                Ok(result)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Rewind to the previous checkpoint and return its label, if successful.
+    pub fn rewind(&self) -> Result<Option<String>> {
+        match self.load_current()? {
+            Some(mut session) => {
+                if session.undo() {
+                    self.save_current(&session)?;
+                    let idx = session.current_checkpoint.unwrap_or(0);
+                    let label = session
+                        .checkpoints
+                        .get(idx)
+                        .map(|c| c.label.clone())
+                        .unwrap_or_default();
+                    Ok(Some(label))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Get the labels of all checkpoints in the current session, if it exists.
+    pub fn checkpoint_labels(&self) -> Result<Vec<String>> {
+        match self.load_current()? {
+            Some(session) => Ok(session
+                .checkpoints
+                .iter()
+                .map(|c| c.label.clone())
+                .collect()),
+            None => Ok(Vec::new()),
+        }
+    }
+
     /// Get the path for a session file.
     fn session_path(&self, id: &str) -> PathBuf {
         self.sessions_dir.join(format!("{}.json", id))
     }
+}
+
+/// The session ID used for the "current" pipeline session.
+pub const CURRENT_SESSION_ID: &str = "current";
+
+/// Get the current git HEAD commit hash for a project path, if available.
+pub fn current_git_commit(project_path: &Path) -> Option<String> {
+    std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(project_path)
+        .output()
+        .ok()
+        .and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout);
+            if o.status.success() && !s.trim().is_empty() {
+                Some(s.trim().to_string())
+            } else {
+                None
+            }
+        })
 }
 
 #[cfg(test)]

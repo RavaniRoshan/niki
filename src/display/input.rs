@@ -40,7 +40,7 @@ impl InputHandler {
                 state.clear();
                 InputAction::Submit(content)
             }
-            KeyCode::Esc => InputAction::None,
+            KeyCode::Esc => InputAction::Cancel,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 state.clear();
                 InputAction::None

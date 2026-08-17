@@ -34,11 +34,15 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::command_palette::CommandPalette;
+use super::components::command_menu;
+use super::components::list_cursor::FocusState;
+use super::components::permission;
 use super::modal::{self, ModalAction};
 use super::onboarding::{self, OnboardingAction};
 use super::pages::chat;
 use super::pages::{AppState, Page, PageId, PageRouter};
 use super::persistence;
+use super::state::InputMode;
 
 /// Events emitted by the pipeline/display layer for the TUI to render.
 #[derive(Debug, Clone)]
@@ -101,6 +105,23 @@ pub enum DisplayEvent {
         command: String,
         response_tx: std::sync::mpsc::Sender<PermissionAction>,
     },
+    /// TUI sender for /steer corrections — the pipeline polls this shared state
+    /// between agent streaming chunks for user corrections.
+    SteerChannel(std::sync::Arc<std::sync::Mutex<Option<String>>>),
+}
+
+/// Which panel currently owns list navigation / mouse routing. Overlays win
+/// over the chat view, in priority order (permission → palette → slash menu).
+fn active_focus(state: &AppState) -> FocusState {
+    if state.show_permission_modal {
+        FocusState::Permission
+    } else if state.show_command_palette {
+        FocusState::CommandPalette
+    } else if state.show_command_menu {
+        FocusState::CommandMenu
+    } else {
+        FocusState::Chat
+    }
 }
 
 /// Restore terminal state no matter how we leave `run_tui`.
@@ -194,6 +215,7 @@ fn run_tui(
     }
 
     let mut state = AppState::new(description, config, project_path.clone());
+    state.cancel = Some(cancel.clone());
     state.onboarded = onboarding::load_state(&project_path);
 
     let mut router = PageRouter::new();
@@ -210,6 +232,8 @@ fn run_tui(
     let mut engine = crate::display::engine::RenderEngine::new(terminal, sync_capable);
     engine.mark_dirty();
     let mut last_render = std::time::Instant::now();
+    // Tracks the previous Ctrl+C press for the two-press-to-exit behaviour.
+    let mut last_ctrl_c: Option<std::time::Instant> = None;
 
     loop {
         // Adapt frame target: 60fps while a stage is streaming, else 30fps idle.
@@ -233,6 +257,7 @@ fn run_tui(
                 );
             }
 
+            state.clear_stale_notice();
             let s = &state;
             if engine
                 .terminal_mut()
@@ -301,19 +326,40 @@ fn run_tui(
                             ModalAction::None => {}
                         }
                     } else if state.show_permission_modal {
-                        if let Some(req) = state.permission_request.take() {
-                            let action = match key.code {
-                                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                                    PermissionAction::Allow
+                        // Permission modal uses the universal list cursor for
+                        // Up/Down; Enter confirms the highlighted option.
+                        let mut cursor = permission::cursor(&state);
+                        match key.code {
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                cursor.prev();
+                                state.permission_selected = cursor.selected;
+                                engine.mark_dirty();
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                cursor.next();
+                                state.permission_selected = cursor.selected;
+                                engine.mark_dirty();
+                            }
+                            _ => {
+                                if let Some(req) = state.permission_request.take() {
+                                    let action = match key.code {
+                                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                                            PermissionAction::Allow
+                                        }
+                                        KeyCode::Enter => cursor
+                                            .submit()
+                                            .map(permission::action_for)
+                                            .unwrap_or(PermissionAction::Deny),
+                                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                            PermissionAction::Deny
+                                        }
+                                        _ => PermissionAction::Deny,
+                                    };
+                                    let _ = req.response_tx.send(action);
+                                    state.show_permission_modal = false;
+                                    engine.mark_dirty();
                                 }
-                                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                                    PermissionAction::Deny
-                                }
-                                _ => PermissionAction::Deny,
-                            };
-                            let _ = req.response_tx.send(action);
-                            state.show_permission_modal = false;
-                            engine.mark_dirty();
+                            }
                         }
                     } else if state.show_command_palette {
                         // Command palette takes priority
@@ -322,6 +368,78 @@ fn run_tui(
                             engine.mark_dirty();
                         } else {
                             engine.mark_dirty();
+                        }
+                    } else if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && key.code == KeyCode::Char('c')
+                    {
+                        // Ctrl+C: first press cancels a running stage / clears input;
+                        // a second press within 2s exits the TUI.
+                        if state.has_running_stage() {
+                            state.request_cancel("Stopping… (Ctrl+C)");
+                        } else {
+                            state.input_state.buffer.clear();
+                            state.input_state.cursor_pos = 0;
+                        }
+                        let now = std::time::Instant::now();
+                        let exit = match last_ctrl_c {
+                            Some(t) => now.duration_since(t) < Duration::from_secs(2),
+                            None => false,
+                        };
+                        last_ctrl_c = Some(now);
+                        if exit {
+                            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                            break;
+                        }
+                        engine.mark_dirty();
+                    } else if state.show_command_menu {
+                        // Slash command menu navigation (universal arrow + Enter model).
+                        match key.code {
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                let mut cursor = command_menu::cursor(&state);
+                                cursor.prev();
+                                state.command_selected = cursor.selected;
+                                engine.mark_dirty();
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                let mut cursor = command_menu::cursor(&state);
+                                cursor.next();
+                                state.command_selected = cursor.selected;
+                                engine.mark_dirty();
+                            }
+                            KeyCode::Enter => {
+                                if let Some(name) =
+                                    crate::display::components::command_menu::get_selected_command(
+                                        &state,
+                                    )
+                                {
+                                    state.input_state.buffer = format!("/{}", name);
+                                    state.input_state.cursor_pos = state.input_state.buffer.len();
+                                    state.input_state.mode = InputMode::Insert;
+                                    state.show_command_menu = false;
+                                    state.command_filter.clear();
+                                    state.command_selected = 0;
+                                    let enter =
+                                        event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+                                    let mut page = chat::ChatPage::new();
+                                    page.handle_key(enter, &mut state);
+                                }
+                                engine.mark_dirty();
+                            }
+                            KeyCode::Esc => {
+                                state.show_command_menu = false;
+                                state.command_filter.clear();
+                                state.command_selected = 0;
+                                state.input_state.mode = InputMode::Insert;
+                                engine.mark_dirty();
+                            }
+                            // All other keys fall through to the input handler so the
+                            // filter updates live as the user types.
+                            _ => {
+                                let mut page = chat::ChatPage::new();
+                                if page.handle_key(key, &mut state) {
+                                    engine.mark_dirty();
+                                }
+                            }
                         }
                     } else if key.code == KeyCode::Tab
                         && !key.modifiers.contains(KeyModifiers::CONTROL)
@@ -389,21 +507,103 @@ fn run_tui(
                     }
                 }
                 Ok(Event::Mouse(mouse)) => {
-                    if state.current_page == PageId::Chat {
-                        if let Ok(size) = engine.terminal().size() {
-                            let full = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                            let chunks = Layout::default()
-                                .direction(Direction::Vertical)
-                                .constraints([
-                                    Constraint::Length(8),
-                                    Constraint::Min(5),
-                                    Constraint::Length(1),
-                                ])
-                                .split(full);
-                            chat::ChatPage::handle_mouse(&mut state, mouse, chunks[1]);
-                            engine.mark_dirty();
+                    use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+                    // Hover (move/drag) moves the highlight; a left press activates.
+                    let hovering =
+                        matches!(mouse.kind, MouseEventKind::Moved | MouseEventKind::Drag(_));
+                    let clicking = matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left));
+                    let full = engine
+                        .terminal()
+                        .size()
+                        .ok()
+                        .map(|size| ratatui::layout::Rect::new(0, 0, size.width, size.height));
+
+                    // Route to the active overlay first; chat copy-mode only
+                    // sees the mouse when no overlay owns it.
+                    match active_focus(&state) {
+                        FocusState::Permission => {
+                            if let Some(full) = full
+                                && let Some(idx) =
+                                    permission::click_index(full, mouse.column, mouse.row)
+                            {
+                                let mut cursor = permission::cursor(&state);
+                                if hovering {
+                                    if cursor.hover(idx) {
+                                        state.permission_selected = cursor.selected;
+                                        engine.mark_dirty();
+                                    }
+                                } else if clicking {
+                                    if let Some(i) = cursor.click(idx) {
+                                        state.permission_selected = i;
+                                        if let Some(req) = state.permission_request.take() {
+                                            let _ = req.response_tx.send(permission::action_for(i));
+                                            state.show_permission_modal = false;
+                                        }
+                                        engine.mark_dirty();
+                                    }
+                                }
+                            }
+                        }
+                        FocusState::CommandPalette => {
+                            if let Some(full) = full
+                                && let Some(idx) = super::command_palette::click_index(
+                                    &command_palette,
+                                    full,
+                                    mouse.column,
+                                    mouse.row,
+                                )
+                            {
+                                if hovering {
+                                    if command_palette.hover(idx) {
+                                        engine.mark_dirty();
+                                    }
+                                } else if clicking && command_palette.click(idx, &mut state) {
+                                    state.show_command_palette = false;
+                                    engine.mark_dirty();
+                                }
+                            }
+                        }
+                        FocusState::CommandMenu => {
+                            if let Some(full) = full
+                                && let Some(idx) =
+                                    command_menu::click_index(&state, full, mouse.column, mouse.row)
+                            {
+                                let mut cursor = command_menu::cursor(&state);
+                                let changed = if hovering {
+                                    cursor.hover(idx)
+                                } else if clicking {
+                                    cursor.click(idx).is_some()
+                                } else {
+                                    false
+                                };
+                                if changed {
+                                    state.command_selected = cursor.selected;
+                                    engine.mark_dirty();
+                                }
+                            }
+                        }
+                        FocusState::Chat => {
+                            if state.current_page == PageId::Chat
+                                && let Some(full) = full
+                            {
+                                let chunks = Layout::default()
+                                    .direction(Direction::Vertical)
+                                    .constraints([
+                                        Constraint::Length(8),
+                                        Constraint::Min(5),
+                                        Constraint::Length(1),
+                                    ])
+                                    .split(full);
+                                chat::ChatPage::handle_mouse(&mut state, mouse, chunks[1]);
+                                engine.mark_dirty();
+                            }
                         }
                     }
+                }
+                Ok(Event::Resize(_, _)) => {
+                    // Terminal was resized — force a re-render so the layout
+                    // reflows to the new dimensions (ratatui re-samples size on draw).
+                    engine.mark_dirty();
                 }
                 _ => {}
             }
@@ -864,5 +1064,22 @@ mod tests {
         assert_eq!(PageId::from_key(','), Some(PageId::Config));
         assert_eq!(PageId::from_key('?'), Some(PageId::Help));
         assert_eq!(PageId::from_key('x'), None);
+    }
+
+    #[test]
+    fn active_focus_priority() {
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("test".into(), config, ".".into());
+        assert_eq!(active_focus(&state), FocusState::Chat);
+
+        state.show_command_menu = true;
+        assert_eq!(active_focus(&state), FocusState::CommandMenu);
+
+        state.show_command_palette = true;
+        assert_eq!(active_focus(&state), FocusState::CommandPalette);
+
+        state.show_permission_modal = true;
+        assert_eq!(active_focus(&state), FocusState::Permission);
+        assert!(active_focus(&state).is_overlay());
     }
 }

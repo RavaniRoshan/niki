@@ -97,7 +97,8 @@ pulldown-cmark = "0.12"
 regex = "1"
 # OS keyring for secure API key storage
 keyring = "2"
-# Masked password/key input
+# OS-level notifications
+notify-rust = "4"# Masked password/key input
 rpassword = "7"
 
 [dev-dependencies]

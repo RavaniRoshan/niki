@@ -6,10 +6,12 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::pages::{AppState, PageId};
+use crate::display::components::list_cursor::ListCursor;
 use crate::display::theme;
 
 pub struct CommandPalette {
-    pub selected: usize,
+    /// Universal list cursor shared with the slash menu / permission modal.
+    pub cursor: ListCursor,
     pub items: Vec<PaletteItem>,
 }
 
@@ -117,7 +119,13 @@ impl CommandPalette {
                 action: PaletteAction::Quit,
             },
         ];
-        Self { selected: 0, items }
+        let cursor = ListCursor::new(items.len());
+        Self { cursor, items }
+    }
+
+    /// Currently highlighted row.
+    pub fn selected(&self) -> usize {
+        self.cursor.selected
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, state: &mut AppState) -> bool {
@@ -127,15 +135,11 @@ impl CommandPalette {
                 true
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if self.selected > 0 {
-                    self.selected -= 1;
-                } else {
-                    self.selected = self.items.len() - 1;
-                }
+                self.cursor.prev();
                 true
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.selected = (self.selected + 1) % self.items.len();
+                self.cursor.next();
                 true
             }
             KeyCode::Enter => self.execute_selected(state),
@@ -145,7 +149,7 @@ impl CommandPalette {
                     .iter()
                     .position(|i| i.shortcut == c.to_string().as_str())
                 {
-                    self.selected = idx;
+                    self.cursor.set_selected(idx);
                     self.execute_selected(state)
                 } else {
                     false
@@ -155,8 +159,24 @@ impl CommandPalette {
         }
     }
 
+    /// Move the highlight to a hovered row (mouse). Returns `true` on change.
+    pub fn hover(&mut self, idx: usize) -> bool {
+        self.cursor.hover(idx)
+    }
+
+    /// Select and run the clicked row (mouse click-to-select).
+    pub fn click(&mut self, idx: usize, state: &mut AppState) -> bool {
+        match self.cursor.click(idx) {
+            Some(_) => self.execute_selected(state),
+            None => false,
+        }
+    }
+
     fn execute_selected(&self, state: &mut AppState) -> bool {
-        let item = &self.items[self.selected];
+        let Some(idx) = self.cursor.submit() else {
+            return false;
+        };
+        let item = &self.items[idx];
         state.show_command_palette = false;
         match &item.action {
             PaletteAction::Navigate(page) => {
@@ -196,18 +216,41 @@ impl CommandPalette {
     }
 }
 
-pub fn render_command_palette(frame: &mut Frame, palette: &CommandPalette, area: Rect) {
-    let popup_width = 42.min(area.width - 4);
-    let popup_height = (palette.items.len() as u16 + 4).min(area.height - 4);
-    let x = (area.width - popup_width) / 2;
-    let y = (area.height - popup_height) / 2;
-
-    let popup_area = Rect {
+/// Geometry of the palette popup — shared by the renderer and the hit-test so
+/// mouse hover/click always match what is on screen.
+pub fn popup_rect(palette: &CommandPalette, area: Rect) -> Rect {
+    let popup_width = 42.min(area.width.saturating_sub(4));
+    let popup_height = (palette.items.len() as u16 + 4).min(area.height.saturating_sub(4));
+    let x = area.width.saturating_sub(popup_width) / 2;
+    let y = area.height.saturating_sub(popup_height) / 2;
+    Rect {
         x,
         y,
         width: popup_width,
         height: popup_height,
-    };
+    }
+}
+
+/// Hit-test a mouse position against the palette rows, returning the row index.
+pub fn click_index(palette: &CommandPalette, area: Rect, x: u16, y: u16) -> Option<usize> {
+    let popup = popup_rect(palette, area);
+    let inner_left = popup.x + 1;
+    let inner_right = popup.x + popup.width.saturating_sub(1);
+    let inner_top = popup.y + 1;
+    let inner_bottom = popup.y + popup.height.saturating_sub(1);
+    if x < inner_left || x >= inner_right || y < inner_top || y >= inner_bottom {
+        return None;
+    }
+    let idx = (y - inner_top) as usize;
+    if idx < palette.items.len() {
+        Some(idx)
+    } else {
+        None
+    }
+}
+
+pub fn render_command_palette(frame: &mut Frame, palette: &CommandPalette, area: Rect) {
+    let popup_area = popup_rect(palette, area);
     frame.render_widget(Clear, popup_area);
 
     let block = Block::default()
@@ -222,7 +265,7 @@ pub fn render_command_palette(frame: &mut Frame, palette: &CommandPalette, area:
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, item) in palette.items.iter().enumerate() {
-        let is_selected = i == palette.selected;
+        let is_selected = i == palette.selected();
         let prefix = if is_selected { "▸ " } else { "  " };
         let item_style = if is_selected {
             Style::default()
@@ -247,4 +290,59 @@ pub fn render_command_palette(frame: &mut Frame, palette: &CommandPalette, area:
     }
 
     frame.render_widget(Paragraph::new(lines).block(block), popup_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::crossterm::event::KeyModifiers;
+
+    fn test_state() -> AppState {
+        let config = crate::config::NikiConfig::default();
+        AppState::new("test".to_string(), config, ".".into())
+    }
+
+    #[test]
+    fn palette_cursor_wraps() {
+        let mut palette = CommandPalette::new();
+        let mut state = test_state();
+        assert_eq!(palette.selected(), 0);
+        // Up from the first row wraps to the last (universal cursor semantics).
+        palette.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), &mut state);
+        assert_eq!(palette.selected(), palette.items.len() - 1);
+        palette.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), &mut state);
+        assert_eq!(palette.selected(), 0);
+    }
+
+    #[test]
+    fn palette_click_index_maps_rows() {
+        let palette = CommandPalette::new();
+        let area = Rect::new(0, 0, 100, 40);
+        let popup = popup_rect(&palette, area);
+        // First row sits just inside the top border.
+        assert_eq!(
+            click_index(&palette, area, popup.x + 2, popup.y + 1),
+            Some(0)
+        );
+        assert_eq!(
+            click_index(&palette, area, popup.x + 2, popup.y + 3),
+            Some(2)
+        );
+        // Border rows and columns are not selectable.
+        assert_eq!(click_index(&palette, area, popup.x, popup.y + 1), None);
+        assert_eq!(click_index(&palette, area, popup.x + 2, popup.y), None);
+    }
+
+    #[test]
+    fn palette_click_runs_row() {
+        let mut palette = CommandPalette::new();
+        let mut state = test_state();
+        state.show_command_palette = true;
+        // Row 0 navigates to the Pipeline page.
+        assert!(palette.click(0, &mut state));
+        assert_eq!(state.current_page, PageId::Pipeline);
+        assert!(!state.show_command_palette);
+        // Out-of-range clicks are ignored.
+        assert!(!palette.click(999, &mut state));
+    }
 }

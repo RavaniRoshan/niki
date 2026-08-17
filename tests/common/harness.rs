@@ -142,6 +142,11 @@ impl TestHarness {
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
         let cancel = Arc::new(AtomicBool::new(false));
+        let task_dir = task
+            .project_path
+            .join(&self.config.general.output_dir)
+            .join("tasks")
+            .join(task.id.to_string());
         execute_pipeline(
             &task,
             &self.config,
@@ -150,6 +155,7 @@ impl TestHarness {
             containers,
             false,
             cancel,
+            &task_dir,
         )
         .await
         .expect("pipeline should succeed")
@@ -164,6 +170,11 @@ impl TestHarness {
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
         let cancel = Arc::new(AtomicBool::new(false));
+        let task_dir = task
+            .project_path
+            .join(&self.config.general.output_dir)
+            .join("tasks")
+            .join(task.id.to_string());
         execute_pipeline(
             &task,
             &self.config,
@@ -172,6 +183,7 @@ impl TestHarness {
             containers,
             true,
             cancel,
+            &task_dir,
         )
         .await
         .expect("pipeline should succeed")
@@ -186,6 +198,11 @@ impl TestHarness {
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
         let cancel = Arc::new(AtomicBool::new(false));
+        let task_dir = task
+            .project_path
+            .join(&self.config.general.output_dir)
+            .join("tasks")
+            .join(task.id.to_string());
         execute_pipeline(
             &task,
             &self.config,
@@ -194,6 +211,7 @@ impl TestHarness {
             containers,
             false,
             cancel,
+            &task_dir,
         )
         .await
         .unwrap_err()

@@ -11,6 +11,7 @@ pub mod input;
 pub mod layout;
 pub mod logo;
 pub mod modal;
+pub mod notify;
 pub mod onboarding;
 pub mod pages;
 pub mod persistence;

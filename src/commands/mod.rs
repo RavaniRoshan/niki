@@ -150,6 +150,13 @@ impl CommandRegistry {
                 model: None,
             },
             SlashCommand {
+                name: "rewind".to_string(),
+                description: "Rewind to previous checkpoint".to_string(),
+                template: "".to_string(),
+                agent: None,
+                model: None,
+            },
+            SlashCommand {
                 name: "export".to_string(),
                 description: "Export conversation to markdown".to_string(),
                 template: "".to_string(),

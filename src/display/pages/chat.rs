@@ -26,14 +26,17 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use std::fs;
 use std::io::Write;
+use std::path::Path;
 
 use crate::artifacts::types::AgentRole;
 use crate::display::chat::markdown::render_markdown;
 use crate::display::chat::message::MessageRenderConfig;
+use crate::display::components::autocomplete::build_candidates;
 use crate::display::input::InputHandler;
 use crate::display::pages::{AppState, ChatLine, Page, StageStatus};
-use crate::display::state::InputAction;
+use crate::display::state::{AutocompleteState, InputAction, InputMode};
 use crate::display::theme;
 
 fn role_label(role: AgentRole) -> &'static str {
@@ -205,6 +208,77 @@ impl ChatPage {
             _ => {}
         }
     }
+
+    /// Keep slash-menu and @-autocomplete overlays in sync with the input buffer/mode.
+    pub fn sync_input_overlays(&self, state: &mut AppState) {
+        let buf = state.input_state.buffer.clone();
+
+        // Slash command menu: visible while in Command mode with a '/' prefix.
+        if state.input_state.mode == InputMode::Command && buf.starts_with('/') {
+            state.show_command_menu = true;
+            state.command_filter = buf.clone();
+            if state.command_selected >= state.commands.len() {
+                state.command_selected = 0;
+            }
+        } else if state.show_command_menu {
+            state.show_command_menu = false;
+            state.command_filter.clear();
+            state.command_selected = 0;
+        }
+
+        // @ file autocomplete: only in Insert mode, '@' prefix, no space yet.
+        if state.input_state.mode == InputMode::Insert && buf.starts_with('@') && !buf.contains(' ')
+        {
+            let files = Self::project_files(state);
+            let candidates = build_candidates(&buf, &files);
+            state.input_state.autocomplete = Some(AutocompleteState {
+                prefix: buf.clone(),
+                candidates,
+                selected: 0,
+            });
+        } else if state.input_state.autocomplete.is_some() {
+            state.input_state.autocomplete = None;
+        }
+    }
+
+    /// Bounded walk of the project tree for @-mention file completion.
+    pub fn project_files(state: &AppState) -> Vec<String> {
+        let root = &state.project_path;
+        let mut out = Vec::new();
+        let mut stack = vec![root.clone()];
+        let mut depth = 0usize;
+        'walk: while let Some(dir) = stack.pop() {
+            let entries = match fs::read_dir(&dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                if path.is_dir() {
+                    if matches!(
+                        name.as_str(),
+                        ".git" | "node_modules" | "target" | "dist" | ".niki"
+                    ) {
+                        continue;
+                    }
+                    if depth < 6 {
+                        stack.push(path);
+                    }
+                } else if let Ok(rel) = path.strip_prefix(root) {
+                    out.push(rel.to_string_lossy().to_string());
+                    if out.len() >= 200 {
+                        break 'walk;
+                    }
+                }
+            }
+            depth += 1;
+            if depth > 6 {
+                break;
+            }
+        }
+        out
+    }
 }
 
 impl Default for ChatPage {
@@ -335,44 +409,71 @@ impl Page for ChatPage {
 
         // Delegate to InputHandler (unified input system).
         let handler = InputHandler::new();
-        match handler.handle_insert(&mut state.input_state, key) {
+        let handled = match handler.handle_insert(&mut state.input_state, key) {
             InputAction::Submit(text) => {
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
                     if trimmed == "/undo" {
-                        let output = std::process::Command::new("git")
-                            .args(["revert", "--no-commit", "HEAD~1"])
-                            .output();
-                        let msg = match output {
-                            Ok(out) if out.status.success() => {
-                                "Undid last change (git revert --no-commit HEAD~1)".to_string()
-                            }
-                            Ok(out) => {
-                                format!("Undo failed: {}", String::from_utf8_lossy(&out.stderr))
-                            }
+                        let mgr = crate::session::SessionManager::new(&state.project_path);
+                        let msg = match mgr.undo() {
+                            Ok(true) => "Undid last checkpoint".to_string(),
+                            Ok(false) => "Nothing to undo".to_string(),
                             Err(e) => format!("Undo error: {}", e),
                         };
                         state.chat_log.push(("system".to_string(), msg));
                     } else if trimmed == "/redo" {
-                        let output = std::process::Command::new("git")
-                            .args(["cherry-pick", "--no-commit", "HEAD@{1}"])
-                            .output();
-                        let msg = match output {
-                            Ok(out) if out.status.success() => {
-                                "Redid last undone change (git cherry-pick HEAD@{1})".to_string()
-                            }
-                            Ok(out) => {
-                                format!("Redo failed: {}", String::from_utf8_lossy(&out.stderr))
-                            }
+                        let mgr = crate::session::SessionManager::new(&state.project_path);
+                        let msg = match mgr.redo() {
+                            Ok(true) => "Redid last undone checkpoint".to_string(),
+                            Ok(false) => "Nothing to redo".to_string(),
                             Err(e) => format!("Redo error: {}", e),
                         };
                         state.chat_log.push(("system".to_string(), msg));
+                    } else if trimmed == "/rewind" {
+                        let mgr = crate::session::SessionManager::new(&state.project_path);
+                        let msg = match mgr.rewind() {
+                            Ok(Some(label)) => format!("Rewound to checkpoint: {}", label),
+                            Ok(None) => "Nothing to rewind to".to_string(),
+                            Err(e) => format!("Rewind error: {}", e),
+                        };
+                        state.chat_log.push(("system".to_string(), msg));
+                    } else if trimmed.starts_with("/steer ") {
+                        let steer_msg = trimmed.strip_prefix("/steer ").unwrap_or("").trim();
+                        if steer_msg.is_empty() {
+                            state.chat_log.push((
+                                "system".to_string(),
+                                "Usage: /steer <your message to the agent>".to_string(),
+                            ));
+                        } else if let Some(steer_arc) = &state.steer_channel {
+                            if let Ok(mut guard) = steer_arc.lock() {
+                                *guard = Some(steer_msg.to_string());
+                                state.chat_log.push((
+                                    "system".to_string(),
+                                    format!("Steered agent: {}", steer_msg),
+                                ));
+                            } else {
+                                state.chat_log.push((
+                                    "system".to_string(),
+                                    "No agent running — cannot steer".to_string(),
+                                ));
+                            }
+                        } else {
+                            state.chat_log.push((
+                                "system".to_string(),
+                                "No agent running — cannot steer".to_string(),
+                            ));
+                        }
                     } else {
                         state
                             .chat_log
                             .push(("user".to_string(), trimmed.to_string()));
                     }
                 }
+                true
+            }
+            InputAction::Cancel => {
+                // Esc in input: stop a running pipeline (if any) and surface a notice.
+                state.request_cancel("Stopping… (Esc)");
                 true
             }
             InputAction::ToggleCommandPalette => {
@@ -434,7 +535,9 @@ impl Page for ChatPage {
                 true
             }
             InputAction::None => false,
-        }
+        };
+        self.sync_input_overlays(state);
+        handled
     }
 
     fn title(&self) -> &str {

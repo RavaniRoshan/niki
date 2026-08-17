@@ -383,16 +383,37 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         containers.clone(),
         args.dry_run,
         cancel.clone(),
+        &task_dir,
     )
     .await
     {
         Ok(r) => r,
         Err(e) => {
+            // Preserve incremental metrics saved by execute_pipeline, if any.
             let mut rec = TaskRecord::new(task.id, &task.description);
+            let task_json = task_dir.join("task.json");
+            if let Ok(bytes) = std::fs::read(&task_json)
+                && let Ok(existing) = serde_json::from_slice::<TaskRecord>(&bytes)
+            {
+                rec.agent_metrics = existing.agent_metrics;
+                rec.total_input_tokens = existing.total_input_tokens;
+                rec.total_output_tokens = existing.total_output_tokens;
+                rec.total_cost_usd = existing.total_cost_usd;
+                rec.total_latency_ms = existing.total_latency_ms;
+                rec.total_retry_count = existing.total_retry_count;
+                rec.max_ttft_ms = existing.max_ttft_ms;
+            }
             rec.status = TaskStatus::Failed {
                 error: e.to_string(),
             };
             let _ = rec.save_to_disk(&task_dir);
+
+            // T9: Emit OS notification for failure or cancellation.
+            if let Some(crate::NikiError::Cancelled) = e.downcast_ref::<crate::NikiError>() {
+                crate::display::notify::pipeline_cancelled();
+            } else {
+                crate::display::notify::pipeline_complete(false, "");
+            }
             display.finish_tui();
             return Err(e);
         }

@@ -67,6 +67,42 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
         spans.push(Span::styled(&state.branch_name, theme::text_dim()));
     }
 
+    // Mode badge
+    let mode_str = match state.input_state.mode {
+        crate::display::state::InputMode::Command => "COMMAND",
+        crate::display::state::InputMode::Insert => "INSERT",
+        crate::display::state::InputMode::Shell => "SHELL",
+    };
+    let mode_color = match state.input_state.mode {
+        crate::display::state::InputMode::Command => theme::text_dim(),
+        crate::display::state::InputMode::Insert => theme::primary(),
+        crate::display::state::InputMode::Shell => theme::warning(),
+    };
+    spans.push(Span::styled(" ─── ", theme::border()));
+    spans.push(Span::styled(
+        mode_str,
+        Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
+    ));
+
+    // Line / Col
+    let (line, col) = state.input_state.line_col();
+    spans.push(Span::styled(" ─── ", theme::border()));
+    spans.push(Span::styled(
+        format!("Ln {}, Col {}", line + 1, col + 1),
+        theme::text_dim(),
+    ));
+
+    // Typing indicator
+    if state.input_state.is_typing(2000) {
+        spans.push(Span::styled(" ─── ", theme::border()));
+        spans.push(Span::styled("Typing… ", theme::text_dim()));
+    }
+
+    // Transient notice (e.g. "Esc — stopping…")
+    if let Some((msg, _)) = &state.notice {
+        spans.push(Span::styled(format!(" ─── {}", msg), mode_color));
+    }
+
     let status_line = Line::from(spans);
     frame.render_widget(Paragraph::new(status_line), area);
 }
