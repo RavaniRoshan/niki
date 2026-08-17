@@ -7,7 +7,8 @@
 
 <div align="center">
 
-<img width="1677" height="703" alt="Niki" src="assets/logo.svg" />
+<img width="1311" height="605" alt="Screenshot 2026-08-17 212129" src="https://github.com/user-attachments/assets/1234e802-b5e8-4033-8ce7-c8015a4d5080" />
+
 
 <br>
 
