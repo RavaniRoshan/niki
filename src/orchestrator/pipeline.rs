@@ -15,7 +15,7 @@ use crate::cost::compute_cost;
 use crate::display::agent_stream::AgenticDisplay;
 use crate::knowledge::indexer::index_project;
 use crate::llm::provider::{LlmProvider, create_provider};
-use crate::orchestrator::state::StageMetric;
+use crate::orchestrator::state::{StageMetric, TaskRecord, TaskStatus};
 use crate::safety::SafetyProof;
 use crate::sandbox::{ActiveContainers, SandboxBackend, create_sandbox};
 
@@ -74,6 +74,7 @@ pub struct PipelineResult {
     /// is set and the produced diff exceeds it, this holds a plain-English warning
     /// surfaced in `report.md`. `None` = on or under the limit (or the limit is unset).
     pub diff_guardwarn: Option<String>,
+    pub context_budget: crate::memory::compression::ContextBudget,
 }
 
 /// Typed output of a single pipeline stage, used for role-specific handling.
@@ -451,6 +452,7 @@ async fn run_parallel_coders(
                 &project_path,
                 &task_id,
                 &config.docker,
+                &config,
                 role_policy(AgentRole::Coder, &config),
                 containers,
                 event_tx.clone(),
@@ -478,6 +480,7 @@ async fn run_parallel_coders(
                 0.0, // temperature: use agent default
                 &mcp_tools,
                 config_max_diff_lines(&config),
+                None,
             )
             .await?;
 
@@ -524,6 +527,7 @@ async fn run_stage(
     degrade_on_invalid: bool,
     max_tokens: u32,
     temperature: f32,
+    steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<String> {
     let start = Instant::now();
     let (json, usage, retry_count, ttft_ms) = run_agent(
@@ -537,6 +541,7 @@ async fn run_stage(
         degrade_on_invalid,
         max_tokens,
         temperature,
+        steer_rx,
     )
     .await?;
     let latency_ms = start.elapsed().as_millis() as u64;
@@ -593,6 +598,7 @@ async fn run_role(
     temperature: f32,
     mcp_tools: &str,
     max_diff_lines: Option<usize>,
+    steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<(String, Vec<String>, RoleOutput)> {
     let task_spec_json = serde_json::to_string_pretty(task_spec)?;
     let (template, schema) = role_prompt(role);
@@ -693,6 +699,7 @@ async fn run_role(
         false, // degrade_on_invalid: strict by default for body stages
         max_tokens,
         temperature,
+        steer_rx,
     )
     .await?;
 
@@ -759,6 +766,60 @@ fn config_max_diff_lines(config: &NikiConfig) -> Option<usize> {
     }
 }
 
+/// T7: Update the context budget from accumulated metrics, write context.json,
+/// and auto-compact when the session-switch threshold is crossed.
+fn update_context_budget(
+    metrics: &[StageMetric],
+    state: &mut super::state::PipelineState,
+    project_path: &Path,
+    task_dir: &Path,
+) {
+    let total: u32 = metrics.iter().map(|m| m.total_tokens()).sum();
+    state.context_budget.used = total;
+
+    let ctx_json = serde_json::json!({
+        "used": state.context_budget.used,
+        "capacity": state.context_budget.capacity,
+        "fill_ratio": state.context_budget.fill_ratio(),
+        "should_compress": state.context_budget.should_compress(),
+        "needs_session_switch": state.context_budget.needs_session_switch(),
+    });
+    let _ = std::fs::create_dir_all(task_dir);
+    let _ = std::fs::write(
+        task_dir.join("context.json"),
+        serde_json::to_string_pretty(&ctx_json).unwrap_or_default(),
+    );
+
+    if state.context_budget.needs_session_switch() {
+        let _ = crate::memory::compression::compress_context(
+            project_path,
+            AgentRole::Planner,
+            crate::memory::compression::CompressionStrategy::KnowledgeBlock,
+            format!(
+                "Pipeline context at {:.1}% budget ({}k/{}k tokens used).",
+                state.context_budget.fill_ratio() * 100.0,
+                state.context_budget.used / 1000,
+                state.context_budget.capacity / 1000,
+            ),
+            vec![format!(
+                "Total tokens consumed: {}",
+                state.context_budget.used
+            )],
+            vec!["Pipeline auto-compaction triggered by context budget threshold.".to_string()],
+            vec![],
+            Some(state.context_budget.used),
+        );
+    }
+}
+
+/// T8: Save an incremental TaskRecord snapshot to disk.
+fn save_task_record(task: &Task, metrics: &[StageMetric], status: TaskStatus, task_dir: &Path) {
+    let mut rec = TaskRecord::new(task.id, &task.description);
+    rec.status = status;
+    rec.add_metrics(metrics);
+    let _ = rec.save_to_disk(task_dir);
+}
+
 pub async fn execute_pipeline(
     task: &Task,
     config: &NikiConfig,
@@ -767,14 +828,20 @@ pub async fn execute_pipeline(
     containers: ActiveContainers,
     dry_run: bool,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    task_dir: &Path,
 ) -> Result<PipelineResult> {
     // 1. Index Project
     let knowledge = index_project(&task.project_path, config).await?;
     let knowledge_str = knowledge.render();
 
-    let state = super::state::PipelineState::new(task.id);
-    let mut artifacts: Vec<(AgentRole, String)> = Vec::new();
+    let mut state = super::state::PipelineState::new(task.id);
     let mut metrics: Vec<StageMetric> = Vec::new();
+
+    // T8: Save an early TaskRecord (Running) so a crash mid-pipeline still
+    // leaves a status file on disk.
+    save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+
+    let mut artifacts: Vec<(AgentRole, String)> = Vec::new();
     // Per-agent context-isolation records (BUILD_PLAN 2.1). Populated as each
     // stage runs so the report can prove every agent was an independent session.
     let mut isolation: Vec<IsolationRecord> = Vec::new();
@@ -797,6 +864,16 @@ pub async fn execute_pipeline(
         let (tx, _) = std::sync::mpsc::channel();
         tx
     });
+
+    // T12: Create the /steer correction channel using a shared Arc<Mutex<Option<String>>>.
+    // The Arc goes to the TUI (via DisplayEvent) so the chat page can write user
+    // corrections; a clone is polled inside run_agent's streaming loop.
+    let steer_state: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let _ = event_tx.send(crate::display::tui::DisplayEvent::SteerChannel(
+        steer_state.clone(),
+    ));
+    let steer_rx = Some(&steer_state);
 
     // Resolve the ordered, data-driven stage list.
     let stages = ensure_planner(resolve_stages(config), config);
@@ -825,6 +902,7 @@ pub async fn execute_pipeline(
         false, // Planner must not degrade — it's the pipeline entry point
         planner_stage.max_tokens,
         planner_stage.temperature,
+        steer_rx,
     )
     .await?;
     let task_spec: TaskSpec = serde_json::from_str(&planner_json)?;
@@ -846,6 +924,10 @@ pub async fn execute_pipeline(
     );
     display.update_pipeline_status();
 
+    // T7+T8: Update context budget and save incremental task record after Planner.
+    update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
+    save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+
     // Decide the agent topology from the task shape (BUILD_PLAN 3.2, P2.2).
     // The Planner has already derived `estimated_complexity`, so we can pick
     // the fast-path (single solo Coder) or the full multi-agent chain now.
@@ -855,6 +937,7 @@ pub async fn execute_pipeline(
     if dry_run {
         return Ok(PipelineResult {
             task_id: task.id,
+            context_budget: state.context_budget.clone(),
             state,
             final_diff: String::new(),
             diff_guardwarn: None,
@@ -869,6 +952,14 @@ pub async fn execute_pipeline(
         });
     }
 
+    // T10: Create a checkpoint after the Planner stage so /undo and /rewind can restore.
+    let session_mgr = crate::session::SessionManager::new(&task.project_path);
+    let _ = session_mgr.init();
+    let _ = session_mgr.create_checkpoint(
+        "after_planner",
+        crate::session::current_git_commit(&task.project_path),
+    );
+
     // 2. Initialize Sandbox (backend chosen by config: docker / worktree)
     // `containers` is an Arc and is cloned here so the parallel-coder path below
     // can hand its own clone to each per-coder worktree sandbox.
@@ -880,6 +971,7 @@ pub async fn execute_pipeline(
         &task.project_path,
         &task.id,
         &config.docker,
+        config,
         planner_policy,
         containers.clone(),
         event_tx.clone(),
@@ -1019,6 +1111,7 @@ pub async fn execute_pipeline(
                     synth_stage.temperature,
                     &mcp_tools,
                     config_max_diff_lines(config),
+                    steer_rx,
                 )
                 .await?;
                 artifacts.push((AgentRole::Synthesizer, json.clone()));
@@ -1036,6 +1129,9 @@ pub async fn execute_pipeline(
                 });
                 display.agent_done(AgentRole::Synthesizer, summary, m.usage(), m.cost_usd);
                 display.update_pipeline_status();
+
+                update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
+                save_task_record(task, &metrics, TaskStatus::Running, task_dir);
 
                 let merged = match role_output {
                     RoleOutput::Synthesizer(s) => s.merged,
@@ -1085,6 +1181,7 @@ pub async fn execute_pipeline(
                         stage.temperature,
                         &mcp_tools,
                         config_max_diff_lines(config),
+                        steer_rx,
                     )
                     .await?;
                     artifacts.push((stage.role, json.clone()));
@@ -1100,6 +1197,9 @@ pub async fn execute_pipeline(
                     display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
                     display.update_pipeline_status();
                     enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
+
+                    update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
+                    save_task_record(task, &metrics, TaskStatus::Running, task_dir);
 
                     match role_output {
                         RoleOutput::Tester(_) => {
@@ -1122,6 +1222,7 @@ pub async fn execute_pipeline(
                     // Cooperative cancellation: the TUI (or any holder of the
                     // flag) can abort the run between revision rounds.
                     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir);
                         return Err(crate::NikiError::Cancelled.into());
                     }
                     for stage in &body_stages {
@@ -1154,6 +1255,7 @@ pub async fn execute_pipeline(
                             stage.temperature,
                             &mcp_tools,
                             config_max_diff_lines(config),
+                            steer_rx,
                         )
                         .await?;
                         artifacts.push((stage.role, json.clone()));
@@ -1172,6 +1274,9 @@ pub async fn execute_pipeline(
                         display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
                         display.update_pipeline_status();
                         enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
+
+                        update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
+                        save_task_record(task, &metrics, TaskStatus::Running, task_dir);
 
                         match role_output {
                             RoleOutput::Coder(diff) => {
@@ -1277,12 +1382,13 @@ pub async fn execute_pipeline(
                     project_memory => crate::memory::render_memory_for_prompt(&task.project_path, AgentRole::Coder, 10),
                     current_files => current_files.clone(),
                 },
-                "schemas/code_diff.schema.json",
-                display,
-                &mut metrics,
-                false, // Solo mode: strict — no degradation
+                 "schemas/code_diff.schema.json",
+                 display,
+                 &mut metrics,
+                 false, // Solo mode: strict — no degradation
                  coder_stage.max_tokens,
                  coder_stage.temperature,
+                 steer_rx,
              )
              .await?;
             artifacts.push((AgentRole::Coder, solo_json.clone()));
@@ -1303,6 +1409,10 @@ pub async fn execute_pipeline(
             );
             display.update_pipeline_status();
             enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
+
+            update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
+            save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+
             // The solo Coder returns a CodeDiff; apply it so the downstream diff
             // read picks up the change.
             coder_json = solo_json;
@@ -1354,6 +1464,9 @@ pub async fn execute_pipeline(
 
     sandbox.destroy().await?;
 
+    update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
+    save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+
     // Extract learnings from this run and save to memory
     extract_memory_from_artifacts(
         &task.project_path,
@@ -1365,6 +1478,7 @@ pub async fn execute_pipeline(
 
     Ok(PipelineResult {
         task_id: task.id,
+        context_budget: state.context_budget.clone(),
         state,
         final_diff,
         diff_guardwarn,

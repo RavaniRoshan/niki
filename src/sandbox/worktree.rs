@@ -31,6 +31,7 @@ impl WorktreeSandbox {
         source_repo: &Path,
         task_id: &Uuid,
         _config: &DockerConfig,
+        niki_config: &crate::config::NikiConfig,
         policy: SecurityPolicyConfig,
         event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
     ) -> Result<Self> {
@@ -64,7 +65,7 @@ impl WorktreeSandbox {
                 agent_role,
                 task_id: task_id.to_string(),
                 policy: policy.clone(),
-                permission_checker: crate::sandbox::build_permission_checker(&policy),
+                permission_checker: crate::sandbox::build_permission_checker(&policy, niki_config),
                 event_tx,
             }),
             _ => Err(anyhow!(

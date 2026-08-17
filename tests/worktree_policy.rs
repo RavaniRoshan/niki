@@ -1,7 +1,7 @@
 mod common;
 
 use niki::artifacts::types::AgentRole;
-use niki::config::{DockerConfig, SecurityPolicyConfig};
+use niki::config::{DockerConfig, NikiConfig, SecurityPolicyConfig};
 use niki::sandbox::docker::ActiveContainers;
 use niki::sandbox::{Sandbox, SandboxBackend, create_sandbox};
 use std::sync::Arc;
@@ -16,11 +16,13 @@ async fn create_worktree_sandbox(
     policy: SecurityPolicyConfig,
 ) -> Result<niki::sandbox::worktree::WorktreeSandbox, anyhow::Error> {
     let (tx, _) = mpsc::channel();
+    let config = niki::config::NikiConfig::default();
     niki::sandbox::worktree::WorktreeSandbox::create(
         AgentRole::Coder,
         repo_path,
         &Uuid::new_v4(),
         &DockerConfig::default(),
+        &config,
         policy,
         tx,
     )
@@ -259,6 +261,7 @@ async fn create_sandbox_worktree_backed() {
         .unwrap();
 
     let policy = SecurityPolicyConfig::default();
+    let config = NikiConfig::default();
     let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
     let (tx, _) = mpsc::channel();
     let sandbox = create_sandbox(
@@ -268,6 +271,7 @@ async fn create_sandbox_worktree_backed() {
         repo,
         &Uuid::new_v4(),
         &DockerConfig::default(),
+        &config,
         policy,
         containers,
         tx,

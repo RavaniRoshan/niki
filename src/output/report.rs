@@ -678,6 +678,7 @@ mod tests {
         PipelineResult {
             diff_guardwarn: None,
             task_id: Uuid::nil(),
+            context_budget: PipelineState::new(Uuid::nil()).context_budget,
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::from("+hello"),
             verdict: Verdict::Approved,
@@ -801,6 +802,7 @@ mod tests {
         let result = PipelineResult {
             diff_guardwarn: None,
             task_id: Uuid::nil(),
+            context_budget: PipelineState::new(Uuid::nil()).context_budget,
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::from("+x"),
             verdict: Verdict::RevisionNeeded,
@@ -835,6 +837,7 @@ mod tests {
         let result = PipelineResult {
             diff_guardwarn: None,
             task_id: Uuid::nil(),
+            context_budget: PipelineState::new(Uuid::nil()).context_budget,
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::new(),
             verdict: Verdict::Approved,
@@ -924,6 +927,7 @@ mod tests {
         PipelineResult {
             diff_guardwarn: None,
             task_id: Uuid::nil(),
+            context_budget: PipelineState::new(Uuid::nil()).context_budget,
             state: PipelineState::new(Uuid::nil()),
             final_diff: diff.to_string(),
             verdict: Verdict::RevisionNeeded,
@@ -1019,6 +1023,7 @@ index 3333333..4444444 100644
         PipelineResult {
             diff_guardwarn: None,
             task_id: Uuid::nil(),
+            context_budget: PipelineState::new(Uuid::nil()).context_budget,
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::new(),
             verdict: Verdict::Approved,

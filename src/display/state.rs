@@ -4,7 +4,10 @@
 //! Events are dispatched through `apply_display_event()`, triggering re-renders.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use ratatui::style::Color;
@@ -177,6 +180,8 @@ pub enum InputAction {
     ScrollDown,
     /// Toggle expand/collapse of the stage at the cursor.
     ToggleExpand(usize),
+    /// Cancel the current operation (Esc in input, etc.).
+    Cancel,
 }
 
 /// Autocomplete state for @ file completion.
@@ -196,6 +201,8 @@ pub struct InputState {
     pub history_index: Option<usize>,
     pub mode: InputMode,
     pub autocomplete: Option<AutocompleteState>,
+    /// Last time the buffer was edited (drives the "Typing…" indicator).
+    pub last_typed_at: Option<Instant>,
 }
 
 impl InputState {
@@ -218,6 +225,7 @@ impl InputState {
     pub fn insert_char(&mut self, c: char) {
         self.buffer.insert(self.cursor_pos, c);
         self.cursor_pos += 1;
+        self.last_typed_at = Some(Instant::now());
     }
 
     /// Delete the character before the cursor (backspace).
@@ -225,6 +233,7 @@ impl InputState {
         if self.cursor_pos > 0 {
             self.cursor_pos -= 1;
             self.buffer.remove(self.cursor_pos);
+            self.last_typed_at = Some(Instant::now());
             true
         } else {
             false
@@ -235,6 +244,7 @@ impl InputState {
     pub fn delete_forward(&mut self) -> bool {
         if self.cursor_pos < self.buffer.len() {
             self.buffer.remove(self.cursor_pos);
+            self.last_typed_at = Some(Instant::now());
             true
         } else {
             false
@@ -299,6 +309,22 @@ impl InputState {
                 self.cursor_pos = 0;
             }
             None => {}
+        }
+    }
+
+    /// Current (1-based) line and (1-based) column of the caret.
+    pub fn line_col(&self) -> (usize, usize) {
+        let before = &self.buffer[..self.cursor_pos.min(self.buffer.len())];
+        let line = before.matches('\n').count() + 1;
+        let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+        (line, col)
+    }
+
+    /// Whether the user edited the buffer within the last `ms` milliseconds.
+    pub fn is_typing(&self, ms: u64) -> bool {
+        match self.last_typed_at {
+            Some(t) => t.elapsed() < Duration::from_millis(ms),
+            None => false,
         }
     }
 }
@@ -379,6 +405,8 @@ pub enum CommandAction {
     Quit,
     Undo,
     Redo,
+    Rewind,
+    Steer,
 }
 
 /// The main application state — single source of truth for the UI.
@@ -405,6 +433,10 @@ pub struct AppState {
     pub command_selected: usize,
     /// Available slash commands.
     pub commands: Vec<Command>,
+    /// Handle used to cancel the running pipeline (set by run_tui).
+    pub cancel: Option<Arc<AtomicBool>>,
+    /// Transient on-screen notice, e.g. "Esc — stopping…". Auto-clears after a few seconds.
+    pub notice: Option<(String, Instant)>,
     /// Whether the permission modal is visible.
     pub show_permission_modal: bool,
     /// Current permission request (if any).
@@ -494,6 +526,8 @@ pub struct AppState {
     pub tips: TipsBanner,
     /// Whether the command palette is visible.
     pub show_command_palette: bool,
+    /// Channel for /steer corrections — the pipeline polls the Arc<Mutex<Option<String>>> for user messages.
+    pub steer_channel: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 }
 
 /// Stage information (mirrors existing StageInfo).
@@ -591,7 +625,35 @@ impl AppState {
             onboarded: false,
             tips: TipsBanner::new(tips_enabled, tips_rotation),
             show_command_palette: false,
+            steer_channel: None,
+            cancel: None,
+            notice: None,
         }
+    }
+
+    /// Show a transient notice (auto-cleared after `ttl_ms`).
+    pub fn set_notice(&mut self, msg: &str, ttl_ms: u64) {
+        self.notice = Some((
+            msg.to_string(),
+            Instant::now() + Duration::from_millis(ttl_ms),
+        ));
+    }
+
+    /// Drop the notice if its TTL has elapsed. Call once per render tick.
+    pub fn clear_stale_notice(&mut self) {
+        if let Some((_, until)) = self.notice {
+            if Instant::now() >= until {
+                self.notice = None;
+            }
+        }
+    }
+
+    /// Request cancellation of the running pipeline, if any, and show a notice.
+    pub fn request_cancel(&mut self, notice: &str) {
+        if let Some(cancel) = &self.cancel {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.set_notice(notice, 4000);
     }
 
     /// Get the theme background color for the current theme mode.
@@ -729,8 +791,25 @@ impl AppState {
                 self.finished = true;
                 self.run_state = RunState::AwaitingApproval;
             }
-            DisplayEvent::PermissionRequest { .. } => {
-                // The TUI layer sets `show_permission_modal` and handles the response.
+            DisplayEvent::PermissionRequest {
+                command,
+                response_tx,
+                ..
+            } => {
+                self.permission_request = Some(PermissionRequest {
+                    tool_name: "sandbox_exec".to_string(),
+                    command: command.clone(),
+                    description: String::new(),
+                    response_tx,
+                });
+                self.permission_selected = 0;
+                if !self.show_permission_modal {
+                    self.show_permission_modal = true;
+                    crate::display::notify::permission_needed(&command);
+                }
+            }
+            DisplayEvent::SteerChannel(tx) => {
+                self.steer_channel = Some(tx);
             }
         }
     }
@@ -823,13 +902,23 @@ fn default_commands() -> Vec<Command> {
         },
         Command {
             name: "/undo".to_string(),
-            description: "Undo last agent change (git revert)".to_string(),
+            description: "Undo last checkpoint".to_string(),
             action: CommandAction::Undo,
         },
         Command {
             name: "/redo".to_string(),
-            description: "Redo last undone change".to_string(),
+            description: "Redo last undone checkpoint".to_string(),
             action: CommandAction::Redo,
+        },
+        Command {
+            name: "/rewind".to_string(),
+            description: "Rewind to previous checkpoint".to_string(),
+            action: CommandAction::Rewind,
+        },
+        Command {
+            name: "/steer".to_string(),
+            description: "Send a correction to the running agent".to_string(),
+            action: CommandAction::Steer,
         },
     ]
 }

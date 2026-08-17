@@ -469,6 +469,7 @@ impl AgenticDisplay {
         branch: &str,
         task_dir: &std::path::Path,
     ) {
+        crate::display::notify::pipeline_complete(true, branch);
         if self.tui.is_some() {
             // Feed live data into TUI pages before showing final screen.
             if !result.final_diff.is_empty() {
@@ -540,6 +541,7 @@ impl AgenticDisplay {
     }
 
     pub fn show_failure(&self, error: &NikiError, _state: &PipelineState) {
+        crate::display::notify::pipeline_complete(false, "");
         if self.tui.is_some() {
             self.emit(DisplayEvent::Revision {
                 round: 0,
