@@ -158,11 +158,7 @@ impl AgentState {
                 AgentState::Complete,
                 AgentState::Error,
             ],
-            AgentState::Writing => &[
-                AgentState::Running,
-                AgentState::Complete,
-                AgentState::Error,
-            ],
+            AgentState::Writing => &[AgentState::Running, AgentState::Complete, AgentState::Error],
             AgentState::Running => &[
                 AgentState::Thinking,
                 AgentState::Reading,
@@ -184,11 +180,7 @@ impl AgentState {
                 AgentState::Complete,
                 AgentState::Error,
             ],
-            AgentState::Blocked => &[
-                AgentState::Thinking,
-                AgentState::Running,
-                AgentState::Error,
-            ],
+            AgentState::Blocked => &[AgentState::Thinking, AgentState::Running, AgentState::Error],
             AgentState::Error => &[AgentState::Idle, AgentState::Thinking],
             AgentState::Complete => &[AgentState::Idle],
         }

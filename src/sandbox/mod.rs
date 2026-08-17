@@ -160,6 +160,40 @@ pub fn check_command_policy(cmd: &[&str], policy: &SecurityPolicyConfig) -> Resu
     Ok(())
 }
 
+/// Truncate long command stdout/stderr to preserve the head (first 15 lines)
+/// and tail (last 40 lines), inserting an omission summary banner in the middle.
+/// If `text` is within `max_lines` and `max_bytes`, it is returned unchanged.
+pub fn truncate_head_tail(text: &str, max_lines: usize, max_bytes: usize) -> String {
+    if text.is_empty() || (text.len() <= max_bytes && text.lines().count() <= max_lines) {
+        return text.to_string();
+    }
+
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() <= max_lines {
+        if text.len() > max_bytes {
+            let mut s = text[..max_bytes.saturating_sub(40)].to_string();
+            s.push_str("\n… [output truncated due to byte limit]");
+            return s;
+        }
+        return text.to_string();
+    }
+
+    let head_count = 15.min(lines.len());
+    let tail_count = 40.min(lines.len().saturating_sub(head_count));
+    let omitted = lines.len().saturating_sub(head_count + tail_count);
+
+    let mut result = Vec::with_capacity(head_count + tail_count + 1);
+    result.extend_from_slice(&lines[..head_count]);
+    if omitted > 0 {
+        let banner = format!("… [{} lines omitted]", omitted);
+        result.push(&banner);
+        result.extend_from_slice(&lines[lines.len() - tail_count..]);
+        return result.join("\n");
+    }
+    result.extend_from_slice(&lines[lines.len() - tail_count..]);
+    result.join("\n")
+}
+
 /// Create the sandbox for `backend`. `docker` is only required for the Docker
 /// backend (pass `None` for worktree).
 ///
@@ -359,5 +393,23 @@ mod tests {
             checker.check_command("ls -la"),
             crate::permissions::Permission::Ask
         );
+    }
+
+    #[test]
+    fn test_truncate_head_tail_short_text() {
+        let text = "line1\nline2\nline3";
+        assert_eq!(truncate_head_tail(text, 10, 1000), text);
+    }
+
+    #[test]
+    fn test_truncate_head_tail_preserves_head_and_tail() {
+        let lines: Vec<String> = (1..=100).map(|i| format!("output line {}", i)).collect();
+        let joined = lines.join("\n");
+        let truncated = truncate_head_tail(&joined, 50, 100_000);
+        assert!(truncated.contains("output line 1\n"));
+        assert!(truncated.contains("output line 15\n"));
+        assert!(truncated.contains("… [45 lines omitted]"));
+        assert!(truncated.contains("output line 61\n"));
+        assert!(truncated.contains("output line 100"));
     }
 }

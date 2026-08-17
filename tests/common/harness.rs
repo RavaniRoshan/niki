@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::common::mock_llm::MockScriptBuilder;
 use niki::config::NikiConfig;
 use niki::display::agent_stream::AgenticDisplay;
@@ -48,7 +50,6 @@ impl TestHarness {
         let path = dir.join(".niki-mock-script.json");
         let _ = std::fs::create_dir_all(path.parent().unwrap());
         std::fs::write(&path, builder.to_json_string()).unwrap();
-        ();
         TestHarness {
             repo: self.repo,
             config: self.config,

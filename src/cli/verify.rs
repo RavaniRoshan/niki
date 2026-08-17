@@ -3,8 +3,6 @@ use clap::Args;
 use std::path::PathBuf;
 use std::process::Command;
 
-use chrono::Utc;
-
 #[derive(Args)]
 pub struct VerifyArgs {
     /// Path to the project directory

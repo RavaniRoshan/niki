@@ -1003,9 +1003,9 @@ pub async fn execute_pipeline(
             parts.extend(s.fallbacks.iter().cloned());
             parts.join(":")
         };
-        if !provider_cache.contains_key(&cache_key) {
+        if let std::collections::hash_map::Entry::Vacant(e) = provider_cache.entry(cache_key) {
             let llm = provider_for(&s.provider, &s.fallbacks, config)?;
-            provider_cache.insert(cache_key, Arc::from(llm));
+            e.insert(Arc::from(llm));
         }
     }
 
@@ -1460,7 +1460,7 @@ pub async fn execute_pipeline(
     // Verification in the loop: actually execute the project's test suite inside
     // the sandbox and record the real result as part of the audit trail, *before*
     // the branch is created. This is the "verified before you see it" guarantee.
-    let test_execution = tester::run_tests(&*sandbox, &config, &task.project_path).await;
+    let test_execution = tester::run_tests(&*sandbox, config, &task.project_path).await;
 
     sandbox.destroy().await?;
 

@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use niki::artifacts::types::AgentRole;
 use niki::config::types::NikiConfig;
 use niki::display::pages::{AppState, Modal, PageId, PageRouter, RunState, StageInfo, StageStatus};

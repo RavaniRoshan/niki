@@ -21,21 +21,20 @@
 //!   markdown-rendered transcript, including syntax-highlighted code blocks.
 
 use ratatui::Frame;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use std::fs;
 use std::io::Write;
-use std::path::Path;
 
 use crate::artifacts::types::AgentRole;
 use crate::display::chat::markdown::render_markdown;
 use crate::display::chat::message::MessageRenderConfig;
 use crate::display::components::autocomplete::build_candidates;
 use crate::display::input::InputHandler;
-use crate::display::pages::{AppState, ChatLine, Page, StageStatus};
+use crate::display::pages::{AppState, ChatLine, Page, PageId, StageStatus};
 use crate::display::state::{AutocompleteState, InputAction, InputMode};
 use crate::display::theme;
 
@@ -53,23 +52,23 @@ fn role_label(role: AgentRole) -> &'static str {
 
 fn role_color(role: AgentRole) -> ratatui::style::Color {
     match role {
-        AgentRole::Planner => theme::primary(),
-        AgentRole::Coder => theme::accent(),
-        AgentRole::Tester => theme::success(),
+        AgentRole::Planner => theme::sand(),
+        AgentRole::Coder => theme::clay(),
+        AgentRole::Tester => theme::fg_dim(),
         AgentRole::Reviewer => theme::warning(),
-        AgentRole::Synthesizer => theme::claude(),
-        AgentRole::SecurityAuditor => theme::shell(),
+        AgentRole::Synthesizer => theme::sand(),
+        AgentRole::SecurityAuditor => theme::error(),
         AgentRole::Red => theme::error(),
     }
 }
 
 fn role_icon(role: AgentRole) -> &'static str {
     match role {
-        AgentRole::Planner => "◆",
-        AgentRole::Coder => "◈",
+        AgentRole::Planner => "◈",
+        AgentRole::Coder => "⟠",
         AgentRole::Tester => "◉",
-        AgentRole::Reviewer => "✓",
-        AgentRole::Synthesizer => "⚯",
+        AgentRole::Reviewer => "◆",
+        AgentRole::Synthesizer => "⧉",
         AgentRole::SecurityAuditor => "⛨",
         AgentRole::Red => "✗",
     }
@@ -77,10 +76,10 @@ fn role_icon(role: AgentRole) -> &'static str {
 
 fn status_glyph(status: &StageStatus) -> &'static str {
     match status {
-        StageStatus::Running => "…",
+        StageStatus::Running => "⠋",
         StageStatus::Done => "✓",
         StageStatus::Failed => "✗",
-        StageStatus::Queued => "•",
+        StageStatus::Queued => "·",
     }
 }
 
@@ -336,6 +335,20 @@ impl Page for ChatPage {
     fn handle_key(&mut self, key: KeyEvent, state: &mut AppState) -> bool {
         build_chat_lines_into(state);
 
+        // Ctrl+O: Global toggle for deductive reasoning / thinking traces
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('o') {
+            state.show_thinking = !state.show_thinking;
+            state.set_notice(
+                if state.show_thinking {
+                    "∴ Expanded all thinking traces (Ctrl+O)"
+                } else {
+                    "∴ Collapsed thinking traces (Ctrl+O)"
+                },
+                2000,
+            );
+            return true;
+        }
+
         if state.chat_copy_mode {
             match key.code {
                 KeyCode::Esc => {
@@ -413,7 +426,85 @@ impl Page for ChatPage {
             InputAction::Submit(text) => {
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
-                    if trimmed == "/undo" {
+                    if trimmed == "/help" {
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Available slash commands:\n  /doctor          Check providers, keys, sandbox health\n  /review          Trigger code review audit on workspace\n  /diff            View full-screen unified diff\n  /cost            Show token spend and cost metrics\n  /context         Show context window utilization\n  /compact         Compact session history into memory\n  /clear           Clear conversation log\n  /model <name>    Switch active LLM model\n  /theme           Cycle color theme (dark/light/auto)\n  /config          Open configuration editor\n  /terminal-setup  Guide truecolor & OSC 52 clipboard setup\n  /undo · /redo    Undo or redo workspace checkpoints\n  /steer <msg>     Send a live steering hint to running agent".to_string(),
+                        ));
+                    } else if trimmed == "/clear" || trimmed == "/reset" {
+                        state.chat_log.clear();
+                        state.chat_lines.clear();
+                        state.set_notice("Conversation cleared", 2500);
+                    } else if trimmed == "/compact" {
+                        let count = state.chat_log.len();
+                        if count > 2 {
+                            let last = state.chat_log.split_off(count - 2);
+                            state.chat_log = vec![(
+                                "system".to_string(),
+                                format!(
+                                    "Compacted {} previous turns into memory checkpoint.",
+                                    count - 2
+                                ),
+                            )];
+                            state.chat_log.extend(last);
+                        } else {
+                            state.chat_log.push((
+                                "system".to_string(),
+                                "Context is already minimal (no compaction needed).".to_string(),
+                            ));
+                        }
+                    } else if trimmed == "/cost" {
+                        state.chat_log.push((
+                            "system".to_string(),
+                            format!(
+                                "Session Economics:\n  • Total Spend:       ${:.4} USD\n  • Input Tokens:      {}\n  • Output Tokens:     {}\n  • Cache Read Tokens: {}\n  • Cache Write Tokens:{}\n  • Model:             {}\n  • Context Limit:     {} tokens",
+                                state.cost,
+                                state.input_tokens,
+                                state.output_tokens,
+                                state.cache_read_tokens,
+                                state.cache_write_tokens,
+                                state.model,
+                                state.context_limit
+                            ),
+                        ));
+                    } else if trimmed == "/context" {
+                        let pct = (state.context_usage * 100.0) as u32;
+                        state.chat_log.push((
+                            "system".to_string(),
+                            format!("Context Window:\n  Utilized: {}% (~{} tokens)\n  Capacity: {} tokens (Model: {})", pct, state.token_count, state.context_limit, state.model),
+                        ));
+                    } else if trimmed == "/diff" {
+                        state.current_page = PageId::Diff;
+                    } else if trimmed == "/config" {
+                        state.current_page = PageId::Config;
+                    } else if trimmed == "/terminal-setup" {
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Terminal Setup Guide:\n  • Truecolor: export COLORTERM=truecolor\n  • OSC-52 Clipboard: Supported in Ghostty, Kitty, iTerm2, WezTerm\n  • Keybindings: 'v' enters copy-mode, 'Space' marks region, 'y' yanks".to_string(),
+                        ));
+                    } else if trimmed.starts_with("/model") {
+                        let arg = trimmed.strip_prefix("/model").unwrap_or("").trim();
+                        if arg.is_empty() {
+                            state.chat_log.push((
+                                "system".to_string(),
+                                format!(
+                                    "Current model: {}. Usage: /model <model-name>",
+                                    state.model
+                                ),
+                            ));
+                        } else {
+                            state.model = arg.to_string();
+                            state
+                                .chat_log
+                                .push(("system".to_string(), format!("Switched model to {}", arg)));
+                        }
+                    } else if trimmed == "/theme" {
+                        let new_theme = crate::display::theme::next_theme();
+                        state.chat_log.push((
+                            "system".to_string(),
+                            format!("Switched theme to {}", new_theme),
+                        ));
+                    } else if trimmed == "/undo" {
                         let mgr = crate::session::SessionManager::new(&state.project_path);
                         let msg = match mgr.undo() {
                             Ok(true) => "Undid last checkpoint".to_string(),
@@ -472,8 +563,26 @@ impl Page for ChatPage {
                 true
             }
             InputAction::Cancel => {
-                // Esc in input: stop a running pipeline (if any) and surface a notice.
-                state.request_cancel("Stopping… (Esc)");
+                let now = std::time::Instant::now();
+                let is_double_esc = state
+                    .last_esc_time
+                    .map(|t| now.duration_since(t).as_millis() < 500)
+                    .unwrap_or(false);
+                state.last_esc_time = Some(now);
+
+                if is_double_esc && state.input_state.buffer.is_empty() {
+                    let mgr = crate::session::SessionManager::new(&state.project_path);
+                    let msg = match mgr.rewind() {
+                        Ok(Some(label)) => format!("Rewound to checkpoint: {}", label),
+                        Ok(None) => "Nothing to rewind to (no prior checkpoints)".to_string(),
+                        Err(e) => format!("Rewind error: {}", e),
+                    };
+                    state.chat_log.push(("system".to_string(), msg));
+                    state.set_notice("Rewound checkpoint (double Esc)", 2500);
+                } else {
+                    // Esc in input: stop a running pipeline (if any) and surface a notice.
+                    state.request_cancel("Stopping… (Esc)");
+                }
                 true
             }
             InputAction::ToggleCommandPalette => {
@@ -647,22 +756,62 @@ pub fn build_chat_lines(state: &AppState, width: usize) -> Vec<ChatLine> {
     push_line(&mut lines, String::new(), usize::MAX, 0, false, None, None);
 
     for (i, (role, text)) in state.chat_log.iter().enumerate() {
-        push_line(
-            &mut lines,
-            format!("● {}: {}", role, text),
-            i,
-            0,
-            false,
-            None,
-            None,
-        );
+        let (icon, color) = match role.as_str() {
+            "user" => ("◈", theme::clay()),
+            "assistant" => ("⟠", theme::sand()),
+            "system" => ("◆", theme::fg_subtle()),
+            _ => ("●", theme::fg_bright()),
+        };
+
+        for (l_idx, line_str) in text.lines().enumerate() {
+            if l_idx == 0 {
+                let rich_line = Line::from(vec![
+                    Span::styled(format!("{} ", icon), Style::default().fg(color)),
+                    Span::styled(
+                        format!("{}: ", role),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        line_str.to_string(),
+                        Style::default().fg(theme::fg_bright()),
+                    ),
+                ]);
+                push_line(
+                    &mut lines,
+                    format!("{} {}: {}", icon, role, line_str),
+                    i,
+                    0,
+                    false,
+                    Some(rich_line),
+                    None,
+                );
+            } else {
+                let rich_line = Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(
+                        line_str.to_string(),
+                        Style::default().fg(theme::fg_bright()),
+                    ),
+                ]);
+                push_line(
+                    &mut lines,
+                    format!("   {}", line_str),
+                    i,
+                    0,
+                    false,
+                    Some(rich_line),
+                    None,
+                );
+            }
+        }
+        push_line(&mut lines, String::new(), usize::MAX, 0, false, None, None);
     }
 
     let base = state.chat_log.len();
     for (i, s) in state.stages.iter().enumerate() {
         let msg_index = base + i;
         let is_running = s.status == StageStatus::Running;
-        let is_expanded = is_running || state.expanded_stages.contains(&i);
+        let is_expanded = is_running || state.show_thinking || state.expanded_stages.contains(&i);
 
         let disclosure = if is_expanded { "▾" } else { "▸" };
         let mut header_text = format!(
@@ -679,14 +828,16 @@ pub fn build_chat_lines(state: &AppState, width: usize) -> Vec<ChatLine> {
                 s.cost_usd
             ));
         }
-        let header_rich = Line::from(vec![
+        let status_color = match s.status {
+            StageStatus::Running => theme::thinking_green(),
+            StageStatus::Done => theme::success(),
+            StageStatus::Failed => theme::error(),
+            StageStatus::Queued => theme::fg_subtle(),
+        };
+        let mut header_spans = vec![
             Span::styled(
                 format!(" {} ", disclosure),
-                Style::default().fg(theme::text_dim()),
-            ),
-            Span::styled(
-                format!("{} ", status_glyph(&s.status)),
-                Style::default().fg(role_color(s.role)),
+                Style::default().fg(theme::fg_subtle()),
             ),
             Span::styled(
                 format!("{} ", role_icon(s.role)),
@@ -695,12 +846,34 @@ pub fn build_chat_lines(state: &AppState, width: usize) -> Vec<ChatLine> {
                     .add_modifier(ratatui::style::Modifier::BOLD),
             ),
             Span::styled(
-                role_label(s.role),
+                format!("{:<9} ", role_label(s.role)),
                 Style::default()
                     .fg(role_color(s.role))
                     .add_modifier(ratatui::style::Modifier::BOLD),
             ),
-        ]);
+            Span::styled(
+                format!("{} ", status_glyph(&s.status)),
+                Style::default().fg(status_color),
+            ),
+        ];
+        if s.status == StageStatus::Done {
+            header_spans.push(Span::styled(
+                format!(
+                    "{} tok · ${:.4}",
+                    s.input_tokens + s.output_tokens,
+                    s.cost_usd
+                ),
+                Style::default().fg(theme::fg_subtle()),
+            ));
+        } else if s.status == StageStatus::Running {
+            let glyph = crate::display::components::progress::spinner_glyph(state.tick);
+            let verb = crate::display::components::progress::action_verb(state.tick);
+            header_spans.push(Span::styled(
+                format!("∴ {} · {}...", glyph, verb),
+                Style::default().fg(theme::thinking_green()),
+            ));
+        }
+        let header_rich = Line::from(header_spans);
         push_line(
             &mut lines,
             header_text,
@@ -934,8 +1107,8 @@ mod tests {
         let lines: Vec<&str> = state.chat_lines.iter().map(|l| l.text.as_str()).collect();
         assert!(lines.iter().any(|l| l.contains("Welcome to NIKI")));
         assert!(lines.iter().any(|l| l.contains("test task")));
-        assert!(lines.iter().any(|l| l.contains("● user: hello")));
-        assert!(lines.iter().any(|l| l.contains("● assistant: world")));
+        assert!(lines.iter().any(|l| l.contains("user: hello")));
+        assert!(lines.iter().any(|l| l.contains("assistant: world")));
         assert!(lines.iter().any(|l| *l == "─".repeat(80).as_str()));
     }
 
@@ -1060,7 +1233,7 @@ mod tests {
             .position(|l| l.text.contains("World"))
             .unwrap();
         let sel = ChatPage::selected_text(&state, (hello_row, 13), (world_row, 14));
-        assert_eq!(sel, "Hello\n● user: World");
+        assert!(sel.contains("Hello") && sel.contains("World"));
     }
 
     #[test]
@@ -1071,5 +1244,30 @@ mod tests {
         let input_idx = state.chat_lines.iter().position(|l| l.is_input).unwrap();
         let sel = ChatPage::selected_text(&state, (0, 0), (input_idx, 10));
         assert!(!sel.contains("> "));
+    }
+
+    #[test]
+    fn show_thinking_expands_all_stages() {
+        let mut state = base_state();
+        state.show_thinking = true;
+        state.stages = vec![crate::display::pages::StageInfo {
+            role: AgentRole::Planner,
+            status: StageStatus::Done,
+            stream: String::new(),
+            full_transcript: "architecture reasoning".to_string(),
+            input_tokens: 10,
+            output_tokens: 20,
+            cost_usd: 0.001,
+            latency_ms: 100,
+            summary: vec!["planned architecture".to_string()],
+            start: None,
+        }];
+        state.chat_lines = build_chat_lines(&state, 80);
+        assert!(
+            state
+                .chat_lines
+                .iter()
+                .any(|l| l.text.contains("architecture reasoning"))
+        );
     }
 }

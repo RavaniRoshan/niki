@@ -33,8 +33,6 @@ struct JsonRpcResponse {
 struct JsonRpcError {
     code: i64,
     message: String,
-    #[serde(default)]
-    data: Option<serde_json::Value>,
 }
 
 /// A connection to an MCP server (STDIO transport).
@@ -298,7 +296,6 @@ pub async fn connect_server(config: &McpServerConfig) -> Result<(McpConnection, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_mcp_connection_stdio() {

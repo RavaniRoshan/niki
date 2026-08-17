@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::broadcast;
 
-use crate::mission::{AgentId, MissionId, SessionId};
+use crate::mission::{AgentId, MissionId};
 use crate::runtime::ToolId;
 
 // ---------------------------------------------------------------------------
@@ -203,14 +203,16 @@ impl fmt::Display for Event {
                 agent_id, state, ..
             } => write!(f, "Agent {} → {}", agent_id, state),
             Event::ToolStarted {
-                tool_name, input_summary, ..
+                tool_name,
+                input_summary,
+                ..
             } => write!(f, "{}({})", tool_name, input_summary),
             Event::ToolCompleted {
                 tool_id, summary, ..
             } => write!(f, "tool {}: {}", tool_id, summary),
-            Event::ToolFailed {
-                tool_id, error, ..
-            } => write!(f, "tool {} failed: {}", tool_id, error),
+            Event::ToolFailed { tool_id, error, .. } => {
+                write!(f, "tool {} failed: {}", tool_id, error)
+            }
             _ => write!(f, "{:?}", self),
         }
     }
@@ -237,6 +239,7 @@ impl EventBus {
     }
 
     /// Publish an event. Returns `Err` only if there are zero receivers.
+    #[allow(clippy::result_large_err)]
     pub fn emit(&self, event: Event) -> Result<(), broadcast::error::SendError<Event>> {
         self.tx.send(event).map(|_| ())
     }

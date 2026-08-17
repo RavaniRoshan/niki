@@ -109,9 +109,11 @@ fn deny_error_message_contains_context() {
 
 #[test]
 fn allow_list_takes_precedence_over_deny() {
-    let mut policy = SecurityPolicyConfig::default();
-    policy.allowed_commands = vec!["git diff".to_string()];
-    policy.denied_commands = vec!["git".to_string()];
+    let policy = SecurityPolicyConfig {
+        allowed_commands: vec!["git diff".to_string()],
+        denied_commands: vec!["git".to_string()],
+        ..Default::default()
+    };
     // "git diff" is in the allow-list, so it should pass even though "git" is denied
     assert!(check_command_policy(&["git", "diff"], &policy).is_ok());
 }

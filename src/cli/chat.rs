@@ -47,9 +47,12 @@ fn process_message(tx: &mpsc::Sender<DisplayEvent>, config: &NikiConfig, user_te
             rt.block_on(async {
                 let req = crate::llm::provider::CompletionRequest {
                     model,
-                    system_prompt:
-                        "You are NIKI, a concise coding assistant embedded in a terminal chat."
-                            .to_string(),
+                    system_prompt: concat!(
+                        "You are NIKI, a concise and high-precision coding assistant embedded in a terminal chat.\n",
+                        "Rule: Never run shell shims (cat, grep, sed, head, tail) when dedicated native tools are available.\n",
+                        "Rule: Always read files before modifying them.\n",
+                        "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__\n"
+                    ).to_string(),
                     user_message: user_text.to_string(),
                     max_tokens: 1024,
                     temperature: 0.7,

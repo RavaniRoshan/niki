@@ -25,11 +25,11 @@ case "$ARCH" in
   *) err "unsupported architecture: $ARCH" ;;
 esac
 
-# Only the three targets we actually ship are valid.
+# Prebuilt targets
 TARGET="${ARCH_PART}-${OS_PART}"
 case "$TARGET" in
-  x86_64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin) ;;
-  *) err "no prebuilt binary for $TARGET yet (Windows and linux/arm64 are planned)" ;;
+  x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin) ;;
+  *) err "no prebuilt binary for $TARGET yet" ;;
 esac
 
 ASSET="niki-${TARGET}.tar.gz"

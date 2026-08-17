@@ -1,34 +1,146 @@
-//! Text input box with cursor rendering.
+//! Text input box with cursor rendering and pill badges (Claude Code / Studio style).
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::display::state::{InputMode, InputState};
 use crate::display::theme;
 
-/// Render the input box with cursor.
+/// Render the input box with cursor, mode indicator, and status pill badges.
 pub fn render_input_box(frame: &mut Frame, state: &InputState, area: Rect) {
-    let prompt = match state.mode {
-        InputMode::Shell => Span::styled("! ", theme::shell()),
-        _ => Span::styled("> ", theme::primary()),
+    if area.width < 8 || area.height < 2 {
+        return;
+    }
+
+    let input_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::border_dim()))
+        .style(Style::default().bg(theme::bg_highlight()));
+
+    let inner = input_block.inner(area);
+    frame.render_widget(input_block, area);
+
+    let inner_width = inner.width as usize;
+    if inner_width < 4 {
+        return;
+    }
+
+    let mode_indicator = match state.mode {
+        InputMode::Shell => vec![
+            Span::styled("▎ ", Style::default().fg(theme::shell())),
+            Span::styled(
+                "Shell ",
+                Style::default()
+                    .fg(theme::fg_bright())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ],
+        InputMode::Command => vec![
+            Span::styled("▎ ", Style::default().fg(theme::clay())),
+            Span::styled(
+                "Cmd ",
+                Style::default()
+                    .fg(theme::fg_bright())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ],
+        InputMode::Insert => vec![
+            Span::styled("▎ ", Style::default().fg(theme::clay())),
+            Span::styled(
+                "Build ",
+                Style::default()
+                    .fg(theme::fg_bright())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ],
     };
 
-    let before_cursor = &state.buffer[..state.cursor_pos.min(state.buffer.len())];
-    let cursor_char = state.buffer[state.cursor_pos..].chars().next();
-    let after_cursor_start = state.cursor_pos + cursor_char.map_or(0, |c| c.len_utf8());
-    let after_cursor = &state.buffer[after_cursor_start.min(state.buffer.len())..];
+    let mut spans = mode_indicator;
+    let mode_len: usize = spans.iter().map(|s| s.content.chars().count()).sum();
 
-    let mut spans = vec![prompt];
-    spans.push(Span::styled(before_cursor.to_string(), theme::text()));
-    spans.push(Span::styled(
-        cursor_char.map_or(" ".to_string(), |c| c.to_string()),
-        theme::prompt_cursor(),
-    ));
-    spans.push(Span::styled(after_cursor.to_string(), theme::text()));
+    if state.buffer.is_empty() {
+        spans.push(Span::styled(" ", theme::prompt_cursor()));
+        let placeholder = if inner_width >= 55 {
+            "Describe a change or press / for commands..."
+        } else if inner_width >= 35 {
+            "Ask NIKI or / for commands..."
+        } else {
+            "Prompt..."
+        };
+        spans.push(Span::styled(
+            placeholder,
+            Style::default().fg(theme::fg_subtle()),
+        ));
+    } else {
+        let avail = inner_width.saturating_sub(mode_len + 1); // room for text + cursor
+        let buffer_chars: Vec<char> = state.buffer.chars().collect();
+        let cursor = state.cursor_pos.min(buffer_chars.len());
 
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+        // Horizontal scroll window calculation
+        let (start, end) = if buffer_chars.len() <= avail {
+            (0, buffer_chars.len())
+        } else if cursor < avail {
+            (0, avail)
+        } else {
+            let s = cursor + 1 - avail;
+            (s, (s + avail).min(buffer_chars.len()))
+        };
+
+        let before_cursor: String = buffer_chars[start..cursor].iter().collect();
+        let cursor_char = buffer_chars.get(cursor).copied();
+        let after_cursor: String = if cursor < end {
+            let next = cursor + 1;
+            if next < end {
+                buffer_chars[next..end].iter().collect()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        spans.push(Span::styled(
+            before_cursor,
+            Style::default().fg(theme::fg_bright()),
+        ));
+        spans.push(Span::styled(
+            cursor_char.map_or(" ".to_string(), |c| c.to_string()),
+            theme::prompt_cursor(),
+        ));
+        if !after_cursor.is_empty() {
+            spans.push(Span::styled(
+                after_cursor,
+                Style::default().fg(theme::fg_bright()),
+            ));
+        }
+    }
+
+    // Measure total left content length to calculate badge right-alignment
+    let content_len: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+    let badge_spans = vec![
+        Span::raw(" "),
+        Span::styled(
+            " sandbox ",
+            Style::default().fg(theme::fg_dim()).bg(theme::bg_deep()),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            " podman ",
+            Style::default().fg(theme::fg_dim()).bg(theme::bg_deep()),
+        ),
+    ];
+    let badge_len: usize = badge_spans.iter().map(|s| s.content.chars().count()).sum();
+
+    if inner_width >= content_len + badge_len + 2 {
+        let pad = inner_width - content_len - badge_len;
+        spans.push(Span::styled(" ".repeat(pad), Style::default()));
+        spans.extend(badge_spans);
+    }
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), inner);
 }
 
 /// Render a multiline input area (for longer messages).
@@ -38,33 +150,40 @@ pub fn render_input_box_multiline(frame: &mut Frame, state: &InputState, area: R
     // Top border
     lines.push(Line::from(Span::styled(
         format!("╭{}╮", "─".repeat(area.width.saturating_sub(2) as usize)),
-        theme::border(),
+        Style::default().fg(theme::border_dim()),
     )));
 
     // Input lines
     let input_text = &state.buffer;
     for input_line in input_text.lines() {
         lines.push(Line::from(vec![
-            Span::styled("│ ", theme::border()),
-            Span::styled(input_line, theme::text()),
+            Span::styled("│ ", Style::default().fg(theme::border_dim())),
+            Span::styled(input_line, Style::default().fg(theme::fg_bright())),
         ]));
     }
 
     // Cursor line if buffer is empty
     if input_text.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled("│ ", theme::border()),
+            Span::styled("│ ", Style::default().fg(theme::border_dim())),
             Span::styled(" ", theme::prompt_cursor()),
+            Span::styled(
+                "Describe a change or press / for commands...",
+                Style::default().fg(theme::fg_subtle()),
+            ),
         ]));
     }
 
     // Bottom border
     lines.push(Line::from(Span::styled(
         format!("╰{}╯", "─".repeat(area.width.saturating_sub(2) as usize)),
-        theme::border(),
+        Style::default().fg(theme::border_dim()),
     )));
 
-    frame.render_widget(Paragraph::new(lines), area);
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(theme::bg_highlight())),
+        area,
+    );
 }
 
 #[cfg(test)]

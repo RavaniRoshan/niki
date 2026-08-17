@@ -25,7 +25,6 @@ use uuid::Uuid;
 
 use anyhow::Result;
 
-use crate::activity::AgentState;
 use crate::event::{Event, EventBus};
 use crate::llm::provider::{CompletionRequest, LlmProvider, ToolCall, ToolSpec};
 use crate::mission::AgentId;
@@ -206,10 +205,7 @@ pub enum ToolData {
         format: String,
     },
     /// Task spawn result.
-    TaskSpawned {
-        task_id: String,
-        agent_role: String,
-    },
+    TaskSpawned { task_id: String, agent_role: String },
     /// Task status.
     TaskStatus {
         task_id: String,
@@ -217,10 +213,7 @@ pub enum ToolData {
         progress: Option<f64>,
     },
     /// User response.
-    UserResponse {
-        question: String,
-        response: String,
-    },
+    UserResponse { question: String, response: String },
     /// Approval result.
     ApprovalResult {
         approved: bool,
@@ -276,11 +269,7 @@ pub trait Tool: Send + Sync {
     fn def(&self) -> &ToolDef;
 
     /// Execute the tool with the given input.
-    async fn execute(
-        &self,
-        input: ToolInput,
-        ctx: &ToolContext,
-    ) -> ToolResult;
+    async fn execute(&self, input: ToolInput, ctx: &ToolContext) -> ToolResult;
 }
 
 /// Input to a tool — a generic JSON value that each tool parses.
@@ -394,12 +383,7 @@ impl ToolRegistry {
     }
 
     /// Execute a tool by name.
-    pub async fn execute(
-        &self,
-        name: &str,
-        input: ToolInput,
-        ctx: &ToolContext,
-    ) -> ToolResult {
+    pub async fn execute(&self, name: &str, input: ToolInput, ctx: &ToolContext) -> ToolResult {
         let start = Instant::now();
         match self.tools.get(name) {
             Some(tool) => {
@@ -474,7 +458,7 @@ impl Tool for ReadTool {
                 let filtered: Vec<(usize, String)> = lines
                     .into_iter()
                     .filter(|(i, _)| *i >= start_line)
-                    .filter(|(i, _)| end_line.map_or(true, |e| *i <= e))
+                    .filter(|(i, _)| end_line.is_none_or(|e| *i <= e))
                     .collect();
                 let summary = format!(
                     "{}:{} ({}/{})",
@@ -627,7 +611,11 @@ impl Tool for GrepTool {
                         }
                     })
                     .collect();
-                let file_count = matches.iter().map(|m| &m.file).collect::<std::collections::HashSet<_>>().len();
+                let file_count = matches
+                    .iter()
+                    .map(|m| &m.file)
+                    .collect::<std::collections::HashSet<_>>()
+                    .len();
                 let total = matches.len();
                 ToolResult {
                     tool_id: ToolId::generate(),
@@ -679,9 +667,8 @@ impl Tool for ListTool {
             Ok(mut entries) => {
                 let mut items = Vec::new();
                 while let Some(entry) = entries.next_entry().await.unwrap_or(None) {
-                    let name = entry.file_name().display().to_string();
-                    let is_dir = entry.file_type().await.map(|ft| ft.is_dir()).unwrap_or(false);
-                    items.push(format!("{}/{}", name, if is_dir { "" } else { "" }));
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    items.push(format!("{name}/"));
                 }
                 items.sort();
                 let count = items.len();
@@ -863,20 +850,19 @@ impl Tool for BashTool {
         };
         let timeout_ms = input.int("timeout_ms").unwrap_or(30_000) as u64;
 
-        let result = tokio::time::timeout(
-            Duration::from_millis(timeout_ms),
-            tokio::process::Command::new("sh")
-                .arg("-c")
-                .arg(command)
-                .current_dir(&ctx.project_path)
-                .output(),
-        )
-        .await;
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.arg("-c").arg(command).current_dir(&ctx.project_path);
+        #[cfg(unix)]
+        cmd.process_group(0);
+
+        let result = tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await;
 
         match result {
             Ok(Ok(output)) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let raw_stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let raw_stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let stdout = crate::sandbox::truncate_head_tail(&raw_stdout, 1500, 65536);
+                let stderr = crate::sandbox::truncate_head_tail(&raw_stderr, 1500, 65536);
                 let exit_code = output.status.code().unwrap_or(-1);
                 let status = if exit_code == 0 {
                     ToolStatus::Success
@@ -939,8 +925,6 @@ fn make_error_result(msg: &str) -> ToolResult {
     }
 }
 
-/// Build a ToolRegistry with the baseline tools.
-// ---------------------------------------------------------------------------
 // Additional baseline tools
 // ---------------------------------------------------------------------------
 
@@ -1020,7 +1004,7 @@ impl Tool for TestTool {
     }
 
     async fn execute(&self, input: ToolInput, ctx: &ToolContext) -> ToolResult {
-        let target = input.str("target");
+        let _target = input.str("target");
         // Detect test runner
         let (cmd, args) = if ctx.project_path.join("Cargo.toml").exists() {
             ("cargo", vec!["test".to_string()])
@@ -1039,7 +1023,7 @@ impl Tool for TestTool {
         match result {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let _stderr = String::from_utf8_lossy(&output.stderr).to_string();
                 let exit_code = output.status.code().unwrap_or(-1);
                 let passed = stdout.matches("test result: ok").count();
                 let failed = stdout.matches("test result: FAILED").count();
@@ -1649,7 +1633,10 @@ fn format_messages(messages: &[LoopMessage]) -> String {
             LoopMessage::User(text) => {
                 out.push_str(&format!("<user>\n{}\n</user>\n", text));
             }
-            LoopMessage::Assistant { content, tool_calls } => {
+            LoopMessage::Assistant {
+                content,
+                tool_calls,
+            } => {
                 if !content.is_empty() {
                     out.push_str(&format!("<assistant>\n{}\n</assistant>\n", content));
                 }
@@ -1787,9 +1774,19 @@ pub async fn run_tool_loop(
             }
 
             call_log.push((tc.name.clone(), success));
+            let content = if !success
+                && (tc.name == "edit" || tc.name == "file_edit" || tc.name == "str_replace")
+            {
+                format!(
+                    "{}. If string match failed, re-read the target file to establish ground-truth context.",
+                    result.summary
+                )
+            } else {
+                result.summary.clone()
+            };
             messages.push(LoopMessage::ToolResult {
                 tool_call_id: tc.id.clone(),
-                content: result.summary.clone(),
+                content,
             });
         }
     }
@@ -1872,7 +1869,9 @@ mod tests {
             &self,
             _request: crate::llm::provider::CompletionRequest,
         ) -> anyhow::Result<crate::llm::provider::CompletionResponse> {
-            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let n = self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if n == 0 {
                 Ok(crate::llm::provider::CompletionResponse {
                     content: String::new(),
@@ -1905,7 +1904,9 @@ mod tests {
 
     #[tokio::test]
     async fn tool_loop_executes_tool_then_final() {
-        let provider = FakeToolProvider { calls: std::sync::atomic::AtomicUsize::new(0) };
+        let provider = FakeToolProvider {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
         let registry = build_baseline_registry();
         let ctx = ToolContext {
             agent_id: crate::mission::AgentId("a1".into()),
@@ -1918,16 +1919,9 @@ mod tests {
             LoopMessage::System("you are a coding agent".into()),
             LoopMessage::User("run echo hi".into()),
         ];
-        let out = run_tool_loop(
-            &provider,
-            &registry,
-            &ctx,
-            messages,
-            None,
-            5,
-        )
-        .await
-        .unwrap();
+        let out = run_tool_loop(&provider, &registry, &ctx, messages, None, 5)
+            .await
+            .unwrap();
         assert_eq!(out.content, "finished");
         assert_eq!(out.steps, 2);
         assert_eq!(out.tool_calls.len(), 1);
@@ -1937,7 +1931,9 @@ mod tests {
 
     #[tokio::test]
     async fn tool_loop_no_tools_returns_immediately() {
-        let provider = FakeToolProvider { calls: std::sync::atomic::AtomicUsize::new(1) };
+        let provider = FakeToolProvider {
+            calls: std::sync::atomic::AtomicUsize::new(1),
+        };
         let registry = build_baseline_registry();
         let ctx = ToolContext {
             agent_id: crate::mission::AgentId("a1".into()),

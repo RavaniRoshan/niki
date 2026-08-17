@@ -131,14 +131,12 @@ pub struct RenderEngine {
     front: CellBuffer,
     back: CellBuffer,
     target: FrameTarget,
-    synchronized_output: bool,
-    stdout: io::Stdout,
     dirty: bool,
 }
 
 impl RenderEngine {
     /// Create a new render engine, taking ownership of the terminal.
-    pub fn new(terminal: Terminal<CrosstermBackend<io::Stdout>>, synchronized: bool) -> Self {
+    pub fn new(terminal: Terminal<CrosstermBackend<io::Stdout>>, _synchronized: bool) -> Self {
         let size = terminal
             .size()
             .unwrap_or(ratatui::layout::Size::new(80, 24));
@@ -147,8 +145,6 @@ impl RenderEngine {
             front: CellBuffer::new(size.width, size.height),
             back: CellBuffer::new(size.width, size.height),
             target: FrameTarget::Low,
-            synchronized_output: synchronized,
-            stdout: io::stdout(),
             dirty: true,
         }
     }
@@ -302,7 +298,7 @@ mod tests {
 
     #[test]
     fn cell_buffer_diff_changes() {
-        let mut buf1 = CellBuffer::new(80, 24);
+        let buf1 = CellBuffer::new(80, 24);
         let mut buf2 = CellBuffer::new(80, 24);
 
         // Only change a few cells

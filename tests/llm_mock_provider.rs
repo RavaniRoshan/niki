@@ -223,9 +223,11 @@ fn mock_script_builder_can_write_to_file() {
 #[ignore = "requires NVIDIA_API_KEY env var + network"]
 async fn nvidia_nim_live_chat() {
     let api_key = std::env::var("NVIDIA_API_KEY").expect("set NVIDIA_API_KEY");
-    let mut cfg = niki::config::ProviderConfig::default();
-    cfg.api_key = Some(api_key);
-    cfg.base_url = Some("https://integrate.api.nvidia.com/v1".to_string());
+    let cfg = niki::config::ProviderConfig {
+        api_key: Some(api_key),
+        base_url: Some("https://integrate.api.nvidia.com/v1".to_string()),
+        ..Default::default()
+    };
 
     let provider =
         niki::llm::provider::create_provider("nvidia", &cfg).expect("create nvidia provider");

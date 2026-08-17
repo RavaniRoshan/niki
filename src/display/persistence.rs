@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::display::state::AppState;
 
-const STATE_DIR: &str = ".niki";
 const CHAT_FILE: &str = ".niki/chat.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -25,10 +24,6 @@ pub struct ChatSession {
 
 fn state_path(project_path: &Path) -> PathBuf {
     project_path.join(CHAT_FILE)
-}
-
-fn state_dir(project_path: &Path) -> PathBuf {
-    project_path.join(STATE_DIR)
 }
 
 /// Load a saved chat session, if present.

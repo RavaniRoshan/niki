@@ -5,10 +5,9 @@ use uuid::Uuid;
 use crate::artifacts::types::Verdict;
 use crate::config::types::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
-use crate::goal::state::{GoalCriterion, GoalState, GoalStatus, GoalTask, TaskStatus};
+use crate::goal::state::{GoalState, GoalStatus, TaskStatus};
 use crate::orchestrator::pipeline::{PipelineResult, Task, execute_pipeline};
 use crate::sandbox::docker::ActiveContainers;
-use std::path::Path;
 
 pub struct GoalRunner;
 
@@ -252,6 +251,7 @@ impl GoalRunner {
 mod tests {
     use super::*;
     use crate::goal::TEST_CWD_LOCK;
+    use crate::goal::state::{GoalCriterion, GoalTask};
 
     fn make_active_state() -> GoalState {
         GoalState {

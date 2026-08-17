@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use niki::orchestrator::state::StageMetric;
 
 pub fn total_input_tokens(metrics: &[StageMetric]) -> u32 {

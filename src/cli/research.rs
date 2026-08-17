@@ -81,6 +81,8 @@ fn extract_search_results(html: &str, max: usize) -> Vec<SearchResult> {
     let mut results = Vec::new();
 
     // Simple extraction of result snippets from DuckDuckGo HTML
+    let snippet_re =
+        regex::Regex::new(r#"<a[^>]+class="result__snippet"[^>]*>([^<]+)</a>"#).unwrap();
     for cap in regex::Regex::new(r#"<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>"#)
         .unwrap()
         .captures_iter(html)
@@ -92,8 +94,6 @@ fn extract_search_results(html: &str, max: usize) -> Vec<SearchResult> {
         let title = cap[2].trim().to_string();
 
         // Try to extract snippet
-        let snippet_re =
-            regex::Regex::new(r#"<a[^>]+class="result__snippet"[^>]*>([^<]+)</a>"#).unwrap();
         let snippet = snippet_re
             .captures(html)
             .map(|m| m[1].trim().to_string())

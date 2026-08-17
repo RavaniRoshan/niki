@@ -30,6 +30,15 @@ pub struct Checkpoint {
     pub git_commit: Option<String>,
 }
 
+/// Rollback / restore mode for checkpoints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RewindMode {
+    #[default]
+    Both,
+    CodeOnly,
+    ConversationOnly,
+}
+
 /// The full state of a session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -122,6 +131,25 @@ impl Session {
         self.current_checkpoint = Some(index);
         self.updated_at = Utc::now();
         Ok(())
+    }
+
+    /// Restore to a checkpoint by index and mode, returning the git commit hash if any.
+    pub fn restore_checkpoint_mode(
+        &mut self,
+        index: usize,
+        mode: RewindMode,
+    ) -> Result<Option<String>> {
+        let checkpoint = self
+            .checkpoints
+            .get(index)
+            .context("Checkpoint not found")?;
+        let commit = checkpoint.git_commit.clone();
+        if mode == RewindMode::Both || mode == RewindMode::ConversationOnly {
+            self.messages = checkpoint.messages.clone();
+        }
+        self.current_checkpoint = Some(index);
+        self.updated_at = Utc::now();
+        Ok(commit)
     }
 
     /// Undo to the previous checkpoint.
@@ -239,7 +267,11 @@ impl SessionManager {
 
     /// Save the "current" session to disk.
     pub fn save_current(&self, session: &Session) -> Result<()> {
-        self.save(session)
+        fs::create_dir_all(&self.sessions_dir)?;
+        let path = self.session_path(CURRENT_SESSION_ID);
+        let json = serde_json::to_string_pretty(session)?;
+        crate::util::write_restricted(&path, json)?;
+        Ok(())
     }
 
     /// Load the current session (mutably), returning a new default session if none exists.
@@ -315,6 +347,32 @@ impl SessionManager {
         }
     }
 
+    /// Rewind to the previous checkpoint with a specific mode (Both, CodeOnly, ConversationOnly).
+    pub fn rewind_mode(&self, mode: RewindMode) -> Result<Option<(String, Option<String>)>> {
+        match self.load_current()? {
+            Some(mut session) => {
+                let target_idx = match session.current_checkpoint {
+                    Some(idx) if idx > 0 => Some(idx - 1),
+                    None if !session.checkpoints.is_empty() => Some(session.checkpoints.len() - 1),
+                    _ => None,
+                };
+                if let Some(idx) = target_idx {
+                    let commit = session.restore_checkpoint_mode(idx, mode)?;
+                    let label = session
+                        .checkpoints
+                        .get(idx)
+                        .map(|c| c.label.clone())
+                        .unwrap_or_default();
+                    self.save_current(&session)?;
+                    Ok(Some((label, commit)))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Get the labels of all checkpoints in the current session, if it exists.
     pub fn checkpoint_labels(&self) -> Result<Vec<String>> {
         match self.load_current()? {
@@ -330,6 +388,49 @@ impl SessionManager {
     /// Get the path for a session file.
     fn session_path(&self, id: &str) -> PathBuf {
         self.sessions_dir.join(format!("{}.json", id))
+    }
+
+    /// Get the path for an append-only session journal file.
+    pub fn journal_path(&self, id: &str) -> PathBuf {
+        self.sessions_dir.join(format!("{}.jsonl", id))
+    }
+
+    /// Append a single transaction entry to the append-only journal with synchronous flush.
+    pub fn append_journal(&self, id: &str, role: &str, content: &str) -> Result<()> {
+        fs::create_dir_all(&self.sessions_dir)?;
+        let path = self.journal_path(id);
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        let msg = SessionMessage {
+            role: role.to_string(),
+            content: content.to_string(),
+            timestamp: Utc::now(),
+        };
+        let line = serde_json::to_string(&msg)?;
+        writeln!(file, "{}", line)?;
+        file.flush()?;
+        Ok(())
+    }
+
+    /// Replay messages from the append-only journal.
+    pub fn read_journal(&self, id: &str) -> Result<Vec<SessionMessage>> {
+        let path = self.journal_path(id);
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let content = fs::read_to_string(&path)?;
+        let mut messages = Vec::new();
+        for line in content.lines() {
+            if !line.trim().is_empty() {
+                if let Ok(msg) = serde_json::from_str::<SessionMessage>(line) {
+                    messages.push(msg);
+                }
+            }
+        }
+        Ok(messages)
     }
 }
 
@@ -474,5 +575,50 @@ mod tests {
         assert_eq!(session.total_input_tokens, 3000);
         assert_eq!(session.total_output_tokens, 1500);
         assert!((session.total_cost_usd - 0.045).abs() < 0.001);
+    }
+
+    #[test]
+    fn session_manager_journal_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let manager = SessionManager::new(dir.path());
+        manager.init().unwrap();
+
+        manager
+            .append_journal("test-sess", "user", "hello journal")
+            .unwrap();
+        manager
+            .append_journal("test-sess", "assistant", "echo journal")
+            .unwrap();
+
+        let msgs = manager.read_journal("test-sess").unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[0].content, "hello journal");
+        assert_eq!(msgs[1].role, "assistant");
+        assert_eq!(msgs[1].content, "echo journal");
+    }
+
+    #[test]
+    fn session_manager_rewind_mode() {
+        let dir = TempDir::new().unwrap();
+        let manager = SessionManager::new(dir.path());
+        manager.init().unwrap();
+
+        let mut session = Session::new(
+            dir.path().to_path_buf(),
+            "claude-sonnet-4".to_string(),
+            "anthropic".to_string(),
+        );
+        session.add_message("user", "Initial prompt");
+        session.create_checkpoint("checkpoint-1", Some("commit123".to_string()));
+        session.add_message("assistant", "Plan created");
+        session.create_checkpoint("checkpoint-2", Some("commit456".to_string()));
+        manager.save_current(&session).unwrap();
+
+        let result = manager.rewind_mode(RewindMode::CodeOnly).unwrap();
+        assert!(result.is_some());
+        let (label, commit) = result.unwrap();
+        assert_eq!(label, "checkpoint-1");
+        assert_eq!(commit, Some("commit123".to_string()));
     }
 }

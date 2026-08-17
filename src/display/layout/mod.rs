@@ -21,7 +21,7 @@ pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
         .constraints([
             Constraint::Min(3),    // messages area
             Constraint::Length(1), // status bar
-            Constraint::Length(1), // input box
+            Constraint::Length(3), // input box (borders + 1 inner row)
         ])
         .split(area);
 

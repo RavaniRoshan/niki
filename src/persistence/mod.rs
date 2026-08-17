@@ -131,7 +131,13 @@ fn snapshot_path(root: &Path, id: &str) -> std::path::PathBuf {
 /// Sanitize an id so it can't escape the missions directory (path traversal).
 fn sanitize_id(id: &str) -> String {
     id.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -175,7 +181,9 @@ pub fn list_missions(root: &Path) -> Result<Vec<Mission>> {
         let json = std::fs::read_to_string(&path)?;
         match serde_json::from_str::<MissionSnapshot>(&json) {
             Ok(snap) => out.push(mission_from(&snap)),
-            Err(e) => tracing::warn!(target: "niki::persistence", "skipping corrupt mission {}: {}", path.display(), e),
+            Err(e) => {
+                tracing::warn!(target: "niki::persistence", "skipping corrupt mission {}: {}", path.display(), e)
+            }
         }
     }
     Ok(out)
@@ -217,7 +225,11 @@ mod tests {
     fn roundtrip_mission() {
         let root = test_root("roundtrip");
         let _ = std::fs::remove_dir_all(&root);
-        let m = Mission::new(MissionId("mission-1".into()), "fix auth bug".into(), "sonnet".into());
+        let m = Mission::new(
+            MissionId("mission-1".into()),
+            "fix auth bug".into(),
+            "sonnet".into(),
+        );
         save_mission(&root, &m).unwrap();
 
         let loaded = load_mission(&root, "mission-1").unwrap().unwrap();
@@ -248,7 +260,11 @@ mod tests {
         let dir = missions_dir(&root);
         for entry in std::fs::read_dir(&dir).unwrap() {
             let p = entry.unwrap().path();
-            assert!(p.starts_with(&dir), "mission file escaped its dir: {}", p.display());
+            assert!(
+                p.starts_with(&dir),
+                "mission file escaped its dir: {}",
+                p.display()
+            );
         }
         let _ = std::fs::remove_dir_all(&root);
     }

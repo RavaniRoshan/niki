@@ -8,9 +8,7 @@ use crate::cli::run::connect_container_runtime;
 use crate::config::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
 use crate::goal::runner::GoalRunner;
-use crate::goal::state::{
-    GoalState, claim_files, create_claim, env_dir, goals_dir, remove_claim_by_goal,
-};
+use crate::goal::state::{GoalState, create_claim, goals_dir, remove_claim_by_goal};
 use crate::sandbox::docker::ActiveContainers;
 
 #[derive(Args)]
@@ -88,7 +86,7 @@ pub async fn handle(args: &GoalArgs) -> Result<()> {
 async fn handle_new(objective: &str, scope: Option<&str>, max: u32) -> Result<()> {
     println!("Creating goal: \"{}\"", objective);
 
-    let mut state = crate::goal::creator::GoalCreator::create(objective, scope, max)?;
+    let state = crate::goal::creator::GoalCreator::create(objective, scope, max)?;
     state.save()?;
 
     let session_id = format!("goal-{}", state.id);
@@ -450,7 +448,7 @@ fn handle_env() -> Result<()> {
 }
 
 async fn handle_fork(id: Option<&str>) -> Result<()> {
-    let mut state = match id {
+    let state = match id {
         Some(goal_id) => GoalState::find_by_id(goal_id)?,
         None => GoalState::active_goal()?,
     };

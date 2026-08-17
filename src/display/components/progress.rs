@@ -56,6 +56,62 @@ pub fn render_steps(frame: &mut Frame, area: Rect, steps: &[&str], current: usiz
     frame.render_widget(Paragraph::new(Line::from(spans)), area)
 }
 
+/// Curated dictionary of personality and action verbs matching Claude Code / NIKI agent phases.
+pub const ACTION_VERBS: &[&str] = &[
+    "Deliberating",
+    "Recombobulating",
+    "Synthesizing solution",
+    "Inspecting AST",
+    "Crafting architecture",
+    "Formulating plan",
+    "Refactoring targets",
+    "Applying mutations",
+    "Compiling workspace",
+    "Running verification",
+    "Dissecting symbols",
+    "Tracing call graph",
+    "Evaluating invariants",
+    "Harmonizing types",
+    "Auditing diffs",
+    "Optimizing AST",
+    "Pruning dead code",
+    "Linting source files",
+    "Prestidigitating",
+    "Constructing payload",
+    "Synchronizing workspace",
+    "Resolving dependencies",
+];
+
+/// Spinner glyph frames (Braille dot animation).
+pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/// Return the spinner glyph for the given frame tick.
+pub fn spinner_glyph(tick: usize) -> &'static str {
+    SPINNER_FRAMES[tick % SPINNER_FRAMES.len()]
+}
+
+/// Return an evocative action verb based on tick or agent role.
+pub fn action_verb(tick: usize) -> &'static str {
+    ACTION_VERBS[(tick / 8) % ACTION_VERBS.len()]
+}
+
+/// Render a live animated spinner with dynamic action verb.
+pub fn render_spinner_with_verb(tick: usize, prefix: Option<&str>) -> Line<'static> {
+    let glyph = spinner_glyph(tick);
+    let verb = action_verb(tick);
+    let mut spans = vec![
+        Span::styled(format!("{} ", glyph), Style::default().fg(theme::primary())),
+        Span::styled(format!("{}...", verb), Style::default().fg(theme::sand())),
+    ];
+    if let Some(p) = prefix {
+        spans.insert(
+            0,
+            Span::styled(format!("{} · ", p), Style::default().fg(theme::fg_subtle())),
+        );
+    }
+    Line::from(spans)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,5 +129,18 @@ mod tests {
             pct
         );
         assert!(bar.contains("[██████████░░░░░░░░░░] 50%"));
+    }
+
+    #[test]
+    fn test_spinner_glyphs_cycle() {
+        assert_eq!(spinner_glyph(0), "⠋");
+        assert_eq!(spinner_glyph(1), "⠙");
+        assert_eq!(spinner_glyph(10), "⠋");
+    }
+
+    #[test]
+    fn test_action_verbs_cycle() {
+        assert_eq!(action_verb(0), "Deliberating");
+        assert_eq!(action_verb(8), "Recombobulating");
     }
 }

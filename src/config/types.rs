@@ -1408,14 +1408,14 @@ mod tests {
     #[test]
     fn default_config_has_new_agents_and_sections() {
         let c = NikiConfig::default();
-        assert!(c.agents.synthesizer.provider.len() > 0);
-        assert!(c.agents.security_auditor.provider.len() > 0);
+        assert!(!c.agents.synthesizer.provider.is_empty());
+        assert!(!c.agents.security_auditor.provider.is_empty());
         assert!(!c.security.enabled);
         assert_eq!(c.parallel.coder_count, 2);
         // Red/Blue is off by default to match "four agents" messaging.
         // Enable via [red_blue] enabled = true in niki.toml.
         assert!(!c.red_blue.enabled);
-        assert!(c.agents.red.provider.len() > 0);
+        assert!(!c.agents.red.provider.is_empty());
     }
 
     #[test]
