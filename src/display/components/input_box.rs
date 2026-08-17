@@ -17,6 +17,7 @@ pub fn render_input_box(frame: &mut Frame, state: &InputState, area: Rect) {
 
     let input_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(Style::default().fg(theme::border_dim()))
         .style(Style::default().bg(theme::bg_highlight()));
 

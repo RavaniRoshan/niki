@@ -11,15 +11,14 @@ use ratatui::widgets::Paragraph;
 
 use super::theme;
 
-/// Pre-generated NIKI logo lines using FIGlet "big" font.
-/// Output of `figlet-rs FIGlet::big().convert("NIKI")`.
+/// Pre-generated NIKI 3D shadow block logo lines.
 const LOGO_LINES: &[&str] = &[
-    r" _   _ _____ _  _______ ",
-    r"| \ | |_   _| |/ /_   _|",
-    r"|  \| | | | | ' /  | |  ",
-    r"| . ` | | | |  <   | |  ",
-    r"| |\  |_| |_| . \ _| |_ ",
-    r"|_| \_|_____|_|\_\_____|",
+    "███╗   ██╗██╗██╗  ██╗██╗",
+    "████╗  ██║██║██║ ██╔╝██║",
+    "██╔██╗ ██║██║█████╔╝ ██║",
+    "██║╚██╗██║██║██╔═██╗ ██║",
+    "██║ ╚████║██║██║  ██╗██║",
+    "╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝╚═╝",
 ];
 
 /// Height of the logo in lines.
@@ -34,7 +33,7 @@ pub fn render_logo(frame: &mut Frame, area: Rect) {
             break;
         }
 
-        let line_width = line.len();
+        let line_width = line.chars().count();
         let padding = if width > line_width {
             (width - line_width) / 2
         } else {
@@ -168,17 +167,17 @@ mod tests {
 
     #[test]
     fn logo_lines_consistent_width() {
-        let widths: Vec<usize> = LOGO_LINES.iter().map(|l| l.len()).collect();
+        let widths: Vec<usize> = LOGO_LINES.iter().map(|l| l.chars().count()).collect();
         let first = widths[0];
         for w in &widths {
-            assert_eq!(*w, first, "Logo lines must be equal byte width");
+            assert_eq!(*w, first, "Logo lines must be equal character width");
         }
     }
 
     #[test]
     fn logo_contains_niki() {
         let combined = LOGO_LINES.join("");
-        assert!(combined.contains('_') || combined.contains('|'));
+        assert!(combined.contains('█') || combined.contains('_') || combined.contains('|'));
     }
 
     #[test]

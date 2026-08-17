@@ -5,10 +5,10 @@ Set Shell "bash"
 Set FontSize 15
 Set FontFamily "DejaVu Sans Mono"
 Set Width 1180
-Set Height 760
+Set Height 720
 Set LetterSpacing 0
-Set LineHeight 1.25
-Set Padding 24
+Set LineHeight 1.22
+Set Padding 20
 Set WindowBar "Colorful"
 Set WindowBarSize 36
 Set Margin 16
@@ -21,4 +21,4 @@ Hide
 Type "python3 scripts/render_demo_terminal.py"
 Enter
 Show
-Sleep 11.5s
+Sleep 14.5s
