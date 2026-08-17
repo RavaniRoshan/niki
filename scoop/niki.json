@@ -1,12 +1,12 @@
 {
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Hermetic multi-agent coding system",
   "homepage": "https://github.com/RavaniRoshan/niki",
   "license": "Apache-2.0",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/RavaniRoshan/niki/releases/download/v0.3.1/niki-x86_64-pc-windows-msvc.zip",
-      "hash": "4eac59354496988ce5a94fe9c41255ae53c3dfeebb78df2d97da92e03384d2f6",
+      "url": "https://github.com/RavaniRoshan/niki/releases/download/v0.4.0/niki-x86_64-pc-windows-msvc.zip",
+      "hash": "",
       "extract_dir": "niki-x86_64-pc-windows-msvc",
       "bin": "niki.exe"
     }
@@ -20,5 +20,8 @@
         "url": "https://github.com/RavaniRoshan/niki/releases/download/v$version/niki-x86_64-pc-windows-msvc.zip"
       }
     }
-  }
+  },
+  "notes": [
+    "Windows builds are planned but not yet shipped. Use the install.sh or Homebrew for now."
+  ]
 }
