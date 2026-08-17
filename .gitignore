@@ -6,6 +6,7 @@ skills-lock.json
 # Agent configs (local, not repo)
 .agents/
 .claude/
+.opencode/
 
 # Untracked directories
 examples/
@@ -13,9 +14,28 @@ evals/
 .kilo/
 research/
 
-# Dev-only scripts (not shipped to users)
+# Dev-only and temporary demo scripts
+demo.sh
+*.tape
+scripts/render_demo_terminal.py
 scripts/generate_screenshots.py
 scripts/render_buffers.py
+
+# Reference screenshots, images, and attachments (root and subdirs)
+Screenshot*
+screenshot*
+*.png
+*.gif
+*.jpg
+*.jpeg
+*.webp
+*.mp4
+!assets/*.svg
+!assets/*.png
+!assets/*.gif
+!assets/*.mp4
+*Zone.Identifier*
+*.identifier
 
 # Internal strategy docs — not for the public repo
 CLOUD_BACKEND_SPEC.md
@@ -23,4 +43,10 @@ BUILD_PLAN.md
 10x-deep-research.md
 problem-statements.md
 docs/screenshots/
-.opencode/
+
+# Temporary files and scratch logs
+*.tmp
+*.bak
+*.swp
+*.log
+Add
