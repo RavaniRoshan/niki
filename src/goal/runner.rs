@@ -8,6 +8,7 @@ use crate::display::agent_stream::AgenticDisplay;
 use crate::goal::state::{GoalCriterion, GoalState, GoalStatus, GoalTask, TaskStatus};
 use crate::orchestrator::pipeline::{PipelineResult, Task, execute_pipeline};
 use crate::sandbox::docker::ActiveContainers;
+use std::path::Path;
 
 pub struct GoalRunner;
 
@@ -60,6 +61,11 @@ impl GoalRunner {
             };
 
             let goal_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let task_dir = pipeline_task
+                .project_path
+                .join(&config.general.output_dir)
+                .join("tasks")
+                .join(pipeline_task.id.to_string());
             match execute_pipeline(
                 &pipeline_task,
                 config,
@@ -68,6 +74,7 @@ impl GoalRunner {
                 containers.clone(),
                 false,
                 goal_cancel.clone(),
+                &task_dir,
             )
             .await
             {

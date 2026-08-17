@@ -293,6 +293,7 @@ fn empty_result() -> PipelineResult {
     PipelineResult {
         diff_guardwarn: None,
         task_id: id,
+        context_budget: PipelineState::new(id).context_budget,
         state: PipelineState::new(id),
         final_diff: String::new(),
         verdict: Verdict::Approved,
@@ -334,6 +335,7 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
         &PipelineResult {
             diff_guardwarn: None,
             task_id: id,
+            context_budget: PipelineState::new(id).context_budget,
             state: PipelineState::new(id),
             final_diff: String::new(),
             verdict: Verdict::Approved,
@@ -353,6 +355,7 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
     Ok(PipelineResult {
         diff_guardwarn: None,
         task_id: id,
+        context_budget: PipelineState::new(id).context_budget,
         state: PipelineState::new(id),
         final_diff: String::new(),
         verdict,
@@ -416,6 +419,11 @@ pub async fn run_case_live(
         containers.clone(),
         false,
         niki_cancel.clone(),
+        &niki_task
+            .project_path
+            .join(&niki_cfg.general.output_dir)
+            .join("tasks")
+            .join(niki_task.id.to_string()),
     )
     .await?;
 
@@ -433,6 +441,11 @@ pub async fn run_case_live(
         containers.clone(),
         false,
         base_cancel.clone(),
+        &base_task
+            .project_path
+            .join(&base_cfg.general.output_dir)
+            .join("tasks")
+            .join(base_task.id.to_string()),
     )
     .await?;
 
@@ -625,6 +638,7 @@ mod tests {
         PipelineResult {
             diff_guardwarn: None,
             task_id: id,
+            context_budget: PipelineState::new(id).context_budget,
             state: PipelineState::new(id),
             final_diff: String::new(),
             verdict: Verdict::Approved,

@@ -145,7 +145,10 @@ pub fn compress_context(
 }
 
 /// Load compressed knowledge for a role, if it exists.
-pub fn load_compressed_knowledge(project_dir: &Path, agent_role: AgentRole) -> Option<CompressedKnowledge> {
+pub fn load_compressed_knowledge(
+    project_dir: &Path,
+    agent_role: AgentRole,
+) -> Option<CompressedKnowledge> {
     let dir = project_dir.join(".niki").join("memory").join("compressed");
     let path = compression_path(&dir, agent_role);
     if !path.exists() {
@@ -173,11 +176,7 @@ pub fn render_memory_with_budget(
     }
 
     // If budget is moderately full, use early-warning mode: fewer entries
-    let max_entries = if budget.should_compress() {
-        5
-    } else {
-        10
-    };
+    let max_entries = if budget.should_compress() { 5 } else { 10 };
 
     let memory = load_memory(project_dir, agent_role);
     if memory.entries.is_empty() {
