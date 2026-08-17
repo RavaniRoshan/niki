@@ -7,27 +7,71 @@ use crate::config::NikiConfig;
 use crate::display::tui::DisplayEvent;
 use crate::llm::provider::{LlmProvider, create_provider};
 
-#[derive(Args)]
+#[derive(Args, Clone, Default)]
 pub struct ChatArgs {
     /// Path to the project directory
     #[arg(short, long, default_value = ".")]
-    project: PathBuf,
+    pub project: PathBuf,
 
     /// Initial message to send (optional)
     #[arg(short, long)]
-    message: Option<String>,
+    pub message: Option<String>,
 }
 
-/// Build a provider from the configured providers map (first entry wins).
+/// Build a provider from the configured providers map or environment variables.
 fn build_provider(config: &NikiConfig) -> Option<(Box<dyn LlmProvider>, String)> {
-    let (name, pc) = config.providers.iter().next()?;
-    let provider = create_provider(name, pc).ok()?;
-    let model = if pc.default_model.is_empty() {
-        "claude-sonnet-4-20250514".to_string()
-    } else {
-        pc.default_model.clone()
-    };
-    Some((provider, model))
+    if let Some((name, pc)) = config.providers.iter().next() {
+        if let Ok(provider) = create_provider(name, pc) {
+            let model = if pc.default_model.is_empty() {
+                "claude-sonnet-4-20250514".to_string()
+            } else {
+                pc.default_model.clone()
+            };
+            return Some((provider, model));
+        }
+    }
+
+    // Auto-detect from environment variables if not specified in niki.toml
+    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+        if !key.is_empty() {
+            let pc = crate::config::types::ProviderConfig {
+                api_key: Some(key),
+                default_model: "claude-3-7-sonnet-20250219".to_string(),
+                ..Default::default()
+            };
+            if let Ok(p) = create_provider("anthropic", &pc) {
+                return Some((p, "claude-3-7-sonnet-20250219".to_string()));
+            }
+        }
+    }
+
+    if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+        if !key.is_empty() {
+            let pc = crate::config::types::ProviderConfig {
+                api_key: Some(key),
+                default_model: "gpt-4o".to_string(),
+                ..Default::default()
+            };
+            if let Ok(p) = create_provider("openai", &pc) {
+                return Some((p, "gpt-4o".to_string()));
+            }
+        }
+    }
+
+    if let Ok(key) = std::env::var("GEMINI_API_KEY") {
+        if !key.is_empty() {
+            let pc = crate::config::types::ProviderConfig {
+                api_key: Some(key),
+                default_model: "gemini-2.5-pro".to_string(),
+                ..Default::default()
+            };
+            if let Ok(p) = create_provider("google", &pc) {
+                return Some((p, "gemini-2.5-pro".to_string()));
+            }
+        }
+    }
+
+    None
 }
 
 /// Process a submitted user message: ask the LLM and stream the reply back into
@@ -66,7 +110,7 @@ fn process_message(tx: &mpsc::Sender<DisplayEvent>, config: &NikiConfig, user_te
             })
         }
         None => {
-            "(offline) no LLM provider configured — message received but no response generated."
+            "Hello! I am NIKI, your autonomous coding assistant. No LLM provider is configured yet. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or run /help to explore commands."
                 .to_string()
         }
     };
