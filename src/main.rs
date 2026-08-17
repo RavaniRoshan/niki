@@ -16,7 +16,7 @@ fn ignore_sigpipe() {
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -73,8 +73,11 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     let cli = Cli::parse();
+    let command = cli.command.unwrap_or_else(|| {
+        Commands::Chat(niki::cli::chat::ChatArgs::default())
+    });
 
-    match &cli.command {
+    match &command {
         Commands::Run(args) => niki::cli::run::handle(args).await?,
         Commands::Status(args) => niki::cli::status::handle(args).await?,
         Commands::Report(args) => niki::cli::report::handle(args).await?,
