@@ -54,6 +54,7 @@ fn make_request() -> CompletionRequest {
         max_tokens: 8192,
         temperature: 0.2,
         json_schema: None,
+        tools: None,
     }
 }
 
@@ -154,6 +155,7 @@ async fn mock_provider_returns_error_on_unknown_model() {
         max_tokens: 8192,
         temperature: 0.2,
         json_schema: None,
+        tools: None,
     };
     let result = provider.complete(req).await;
     assert!(result.is_err());
@@ -234,6 +236,7 @@ async fn nvidia_nim_live_chat() {
         max_tokens: 128,
         temperature: 0.7,
         json_schema: None,
+        tools: None,
     };
     let resp = provider.complete(req).await.expect("LLM call");
     assert!(resp.usage.output_tokens > 0, "should produce output tokens");

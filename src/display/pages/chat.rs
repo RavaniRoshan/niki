@@ -534,6 +534,20 @@ impl Page for ChatPage {
                 }
                 true
             }
+            InputAction::ReverseSearch => {
+                // Ctrl+R: enter reverse history search. Load the most recent
+                // history entry as a starting point for incremental editing.
+                state.reverse_search = !state.reverse_search;
+                if state.reverse_search {
+                    if let Some(last) = state.input_state.history.last().cloned() {
+                        state.input_state.buffer = last;
+                        state.input_state.cursor_pos = state.input_state.buffer.len();
+                        state.input_state.history_index = Some(state.input_state.history.len() - 1);
+                    }
+                    state.set_notice("(reverse-search) type to filter · Enter to accept", 4000);
+                }
+                true
+            }
             InputAction::None => false,
         };
         self.sync_input_overlays(state);

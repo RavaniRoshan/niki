@@ -19,6 +19,7 @@
 use anyhow::anyhow;
 use include_dir::{Dir, include_dir};
 
+pub mod activity;
 pub mod agents;
 pub mod artifacts;
 pub mod audit;
@@ -29,16 +30,20 @@ pub mod cost;
 pub mod display;
 pub mod errors;
 pub mod eval;
+pub mod event;
 pub mod goal;
 pub mod knowledge;
 pub mod llm;
 pub mod mcp;
 pub mod memory;
+pub mod mission;
 pub mod observability;
 pub mod orchestrator;
 pub mod output;
+pub mod persistence;
 pub mod permissions;
 pub mod recommend;
+pub mod runtime;
 pub mod safety;
 pub mod sandbox;
 pub mod session;

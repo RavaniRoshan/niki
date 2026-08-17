@@ -22,7 +22,7 @@ use crate::permissions::PermissionAction;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
@@ -258,6 +258,7 @@ fn run_tui(
             }
 
             state.clear_stale_notice();
+            state.refresh_fleet();
             let s = &state;
             if engine
                 .terminal_mut()
@@ -498,6 +499,25 @@ fn run_tui(
                             } else if router.handle_key(key, &mut state) {
                                 engine.mark_dirty();
                             }
+                        } else if state.current_page == PageId::Fleet {
+                            handle_fleet_nav(key, &mut state);
+                            engine.mark_dirty();
+                        } else if state.current_page == PageId::Session {
+                            handle_session_nav(key, &mut state);
+                            engine.mark_dirty();
+                        } else if let KeyCode::Char('g') = key.code {
+                            // 'g' jumps to the Fleet grid from any page.
+                            state.current_page = PageId::Fleet;
+                            engine.mark_dirty();
+                        } else if let KeyCode::Char('s') = key.code {
+                            // 's' opens the Session view (falls back to the Fleet
+                            // selection when nothing is open yet).
+                            if state.session_view.is_none() {
+                                state.open_selected_mission();
+                            } else {
+                                state.current_page = PageId::Session;
+                            }
+                            engine.mark_dirty();
                         } else {
                             // On sub-pages: page-specific key handling
                             if router.handle_key(key, &mut state) {
@@ -625,6 +645,7 @@ fn run_tui(
     }
 
     state.finished = true;
+    state.refresh_fleet();
     let _ = engine
         .terminal_mut()
         .draw(|f| render(f, &state, &router, &command_palette));
@@ -710,6 +731,7 @@ pub fn run_chat(
     loop {
         if needs_render {
             state.tick();
+            state.refresh_fleet();
             if sync_capable {
                 let _ = execute!(
                     io::stdout(),
@@ -984,7 +1006,19 @@ fn render(
     super::logo::render_logo(frame, chunks[0]);
 
     // Render the current page in the content area
-    router.render_current(frame, chunks[1], state);
+    match state.current_page {
+        PageId::Fleet => {
+            crate::display::pages::fleet::render_fleet(&state.fleet, chunks[1], frame.buffer_mut());
+        }
+        PageId::Session => {
+            if let Some(ref sv) = state.session_view {
+                crate::display::pages::session::render_session(sv, chunks[1], frame.buffer_mut());
+            } else {
+                router.render_current(frame, chunks[1], state);
+            }
+        }
+        _ => router.render_current(frame, chunks[1], state),
+    }
 
     // Render status line (product "footer meta")
     render_status_line(frame, chunks[2], state);
@@ -1024,6 +1058,46 @@ fn render(
     // Render a spinner/progress indicator while stages are running
     if state.has_running_stage() {
         render_activity_spinner(frame, size, state);
+    }
+}
+
+/// Key navigation for the Fleet grid (`g` page).
+fn handle_fleet_nav(key: KeyEvent, state: &mut AppState) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => state.fleet.select_prev(),
+        KeyCode::Down | KeyCode::Char('j') => state.fleet.select_next(),
+        KeyCode::Left => state.fleet.select_left(2),
+        KeyCode::Right => state.fleet.select_right(2),
+        KeyCode::Char('s') => {
+            // Open the selected mission's Session view directly from Fleet.
+            state.open_selected_mission();
+        }
+        KeyCode::Enter => state.open_selected_mission(),
+        KeyCode::Esc => state.current_page = PageId::Chat,
+        _ => {}
+    }
+}
+
+/// Key navigation for the Session view (`s` page).
+fn handle_session_nav(key: KeyEvent, state: &mut AppState) {
+    match key.code {
+        KeyCode::Tab => {
+            if let Some(ref mut sv) = state.session_view {
+                sv.next_tab();
+            }
+        }
+        KeyCode::Left | KeyCode::Char('h') => {
+            if let Some(ref mut sv) = state.session_view {
+                sv.prev_tab();
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            if let Some(ref mut sv) = state.session_view {
+                sv.next_tab();
+            }
+        }
+        KeyCode::Esc => state.close_session_to_fleet(),
+        _ => {}
     }
 }
 

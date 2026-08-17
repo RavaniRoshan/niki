@@ -2,6 +2,7 @@ use crate::config::ProviderConfig;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use futures::Stream;
+use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
 /// A single item emitted by a streaming completion.
@@ -96,7 +97,7 @@ pub(crate) fn is_retryable_status(status: reqwest::StatusCode) -> bool {
     status.as_u16() == 429 || status.is_server_error()
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Default)]
 pub struct CompletionRequest {
     pub model: String,
     pub system_prompt: String,
@@ -107,6 +108,29 @@ pub struct CompletionRequest {
     /// support structured output will use constrained decoding to guarantee the
     /// response matches the schema exactly.
     pub json_schema: Option<String>,
+    /// Optional tool specifications. When present, providers that support native
+    /// tool calling emit `tool_calls` in the response instead of (or in addition
+    /// to) text. Providers without native support simply ignore this field and
+    /// return `tool_calls` empty, so callers fall through to plain text.
+    pub tools: Option<Vec<ToolSpec>>,
+}
+
+/// A single tool exposed to the LLM for native tool calling.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSpec {
+    pub name: String,
+    pub description: String,
+    /// JSON-schema object describing the tool's parameters.
+    pub parameters: serde_json::Value,
+}
+
+/// A tool invocation requested by the LLM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    /// Parsed argument object (may be empty `{}`).
+    pub arguments: serde_json::Value,
 }
 
 #[derive(Debug)]
@@ -114,6 +138,8 @@ pub struct CompletionResponse {
     pub content: String,
     pub model: String,
     pub usage: TokenUsage,
+    /// Tool invocations requested by the model. Empty for plain-text responses.
+    pub tool_calls: Vec<ToolCall>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]

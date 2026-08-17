@@ -76,6 +76,8 @@ pub enum PageId {
     Help,
     TestLog,
     Chat,
+    Fleet,
+    Session,
 }
 
 impl PageId {
@@ -92,6 +94,8 @@ impl PageId {
             PageId::Config,
             PageId::Help,
             PageId::TestLog,
+            PageId::Fleet,
+            PageId::Session,
             PageId::Chat,
         ]
     }
@@ -112,6 +116,8 @@ impl PageId {
             ',' => Some(PageId::Config),
             '?' => Some(PageId::Help),
             'l' => Some(PageId::TestLog),
+            'g' => Some(PageId::Fleet),
+            's' => Some(PageId::Session),
             _ => None,
         }
     }
@@ -130,6 +136,8 @@ impl PageId {
             PageId::Help => "help",
             PageId::TestLog => "test_log",
             PageId::Chat => "chat",
+            PageId::Fleet => "fleet",
+            PageId::Session => "session",
         }
     }
 
@@ -147,6 +155,8 @@ impl PageId {
             PageId::Help => "?",
             PageId::TestLog => "l",
             PageId::Chat => "tab",
+            PageId::Fleet => "g",
+            PageId::Session => "s",
         }
     }
 }
@@ -182,6 +192,8 @@ pub enum InputAction {
     ToggleExpand(usize),
     /// Cancel the current operation (Esc in input, etc.).
     Cancel,
+    /// Trigger reverse (incremental) search through command history.
+    ReverseSearch,
 }
 
 /// Autocomplete state for @ file completion.
@@ -203,6 +215,9 @@ pub struct InputState {
     pub autocomplete: Option<AutocompleteState>,
     /// Last time the buffer was edited (drives the "Typing…" indicator).
     pub last_typed_at: Option<Instant>,
+    /// Prompts submitted while an operation is in flight are queued and
+    /// replayed once the current turn completes.
+    pub queued: Vec<String>,
 }
 
 impl InputState {
@@ -273,6 +288,69 @@ impl InputState {
     /// Move cursor to end of line.
     pub fn move_to_end(&mut self) {
         self.cursor_pos = self.buffer.len();
+    }
+
+    /// Move cursor one word to the left (Ctrl+Left / Alt+Left).
+    pub fn move_word_left(&mut self) {
+        if self.cursor_pos == 0 {
+            return;
+        }
+        let bytes = self.buffer.as_bytes();
+        let mut pos = self.cursor_pos;
+        // Skip whitespace to the left.
+        while pos > 0 && bytes[pos - 1].is_ascii_whitespace() {
+            pos -= 1;
+        }
+        // Skip the word itself.
+        while pos > 0 && !bytes[pos - 1].is_ascii_whitespace() {
+            pos -= 1;
+        }
+        self.cursor_pos = pos;
+    }
+
+    /// Move cursor one word to the right (Ctrl+Right / Alt+Right).
+    pub fn move_word_right(&mut self) {
+        let len = self.buffer.len();
+        if self.cursor_pos >= len {
+            return;
+        }
+        let bytes = self.buffer.as_bytes();
+        let mut pos = self.cursor_pos;
+        // Skip the current word.
+        while pos < len && !bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+        // Skip whitespace to the right.
+        while pos < len && bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+        self.cursor_pos = pos;
+    }
+
+    /// Insert a newline at the cursor (multiline composer, Shift+Enter).
+    pub fn insert_newline(&mut self) {
+        self.buffer.insert(self.cursor_pos, '\n');
+        self.cursor_pos += 1;
+        self.last_typed_at = Some(Instant::now());
+    }
+
+    /// Queue a prompt to be replayed after the current turn.
+    pub fn queue_prompt(&mut self, prompt: String) {
+        self.queued.push(prompt);
+    }
+
+    /// Take the next queued prompt, if any.
+    pub fn next_queued(&mut self) -> Option<String> {
+        if self.queued.is_empty() {
+            None
+        } else {
+            Some(self.queued.remove(0))
+        }
+    }
+
+    /// Whether any prompts are queued.
+    pub fn has_queued(&self) -> bool {
+        !self.queued.is_empty()
     }
 
     /// Navigate to previous history entry.
@@ -437,6 +515,8 @@ pub struct AppState {
     pub cancel: Option<Arc<AtomicBool>>,
     /// Transient on-screen notice, e.g. "Esc — stopping…". Auto-clears after a few seconds.
     pub notice: Option<(String, Instant)>,
+    /// Whether reverse (incremental) history search is active (Ctrl+R).
+    pub reverse_search: bool,
     /// Whether the permission modal is visible.
     pub show_permission_modal: bool,
     /// Current permission request (if any).
@@ -528,6 +608,14 @@ pub struct AppState {
     pub show_command_palette: bool,
     /// Channel for /steer corrections — the pipeline polls the Arc<Mutex<Option<String>>> for user messages.
     pub steer_channel: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+    /// Shared domain stores (missions / sessions / agents / event bus).
+    pub stores: crate::mission::Stores,
+    /// Live Fleet view state (mission grid). Refreshed from `stores` each render.
+    pub fleet: crate::display::pages::fleet::FleetState,
+    /// Session view state for the currently-open mission (`g`/`s` pages).
+    pub session_view: Option<crate::display::pages::session::SessionState>,
+    /// Id of the mission selected in the Fleet grid.
+    pub selected_mission: Option<crate::mission::MissionId>,
 }
 
 /// Stage information (mirrors existing StageInfo).
@@ -628,6 +716,11 @@ impl AppState {
             steer_channel: None,
             cancel: None,
             notice: None,
+            reverse_search: false,
+            stores: crate::mission::Stores::new(crate::event::EventBus::new()),
+            fleet: crate::display::pages::fleet::FleetState::new(Vec::new()),
+            session_view: None,
+            selected_mission: None,
         }
     }
 
@@ -654,6 +747,39 @@ impl AppState {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         self.set_notice(notice, 4000);
+    }
+
+    /// Refresh the Fleet grid from the shared mission store (called each render).
+    pub fn refresh_fleet(&mut self) {
+        let missions = futures::executor::block_on(self.stores.missions.list());
+        // Preserve the current selection index where possible.
+        let selected = self.fleet.selected.min(missions.len().saturating_sub(1));
+        self.fleet = crate::display::pages::fleet::FleetState::new(missions);
+        self.fleet.selected = selected;
+    }
+
+    /// Open the Session view for the mission at the Fleet cursor.
+    pub fn open_selected_mission(&mut self) {
+        let missions = futures::executor::block_on(self.stores.missions.list());
+        if let Some(m) = missions.into_iter().nth(self.fleet.selected) {
+            self.selected_mission = Some(m.id.clone());
+            let mission_sessions: std::collections::HashSet<_> =
+                m.sessions.iter().cloned().collect();
+            let agents = futures::executor::block_on(self.stores.agents.list())
+                .into_iter()
+                .filter(|a| mission_sessions.contains(&a.session_id))
+                .collect();
+            let session_state =
+                crate::display::pages::session::SessionState::with_agents(m, agents);
+            self.session_view = Some(session_state);
+            self.current_page = PageId::Session;
+        }
+    }
+
+    /// Return from the Session view to the Fleet grid.
+    pub fn close_session_to_fleet(&mut self) {
+        self.session_view = None;
+        self.current_page = PageId::Fleet;
     }
 
     /// Get the theme background color for the current theme mode.

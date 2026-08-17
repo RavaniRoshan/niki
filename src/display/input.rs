@@ -33,6 +33,12 @@ impl InputHandler {
     pub fn handle_insert(&self, state: &mut InputState, key: KeyEvent) -> InputAction {
         match key.code {
             KeyCode::Enter => {
+                // Shift+Enter inserts a newline for multiline composition;
+                // plain Enter submits.
+                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    state.insert_newline();
+                    return InputAction::None;
+                }
                 let content = state.buffer.clone();
                 if content.trim().is_empty() {
                     return InputAction::None;
@@ -41,6 +47,10 @@ impl InputHandler {
                 InputAction::Submit(content)
             }
             KeyCode::Esc => InputAction::Cancel,
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Reverse incremental search through history.
+                InputAction::ReverseSearch
+            }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 state.clear();
                 InputAction::None
@@ -67,6 +77,18 @@ impl InputHandler {
             }
             KeyCode::Down => {
                 state.history_next();
+                InputAction::None
+            }
+            KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                state.move_word_left();
+                InputAction::None
+            }
+            KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                state.move_word_right();
                 InputAction::None
             }
             KeyCode::Left => {
@@ -408,5 +430,76 @@ mod tests {
         assert!(!should_trigger_autocomplete("@file.rs ", 9));
         // While typing after @, should trigger
         assert!(should_trigger_autocomplete("@file.rs", 8));
+    }
+
+    #[test]
+    fn input_handler_shift_enter_newline() {
+        let handler = InputHandler::new();
+        let mut state = InputState::new();
+        state.buffer = "line1".to_string();
+        state.cursor_pos = 5;
+        // Shift+Enter inserts a newline instead of submitting.
+        let action = handler.handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT),
+        );
+        assert_eq!(action, InputAction::None);
+        assert_eq!(state.buffer, "line1\n");
+        assert_eq!(state.cursor_pos, 6);
+        // Plain Enter still submits.
+        state.buffer = "line1\nline2".to_string();
+        state.cursor_pos = 11;
+        let action = handler.handle_key(&mut state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(action, InputAction::Submit(_)));
+    }
+
+    #[test]
+    fn input_handler_ctrl_r_reverse_search() {
+        let handler = InputHandler::new();
+        let mut state = InputState::new();
+        let action = handler.handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(action, InputAction::ReverseSearch);
+    }
+
+    #[test]
+    fn input_handler_word_navigation() {
+        let handler = InputHandler::new();
+        let mut state = InputState::new();
+        for c in "foo bar baz".chars() {
+            state.insert_char(c);
+        }
+        assert_eq!(state.cursor_pos, 11);
+        // Ctrl+Left jumps back a word.
+        handler.handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL),
+        );
+        assert_eq!(state.cursor_pos, 8); // start of "baz"
+        handler.handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL),
+        );
+        assert_eq!(state.cursor_pos, 4); // start of "bar"
+        // Ctrl+Right jumps forward a word.
+        handler.handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL),
+        );
+        assert_eq!(state.cursor_pos, 8);
+    }
+
+    #[test]
+    fn input_handler_queued_prompts() {
+        let mut state = InputState::new();
+        state.queue_prompt("second".to_string());
+        state.queue_prompt("third".to_string());
+        assert!(state.has_queued());
+        assert_eq!(state.next_queued(), Some("second".to_string()));
+        assert_eq!(state.next_queued(), Some("third".to_string()));
+        assert!(!state.has_queued());
+        assert_eq!(state.next_queued(), None);
     }
 }

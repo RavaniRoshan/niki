@@ -385,6 +385,7 @@ async fn check_single_provider(name: &str, cfg: &ProviderConfig) -> Result<Token
         max_tokens: 10,
         temperature: 0.0,
         json_schema: None,
+        tools: None,
     };
 
     let response = provider.complete(request).await?;

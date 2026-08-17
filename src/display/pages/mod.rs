@@ -4,10 +4,12 @@ pub mod chat;
 pub mod config;
 pub mod cost;
 pub mod diff;
+pub mod fleet;
 pub mod help;
 pub mod history;
 pub mod pipeline;
 pub mod run;
+pub mod session;
 pub mod test_log;
 pub mod verdict;
 
@@ -53,6 +55,8 @@ impl PageRouter {
         pages.insert(PageId::Help, Box::new(help::HelpPage::new()));
         pages.insert(PageId::TestLog, Box::new(test_log::TestLogPage::new()));
         pages.insert(PageId::Chat, Box::new(chat::ChatPage::new()));
+        // Fleet and Session are rendered via their own render functions, not Page trait
+        // (they use the new event/mission stores directly)
         Self { pages }
     }
 

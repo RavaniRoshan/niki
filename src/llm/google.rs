@@ -97,6 +97,7 @@ impl LlmProvider for GoogleProvider {
                 input_tokens,
                 output_tokens,
             },
+            tool_calls: Vec::new(),
         })
     }
 
