@@ -33,9 +33,7 @@ impl InputHandler {
     pub fn handle_insert(&self, state: &mut InputState, key: KeyEvent) -> InputAction {
         match key.code {
             KeyCode::Enter => {
-                // Shift+Enter inserts a newline for multiline composition;
-                // plain Enter submits.
-                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                if key.modifiers.contains(KeyModifiers::SHIFT) || state.in_paste_burst() {
                     state.insert_newline();
                     return InputAction::None;
                 }

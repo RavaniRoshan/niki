@@ -627,6 +627,7 @@ fn run_tui(
                 }
                 Ok(Event::Paste(pasted)) => {
                     state.input_state.insert_str(&pasted);
+                    state.input_state.start_paste_burst();
                     engine.mark_dirty();
                 }
                 Ok(Event::Resize(_, _)) => {
@@ -897,6 +898,7 @@ pub fn run_chat(
                 }
             } else if let Ok(Event::Paste(pasted)) = event::read() {
                 state.input_state.insert_str(&pasted);
+                state.input_state.start_paste_burst();
                 needs_render = true;
             } else if let Ok(Event::Resize(_, _)) = event::read() {
                 needs_render = true;

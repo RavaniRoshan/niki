@@ -218,6 +218,10 @@ pub struct InputState {
     /// Prompts submitted while an operation is in flight are queued and
     /// replayed once the current turn completes.
     pub queued: Vec<String>,
+    /// During a paste burst (bracketed paste or rapid char stream), Enter keys
+    /// are treated as newlines rather than submits. Set by the paste handler,
+    /// cleared automatically after the burst window expires.
+    pub paste_burst_until: Option<Instant>,
 }
 
 impl InputState {
@@ -234,6 +238,20 @@ impl InputState {
         self.cursor_pos = 0;
         self.history_index = None;
         self.autocomplete = None;
+        self.paste_burst_until = None;
+    }
+
+    /// Mark the start of a paste burst. Enter keys received within the burst
+    /// window are treated as newlines, not submits.
+    pub fn start_paste_burst(&mut self) {
+        self.paste_burst_until = Some(Instant::now() + std::time::Duration::from_millis(80));
+    }
+
+    /// Whether the input is currently in a paste burst window.
+    pub fn in_paste_burst(&self) -> bool {
+        self.paste_burst_until
+            .map(|t| Instant::now() < t)
+            .unwrap_or(false)
     }
 
     /// Insert a character at the cursor position.
@@ -1173,9 +1191,14 @@ impl Store {
                 self.state.scroll_offset = self.state.scroll_offset.saturating_add(1);
                 self.state.auto_scroll = false;
             }
-            StoreEvent::ScrollDown => {
-                self.state.scroll_offset = self.state.scroll_offset.saturating_sub(1);
+        StoreEvent::ScrollDown => {
+            let new_offset = self.state.scroll_offset.saturating_sub(1);
+            self.state.scroll_offset = new_offset;
+            // Re-enable auto-scroll when user scrolls back to bottom.
+            if new_offset == 0 {
+                self.state.auto_scroll = true;
             }
+        }
             StoreEvent::ToggleAutoScroll => {
                 self.state.auto_scroll = !self.state.auto_scroll;
             }
