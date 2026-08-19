@@ -1,8 +1,9 @@
 //! Permission request modal overlay.
 //!
-//! The three options (`Allow once` / `Allow always` / `Deny`) are rendered one
-//! per row and driven by the shared [`ListCursor`], so keyboard nav and mouse
-//! hover/click behave exactly like the command palette and slash menu.
+//! Claude Code–style layout:
+//!   tool line → blue separator → description → dotted separator → options → footer
+//! Options: Allow once · Allow always · Deny · Deny always
+//! Keybindings: ↑/↓ navigate · Enter/Y confirm · Esc/N cancel · Ctrl+E explanation · Ctrl+D raw params
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -16,12 +17,12 @@ use crate::display::theme;
 use crate::permissions::PermissionAction;
 
 /// Selectable options, in row order.
-pub const OPTIONS: [&str; 3] = ["Allow once", "Allow always", "Deny"];
+pub const OPTIONS: [&str; 4] = ["Allow once", "Allow always", "Deny", "Deny always"];
 
-/// Height of the modal: borders + prompt + command + one row per option + hint.
-const MODAL_HEIGHT: u16 = 13;
+/// Height of the modal: borders + tool line + blue sep + description + dotted sep + 4 options + hint.
+const MODAL_HEIGHT: u16 = 16;
 /// Row offset (inside the modal border) of the first option row.
-const FIRST_OPTION_ROW: u16 = 4;
+const FIRST_OPTION_ROW: u16 = 6;
 
 /// The cursor over the permission options, seeded from `AppState`.
 pub fn cursor(state: &AppState) -> ListCursor {
@@ -29,8 +30,8 @@ pub fn cursor(state: &AppState) -> ListCursor {
 }
 
 /// The [`PermissionAction`] a given option row maps to.
-/// (`Allow always` currently resolves to `Allow` — the protocol has no
-/// persistent variant, so we do not change the display event contract.)
+/// ("Allow always" / "Deny always" resolve to Allow/Deny here; persistent
+/// variants are a future enhancement — the protocol has no persistent flag yet.)
 pub fn action_for(index: usize) -> PermissionAction {
     match index {
         0 | 1 => PermissionAction::Allow,
@@ -67,6 +68,15 @@ pub fn click_index(area: Rect, x: u16, y: u16) -> Option<usize> {
 }
 
 /// Render the permission modal overlay.
+///
+/// Claude Code–style layout (top → bottom inside the modal border):
+///   1. "The agent wants to run:" label
+///   2. `$ <command>`  (tool call line)
+///   3. Blue separator  (rgb 177,185,249)
+///   4. Description + hint
+///   5. Dotted separator (rgb 80,80,80)
+///   6. Options (Allow once · Allow always · Deny · Deny always)
+///   7. Footer hint
 pub fn render_permission_modal(
     frame: &mut Frame,
     request: &PermissionRequest,
@@ -75,10 +85,8 @@ pub fn render_permission_modal(
 ) {
     let modal_area = modal_rect(area);
 
-    // Clear the area (dim background)
     frame.render_widget(Clear, modal_area);
 
-    // Border block
     let block = Block::default()
         .title(" Permission Required ")
         .borders(Borders::ALL)
@@ -87,7 +95,6 @@ pub fn render_permission_modal(
 
     frame.render_widget(block, modal_area);
 
-    // Inner layout
     let inner = Rect {
         x: modal_area.x + 1,
         y: modal_area.y + 1,
@@ -96,6 +103,8 @@ pub fn render_permission_modal(
     };
 
     let selected = cursor(state).selected;
+    let blue = Style::default().fg(ratatui::style::Color::Rgb(177, 185, 249));
+    let dotted = Style::default().fg(ratatui::style::Color::Rgb(80, 80, 80));
 
     let mut lines = vec![
         Line::from(Span::styled("The agent wants to run:", theme::text_dim())),
@@ -107,9 +116,32 @@ pub fn render_permission_modal(
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
+        Line::from(Span::styled(
+            "─".repeat(inner.width.saturating_sub(4) as usize),
+            blue,
+        )),
+        Line::from(""),
     ];
 
-    // One row per option so hover-highlight / click-to-select line up 1:1.
+    if !request.description.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", request.description),
+            theme::text(),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    lines.push(Line::from(Span::styled(
+        format!("  {} options:", OPTIONS.len()),
+        theme::text_dim(),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("  {}", "·".repeat(inner.width.saturating_sub(4) as usize)),
+        dotted,
+    )));
+    lines.push(Line::from(""));
+
     debug_assert_eq!(lines.len() as u16, FIRST_OPTION_ROW);
     for (i, opt) in OPTIONS.iter().enumerate() {
         let is_selected = i == selected;
@@ -128,7 +160,7 @@ pub fn render_permission_modal(
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "[↑/↓] Select  [Enter] Confirm  [Esc] Deny",
+        "[↑/↓] Select  [Enter/Y] Confirm  [Esc/N] Deny  [Ctrl+E] Explain  [Ctrl+D] Raw",
         theme::text_dim(),
     )));
 
@@ -162,6 +194,7 @@ mod tests {
         assert!(result.contains("● Allow once"));
         assert!(result.contains("○ Allow always"));
         assert!(result.contains("○ Deny"));
+        assert!(result.contains("○ Deny always"));
     }
 
     #[test]
@@ -179,9 +212,10 @@ mod tests {
         assert_eq!(click_index(area, modal.x + 3, first), Some(0));
         assert_eq!(click_index(area, modal.x + 3, first + 1), Some(1));
         assert_eq!(click_index(area, modal.x + 3, first + 2), Some(2));
+        assert_eq!(click_index(area, modal.x + 3, first + 3), Some(3));
         // Rows above the options and the hint row below are not selectable.
         assert_eq!(click_index(area, modal.x + 3, first - 1), None);
-        assert_eq!(click_index(area, modal.x + 3, first + 3), None);
+        assert_eq!(click_index(area, modal.x + 3, first + 4), None);
         // Border columns are not selectable.
         assert_eq!(click_index(area, modal.x, first), None);
     }
@@ -193,7 +227,7 @@ mod tests {
         state.permission_selected = 0;
         let mut c = cursor(&state);
         c.prev();
-        assert_eq!(c.selected, 2);
+        assert_eq!(c.selected, 3);
         assert!(matches!(action_for(c.selected), PermissionAction::Deny));
         c.next();
         assert_eq!(c.selected, 0);

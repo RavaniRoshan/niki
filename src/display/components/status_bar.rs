@@ -109,6 +109,31 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
         ));
     }
 
+    if state.context_usage > 0.0 && width >= 55 {
+        let pct = (state.context_usage * 100.0).round() as u32;
+        let filled = (pct / 10).clamp(0, 10) as usize;
+        let empty = 10 - filled;
+        right_spans.push(Span::styled(
+            format!(
+                "ctx {}{}{}{} {}%   ",
+                theme::thinking_green(),
+                "▓".repeat(filled),
+                theme::fg_dim(),
+                "░".repeat(empty),
+                pct
+            ),
+            Style::default().fg(theme::fg_dim()),
+        ));
+    }
+
+    if state.input_state.has_queued() && width >= 50 {
+        let q = state.input_state.queued.len();
+        right_spans.push(Span::styled(
+            format!("{} queued   ", q),
+            Style::default().fg(theme::clay()),
+        ));
+    }
+
     if let Some((msg, _)) = &state.notice {
         right_spans.push(Span::styled(
             format!("· {} ", msg),
