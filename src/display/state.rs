@@ -1217,14 +1217,14 @@ impl Store {
                 self.state.scroll_offset = self.state.scroll_offset.saturating_add(1);
                 self.state.auto_scroll = false;
             }
-        StoreEvent::ScrollDown => {
-            let new_offset = self.state.scroll_offset.saturating_sub(1);
-            self.state.scroll_offset = new_offset;
-            // Re-enable auto-scroll when user scrolls back to bottom.
-            if new_offset == 0 {
-                self.state.auto_scroll = true;
+            StoreEvent::ScrollDown => {
+                let new_offset = self.state.scroll_offset.saturating_sub(1);
+                self.state.scroll_offset = new_offset;
+                // Re-enable auto-scroll when user scrolls back to bottom.
+                if new_offset == 0 {
+                    self.state.auto_scroll = true;
+                }
             }
-        }
             StoreEvent::ToggleAutoScroll => {
                 self.state.auto_scroll = !self.state.auto_scroll;
             }

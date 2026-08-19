@@ -4,6 +4,37 @@ All notable changes to NIKI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-08-19
+
+Claude Code UI parity + bug fixes + demo refresh.
+
+### Added
+- Claude Code–style permission modal (4 options, blue separator, dotted separator, Ctrl+E/Ctrl+D hints)
+- Context-window gauge in status bar (`ctx ▓▓░░░░░░░░ 12%`) with color thresholds
+- Queued-prompt indicator in status bar
+- Full color detection hierarchy: `ColorDepth::detect()` (NO_COLOR → ANSI-16 → 256-color → truecolor)
+- Paste burst detector: 80ms Enter-as-newline guard for bracketed paste
+- Model-aware context limit registry (`update_context_limit_for_model`, 8K–1M)
+
+### Changed
+- Chat page now routes through `layout::render_chat` + dead-island `build_chat_lines`
+- `render_input_box` takes `&AppState`; border/bg dims during active streaming
+- Auto-scroll re-enables when scrolled to bottom (was permanent-off)
+- Token accounting: `StageDone` accumulates `token_count`; `context_usage` = token_count / context_limit
+- Removed dead `render_messages`, `msg_content`, `msg_role` from `layout/mod.rs`
+
+### Fixed
+- Auto-scroll stuck-off after user scrolls up
+- Bracketed paste Enter-from-multiline submitting prematurely
+- Context-window gauge missing from status bar
+- Permission modal had only 3 options (now 4: Allow once/always, Deny, Deny always)
+
+### Demo
+- Rewrote `demo.tape` (900×560, 38s comprehensive chat flow)
+- Rewrote `scripts/render_demo_terminal.py` (Claude Code–style capsule, spinner, gauge)
+- GIF: 872K (`gifsicle -O3 --colors 32 --resize-width 640`)
+- MP4: 957K (`ffmpeg -movflags +faststart -pix_fmt yuv420p -crf 23`)
+
 ## [0.4.0] - 2026-08-18
 
 Launch cut.
