@@ -494,6 +494,7 @@ impl Page for ChatPage {
                             ));
                         } else {
                             state.model = arg.to_string();
+                            state.update_context_limit_for_model(arg);
                             state
                                 .chat_log
                                 .push(("system".to_string(), format!("Switched model to {}", arg)));
@@ -994,7 +995,7 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
 /// handle_key so selection/toggle math uses coordinates that match the view).
 fn build_chat_lines_into(state: &mut AppState) {
     let width = state.chat_width.get();
-        state.chat_lines = build_chat_lines(state, width, true);
+    state.chat_lines = build_chat_lines(state, width, true);
 }
 
 fn push_line(

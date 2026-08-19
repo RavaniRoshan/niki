@@ -791,6 +791,27 @@ impl AppState {
         }
     }
 
+    /// Update the context window limit based on the active model name.
+    /// Uses a small hardcoded registry of known models; falls back to 200K.
+    pub fn update_context_limit_for_model(&mut self, model: &str) {
+        let lower = model.to_lowercase();
+        let limit = if lower.contains("gemini") {
+            1_000_000
+        } else if lower.contains("gpt-4o") || lower.contains("gpt-4-turbo") {
+            128_000
+        } else if lower.contains("gpt-4") && lower.contains("32k") {
+            32_000
+        } else if lower.contains("gpt-4") {
+            8_000
+        } else {
+            200_000
+        };
+        self.context_limit = limit;
+        if self.context_limit > 0 {
+            self.context_usage = (self.token_count as f64) / (self.context_limit as f64);
+        }
+    }
+
     /// Request cancellation of the running pipeline, if any, and show a notice.
     pub fn request_cancel(&mut self, notice: &str) {
         if let Some(cancel) = &self.cancel {
@@ -897,6 +918,11 @@ impl AppState {
                     s.cost_usd = cost_usd;
                     s.latency_ms = latency_ms;
                     s.stream.clear();
+                }
+                let total = input_tokens.saturating_add(output_tokens) as usize;
+                self.token_count = self.token_count.saturating_add(total);
+                if self.context_limit > 0 {
+                    self.context_usage = (self.token_count as f64) / (self.context_limit as f64);
                 }
             }
             DisplayEvent::StageFailed { role, error } => {
