@@ -113,6 +113,56 @@ pub fn no_color() -> bool {
     std::env::var("NO_COLOR").is_ok()
 }
 
+/// Color depth supported by the current terminal environment.
+/// Detection order: NO_COLOR > TERM=dumb/non-TTY > COLORTERM=truecolor/24bit
+/// > *-256color > ANSI-16 fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorDepth {
+    NoColor,
+    Ansi16,
+    Color256,
+    TrueColor,
+}
+
+impl ColorDepth {
+    pub fn detect() -> Self {
+        use std::io::IsTerminal;
+        if no_color() || !std::io::stdout().is_terminal() {
+            return ColorDepth::NoColor;
+        }
+        if let Ok(term) = std::env::var("TERM") {
+            if term == "dumb" {
+                return ColorDepth::NoColor;
+            }
+        }
+        if let Ok(ct) = std::env::var("COLORTERM") {
+            let lower = ct.to_lowercase();
+            if lower.contains("truecolor") || lower.contains("24bit") || lower.contains("tc") {
+                return ColorDepth::TrueColor;
+            }
+        }
+        if let Ok(term) = std::env::var("TERM") {
+            if term.ends_with("256color") || term.ends_with("256") {
+                return ColorDepth::Color256;
+            }
+        }
+        ColorDepth::Ansi16
+    }
+
+    pub fn is_no_color(self) -> bool {
+        matches!(self, ColorDepth::NoColor)
+    }
+
+    pub fn is_truecolor(self) -> bool {
+        matches!(self, ColorDepth::TrueColor)
+    }
+}
+
+/// Returns true if the terminal supports truecolor (24-bit) output.
+pub fn supports_truecolor() -> bool {
+    ColorDepth::detect().is_truecolor()
+}
+
 /// Returns the appropriate foreground color, respecting NO_COLOR.
 fn fg(color: Color) -> Color {
     if no_color() { Color::Reset } else { color }
