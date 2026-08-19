@@ -1,4 +1,7 @@
 //! Text input box with cursor rendering and pill badges (Claude Code / Studio style).
+//!
+//! During an active streaming pipeline stage the border turns gray and the
+//! inner text is dimmed — matching Claude Code's disabled-input behavior.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -6,20 +9,32 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::display::state::{InputMode, InputState};
+use crate::display::state::{AppState, InputMode, InputState};
 use crate::display::theme;
 
 /// Render the input box with cursor, mode indicator, and status pill badges.
-pub fn render_input_box(frame: &mut Frame, state: &InputState, area: Rect) {
+pub fn render_input_box(frame: &mut Frame, state: &AppState, area: Rect) {
     if area.width < 8 || area.height < 2 {
         return;
     }
 
+    let is_streaming = state.has_running_stage();
+    let border_style = if is_streaming {
+        Style::default().fg(theme::fg_dim())
+    } else {
+        Style::default().fg(theme::border_dim())
+    };
+    let bg_style = if is_streaming {
+        Style::default().bg(theme::bg_color())
+    } else {
+        Style::default().bg(theme::bg_highlight())
+    };
+
     let input_block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(theme::border_dim()))
-        .style(Style::default().bg(theme::bg_highlight()));
+        .border_style(border_style)
+        .style(bg_style);
 
     let inner = input_block.inner(area);
     frame.render_widget(input_block, area);
@@ -29,7 +44,7 @@ pub fn render_input_box(frame: &mut Frame, state: &InputState, area: Rect) {
         return;
     }
 
-    let mode_indicator = match state.mode {
+    let mode_indicator = match state.input_state.mode {
         InputMode::Shell => vec![
             Span::styled("▎ ", Style::default().fg(theme::shell())),
             Span::styled(
@@ -62,7 +77,7 @@ pub fn render_input_box(frame: &mut Frame, state: &InputState, area: Rect) {
     let mut spans = mode_indicator;
     let mode_len: usize = spans.iter().map(|s| s.content.chars().count()).sum();
 
-    if state.buffer.is_empty() {
+    if state.input_state.buffer.is_empty() {
         spans.push(Span::styled(" ", theme::prompt_cursor()));
         let placeholder = if inner_width >= 55 {
             "Describe a change or press / for commands..."
@@ -77,8 +92,8 @@ pub fn render_input_box(frame: &mut Frame, state: &InputState, area: Rect) {
         ));
     } else {
         let avail = inner_width.saturating_sub(mode_len + 1); // room for text + cursor
-        let buffer_chars: Vec<char> = state.buffer.chars().collect();
-        let cursor = state.cursor_pos.min(buffer_chars.len());
+        let buffer_chars: Vec<char> = state.input_state.buffer.chars().collect();
+        let cursor = state.input_state.cursor_pos.min(buffer_chars.len());
 
         // Horizontal scroll window calculation
         let (start, end) = if buffer_chars.len() <= avail {
