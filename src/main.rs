@@ -73,9 +73,9 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     let cli = Cli::parse();
-    let command = cli.command.unwrap_or_else(|| {
-        Commands::Chat(niki::cli::chat::ChatArgs::default())
-    });
+    let command = cli
+        .command
+        .unwrap_or_else(|| Commands::Chat(niki::cli::chat::ChatArgs::default()));
 
     match &command {
         Commands::Run(args) => niki::cli::run::handle(args).await?,

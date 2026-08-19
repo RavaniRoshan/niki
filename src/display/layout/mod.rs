@@ -6,9 +6,9 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+use crate::display::pages::chat;
 use crate::display::state::{AppState, PageId};
 use crate::display::theme;
-use crate::display::pages::chat;
 
 /// Render the main chat layout (conversational view).
 pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
@@ -33,7 +33,11 @@ pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
         .iter()
         .skip(scroll)
         .take(visible)
-        .map(|cl| cl.rich.clone().unwrap_or_else(|| Line::from(cl.text.clone())))
+        .map(|cl| {
+            cl.rich
+                .clone()
+                .unwrap_or_else(|| Line::from(cl.text.clone()))
+        })
         .collect();
     let mut display_lines = visible_lines;
     while display_lines.len() < visible {
@@ -42,71 +46,7 @@ pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
     frame.render_widget(Paragraph::new(display_lines), chunks[0]);
 
     // Render input box (Claude Code elevated capsule)
-    super::components::render_input_box(frame, &state.input_state, chunks[1]);
-}
-
-/// Render messages in the chat view.
-fn render_messages(frame: &mut Frame, area: Rect, state: &AppState) {
-    let mut lines: Vec<Line> = vec![];
-
-    // Welcome banner (if no messages)
-    if state.messages.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "  ✦ Welcome to NIKI",
-            theme::primary(),
-        )));
-        lines.push(Line::from(Span::styled(
-            "  Send /help for help information.",
-            theme::text_dim(),
-        )));
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            format!("  Directory: {}", state.project_path.display()),
-            theme::text_dim(),
-        )));
-        lines.push(Line::from(Span::styled(
-            format!("  Model:     {}", state.model),
-            theme::text_dim(),
-        )));
-        lines.push(Line::from(Span::styled(
-            "  Version:   0.2.0",
-            theme::text_dim(),
-        )));
-        lines.push(Line::from(""));
-    } else {
-        // Render each message
-        for msg in &state.messages {
-            lines.extend(crate::display::chat::message::render_message(
-                &msg_content(msg),
-                msg_role(msg),
-                &[],
-                &crate::display::chat::message::MessageRenderConfig::from_theme(
-                    area.width as usize,
-                ),
-            ));
-        }
-    }
-
-    // Apply scroll offset
-    let visible_lines = area.height as usize;
-    let scroll = state
-        .scroll_offset
-        .min(lines.len().saturating_sub(visible_lines));
-    let visible: Vec<_> = lines
-        .iter()
-        .skip(scroll)
-        .take(visible_lines)
-        .cloned()
-        .collect();
-
-    // Fill remaining space
-    let mut display_lines = visible;
-    while display_lines.len() < visible_lines {
-        display_lines.push(Line::from(""));
-    }
-
-    frame.render_widget(Paragraph::new(display_lines), area);
+    super::components::render_input_box(frame, state, chunks[1]);
 }
 
 /// Render the page layout (tab-based page view).
@@ -354,32 +294,6 @@ fn render_artifacts_page(state: &AppState, _width: usize) -> Vec<Line<'static>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn msg_content_test() {
-        let msg = crate::display::state::Message::User {
-            content: "hello".to_string(),
-            timestamp: chrono::Utc::now(),
-        };
-        assert_eq!(msg_content(&msg), "hello");
-    }
-
-    #[test]
-    fn msg_role_test() {
-        let msg = crate::display::state::Message::Assistant {
-            content: "test".to_string(),
-            role: crate::artifacts::types::AgentRole::Planner,
-            timestamp: chrono::Utc::now(),
-            tool_calls: vec![],
-            thinking: None,
-        };
-        match msg_role(&msg) {
-            crate::display::chat::message::MessageRole::Assistant(r) => {
-                assert_eq!(r, crate::artifacts::types::AgentRole::Planner);
-            }
-            _ => panic!("Expected Assistant role"),
-        }
-    }
 
     #[test]
     fn tab_bar_renders() {
