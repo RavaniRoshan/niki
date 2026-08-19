@@ -1032,6 +1032,9 @@ fn render(
                 router.render_current(frame, chunks[1], state);
             }
         }
+        PageId::Chat => {
+            crate::display::layout::render_chat(frame, chunks[1], state);
+        }
         _ => router.render_current(frame, chunks[1], state),
     }
 

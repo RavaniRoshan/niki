@@ -60,7 +60,7 @@ pub fn apply_session(state: &mut AppState, session: ChatSession) {
     state.revision_round = session.revision_round;
     // Rebuild the rendered chat lines so the resumed log shows immediately.
     let width = state.chat_width.get().max(80);
-    state.chat_lines = crate::display::pages::chat::build_chat_lines(state, width);
+    state.chat_lines = crate::display::pages::chat::build_chat_lines(state, width, true);
 }
 
 /// Extract a saveable snapshot from the live state.

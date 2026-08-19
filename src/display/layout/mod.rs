@@ -8,6 +8,7 @@ use ratatui::widgets::Paragraph;
 
 use crate::display::state::{AppState, PageId};
 use crate::display::theme;
+use crate::display::pages::chat;
 
 /// Render the main chat layout (conversational view).
 pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
@@ -15,24 +16,33 @@ pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
         return;
     }
 
-    // Split area: messages + status bar + input
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(3),    // messages area
-            Constraint::Length(1), // status bar
             Constraint::Length(3), // input box (borders + 1 inner row)
         ])
         .split(area);
 
-    // Render messages
-    render_messages(frame, chunks[0], state);
+    // Render messages using the existing build_chat_lines (handles stages,
+    // progressive disclosure, chat log). Skip inline input — rendered below.
+    let lines = chat::build_chat_lines(state, area.width as usize, false);
+    let visible = (area.height as usize).saturating_sub(3);
+    let scroll = state.scroll_offset.min(lines.len().saturating_sub(visible));
+    let visible_lines: Vec<Line> = lines
+        .iter()
+        .skip(scroll)
+        .take(visible)
+        .map(|cl| cl.rich.clone().unwrap_or_else(|| Line::from(cl.text.clone())))
+        .collect();
+    let mut display_lines = visible_lines;
+    while display_lines.len() < visible {
+        display_lines.push(Line::from(""));
+    }
+    frame.render_widget(Paragraph::new(display_lines), chunks[0]);
 
-    // Render status bar
-    super::components::render_status_bar(frame, state, chunks[1]);
-
-    // Render input box
-    super::components::render_input_box(frame, &state.input_state, chunks[2]);
+    // Render input box (Claude Code elevated capsule)
+    super::components::render_input_box(frame, &state.input_state, chunks[1]);
 }
 
 /// Render messages in the chat view.
@@ -97,40 +107,6 @@ fn render_messages(frame: &mut Frame, area: Rect, state: &AppState) {
     }
 
     frame.render_widget(Paragraph::new(display_lines), area);
-}
-
-/// Get message content as string.
-fn msg_content(msg: &crate::display::state::Message) -> String {
-    match msg {
-        crate::display::state::Message::User { content, .. } => content.clone(),
-        crate::display::state::Message::Assistant { content, .. } => content.clone(),
-        crate::display::state::Message::System { content, .. } => content.clone(),
-    }
-}
-
-/// Get message role.
-fn msg_role(msg: &crate::display::state::Message) -> crate::display::chat::message::MessageRole {
-    match msg {
-        crate::display::state::Message::User { .. } => {
-            crate::display::chat::message::MessageRole::User
-        }
-        crate::display::state::Message::Assistant { role, .. } => {
-            crate::display::chat::message::MessageRole::Assistant(*role)
-        }
-        crate::display::state::Message::System { level, .. } => {
-            crate::display::chat::message::MessageRole::System(match level {
-                crate::display::state::SystemLevel::Info => {
-                    crate::display::chat::message::SystemLevel::Info
-                }
-                crate::display::state::SystemLevel::Warning => {
-                    crate::display::chat::message::SystemLevel::Warning
-                }
-                crate::display::state::SystemLevel::Error => {
-                    crate::display::chat::message::SystemLevel::Error
-                }
-            })
-        }
-    }
 }
 
 /// Render the page layout (tab-based page view).

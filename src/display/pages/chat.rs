@@ -307,7 +307,7 @@ impl Page for ChatPage {
         // Remember the render width so handle_key's cached lines match wrapping.
         state.chat_width.set(width);
 
-        let lines = build_chat_lines(state, width);
+        let lines = build_chat_lines(state, width, true);
 
         let visible = area.height as usize;
         let offset = scroll_offset(lines.len(), visible);
@@ -712,7 +712,7 @@ fn disclosure_summary(s: &crate::display::pages::StageInfo) -> String {
 }
 
 /// Build the full list of chat rows from state.
-pub fn build_chat_lines(state: &AppState, width: usize) -> Vec<ChatLine> {
+pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> Vec<ChatLine> {
     let mut lines: Vec<ChatLine> = Vec::new();
 
     push_line(
@@ -947,43 +947,45 @@ pub fn build_chat_lines(state: &AppState, width: usize) -> Vec<ChatLine> {
         );
     }
 
-    let prompt = match state.input_state.mode {
-        crate::display::state::InputMode::Shell => "! ",
-        _ => {
-            if state.chat_copy_mode {
-                "COPY "
-            } else {
-                "> "
+    if include_input {
+        let prompt = match state.input_state.mode {
+            crate::display::state::InputMode::Shell => "! ",
+            _ => {
+                if state.chat_copy_mode {
+                    "COPY "
+                } else {
+                    "> "
+                }
             }
-        }
-    };
-    let buf = &state.input_state.buffer;
-    let cursor_pos = state.input_state.cursor_pos.min(buf.len());
-    let before = &buf[..cursor_pos];
-    let cursor_char = buf[cursor_pos..]
-        .chars()
-        .next()
-        .map(|c| c.to_string())
-        .unwrap_or_else(|| " ".to_string());
-    let after_start = cursor_pos + cursor_char.chars().count();
-    let after = &buf[after_start.min(buf.len())..];
-    let input_display = format!("{}{}{}{}", prompt, before, cursor_char, after);
-    push_line(&mut lines, input_display, usize::MAX, 0, true, None, None);
+        };
+        let buf = &state.input_state.buffer;
+        let cursor_pos = state.input_state.cursor_pos.min(buf.len());
+        let before = &buf[..cursor_pos];
+        let cursor_char = buf[cursor_pos..]
+            .chars()
+            .next()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| " ".to_string());
+        let after_start = cursor_pos + cursor_char.chars().count();
+        let after = &buf[after_start.min(buf.len())..];
+        let input_display = format!("{}{}{}{}", prompt, before, cursor_char, after);
+        push_line(&mut lines, input_display, usize::MAX, 0, true, None, None);
 
-    let hint = if state.chat_copy_mode {
-        "[copy-mode] arrows move · Space mark · y yank · c char · Esc cancel"
-    } else {
-        "type + Enter to send · Tab pages · Enter expand · v copy-mode · y copy message · drag to select"
-    };
-    push_line(
-        &mut lines,
-        hint.to_string(),
-        usize::MAX,
-        0,
-        false,
-        None,
-        None,
-    );
+        let hint = if state.chat_copy_mode {
+            "[copy-mode] arrows move · Space mark · y yank · c char · Esc cancel"
+        } else {
+            "type + Enter to send · Tab pages · Enter expand · v copy-mode · y copy message · drag to select"
+        };
+        push_line(
+            &mut lines,
+            hint.to_string(),
+            usize::MAX,
+            0,
+            false,
+            None,
+            None,
+        );
+    }
 
     lines
 }
@@ -992,7 +994,7 @@ pub fn build_chat_lines(state: &AppState, width: usize) -> Vec<ChatLine> {
 /// handle_key so selection/toggle math uses coordinates that match the view).
 fn build_chat_lines_into(state: &mut AppState) {
     let width = state.chat_width.get();
-    state.chat_lines = build_chat_lines(state, width);
+        state.chat_lines = build_chat_lines(state, width, true);
 }
 
 fn push_line(
@@ -1103,7 +1105,7 @@ mod tests {
             ("user".to_string(), "hello".to_string()),
             ("assistant".to_string(), "world".to_string()),
         ];
-        state.chat_lines = build_chat_lines(&state, 80);
+        state.chat_lines = build_chat_lines(&state, 80, true);
         let lines: Vec<&str> = state.chat_lines.iter().map(|l| l.text.as_str()).collect();
         assert!(lines.iter().any(|l| l.contains("Welcome to NIKI")));
         assert!(lines.iter().any(|l| l.contains("test task")));
@@ -1127,7 +1129,7 @@ mod tests {
             summary: vec!["did the thing".to_string()],
             start: None,
         }];
-        state.chat_lines = build_chat_lines(&state, 80);
+        state.chat_lines = build_chat_lines(&state, 80, true);
         assert!(
             state
                 .chat_lines
@@ -1164,7 +1166,7 @@ mod tests {
             summary: vec!["did the thing".to_string()],
             start: None,
         }];
-        state.chat_lines = build_chat_lines(&state, 80);
+        state.chat_lines = build_chat_lines(&state, 80, true);
         assert!(
             state
                 .chat_lines
@@ -1189,7 +1191,7 @@ mod tests {
             summary: vec![],
             start: None,
         }];
-        state.chat_lines = build_chat_lines(&state, 80);
+        state.chat_lines = build_chat_lines(&state, 80, true);
         assert!(
             state
                 .chat_lines
@@ -1202,7 +1204,7 @@ mod tests {
     fn selected_text_within_single_message() {
         let mut state = base_state();
         state.chat_log = vec![("assistant".to_string(), "Hello, world".to_string())];
-        state.chat_lines = build_chat_lines(&state, 80);
+        state.chat_lines = build_chat_lines(&state, 80, true);
         let row = state
             .chat_lines
             .iter()
@@ -1221,7 +1223,7 @@ mod tests {
             ("assistant".to_string(), "Hello".to_string()),
             ("user".to_string(), "World".to_string()),
         ];
-        state.chat_lines = build_chat_lines(&state, 80);
+        state.chat_lines = build_chat_lines(&state, 80, true);
         let hello_row = state
             .chat_lines
             .iter()
@@ -1240,7 +1242,7 @@ mod tests {
     fn selected_text_skips_input_lines() {
         let mut state = base_state();
         state.chat_log = vec![("assistant".to_string(), "data".to_string())];
-        state.chat_lines = build_chat_lines(&state, 80);
+        state.chat_lines = build_chat_lines(&state, 80, true);
         let input_idx = state.chat_lines.iter().position(|l| l.is_input).unwrap();
         let sel = ChatPage::selected_text(&state, (0, 0), (input_idx, 10));
         assert!(!sel.contains("> "));
@@ -1262,7 +1264,7 @@ mod tests {
             summary: vec!["planned architecture".to_string()],
             start: None,
         }];
-        state.chat_lines = build_chat_lines(&state, 80);
+        state.chat_lines = build_chat_lines(&state, 80, true);
         assert!(
             state
                 .chat_lines
