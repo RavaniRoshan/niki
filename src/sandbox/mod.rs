@@ -62,6 +62,7 @@ pub(crate) fn build_permission_checker(
         auto_approve: config.permissions.auto_approve,
         external_directory: Permission::Ask,
         doom_loop: Permission::Ask,
+        ..Default::default()
     })
 }
 

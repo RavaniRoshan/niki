@@ -61,6 +61,38 @@ pub enum ViewMode {
     Page(PageId),
 }
 
+/// Permission mode — controls which actions require user confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionMode {
+    Default,
+    AcceptEdits,
+    Plan,
+    Auto,
+    BypassPermissions,
+}
+
+impl PermissionMode {
+    pub fn next(&self) -> Self {
+        match self {
+            PermissionMode::Default => PermissionMode::AcceptEdits,
+            PermissionMode::AcceptEdits => PermissionMode::Plan,
+            PermissionMode::Plan => PermissionMode::Auto,
+            PermissionMode::Auto => PermissionMode::BypassPermissions,
+            PermissionMode::BypassPermissions => PermissionMode::Default,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            PermissionMode::Default => "manual mode on",
+            PermissionMode::AcceptEdits => "accept edits on",
+            PermissionMode::Plan => "plan mode on",
+            PermissionMode::Auto => "auto mode on",
+            PermissionMode::BypassPermissions => "bypass permissions on",
+        }
+    }
+}
+
 /// Page identifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PageId {
@@ -218,6 +250,9 @@ pub struct InputState {
     /// Prompts submitted while an operation is in flight are queued and
     /// replayed once the current turn completes.
     pub queued: Vec<String>,
+    /// Per-mode command history so Up/Down recalls only same-mode entries.
+    pub shell_history: Vec<String>,
+    pub command_history: Vec<String>,
     /// During a paste burst (bracketed paste or rapid char stream), Enter keys
     /// are treated as newlines rather than submits. Set by the paste handler,
     /// cleared automatically after the burst window expires.
@@ -232,7 +267,11 @@ impl InputState {
     /// Reset the input buffer after submission.
     pub fn clear(&mut self) {
         if !self.buffer.is_empty() {
-            self.history.push(self.buffer.clone());
+            match self.mode {
+                InputMode::Shell => self.shell_history.push(self.buffer.clone()),
+                InputMode::Command => self.command_history.push(self.buffer.clone()),
+                InputMode::Insert => self.history.push(self.buffer.clone()),
+            }
         }
         self.buffer.clear();
         self.cursor_pos = 0;
@@ -381,18 +420,23 @@ impl InputState {
 
     /// Navigate to previous history entry.
     pub fn history_prev(&mut self) {
-        if self.history.is_empty() {
+        let hist: &Vec<String> = match self.mode {
+            InputMode::Shell => &self.shell_history,
+            InputMode::Command => &self.command_history,
+            InputMode::Insert => &self.history,
+        };
+        if hist.is_empty() {
             return;
         }
         match self.history_index {
             None => {
-                self.history_index = Some(self.history.len() - 1);
-                self.buffer = self.history[self.history.len() - 1].clone();
+                self.history_index = Some(hist.len() - 1);
+                self.buffer = hist[hist.len() - 1].clone();
                 self.cursor_pos = self.buffer.len();
             }
             Some(idx) if idx > 0 => {
                 self.history_index = Some(idx - 1);
-                self.buffer = self.history[idx - 1].clone();
+                self.buffer = hist[idx - 1].clone();
                 self.cursor_pos = self.buffer.len();
             }
             _ => {}
@@ -401,10 +445,15 @@ impl InputState {
 
     /// Navigate to next history entry.
     pub fn history_next(&mut self) {
+        let hist: &Vec<String> = match self.mode {
+            InputMode::Shell => &self.shell_history,
+            InputMode::Command => &self.command_history,
+            InputMode::Insert => &self.history,
+        };
         match self.history_index {
-            Some(idx) if idx + 1 < self.history.len() => {
+            Some(idx) if idx + 1 < hist.len() => {
                 self.history_index = Some(idx + 1);
-                self.buffer = self.history[idx + 1].clone();
+                self.buffer = hist[idx + 1].clone();
                 self.cursor_pos = self.buffer.len();
             }
             Some(_) => {
@@ -413,6 +462,15 @@ impl InputState {
                 self.cursor_pos = 0;
             }
             None => {}
+        }
+    }
+
+    /// Active history vec for the current input mode (mode-aware recall).
+    pub fn active_history(&self) -> &Vec<String> {
+        match self.mode {
+            InputMode::Shell => &self.shell_history,
+            InputMode::Command => &self.command_history,
+            InputMode::Insert => &self.history,
         }
     }
 
@@ -549,6 +607,9 @@ pub struct AppState {
     pub notice: Option<(String, Instant)>,
     /// Whether reverse (incremental) history search is active (Ctrl+R).
     pub reverse_search: bool,
+    /// Set while we are awaiting a terminal cursor-position report for IME
+    /// anchoring. Cleared once the response is drained (see `display::ime`).
+    pub anchor_pending: bool,
     /// Whether the permission modal is visible.
     pub show_permission_modal: bool,
     /// Current permission request (if any).
@@ -652,6 +713,8 @@ pub struct AppState {
     pub show_thinking: bool,
     /// Timestamp of last Esc keypress for double-Esc rewind shortcut.
     pub last_esc_time: Option<std::time::Instant>,
+    /// Current permission mode.
+    pub permission_mode: PermissionMode,
     /// Total session input tokens.
     pub input_tokens: usize,
     /// Total session output tokens.
@@ -761,12 +824,14 @@ impl AppState {
             cancel: None,
             notice: None,
             reverse_search: false,
+            anchor_pending: false,
             stores: crate::mission::Stores::new(crate::event::EventBus::new()),
             fleet: crate::display::pages::fleet::FleetState::new(Vec::new()),
             session_view: None,
             selected_mission: None,
             show_thinking: false,
             last_esc_time: None,
+            permission_mode: PermissionMode::Default,
             input_tokens: 0,
             output_tokens: 0,
             cache_read_tokens: 0,

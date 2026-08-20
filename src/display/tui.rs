@@ -172,22 +172,21 @@ fn run_tui(
 
     // Best-effort DEC 2026 synchronized output — eliminates flicker on
     // supporting terminals (kitty, Ghostty, xterm.js ≥6.0, newer tmux).
+    // The bracket is opened/closed around each frame draw inside the render
+    // loop, so we do NOT open it here: leaving it open would desync the
+    // bracket and make the trailing End at exit unmatched.
     let sync_capable = detect_synchronized_output();
-    if sync_capable {
-        let _ = execute!(
-            io::stdout(),
-            ratatui::crossterm::terminal::BeginSynchronizedUpdate
-        );
-    }
 
     let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = match Terminal::new(backend) {
+    let terminal = match Terminal::new(backend) {
         Ok(t) => t,
         Err(_) => return,
     };
+    let mut engine = super::engine::RenderEngine::new(terminal, sync_capable);
 
     // Initial full draw
-    let _ = terminal.draw(|f| {
+    engine.begin_frame();
+    let _ = engine.terminal_mut().draw(|f| {
         let area = f.area();
         f.render_widget(
             Paragraph::new(""),
@@ -199,6 +198,8 @@ fn run_tui(
             },
         );
     });
+    engine.end_frame();
+    engine.mark_clean_for_render();
 
     let config =
         crate::config::types::NikiConfig::load(std::path::Path::new(".")).unwrap_or_default();
@@ -234,7 +235,6 @@ fn run_tui(
     // Drive rendering through the high-performance RenderEngine: dirty-flag
     // redraws, 60fps during streaming / 30fps idle, and CSI 2026
     // synchronized output for flicker-free updates.
-    let mut engine = crate::display::engine::RenderEngine::new(terminal, sync_capable);
     engine.mark_dirty();
     let mut last_render = std::time::Instant::now();
     // Tracks the previous Ctrl+C press for the two-press-to-exit behaviour.
@@ -265,6 +265,7 @@ fn run_tui(
             state.clear_stale_notice();
             state.refresh_fleet();
             let s = &state;
+            engine.begin_frame();
             if engine
                 .terminal_mut()
                 .draw(|f| render(f, s, &router, &command_palette))
@@ -272,6 +273,7 @@ fn run_tui(
             {
                 break;
             }
+            engine.end_frame();
 
             if sync_capable {
                 let _ = execute!(
@@ -925,12 +927,6 @@ pub fn run_chat(
         DisableMouseCapture,
         ratatui::crossterm::event::DisableBracketedPaste
     );
-    if sync_capable {
-        let _ = execute!(
-            io::stdout(),
-            ratatui::crossterm::terminal::EndSynchronizedUpdate
-        );
-    }
 }
 
 fn render_status_line(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &AppState) {

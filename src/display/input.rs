@@ -133,11 +133,13 @@ impl InputHandler {
                     state.mode = InputMode::Command;
                     state.buffer.push('/');
                     state.cursor_pos = 1;
+                    state.history_index = None;
                     InputAction::None
                 } else if state.buffer.is_empty() && c == '!' {
                     state.mode = InputMode::Shell;
                     state.buffer.push('!');
                     state.cursor_pos = 1;
+                    state.history_index = None;
                     InputAction::None
                 } else {
                     state.insert_char(c);
@@ -160,6 +162,14 @@ impl InputHandler {
             KeyCode::Esc => {
                 state.clear();
                 state.mode = InputMode::Insert;
+                InputAction::None
+            }
+            KeyCode::Up => {
+                state.history_prev();
+                InputAction::None
+            }
+            KeyCode::Down => {
+                state.history_next();
                 InputAction::None
             }
             KeyCode::Backspace => {
@@ -189,6 +199,14 @@ impl InputHandler {
             KeyCode::Esc => {
                 state.clear();
                 state.mode = InputMode::Insert;
+                InputAction::None
+            }
+            KeyCode::Up => {
+                state.history_prev();
+                InputAction::None
+            }
+            KeyCode::Down => {
+                state.history_next();
                 InputAction::None
             }
             KeyCode::Backspace => {
@@ -492,6 +510,28 @@ mod tests {
             KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL),
         );
         assert_eq!(state.cursor_pos, 8);
+    }
+
+    #[test]
+    fn input_handler_history_is_mode_aware() {
+        let handler = InputHandler::new();
+        let mut state = InputState::new();
+        // Chat message -> Insert history
+        state.buffer = "chat one".to_string();
+        state.cursor_pos = 8;
+        state.clear();
+        // Shell command -> Shell history
+        state.mode = InputMode::Shell;
+        state.buffer = "!ls".to_string();
+        state.cursor_pos = 3;
+        state.clear();
+        // Shell history only contains the shell command
+        assert_eq!(state.shell_history, vec!["!ls".to_string()]);
+        assert_eq!(state.history, vec!["chat one".to_string()]);
+
+        // Up in Shell mode recalls the shell command, not the chat one.
+        handler.handle_key(&mut state, key(KeyCode::Up));
+        assert_eq!(state.buffer, "!ls");
     }
 
     #[test]

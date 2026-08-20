@@ -13,4 +13,3 @@ pub mod streaming;
 
 // Re-exports for convenience
 pub use message::{MessageRenderConfig, render_message};
-pub use streaming::StreamingMessage;

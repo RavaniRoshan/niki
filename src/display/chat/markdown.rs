@@ -279,6 +279,12 @@ impl<'a> MarkdownRenderer<'a> {
         self.push_current_line();
         if self.lines.is_empty() {
             self.lines.push(Line::from(""));
+        } else {
+            // SEGMENT_RESET: terminate every line with a reset span so styled
+            // content cannot bleed into the next line or adjacent widget.
+            for line in &mut self.lines {
+                line.spans.push(Span::styled("", Style::default()));
+            }
         }
         self.lines
     }

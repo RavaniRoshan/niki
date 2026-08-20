@@ -15,18 +15,18 @@ const STATE_FILE: &str = ".niki/state.json";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnboardingPage {
     Welcome,
-    Shortcuts,
-    Workflow,
-    SandboxBackends,
+    AuthSecurity,
+    TerminalSetup,
+    Telemetry,
     Help,
 }
 
 impl OnboardingPage {
     pub const ALL: &'static [OnboardingPage] = &[
         OnboardingPage::Welcome,
-        OnboardingPage::Shortcuts,
-        OnboardingPage::Workflow,
-        OnboardingPage::SandboxBackends,
+        OnboardingPage::AuthSecurity,
+        OnboardingPage::TerminalSetup,
+        OnboardingPage::Telemetry,
         OnboardingPage::Help,
     ];
 
@@ -46,10 +46,10 @@ impl OnboardingPage {
 
     pub fn title(&self) -> &'static str {
         match self {
-            OnboardingPage::Welcome => "Welcome",
-            OnboardingPage::Shortcuts => "Keyboard Shortcuts",
-            OnboardingPage::Workflow => "How NIKI Works",
-            OnboardingPage::SandboxBackends => "Sandbox Backends",
+            OnboardingPage::Welcome => "Welcome to Niki",
+            OnboardingPage::AuthSecurity => "Authentication & Security",
+            OnboardingPage::TerminalSetup => "Terminal Setup",
+            OnboardingPage::Telemetry => "Telemetry",
             OnboardingPage::Help => "Getting Help",
         }
     }
@@ -171,9 +171,9 @@ impl OnboardingModal {
 
         let content_lines = match self.page {
             OnboardingPage::Welcome => self.render_welcome(),
-            OnboardingPage::Shortcuts => self.render_shortcuts(),
-            OnboardingPage::Workflow => self.render_workflow(),
-            OnboardingPage::SandboxBackends => self.render_sandbox_backends(),
+            OnboardingPage::AuthSecurity => self.render_auth_security(),
+            OnboardingPage::TerminalSetup => self.render_terminal_setup(),
+            OnboardingPage::Telemetry => self.render_telemetry(),
             OnboardingPage::Help => self.render_help_page(),
         };
 
@@ -239,26 +239,31 @@ impl OnboardingModal {
         vec![
             Line::from(""),
             Line::from(Span::styled(
-                "  Welcome to NIKI",
+                "  Welcome to Niki",
                 Style::default()
                     .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "  NIKI is a hermetic multi-agent coding system.",
+                "  Niki is a hermetic multi-agent coding system.",
                 Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
-                "  It orchestrates specialized AI agents (Planner, Coder,",
+                "  It orchestrates specialized AI agents to implement",
                 Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
-                "  Tester, Reviewer, and more) to implement your task",
+                "  your task in isolated sandboxes.",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Select a text style:",
                 Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
-                "  in isolated sandboxes, then reviews the result.",
+                "  [1] Dark  [2] Light  [3] Colorblind",
                 Style::default().fg(theme::fg_color()),
             )),
             Line::from(""),
@@ -269,7 +274,107 @@ impl OnboardingModal {
         ]
     }
 
-    fn render_shortcuts(&self) -> Vec<Line<'static>> {
+    fn render_auth_security(&self) -> Vec<Line<'static>> {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Authentication & Security",
+                Style::default()
+                    .fg(theme::BLUE())
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  1. Sign in with your provider (API key or OAuth).",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "  2. Niki will use your keys for LLM calls.",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Security Note:",
+                Style::default().fg(theme::AMBER()).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                "  AI agents can make mistakes and there are prompt",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "  injection risks. Only use with code you trust.",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Press [→] or [n] to continue...",
+                Style::default().fg(theme::fg_dim()),
+            )),
+        ]
+    }
+
+    fn render_terminal_setup(&self) -> Vec<Line<'static>> {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Terminal Setup",
+                Style::default()
+                    .fg(theme::BLUE())
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Recommended settings:",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "  - Option+Enter for newlines",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "  - Visual bell notification",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Press [→] or [n] to continue...",
+                Style::default().fg(theme::fg_dim()),
+            )),
+        ]
+    }
+
+    fn render_telemetry(&self) -> Vec<Line<'static>> {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Telemetry",
+                Style::default()
+                    .fg(theme::BLUE())
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Niki collects anonymous usage data to improve",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "  the product. No code or prompts are ever sent.",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Telemetry is OFF by default.",
+                Style::default().fg(theme::GREEN()),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Press [→] or [n] to continue...",
+                Style::default().fg(theme::fg_dim()),
+            )),
+        ]
+    }
+
+    fn render_help_page(&self) -> Vec<Line<'static>> {
         vec![
             Line::from(""),
             Line::from(Span::styled(
@@ -293,180 +398,6 @@ impl OnboardingModal {
                     Style::default().fg(theme::fg_color()),
                 ),
             ]),
-            Line::from(vec![
-                Span::styled("    [v] verdict", Style::default().fg(theme::fg_color())),
-                Span::styled(
-                    "    [c] cost       [f] artifacts",
-                    Style::default().fg(theme::fg_color()),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled("    [h] history", Style::default().fg(theme::fg_color())),
-                Span::styled(
-                    "    [,] config     [?] help",
-                    Style::default().fg(theme::fg_color()),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  In the Run page:",
-                Style::default()
-                    .fg(theme::CYAN())
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(vec![
-                Span::styled(
-                    "    [Space] pause  [j/k] scroll",
-                    Style::default().fg(theme::fg_color()),
-                ),
-                Span::styled("  [g/G] top/bottom", Style::default().fg(theme::fg_color())),
-            ]),
-        ]
-    }
-
-    fn render_workflow(&self) -> Vec<Line<'static>> {
-        vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                "  How NIKI Works",
-                Style::default()
-                    .fg(theme::BLUE())
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  1. Planner analyzes your task and creates a spec",
-                Style::default().fg(theme::GREEN()),
-            )),
-            Line::from(Span::styled(
-                "  2. Coder implements the changes in a sandbox",
-                Style::default().fg(theme::PURPLE()),
-            )),
-            Line::from(Span::styled(
-                "  3. Tester validates the implementation",
-                Style::default().fg(theme::GREEN()),
-            )),
-            Line::from(Span::styled(
-                "  4. Red agent adversarially probes the diff",
-                Style::default().fg(theme::RED()),
-            )),
-            Line::from(Span::styled(
-                "  5. Reviewer makes a final verdict",
-                Style::default().fg(theme::AMBER()),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Each agent runs in an isolated sandbox.",
-                Style::default().fg(theme::fg_color()),
-            )),
-            Line::from(Span::styled(
-                "  If issues are found, NIKI revises automatically",
-                Style::default().fg(theme::fg_color()),
-            )),
-            Line::from(Span::styled(
-                "  (up to the configured max rounds).",
-                Style::default().fg(theme::fg_color()),
-            )),
-        ]
-    }
-
-    fn render_sandbox_backends(&self) -> Vec<Line<'static>> {
-        vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Sandbox Backends",
-                Style::default()
-                    .fg(theme::BLUE())
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  NIKI runs each agent in an isolated environment.",
-                Style::default().fg(theme::fg_color()),
-            )),
-            Line::from(Span::styled(
-                "  Three backends are available:",
-                Style::default().fg(theme::fg_color()),
-            )),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(
-                    "    docker",
-                    Style::default()
-                        .fg(theme::CYAN())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    "  Containerized isolation (default)",
-                    Style::default().fg(theme::fg_color()),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "    worktree",
-                    Style::default()
-                        .fg(theme::CYAN())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    "  Git worktree + local process (no Docker)",
-                    Style::default().fg(theme::fg_color()),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "    cloud",
-                    Style::default()
-                        .fg(theme::CYAN())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    "  NIKI managed infrastructure (beta)",
-                    Style::default().fg(theme::fg_color()),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Configure in niki.toml: [docker] backend = \"...\"",
-                Style::default().fg(theme::fg_dim()),
-            )),
-        ]
-    }
-
-    fn render_help_page(&self) -> Vec<Line<'static>> {
-        vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Getting Help",
-                Style::default()
-                    .fg(theme::BLUE())
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  During a run, press [?] at any time to view",
-                Style::default().fg(theme::fg_color()),
-            )),
-            Line::from(Span::styled(
-                "  the full keyboard shortcut reference.",
-                Style::default().fg(theme::fg_color()),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Pipeline status and agent output are shown",
-                Style::default().fg(theme::fg_color()),
-            )),
-            Line::from(Span::styled(
-                "  across the Run, Pipeline, and Agents pages.",
-                Style::default().fg(theme::fg_color()),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  You're ready to go!",
-                Style::default()
-                    .fg(theme::GREEN())
-                    .add_modifier(Modifier::BOLD),
-            )),
             Line::from(""),
             Line::from(Span::styled(
                 "  Press [Enter] to start, or [Esc] to skip.",
@@ -556,12 +487,12 @@ mod tests {
     #[test]
     fn page_navigation() {
         let welcome = OnboardingPage::Welcome;
-        assert_eq!(welcome.next(), Some(OnboardingPage::Shortcuts));
+        assert_eq!(welcome.next(), Some(OnboardingPage::AuthSecurity));
         assert_eq!(welcome.prev(), None);
 
         let help = OnboardingPage::Help;
         assert_eq!(help.next(), None);
-        assert_eq!(help.prev(), Some(OnboardingPage::SandboxBackends));
+        assert_eq!(help.prev(), Some(OnboardingPage::Telemetry));
     }
 
     #[test]
@@ -587,19 +518,19 @@ mod tests {
             KeyCode::Right,
             ratatui::crossterm::event::KeyModifiers::NONE,
         ));
-        assert_eq!(modal.page, OnboardingPage::Shortcuts);
+        assert_eq!(modal.page, OnboardingPage::AuthSecurity);
 
         modal.handle_key(KeyEvent::new(
             KeyCode::Char('n'),
             ratatui::crossterm::event::KeyModifiers::NONE,
         ));
-        assert_eq!(modal.page, OnboardingPage::Workflow);
+        assert_eq!(modal.page, OnboardingPage::TerminalSetup);
 
         modal.handle_key(KeyEvent::new(
             KeyCode::Tab,
             ratatui::crossterm::event::KeyModifiers::NONE,
         ));
-        assert_eq!(modal.page, OnboardingPage::SandboxBackends);
+        assert_eq!(modal.page, OnboardingPage::Telemetry);
 
         modal.handle_key(KeyEvent::new(
             KeyCode::Right,
@@ -612,13 +543,13 @@ mod tests {
     #[test]
     fn modal_prev_navigation() {
         let mut modal = OnboardingModal::new();
-        modal.page = OnboardingPage::Workflow;
+        modal.page = OnboardingPage::TerminalSetup;
 
         modal.handle_key(KeyEvent::new(
             KeyCode::Left,
             ratatui::crossterm::event::KeyModifiers::NONE,
         ));
-        assert_eq!(modal.page, OnboardingPage::Shortcuts);
+        assert_eq!(modal.page, OnboardingPage::AuthSecurity);
 
         modal.handle_key(KeyEvent::new(
             KeyCode::Char('p'),
@@ -658,7 +589,7 @@ mod tests {
             ratatui::crossterm::event::KeyModifiers::NONE,
         ));
         assert_eq!(action, OnboardingAction::None);
-        assert_eq!(modal.page, OnboardingPage::Shortcuts);
+        assert_eq!(modal.page, OnboardingPage::AuthSecurity);
     }
 
     #[test]

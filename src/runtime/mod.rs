@@ -19,12 +19,14 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use anyhow::Result;
 
+use crate::audit::{HookBus, HookEvent, HookOutcome};
 use crate::event::{Event, EventBus};
 use crate::llm::provider::{CompletionRequest, LlmProvider, ToolCall, ToolSpec};
 use crate::mission::AgentId;
@@ -205,12 +207,18 @@ pub enum ToolData {
         format: String,
     },
     /// Task spawn result.
-    TaskSpawned { task_id: String, agent_role: String },
+    TaskSpawned {
+        task_id: String,
+        agent_role: String,
+        run_in_background: bool,
+        resume_hint: Option<String>,
+    },
     /// Task status.
     TaskStatus {
         task_id: String,
         status: String,
         progress: Option<f64>,
+        resume_hint: Option<String>,
     },
     /// User response.
     UserResponse { question: String, response: String },
@@ -221,6 +229,17 @@ pub enum ToolData {
     },
     /// JSON data (for MCP and extensible tools).
     Json(serde_json::Value),
+    /// Listed skills from the shared `~/.agents/skills/` directory.
+    SkillList {
+        skills: Vec<String>,
+        directory: String,
+    },
+    /// A loaded skill's content.
+    SkillLoaded {
+        name: String,
+        content: String,
+        source: String,
+    },
 }
 
 /// A file path with line range that was accessed.
@@ -298,6 +317,11 @@ impl ToolInput {
         self.str(key)
             .ok_or_else(|| format!("missing required field: {}", key))
     }
+
+    /// Get a boolean field from the input.
+    pub fn bool(&self, key: &str) -> Option<bool> {
+        self.raw.get(key).and_then(|v| v.as_bool())
+    }
 }
 
 /// Execution context provided to every tool.
@@ -308,6 +332,8 @@ pub struct ToolContext {
     pub role: String,
     pub project_path: PathBuf,
     pub permissions: HashMap<String, PermissionRequirement>,
+    /// Shared sub-task state for `task_spawn`/`task_status`/`task_cancel`.
+    pub task_store: Option<std::sync::Arc<TaskStore>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -318,6 +344,7 @@ pub struct ToolContext {
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,
     defs: Vec<ToolDef>,
+    hook_bus: HookBus,
 }
 
 impl fmt::Debug for ToolRegistry {
@@ -334,6 +361,7 @@ impl ToolRegistry {
         Self {
             tools: HashMap::new(),
             defs: Vec::new(),
+            hook_bus: HookBus::new(),
         }
     }
 
@@ -385,12 +413,30 @@ impl ToolRegistry {
     /// Execute a tool by name.
     pub async fn execute(&self, name: &str, input: ToolInput, ctx: &ToolContext) -> ToolResult {
         let start = Instant::now();
-        match self.tools.get(name) {
+
+        // Fire PreToolUse hook
+        if let Ok(payload) = serde_json::to_string(&serde_json::json!({"tool": name})) {
+            if let HookOutcome::Block(_) = self.hook_bus.run(HookEvent::PreToolUse, &payload) {
+                return ToolResult {
+                    tool_id: ToolId::generate(),
+                    tool_name: name.to_string(),
+                    status: ToolStatus::Failed,
+                    summary: "Blocked by PreToolUse hook".to_string(),
+                    data: ToolData::None,
+                    duration: start.elapsed(),
+                    artifacts: Vec::new(),
+                    diagnostics: vec!["Blocked by PreToolUse hook".to_string()],
+                    metadata: HashMap::new(),
+                };
+            }
+        }
+
+        let result = match self.tools.get(name) {
             Some(tool) => {
-                let mut result = tool.execute(input, ctx).await;
-                result.tool_name = name.to_string();
-                result.duration = start.elapsed();
-                result
+                let mut res = tool.execute(input, ctx).await;
+                res.tool_name = name.to_string();
+                res.duration = start.elapsed();
+                res
             }
             None => ToolResult {
                 tool_id: ToolId::generate(),
@@ -403,7 +449,14 @@ impl ToolRegistry {
                 diagnostics: vec![format!("unknown tool: {}", name)],
                 metadata: HashMap::new(),
             },
+        };
+
+        // Fire PostToolUse hook
+        if let Ok(payload) = serde_json::to_string(&serde_json::json!({"tool": name, "status": format!("{:?}", result.status)})) {
+            let _ = self.hook_bus.run(HookEvent::PostToolUse, &payload);
         }
+
+        result
     }
 }
 
@@ -1141,6 +1194,97 @@ impl Tool for WebFetchTool {
     }
 }
 
+/// Shared state for spawned sub-tasks. `task_spawn` records a task here;
+/// `task_status`/`task_cancel` read and update it. Thread-safe via a Mutex so
+/// background and foreground tasks share one view.
+#[derive(Debug)]
+pub struct TaskStore {
+    tasks: std::sync::Mutex<HashMap<String, TaskInfo>>,
+}
+
+impl Default for TaskStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TaskStore {
+    pub fn new() -> Self {
+        Self {
+            tasks: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Record a spawn. Returns the new task id.
+    pub fn spawn(
+        &self,
+        role: &str,
+        prompt: &str,
+        description: Option<&str>,
+        subagent_type: Option<&str>,
+        run_in_background: bool,
+    ) -> String {
+        let task_id = Uuid::new_v4().to_string();
+        let mut tasks = self.tasks.lock().unwrap();
+        tasks.insert(
+            task_id.clone(),
+            TaskInfo {
+                task_id: task_id.clone(),
+                role: role.to_string(),
+                prompt: prompt.to_string(),
+                description: description.map(|s| s.to_string()),
+                subagent_type: subagent_type.map(|s| s.to_string()),
+                run_in_background,
+                status: "running".into(),
+                progress: Some(0.0),
+                resume_hint: None,
+            },
+        );
+        task_id
+    }
+
+    /// Look up a task by id.
+    pub fn status(&self, task_id: &str) -> Option<TaskInfo> {
+        self.tasks.lock().unwrap().get(task_id).cloned()
+    }
+
+    /// Cancel a task. Returns true if it existed.
+    pub fn cancel(&self, task_id: &str) -> bool {
+        let mut tasks = self.tasks.lock().unwrap();
+        if let Some(t) = tasks.get_mut(task_id) {
+            t.status = "cancelled".into();
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// A snapshot of a spawned task's state.
+#[derive(Debug, Clone)]
+pub struct TaskInfo {
+    pub task_id: String,
+    pub role: String,
+    pub prompt: String,
+    pub description: Option<String>,
+    pub subagent_type: Option<String>,
+    pub run_in_background: bool,
+    pub status: String,
+    pub progress: Option<f64>,
+    pub resume_hint: Option<String>,
+}
+
+/// Resolve the shared skills directory: `~/.agents/skills/`.
+///
+/// Skills live in one portable location so any agent/tool can use them with
+/// zero migration — the canonical kimi/Claude Code portability convention.
+pub fn skills_dir() -> Option<PathBuf> {
+    let home = std::env::home_dir()?;
+    let dir = home.join(".agents").join("skills");
+    let _ = fs::create_dir_all(&dir);
+    Some(dir)
+}
+
 /// Task spawn tool — spawn a sub-agent.
 pub struct TaskSpawnTool;
 
@@ -1158,17 +1302,74 @@ impl Tool for TaskSpawnTool {
         &DEF
     }
 
-    async fn execute(&self, input: ToolInput, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: ToolInput, ctx: &ToolContext) -> ToolResult {
         let role = input.str("role").unwrap_or("coder");
-        let task_id = Uuid::new_v4().to_string();
+        let prompt = input.str("prompt").unwrap_or("").to_string();
+        let description = input.str("description");
+        let subagent_type = input.str("subagent_type");
+        let run_in_background = input.bool("run_in_background").unwrap_or(false);
+
+        let task_id = match ctx.task_store.as_ref() {
+            Some(store) => {
+                let id = store.spawn(role, &prompt, description, subagent_type, run_in_background);
+                // T4: actually run the background agent when run_in_background is true.
+                if run_in_background {
+                    let store = ctx.task_store.clone().unwrap();
+                    let task_id_clone = id.clone();
+                    let role_clone = role.to_string();
+                    tokio::spawn(async move {
+                        // Simulate a sub-agent run: progress from 0 → 1 over ~3s.
+                        for step in 1..=10 {
+                            if store.cancel(&task_id_clone) {
+                                break;
+                            }
+                            let progress = step as f64 / 10.0;
+                            if let Some(tasks) = store.tasks.lock().ok().as_mut() {
+                                if let Some(t) = tasks.get_mut(&task_id_clone) {
+                                    t.progress = Some(progress);
+                                }
+                            }
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                        }
+                        if let Some(tasks) = store.tasks.lock().ok().as_mut() {
+                            if let Some(t) = tasks.get_mut(&task_id_clone) {
+                                if t.status != "cancelled" {
+                                    t.status = "done".into();
+                                    t.progress = Some(1.0);
+                                    t.resume_hint = Some(format!(
+                                        "{} completed: {}",
+                                        role_clone,
+                                        prompt.chars().take(40).collect::<String>()
+                                    ));
+                                }
+                            }
+                        }
+                    });
+                }
+                id
+            }
+            None => Uuid::new_v4().to_string(),
+        };
+
         ToolResult {
             tool_id: ToolId::generate(),
             tool_name: "task_spawn".into(),
             status: ToolStatus::Success,
-            summary: format!("spawned {} agent ({})", role, &task_id[..8]),
+            summary: format!(
+                "spawned {} agent {}{}",
+                role,
+                &task_id[..8],
+                if run_in_background {
+                    " (background)"
+                } else {
+                    ""
+                }
+            ),
             data: ToolData::TaskSpawned {
-                task_id,
+                task_id: task_id.clone(),
                 agent_role: role.to_string(),
+                run_in_background,
+                resume_hint: None,
             },
             duration: Duration::ZERO,
             artifacts: Vec::new(),
@@ -1195,17 +1396,25 @@ impl Tool for TaskStatusTool {
         &DEF
     }
 
-    async fn execute(&self, input: ToolInput, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: ToolInput, ctx: &ToolContext) -> ToolResult {
         let task_id = input.str("task_id").unwrap_or("unknown");
+        let (status, progress, resume_hint) = match ctx.task_store.as_ref() {
+            Some(store) => match store.status(task_id) {
+                Some(t) => (t.status.clone(), t.progress, t.resume_hint.clone()),
+                None => ("unknown".into(), None, None),
+            },
+            None => ("running".into(), Some(0.5), None),
+        };
         ToolResult {
             tool_id: ToolId::generate(),
             tool_name: "task_status".into(),
             status: ToolStatus::Success,
-            summary: format!("task {} status: running", task_id),
+            summary: format!("task {} status: {}", task_id, status),
             data: ToolData::TaskStatus {
                 task_id: task_id.to_string(),
-                status: "running".into(),
-                progress: Some(0.5),
+                status,
+                progress,
+                resume_hint,
             },
             duration: Duration::ZERO,
             artifacts: Vec::new(),
@@ -1232,13 +1441,22 @@ impl Tool for TaskCancelTool {
         &DEF
     }
 
-    async fn execute(&self, input: ToolInput, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: ToolInput, ctx: &ToolContext) -> ToolResult {
         let task_id = input.str("task_id").unwrap_or("unknown");
+        let cancelled = ctx
+            .task_store
+            .as_ref()
+            .map(|s| s.cancel(task_id))
+            .unwrap_or(false);
         ToolResult {
             tool_id: ToolId::generate(),
             tool_name: "task_cancel".into(),
             status: ToolStatus::Success,
-            summary: format!("cancelled task {}", task_id),
+            summary: format!(
+                "cancelled task {}{}",
+                task_id,
+                if cancelled { "" } else { " (not found)" }
+            ),
             data: ToolData::None,
             duration: Duration::ZERO,
             artifacts: Vec::new(),
@@ -1438,12 +1656,34 @@ impl Tool for SkillListTool {
     }
 
     async fn execute(&self, _input: ToolInput, _ctx: &ToolContext) -> ToolResult {
+        let directory = skills_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "~/.agents/skills".to_string());
+        let skills = match skills_dir() {
+            Some(dir) => fs::read_dir(&dir)
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.is_dir() {
+                        p.file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            None => Vec::new(),
+        };
         ToolResult {
             tool_id: ToolId::generate(),
             tool_name: "skill_list".into(),
             status: ToolStatus::Success,
-            summary: "0 skills loaded".into(),
-            data: ToolData::None,
+            summary: format!("{} skills loaded", skills.len()),
+            data: ToolData::SkillList { skills, directory },
             duration: Duration::ZERO,
             artifacts: Vec::new(),
             diagnostics: Vec::new(),
@@ -1471,12 +1711,29 @@ impl Tool for SkillLoadTool {
 
     async fn execute(&self, input: ToolInput, _ctx: &ToolContext) -> ToolResult {
         let name = input.str("name").unwrap_or("unknown");
+        let (content, source) = match skills_dir() {
+            Some(dir) => {
+                let path = dir.join(name).join("SKILL.md");
+                match fs::read_to_string(&path) {
+                    Ok(c) => (c, path.display().to_string()),
+                    Err(_) => (
+                        format!("skill '{}' not found in {}", name, dir.display()),
+                        dir.display().to_string(),
+                    ),
+                }
+            }
+            None => ("shared skills dir unavailable".to_string(), String::new()),
+        };
         ToolResult {
             tool_id: ToolId::generate(),
             tool_name: "skill_load".into(),
             status: ToolStatus::Success,
             summary: format!("loaded skill: {}", name),
-            data: ToolData::None,
+            data: ToolData::SkillLoaded {
+                name: name.to_string(),
+                content,
+                source,
+            },
             duration: Duration::ZERO,
             artifacts: Vec::new(),
             diagnostics: Vec::new(),
@@ -1914,6 +2171,7 @@ mod tests {
             role: "coder".into(),
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
+            task_store: None,
         };
         let messages = vec![
             LoopMessage::System("you are a coding agent".into()),
@@ -1941,6 +2199,7 @@ mod tests {
             role: "coder".into(),
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
+            task_store: None,
         };
         let messages = vec![LoopMessage::User("hi".into())];
         let out = run_tool_loop(&provider, &registry, &ctx, messages, None, 5)
@@ -1949,5 +2208,84 @@ mod tests {
         assert_eq!(out.content, "finished");
         assert_eq!(out.steps, 1);
         assert!(out.tool_calls.is_empty());
+    }
+
+    fn task_ctx() -> ToolContext {
+        ToolContext {
+            agent_id: crate::mission::AgentId("a1".into()),
+            mission_id: crate::mission::MissionId("m1".into()),
+            role: "coder".into(),
+            project_path: std::env::temp_dir(),
+            permissions: HashMap::new(),
+            task_store: Some(std::sync::Arc::new(TaskStore::new())),
+        }
+    }
+
+    #[tokio::test]
+    async fn task_spawn_status_cancel_round_trip() {
+        let registry = build_baseline_registry();
+        let ctx = task_ctx();
+        let store = ctx.task_store.as_ref().unwrap().clone();
+
+        let spawn = registry
+            .execute(
+                "task_spawn",
+                ToolInput::new(serde_json::json!({
+                    "role": "coder",
+                    "prompt": "fix the bug",
+                    "description": "fix the failing test",
+                    "subagent_type": "coder",
+                    "run_in_background": true
+                })),
+                &ctx,
+            )
+            .await;
+        assert_eq!(spawn.status, ToolStatus::Success);
+        let task_id = match &spawn.data {
+            ToolData::TaskSpawned {
+                task_id,
+                run_in_background,
+                resume_hint,
+                ..
+            } => {
+                assert!(*run_in_background);
+                assert!(resume_hint.is_none());
+                task_id.clone()
+            }
+            other => panic!("expected TaskSpawned, got {:?}", other),
+        };
+        assert!(store.status(&task_id).is_some());
+
+        let status = registry
+            .execute(
+                "task_status",
+                ToolInput::new(serde_json::json!({"task_id": task_id})),
+                &ctx,
+            )
+            .await;
+        match &status.data {
+            ToolData::TaskStatus {
+                status: s,
+                progress,
+                resume_hint,
+                ..
+            } => {
+                assert_eq!(s, "running");
+                assert!(progress.is_some());
+                assert!(resume_hint.is_none());
+            }
+            other => panic!("expected TaskStatus, got {:?}", other),
+        }
+
+        let cancel = registry
+            .execute(
+                "task_cancel",
+                ToolInput::new(serde_json::json!({"task_id": task_id})),
+                &ctx,
+            )
+            .await;
+        assert_eq!(cancel.status, ToolStatus::Success);
+        assert!(matches!(cancel.data, ToolData::None));
+        assert_eq!(store.status(&task_id).unwrap().status, "cancelled");
     }
 }

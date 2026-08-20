@@ -7,6 +7,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use super::{AppState, Page, PageId};
 use crate::display::theme;
+use similar::{ChangeTag, TextDiff};
 
 pub struct DiffPage {
     scroll_offset: u16,
@@ -225,7 +226,7 @@ impl Page for DiffPage {
     }
 }
 
-/// Render a unified diff with line numbers and proper Claude Code styling.
+/// Render a unified diff with line numbers and word-level intra-line highlighting.
 fn render_diff_with_line_numbers(
     diff: &str,
     show_line_numbers: bool,
@@ -234,6 +235,8 @@ fn render_diff_with_line_numbers(
     let mut lines = Vec::new();
     let mut old_line = 0u32;
     let mut new_line = 0u32;
+    // Track the previous deletion so we can word-diff it against the next addition.
+    let mut prev_deletion: Option<String> = None;
 
     for raw_line in diff.lines() {
         if raw_line.starts_with("diff --git") || raw_line.starts_with("index ") {
@@ -263,7 +266,7 @@ fn render_diff_with_line_numbers(
                 Style::default().fg(theme::DIFF_HUNK()),
             )));
         } else if let Some(content) = raw_line.strip_prefix('+') {
-            // Added line — green on diff bg
+            // Added line — green on diff bg; word-diff against previous deletion
             let mut spans = Vec::new();
             if show_line_numbers {
                 spans.push(Span::styled(
@@ -271,16 +274,50 @@ fn render_diff_with_line_numbers(
                     Style::default().fg(theme::fg_dim()),
                 ));
             }
-            spans.push(Span::styled(
-                format!("+{}", content),
-                Style::default()
-                    .fg(theme::DIFF_ADD_FG())
-                    .bg(theme::DIFF_ADD_BG()),
-            ));
+            if let Some(prev) = prev_deletion.take() {
+                // Word-level diff: highlight words that changed.
+                let word_diff = TextDiff::from_words(prev.as_str(), content);
+                for change in word_diff.iter_all_changes() {
+                    match change.tag() {
+                        ChangeTag::Equal => {
+                            spans.push(Span::styled(
+                                format!(" {}", change.value()),
+                                Style::default()
+                                    .fg(theme::DIFF_ADD_FG())
+                                    .bg(theme::DIFF_ADD_BG()),
+                            ));
+                        }
+                        ChangeTag::Delete => {
+                            spans.push(Span::styled(
+                                format!("-{}", change.value()),
+                                Style::default()
+                                    .fg(theme::error())
+                                    .add_modifier(Modifier::BOLD),
+                            ));
+                        }
+                        ChangeTag::Insert => {
+                            spans.push(Span::styled(
+                                format!("+{}", change.value()),
+                                Style::default()
+                                    .fg(theme::DIFF_ADD_FG())
+                                    .bg(theme::DIFF_ADD_BG())
+                                    .add_modifier(Modifier::BOLD),
+                            ));
+                        }
+                    }
+                }
+            } else {
+                spans.push(Span::styled(
+                    format!("+{}", content),
+                    Style::default()
+                        .fg(theme::DIFF_ADD_FG())
+                        .bg(theme::DIFF_ADD_BG()),
+                ));
+            }
             lines.push(Line::from(spans));
             new_line += 1;
         } else if let Some(content) = raw_line.strip_prefix('-') {
-            // Removed line — red on diff bg
+            // Removed line — red on diff bg; save for potential word-diff
             let mut spans = Vec::new();
             if show_line_numbers {
                 spans.push(Span::styled(
@@ -295,9 +332,11 @@ fn render_diff_with_line_numbers(
                     .bg(theme::DIFF_DEL_BG()),
             ));
             lines.push(Line::from(spans));
+            prev_deletion = Some(content.to_string());
             old_line += 1;
         } else {
-            // Context line
+            // Context line — reset any pending deletion
+            prev_deletion = None;
             let mut spans = Vec::new();
             if show_line_numbers {
                 spans.push(Span::styled(
