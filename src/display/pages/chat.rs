@@ -32,6 +32,7 @@ use std::io::Write;
 use crate::artifacts::types::AgentRole;
 use crate::display::chat::markdown::render_markdown;
 use crate::display::chat::message::MessageRenderConfig;
+use crate::display::chat::streaming::render_streaming_markdown;
 use crate::display::components::autocomplete::build_candidates;
 use crate::display::input::InputHandler;
 use crate::display::pages::{AppState, ChatLine, Page, PageId, StageStatus};
@@ -335,6 +336,17 @@ impl Page for ChatPage {
     fn handle_key(&mut self, key: KeyEvent, state: &mut AppState) -> bool {
         build_chat_lines_into(state);
 
+        // IME anchoring: ask the terminal for its cursor position so the IME
+        // composition window can follow the caret. Opt-in via
+        // `config.ui.ime_anchor`; degraded to a no-op under tmux/screen and in
+        // test environments (see `display::ime::ime_capable`). We only emit the
+        // request — the response is consumed by the terminal, not by us.
+        if state.config.ui.ime_anchor && crate::display::ime::ime_capable() && !state.anchor_pending
+        {
+            state.anchor_pending = true;
+            crate::display::ime::request_cursor_position();
+        }
+
         // Ctrl+O: Global toggle for deductive reasoning / thinking traces
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('o') {
             state.show_thinking = !state.show_thinking;
@@ -346,6 +358,48 @@ impl Page for ChatPage {
                 },
                 2000,
             );
+            return true;
+        }
+
+        // Ctrl+S: send a live steering correction to the running agent
+        // (kimi parity). Pre-fills the composer with `/steer ` so the user
+        // types the correction and presses Enter — the pipeline polls
+        // `steer_channel` for the result.
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
+            if state.has_running_stage() {
+                state.input_state.buffer.clear();
+                state.input_state.buffer.push_str("/steer ");
+                state.input_state.cursor_pos = state.input_state.buffer.len();
+                state.input_state.mode = InputMode::Insert;
+                state.set_notice("⌨ Steer: type your correction, then Enter", 2500);
+            } else {
+                state.set_notice("No agent running — cannot steer", 2500);
+            }
+            return true;
+        }
+
+        // Shift+Tab (reported as `Backtab` by some terminals): cycle permission
+        // modes if input is empty, otherwise toggle thinking expansion.
+        if key.code == KeyCode::BackTab
+            || (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
+        {
+            if state.input_state.buffer.is_empty() {
+                state.permission_mode = state.permission_mode.next();
+                state.set_notice(
+                    &format!("⏵⏵ {}", state.permission_mode.label()),
+                    2000,
+                );
+            } else {
+                state.show_thinking = !state.show_thinking;
+                state.set_notice(
+                    if state.show_thinking {
+                        "∴ Plan / thinking expanded (Shift+Tab)"
+                    } else {
+                        "∴ Plan / thinking collapsed (Shift+Tab)"
+                    },
+                    2000,
+                );
+            }
             return true;
         }
 
@@ -649,10 +703,11 @@ impl Page for ChatPage {
                 // history entry as a starting point for incremental editing.
                 state.reverse_search = !state.reverse_search;
                 if state.reverse_search {
-                    if let Some(last) = state.input_state.history.last().cloned() {
+                    let hist = state.input_state.active_history().clone();
+                    if let Some(last) = hist.last().cloned() {
                         state.input_state.buffer = last;
                         state.input_state.cursor_pos = state.input_state.buffer.len();
-                        state.input_state.history_index = Some(state.input_state.history.len() - 1);
+                        state.input_state.history_index = Some(hist.len() - 1);
                     }
                     state.set_notice("(reverse-search) type to filter · Enter to accept", 4000);
                 }
@@ -670,18 +725,27 @@ impl Page for ChatPage {
 }
 
 /// Render markdown `body` as indented (2-space) rich+plain rows.
-fn markdown_rows(body: &str, width: usize) -> Vec<ChatLine> {
+///
+/// When `streaming` is true the body is still being produced by the model, so
+/// a partial closing code fence is trimmed (see `trim_partial_closing_fences`)
+/// to keep an in-progress code block open instead of collapsing it.
+fn markdown_rows(body: &str, width: usize, streaming: bool) -> Vec<ChatLine> {
     if body.trim().is_empty() {
         return Vec::new();
     }
     let inner = width.saturating_sub(2).max(20);
     let cfg = MessageRenderConfig::from_theme(inner);
-    let rendered = render_markdown(body, inner, &cfg);
+    let rendered = if streaming {
+        render_streaming_markdown(body, inner, &cfg)
+    } else {
+        render_markdown(body, inner, &cfg)
+    };
     let mut out = Vec::with_capacity(rendered.len());
     for l in rendered {
         let plain = ChatPage::line_text(&l);
         let mut spans = vec![Span::styled("  ".to_string(), Style::default())];
         spans.extend(l.spans);
+        spans.push(Span::styled("", Style::default())); // SEGMENT_RESET
         out.push(ChatLine {
             text: format!("  {}", plain),
             rich: Some(Line::from(spans)),
@@ -694,22 +758,35 @@ fn markdown_rows(body: &str, width: usize) -> Vec<ChatLine> {
     out
 }
 
-/// One-line disclosure summary for a collapsed stage.
-fn disclosure_summary(s: &crate::display::pages::StageInfo) -> String {
-    if !s.summary.is_empty() {
-        if let Some(first) = s.summary.iter().find(|x| !x.trim().is_empty()) {
-            return first.clone();
+/// Up to 3 preview lines for a collapsed stage (progressive disclosure).
+fn disclosure_preview(s: &crate::display::pages::StageInfo) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    // Pull from summary first
+    for line in &s.summary {
+        let trimmed = line.trim().to_string();
+        if !trimmed.is_empty() {
+            lines.push(trimmed);
+            if lines.len() >= 3 {
+                return lines;
+            }
         }
     }
-    if !s.full_transcript.is_empty() {
-        if let Some(first) = s.full_transcript.lines().find(|x| !x.trim().is_empty()) {
-            return first.to_string();
+    // Then from transcript
+    for line in s.full_transcript.lines() {
+        let trimmed = line.trim().to_string();
+        if !trimmed.is_empty() {
+            lines.push(trimmed);
+            if lines.len() >= 3 {
+                return lines;
+            }
         }
     }
-    if s.status == StageStatus::Running {
-        return "(streaming…)".to_string();
+    if lines.is_empty() && s.status == StageStatus::Running {
+        lines.push("(streaming…)".to_string());
+    } else if lines.is_empty() {
+        lines.push("(no output)".to_string());
     }
-    "(no output)".to_string()
+    lines
 }
 
 /// Build the full list of chat rows from state.
@@ -776,6 +853,7 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
                         line_str.to_string(),
                         Style::default().fg(theme::fg_bright()),
                     ),
+                    Span::styled("", Style::default()), // SEGMENT_RESET
                 ]);
                 push_line(
                     &mut lines,
@@ -793,6 +871,7 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
                         line_str.to_string(),
                         Style::default().fg(theme::fg_bright()),
                     ),
+                    Span::styled("", Style::default()), // SEGMENT_RESET
                 ]);
                 push_line(
                     &mut lines,
@@ -809,7 +888,46 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
     }
 
     let base = state.chat_log.len();
-    for (i, s) in state.stages.iter().enumerate() {
+
+    // R8: Sliding-window transcript fold — when auto_collapse_turns is enabled
+    // and there are many completed stages, fold the oldest ones into a summary.
+    let max_visible_stages = 10usize;
+    let total_stages = state.stages.len();
+    let collapse_threshold = max_visible_stages.saturating_add(5);
+    let skip_oldest =
+        if state.config.ui.transcript.auto_collapse_turns && total_stages > collapse_threshold {
+            let completed = state
+                .stages
+                .iter()
+                .filter(|s| s.status == StageStatus::Done || s.status == StageStatus::Failed)
+                .count();
+            if completed > max_visible_stages {
+                completed.saturating_sub(max_visible_stages)
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
+    if skip_oldest > 0 {
+        let skipped: Vec<_> = state.stages.iter().take(skip_oldest).collect();
+        let summary = format!("··· {} earlier stages ···", skipped.len());
+        push_line(
+            &mut lines,
+            summary,
+            usize::MAX,
+            0,
+            false,
+            Some(Line::from(Span::styled(
+                format!("··· {} earlier stages ···", skipped.len()),
+                Style::default().fg(theme::fg_dim()),
+            ))),
+            None,
+        );
+    }
+
+    for (i, s) in state.stages.iter().enumerate().skip(skip_oldest) {
         let msg_index = base + i;
         let is_running = s.status == StageStatus::Running;
         let is_expanded = is_running || state.show_thinking || state.expanded_stages.contains(&i);
@@ -874,6 +992,7 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
                 Style::default().fg(theme::thinking_green()),
             ));
         }
+        header_spans.push(Span::styled("", Style::default())); // SEGMENT_RESET
         let header_rich = Line::from(header_spans);
         push_line(
             &mut lines,
@@ -896,18 +1015,43 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
                 parts.push(s.full_transcript.clone());
             }
             let body = parts.join("\n\n");
-            for mut row in markdown_rows(&body, width) {
+            for mut row in markdown_rows(&body, width, is_running) {
                 row.msg_index = msg_index;
                 lines.push(row);
             }
         } else {
+            // Progressive disclosure: multi-line preview with dimmed styling
+            let preview = disclosure_preview(s);
+            for (j, preview_line) in preview.iter().enumerate() {
+                let prefix = if j == 0 { "  └ " } else { "    " };
+                let styled_line = Line::from(Span::styled(
+                    format!("{}{}", prefix, preview_line),
+                    Style::default().fg(theme::fg_subtle()),
+                ));
+                push_line(
+                    &mut lines,
+                    format!("{}{}", prefix, preview_line),
+                    msg_index,
+                    0,
+                    false,
+                    Some(styled_line),
+                    None,
+                );
+            }
+            // Hint line
+            let hint = Line::from(Span::styled(
+                "      Ctrl+O to expand",
+                Style::default().fg(theme::fg_subtle()).add_modifier(
+                    ratatui::style::Modifier::ITALIC,
+                ),
+            ));
             push_line(
                 &mut lines,
-                format!("  └ {}", disclosure_summary(s)),
+                "      Ctrl+O to expand".to_string(),
                 msg_index,
                 0,
                 false,
-                None,
+                Some(hint),
                 None,
             );
         }
@@ -1131,18 +1275,21 @@ mod tests {
             start: None,
         }];
         state.chat_lines = build_chat_lines(&state, 80, true);
+        // Progressive disclosure: summary takes priority, then first transcript lines
         assert!(
             state
                 .chat_lines
                 .iter()
                 .any(|l| l.text.contains("did the thing"))
         );
-        assert!(
-            !state
-                .chat_lines
-                .iter()
-                .any(|l| l.text.contains("long transcript"))
-        );
+        // Collapsed view does NOT dump the entire transcript
+        let full_lines: Vec<_> = state
+            .chat_lines
+            .iter()
+            .filter(|l| l.text.contains("long transcript"))
+            .collect();
+        // At most the first line of transcript appears in preview (up to 3 lines total)
+        assert!(full_lines.len() <= 1);
         let header = state
             .chat_lines
             .iter()
@@ -1272,5 +1419,60 @@ mod tests {
                 .iter()
                 .any(|l| l.text.contains("architecture reasoning"))
         );
+    }
+
+    #[test]
+    fn ctrl_s_prefills_steer_when_running() {
+        let mut state = base_state();
+        state.stages = vec![crate::display::pages::StageInfo {
+            role: AgentRole::Planner,
+            status: StageStatus::Running,
+            stream: "planning now".to_string(),
+            full_transcript: String::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: 0.0,
+            latency_ms: 0,
+            summary: vec![],
+            start: None,
+        }];
+        let mut page = ChatPage::new();
+        let key = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
+        assert!(page.handle_key(key, &mut state));
+        assert!(state.input_state.buffer.starts_with("/steer "));
+        assert_eq!(state.input_state.mode, InputMode::Insert);
+        assert_eq!(state.input_state.cursor_pos, state.input_state.buffer.len());
+    }
+
+    #[test]
+    fn ctrl_s_noop_when_no_running_stage() {
+        let mut state = base_state();
+        let mut page = ChatPage::new();
+        let key = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
+        assert!(page.handle_key(key, &mut state));
+        assert!(!state.input_state.buffer.starts_with("/steer "));
+    }
+
+    #[test]
+    fn shift_tab_cycles_permission_mode() {
+        let mut state = base_state();
+        let initial_mode = state.permission_mode;
+        let mut page = ChatPage::new();
+        // Shift+Tab with empty input cycles permission modes.
+        let key = KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE);
+        assert!(page.handle_key(key, &mut state));
+        assert_ne!(state.permission_mode, initial_mode);
+    }
+
+    #[test]
+    fn shift_tab_toggles_thinking_when_typing() {
+        let mut state = base_state();
+        let mut page = ChatPage::new();
+        // Put some text in the input buffer so Shift+Tab toggles thinking.
+        state.input_state.buffer = "hello".to_string();
+        let initial = state.show_thinking;
+        let key = KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE);
+        assert!(page.handle_key(key, &mut state));
+        assert_ne!(state.show_thinking, initial);
     }
 }

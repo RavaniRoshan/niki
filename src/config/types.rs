@@ -443,6 +443,11 @@ pub struct UiConfig {
     pub theme: ThemePreference,
     #[serde(default)]
     pub transcript: TranscriptConfig,
+    #[serde(default)]
+    /// Opt-in IME composition anchoring via terminal cursor-position
+    /// reporting. Disabled by default because it is a no-op under tmux/screen
+    /// and in test environments.
+    pub ime_anchor: bool,
 }
 
 /// Transcript view configuration.

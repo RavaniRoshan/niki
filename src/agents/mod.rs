@@ -52,7 +52,31 @@ pub async fn run_agent(
             serde_json::Value::String(schema_content),
         );
     }
-    let system_prompt = tmpl.render(ctx)?;
+    // Render the stage-specific overlay first, then wrap it in the shared
+    // base persona so every stage reads as one continuous assistant rather
+    // than four disconnected prompts. Falls back to the stage prompt alone if
+    // `prompts/base.md` is missing or fails to render (keeps eval behavior
+    // intact when the base layer is absent).
+    let stage_prompt = tmpl.render(ctx.clone())?;
+    let system_prompt = match crate::load_asset("prompts/base.md") {
+        Ok(base_content) => {
+            let _ = env.add_template("__base", &base_content);
+            match env.get_template("__base").and_then(|t| {
+                let mut c = ctx.clone();
+                if let Some(o) = c.as_object_mut() {
+                    o.insert(
+                        "role_additional".to_string(),
+                        serde_json::Value::String(stage_prompt.clone()),
+                    );
+                }
+                t.render(c)
+            }) {
+                Ok(s) => s,
+                Err(_) => stage_prompt,
+            }
+        }
+        Err(_) => stage_prompt,
+    };
 
     let mut request = CompletionRequest {
         model: model.to_string(),

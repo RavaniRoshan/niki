@@ -16,7 +16,7 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    let mut left_spans = if width >= 80 {
+    let left_spans = if width >= 80 {
         vec![
             Span::styled(
                 "tab ",
@@ -113,15 +113,17 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
         let pct = (state.context_usage * 100.0).round() as u32;
         let filled = (pct / 10).clamp(0, 10) as usize;
         let empty = 10 - filled;
+        right_spans.push(Span::styled("ctx ", Style::default().fg(theme::fg_dim())));
         right_spans.push(Span::styled(
-            format!(
-                "ctx {}{}{}{} {}%   ",
-                theme::thinking_green(),
-                "▓".repeat(filled),
-                theme::fg_dim(),
-                "░".repeat(empty),
-                pct
-            ),
+            "▓".repeat(filled),
+            Style::default().fg(theme::thinking_green()),
+        ));
+        right_spans.push(Span::styled(
+            "░".repeat(empty),
+            Style::default().fg(theme::fg_dim()),
+        ));
+        right_spans.push(Span::styled(
+            format!(" {}%   ", pct),
             Style::default().fg(theme::fg_dim()),
         ));
     }
@@ -134,6 +136,12 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
         ));
     }
 
+    // Permission mode indicator
+    right_spans.push(Span::styled(
+        format!("⏵⏵ {}   ", state.permission_mode.label()),
+        Style::default().fg(theme::fg_dim()),
+    ));
+
     if let Some((msg, _)) = &state.notice {
         right_spans.push(Span::styled(
             format!("· {} ", msg),
@@ -142,15 +150,28 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     }
 
     let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
-    let right_len: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
 
-    if width > left_len + right_len {
-        let pad = width - left_len - right_len;
-        left_spans.push(Span::styled(" ".repeat(pad), Style::default()));
-        left_spans.extend(right_spans);
+    // Build the final line greedily so it can never overflow the frame:
+    // left shortcuts first, then as many right-aligned extras as fit, then a
+    // trailing pad. This guarantees `total <= width` in every branch.
+    let mut spans = left_spans;
+    let mut used = left_len;
+    let mut kept_right = Vec::new();
+    for s in &right_spans {
+        let n = s.content.chars().count();
+        if used + n <= width {
+            kept_right.push(s.clone());
+            used += n;
+        } else {
+            break;
+        }
     }
+    if width > used {
+        spans.push(Span::styled(" ".repeat(width - used), Style::default()));
+    }
+    spans.extend(kept_right);
 
-    frame.render_widget(Paragraph::new(Line::from(left_spans)), area);
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 #[cfg(test)]

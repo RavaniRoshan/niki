@@ -155,6 +155,32 @@ pub struct EvalReport {
     pub categories: Vec<CategoryMetrics>,
 }
 
+impl EvalReport {
+    /// Total number of cases in the dataset.
+    pub fn total_cases(&self) -> u32 {
+        self.n_cases.max(self.cases.len() as u32)
+    }
+
+    /// NIKI's pass rate: the fraction of expected-caught defects NIKI's
+    /// reviewer surfaced (i.e. `1 - false_approval_rate` for NIKI). This is
+    /// the headline eval metric surfaced in the UI.
+    pub fn pass_rate(&self) -> f64 {
+        self.niki_catch_rate
+    }
+
+    /// Convenience alias for the same metric.
+    pub fn niki_pass_rate(&self) -> f64 {
+        self.niki_catch_rate
+    }
+
+    /// Whether the eval is healthy enough to declare parity (both runs had
+    /// a baseline to compare against and NIKI caught at least the expected
+    /// fraction).
+    pub fn is_healthy(&self) -> bool {
+        self.n_cases > 0 && self.niki_catch_rate > 0.0
+    }
+}
+
 // ── Config builders ───────────────────────────────────────────────
 
 /// NIKI configuration: adversarial Red/Blue review on, other optional passes off

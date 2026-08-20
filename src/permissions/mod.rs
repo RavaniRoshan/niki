@@ -26,6 +26,38 @@ pub enum PermissionAction {
     Deny,
 }
 
+/// Top-level permission *mode* (kimi/Claude Code parity).
+///
+/// - `Manual`: every sensitive action is prompted (`Ask`). Safe default.
+/// - `Auto`: inside a hermetic sandbox, file/shell actions are auto-approved;
+///   host-reaching actions (network egress, git push, config writes) still ask.
+/// - `Yolo`: accept every suggestion without prompting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[derive(Default)]
+pub enum PermissionMode {
+    #[default]
+    Manual,
+    Auto,
+    Yolo,
+}
+
+/// Lifetime over which an approval stays in effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[derive(Default)]
+pub enum PermissionScope {
+    /// Only the current tool call / turn.
+    Turn,
+    /// The rest of this interactive session.
+    #[default]
+    Session,
+    /// Persisted for this project.
+    Project,
+    /// Persisted globally for this user.
+    User,
+}
+
 /// A permission rule with optional pattern matching.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionRule {
@@ -67,6 +99,10 @@ pub struct PermissionConfig {
     pub auto_approve: bool,
     pub external_directory: Permission,
     pub doom_loop: Permission,
+    /// Active permission mode (Manual/Auto/Yolo).
+    pub mode: PermissionMode,
+    /// Scope at which approvals are promoted.
+    pub scope: PermissionScope,
 }
 
 /// Permission checker — evaluates whether an action is allowed.
@@ -78,6 +114,37 @@ impl PermissionChecker {
     /// Create a new permission checker.
     pub fn new(config: PermissionConfig) -> Self {
         Self { config }
+    }
+
+    /// Check if a tool action is permitted, resolving the active
+    /// [`PermissionMode`] (Manual/Auto/Yolo) and sandbox context.
+    ///
+    /// - `Yolo` accepts everything.
+    /// - `Auto` auto-allows file/shell ops that run *inside* a hermetic sandbox,
+    ///   but still prompts for host-reaching actions (network egress via
+    ///   `webfetch`, etc.); outside the sandbox it falls back to the per-tool
+    ///   config.
+    /// - `Manual` (and the default) uses the per-tool `Permission` config.
+    pub fn resolve_tool(&self, tool: &str, in_sandbox: bool) -> Permission {
+        match self.config.mode {
+            PermissionMode::Yolo => return Permission::Allow,
+            PermissionMode::Auto => {
+                let sandbox_safe = matches!(
+                    tool,
+                    "read" | "edit" | "write" | "bash" | "glob" | "grep" | "task"
+                );
+                if in_sandbox && sandbox_safe {
+                    return Permission::Allow;
+                }
+                // Host-reaching actions (network egress) always ask, even in
+                // Auto mode, to preserve Niki's sandbox differentiator.
+                if matches!(tool, "webfetch" | "websearch") {
+                    return Permission::Ask;
+                }
+            }
+            PermissionMode::Manual => {}
+        }
+        self.check_tool(tool)
     }
 
     /// Check if a tool action is permitted.
@@ -172,5 +239,43 @@ mod tests {
         };
         let checker = PermissionChecker::new(config);
         assert!(checker.auto_approve());
+    }
+
+    #[test]
+    fn resolve_tool_yolo_allows_everything() {
+        let config = PermissionConfig {
+            mode: PermissionMode::Yolo,
+            ..Default::default()
+        };
+        let checker = PermissionChecker::new(config);
+        assert_eq!(checker.resolve_tool("edit", false), Permission::Allow);
+        assert_eq!(checker.resolve_tool("webfetch", false), Permission::Allow);
+    }
+
+    #[test]
+    fn resolve_tool_auto_allows_sandbox_file_shell() {
+        let config = PermissionConfig {
+            mode: PermissionMode::Auto,
+            ..Default::default()
+        };
+        let checker = PermissionChecker::new(config);
+        assert_eq!(checker.resolve_tool("bash", true), Permission::Allow);
+        assert_eq!(checker.resolve_tool("edit", true), Permission::Allow);
+        // Host-reaching network egress still asks, even in Auto.
+        assert_eq!(checker.resolve_tool("webfetch", true), Permission::Ask);
+        // Outside the sandbox, falls back to per-tool config (edit = Ask).
+        assert_eq!(checker.resolve_tool("edit", false), Permission::Ask);
+    }
+
+    #[test]
+    fn resolve_tool_manual_uses_per_tool_config() {
+        let config = PermissionConfig {
+            mode: PermissionMode::Manual,
+            ..Default::default()
+        };
+        let checker = PermissionChecker::new(config);
+        assert_eq!(checker.resolve_tool("read", false), Permission::Allow);
+        assert_eq!(checker.resolve_tool("edit", false), Permission::Ask);
+        assert_eq!(checker.resolve_tool("edit", true), Permission::Ask);
     }
 }

@@ -7,6 +7,7 @@ pub mod completion;
 pub mod components;
 pub mod diff_display;
 pub mod engine;
+pub mod ime;
 pub mod input;
 pub mod layout;
 pub mod logo;
