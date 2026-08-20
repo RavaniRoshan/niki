@@ -31,7 +31,8 @@ pub enum PermissionAction {
 /// - `Manual`: every sensitive action is prompted (`Ask`). Safe default.
 /// - `Auto`: inside a hermetic sandbox, file/shell actions are auto-approved;
 ///   host-reaching actions (network egress, git push, config writes) still ask.
-/// - `Yolo`: accept every suggestion without prompting.
+/// - `DontAsk`: accept all actions without prompting (YOLO mode).
+/// - `BypassPermissions`: bypass all permission checks entirely.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
@@ -39,7 +40,8 @@ pub enum PermissionMode {
     #[default]
     Manual,
     Auto,
-    Yolo,
+    DontAsk,
+    BypassPermissions,
 }
 
 /// Lifetime over which an approval stays in effect.
@@ -99,7 +101,7 @@ pub struct PermissionConfig {
     pub auto_approve: bool,
     pub external_directory: Permission,
     pub doom_loop: Permission,
-    /// Active permission mode (Manual/Auto/Yolo).
+    /// Active permission mode (Manual/Auto/DontAsk/BypassPermissions).
     pub mode: PermissionMode,
     /// Scope at which approvals are promoted.
     pub scope: PermissionScope,
@@ -117,9 +119,9 @@ impl PermissionChecker {
     }
 
     /// Check if a tool action is permitted, resolving the active
-    /// [`PermissionMode`] (Manual/Auto/Yolo) and sandbox context.
+    /// [`PermissionMode`] (Manual/Auto/DontAsk/BypassPermissions) and sandbox context.
     ///
-    /// - `Yolo` accepts everything.
+    /// - `DontAsk` accepts everything.
     /// - `Auto` auto-allows file/shell ops that run *inside* a hermetic sandbox,
     ///   but still prompts for host-reaching actions (network egress via
     ///   `webfetch`, etc.); outside the sandbox it falls back to the per-tool
@@ -127,7 +129,9 @@ impl PermissionChecker {
     /// - `Manual` (and the default) uses the per-tool `Permission` config.
     pub fn resolve_tool(&self, tool: &str, in_sandbox: bool) -> Permission {
         match self.config.mode {
-            PermissionMode::Yolo => return Permission::Allow,
+            PermissionMode::DontAsk | PermissionMode::BypassPermissions => {
+                return Permission::Allow
+            }
             PermissionMode::Auto => {
                 let sandbox_safe = matches!(
                     tool,
@@ -242,9 +246,9 @@ mod tests {
     }
 
     #[test]
-    fn resolve_tool_yolo_allows_everything() {
+    fn resolve_tool_dontask_allows_everything() {
         let config = PermissionConfig {
-            mode: PermissionMode::Yolo,
+            mode: PermissionMode::DontAsk,
             ..Default::default()
         };
         let checker = PermissionChecker::new(config);

@@ -984,6 +984,29 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
                 ),
                 Style::default().fg(theme::fg_subtle()),
             ));
+        } else if s.status == StageStatus::Failed {
+            // Show retry count if any retries occurred
+            if s.retry_count > 0 {
+                header_spans.push(Span::styled(
+                    format!(" retry {}/3", s.retry_count),
+                    Style::default()
+                        .fg(theme::error())
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ));
+            }
+            // Show inline error message
+            if let Some(ref err) = s.error_message {
+                let short_err = err.lines().next().unwrap_or("unknown error");
+                let truncated = if short_err.len() > 60 {
+                    format!("{}…", &short_err[..57])
+                } else {
+                    short_err.to_string()
+                };
+                header_spans.push(Span::styled(
+                    format!(" — {}", truncated),
+                    Style::default().fg(theme::error()),
+                ));
+            }
         } else if s.status == StageStatus::Running {
             let glyph = crate::display::components::progress::spinner_glyph(state.tick);
             let verb = crate::display::components::progress::action_verb(state.tick);
@@ -1135,11 +1158,42 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
     lines
 }
 
+/// Compute a simple content hash from the state that affects chat rendering.
+fn chat_content_hash(state: &AppState) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    // Hash the stages (role + status + stream length + summary count)
+    for s in &state.stages {
+        s.role.hash(&mut hasher);
+        format!("{:?}", s.status).hash(&mut hasher);
+        s.stream.len().hash(&mut hasher);
+        s.summary.len().hash(&mut hasher);
+        s.prompt_file.hash(&mut hasher);
+    }
+    // Hash chat_log length
+    state.chat_log.len().hash(&mut hasher);
+    // Hash expanded stages
+    let mut expanded: Vec<_> = state.expanded_stages.iter().copied().collect();
+    expanded.sort();
+    expanded.hash(&mut hasher);
+    // Hash show_thinking and tick
+    state.show_thinking.hash(&mut hasher);
+    state.tick.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Rebuild `state.chat_lines` from current state (called at the start of
 /// handle_key so selection/toggle math uses coordinates that match the view).
+/// Skips rebuild if content hash hasn't changed.
 fn build_chat_lines_into(state: &mut AppState) {
+    let new_hash = chat_content_hash(state);
+    if new_hash == state.chat_content_hash && !state.chat_lines.is_empty() {
+        return;
+    }
     let width = state.chat_width.get();
     state.chat_lines = build_chat_lines(state, width, true);
+    state.chat_content_hash = new_hash;
 }
 
 fn push_line(
@@ -1273,6 +1327,9 @@ mod tests {
             latency_ms: 100,
             summary: vec!["did the thing".to_string()],
             start: None,
+            prompt_file: None,
+            retry_count: 0,
+            error_message: None,
         }];
         state.chat_lines = build_chat_lines(&state, 80, true);
         // Progressive disclosure: summary takes priority, then first transcript lines
@@ -1313,6 +1370,9 @@ mod tests {
             latency_ms: 100,
             summary: vec!["did the thing".to_string()],
             start: None,
+            prompt_file: None,
+            retry_count: 0,
+            error_message: None,
         }];
         state.chat_lines = build_chat_lines(&state, 80, true);
         assert!(
@@ -1338,6 +1398,9 @@ mod tests {
             latency_ms: 0,
             summary: vec![],
             start: None,
+            prompt_file: None,
+            retry_count: 0,
+            error_message: None,
         }];
         state.chat_lines = build_chat_lines(&state, 80, true);
         assert!(
@@ -1411,6 +1474,9 @@ mod tests {
             latency_ms: 100,
             summary: vec!["planned architecture".to_string()],
             start: None,
+            prompt_file: None,
+            retry_count: 0,
+            error_message: None,
         }];
         state.chat_lines = build_chat_lines(&state, 80, true);
         assert!(
@@ -1435,6 +1501,9 @@ mod tests {
             latency_ms: 0,
             summary: vec![],
             start: None,
+            prompt_file: None,
+            retry_count: 0,
+            error_message: None,
         }];
         let mut page = ChatPage::new();
         let key = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);

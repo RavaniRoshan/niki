@@ -68,6 +68,7 @@ pub enum PermissionMode {
     AcceptEdits,
     Plan,
     Auto,
+    DontAsk,
     BypassPermissions,
 }
 
@@ -77,18 +78,32 @@ impl PermissionMode {
             PermissionMode::Default => PermissionMode::AcceptEdits,
             PermissionMode::AcceptEdits => PermissionMode::Plan,
             PermissionMode::Plan => PermissionMode::Auto,
-            PermissionMode::Auto => PermissionMode::BypassPermissions,
+            PermissionMode::Auto => PermissionMode::DontAsk,
+            PermissionMode::DontAsk => PermissionMode::BypassPermissions,
             PermissionMode::BypassPermissions => PermissionMode::Default,
         }
     }
 
     pub fn label(&self) -> &'static str {
         match self {
-            PermissionMode::Default => "manual mode on",
-            PermissionMode::AcceptEdits => "accept edits on",
-            PermissionMode::Plan => "plan mode on",
-            PermissionMode::Auto => "auto mode on",
-            PermissionMode::BypassPermissions => "bypass permissions on",
+            PermissionMode::Default => "manual",
+            PermissionMode::AcceptEdits => "accept edits",
+            PermissionMode::Plan => "plan",
+            PermissionMode::Auto => "auto",
+            PermissionMode::DontAsk => "don't ask",
+            PermissionMode::BypassPermissions => "bypass",
+        }
+    }
+
+    /// Short badge label for the status bar.
+    pub fn badge(&self) -> &'static str {
+        match self {
+            PermissionMode::Default => "MANUAL",
+            PermissionMode::AcceptEdits => "EDITS",
+            PermissionMode::Plan => "PLAN",
+            PermissionMode::Auto => "AUTO",
+            PermissionMode::DontAsk => "YOLO",
+            PermissionMode::BypassPermissions => "BYPASS",
         }
     }
 }
@@ -541,6 +556,7 @@ pub struct PermissionRequest {
     pub tool_name: String,
     pub command: String,
     pub description: String,
+    pub params: Option<String>,
     pub response_tx: std::sync::mpsc::Sender<PermissionAction>,
 }
 
@@ -616,6 +632,10 @@ pub struct AppState {
     pub permission_request: Option<PermissionRequest>,
     /// Selected permission option (0=allow once, 1=allow always, 2=deny).
     pub permission_selected: usize,
+    /// Show raw params detail in permission modal (Ctrl+D toggle).
+    pub show_permission_detail: bool,
+    /// Permission scope selector (0=Turn, 1=Session, 2=Project).
+    pub permission_scope: usize,
     /// Whether help overlay is shown.
     pub show_help: bool,
     /// Context usage percentage (0.0 - 1.0).
@@ -679,6 +699,8 @@ pub struct AppState {
     pub chat_copied: Option<String>,
     /// Rendered chat lines.
     pub chat_lines: Vec<ChatLine>,
+    /// Content hash of the last chat_lines build (for skip-if-unchanged).
+    pub chat_content_hash: u64,
     /// Chat log — (role, text) pairs.
     pub chat_log: Vec<(String, String)>,
     /// Stages expanded in chat view (by index). Collapsed by default.
@@ -738,6 +760,25 @@ pub struct StageInfo {
     pub latency_ms: u64,
     pub summary: Vec<String>,
     pub start: Option<std::time::Instant>,
+    /// Prompt file used for this stage (e.g. "planner.md").
+    pub prompt_file: Option<String>,
+    /// Number of retries attempted for this stage.
+    pub retry_count: u32,
+    /// Error message if the stage failed.
+    pub error_message: Option<String>,
+}
+
+/// Map an AgentRole to its prompt file name (without extension).
+fn role_to_prompt_name(role: AgentRole) -> &'static str {
+    match role {
+        AgentRole::Planner => "planner",
+        AgentRole::Coder => "coder",
+        AgentRole::Tester => "tester",
+        AgentRole::Reviewer => "reviewer",
+        AgentRole::Synthesizer => "synthesizer",
+        AgentRole::SecurityAuditor => "security_auditor",
+        AgentRole::Red => "red",
+    }
 }
 
 /// Stage status.
@@ -780,6 +821,8 @@ impl AppState {
             show_permission_modal: false,
             permission_request: None,
             permission_selected: 0,
+            show_permission_detail: false,
+            permission_scope: 0,
             show_help: false,
             context_usage: 0.0,
             token_count: 0,
@@ -811,6 +854,7 @@ impl AppState {
             chat_cursor_pos: (0, 0),
             chat_copied: None,
             chat_lines: Vec::new(),
+            chat_content_hash: 0,
             chat_log: Vec::new(),
             expanded_stages: std::collections::HashSet::new(),
             chat_width: std::cell::Cell::new(80),
@@ -944,6 +988,9 @@ impl AppState {
                     latency_ms: 0,
                     summary: Vec::new(),
                     start: Some(std::time::Instant::now()),
+                    prompt_file: Some(format!("{}.md", role_to_prompt_name(role))),
+                    retry_count: 0,
+                    error_message: None,
                 });
                 self.run_state = RunState::Running;
             }
@@ -998,7 +1045,8 @@ impl AppState {
                     .find(|s| s.role == role && s.status == StageStatus::Running)
                 {
                     s.status = StageStatus::Failed;
-                    s.summary = vec![error];
+                    s.summary = vec![error.clone()];
+                    s.error_message = Some(error);
                     s.stream.clear();
                 }
                 self.run_state = RunState::Failed;
@@ -1067,6 +1115,7 @@ impl AppState {
                     tool_name: "sandbox_exec".to_string(),
                     command: command.clone(),
                     description: String::new(),
+                    params: None,
                     response_tx,
                 });
                 self.permission_selected = 0;
