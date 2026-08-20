@@ -19,10 +19,13 @@ use crate::permissions::PermissionAction;
 /// Selectable options, in row order.
 pub const OPTIONS: [&str; 4] = ["Allow once", "Allow always", "Deny", "Deny always"];
 
-/// Height of the modal: borders + tool line + blue sep + description + dotted sep + 4 options + hint.
-const MODAL_HEIGHT: u16 = 16;
+/// Permission scope labels.
+pub const SCOPES: [&str; 3] = ["Turn", "Session", "Project"];
+
+/// Height of the modal: borders + tool line + blue sep + description + scope + dotted sep + 4 options + hint.
+const MODAL_HEIGHT: u16 = 20;
 /// Row offset (inside the modal border) of the first option row.
-const FIRST_OPTION_ROW: u16 = 6;
+const FIRST_OPTION_ROW: u16 = 10;
 
 /// The cursor over the permission options, seeded from `AppState`.
 pub fn cursor(state: &AppState) -> ListCursor {
@@ -74,9 +77,10 @@ pub fn click_index(area: Rect, x: u16, y: u16) -> Option<usize> {
 ///   2. `$ <command>`  (tool call line)
 ///   3. Blue separator  (rgb 177,185,249)
 ///   4. Description + hint
-///   5. Dotted separator (rgb 80,80,80)
-///   6. Options (Allow once · Allow always · Deny · Deny always)
-///   7. Footer hint
+///   5. Scope selector (Turn/Session/Project)
+///   6. Dotted separator (rgb 80,80,80)
+///   7. Options (Allow once · Allow always · Deny · Deny always)
+///   8. Footer hint
 pub fn render_permission_modal(
     frame: &mut Frame,
     request: &PermissionRequest,
@@ -131,16 +135,64 @@ pub fn render_permission_modal(
         lines.push(Line::from(""));
     }
 
+    // Detail panel (toggled by Ctrl+D)
+    if state.show_permission_detail {
+        if let Some(ref params) = request.params {
+            lines.push(Line::from(Span::styled(
+                "  Raw parameters:",
+                Style::default().fg(theme::text_dim()).add_modifier(Modifier::ITALIC),
+            )));
+            for line in params.lines().take(5) {
+                lines.push(Line::from(Span::styled(
+                    format!("    {}", line),
+                    theme::text_dim(),
+                )));
+            }
+            lines.push(Line::from(""));
+        }
+    }
+
+    // Scope selector
+    let scope_idx = state.permission_scope.min(SCOPES.len() - 1);
+    let scope_spans: Vec<Span> = SCOPES
+        .iter()
+        .enumerate()
+        .flat_map(|(i, scope)| {
+            let is_selected = i == scope_idx;
+            let style = if is_selected {
+                Style::default()
+                    .fg(theme::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme::text_dim())
+            };
+            vec![
+                Span::styled(if is_selected { "●" } else { "○" }, style),
+                Span::styled(format!(" {} ", scope), style),
+            ]
+        })
+        .collect();
+    lines.push(Line::from(Span::styled(
+        "  Scope:",
+        theme::text_dim(),
+    )));
+    lines.push(Line::from(scope_spans));
+    lines.push(Line::from(""));
+
     lines.push(Line::from(Span::styled(
         format!("  {} options:", OPTIONS.len()),
         theme::text_dim(),
     )));
-    lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         format!("  {}", "·".repeat(inner.width.saturating_sub(4) as usize)),
         dotted,
     )));
     lines.push(Line::from(""));
+
+    // Pad to FIRST_OPTION_ROW
+    while lines.len() < FIRST_OPTION_ROW as usize {
+        lines.push(Line::from(""));
+    }
 
     debug_assert_eq!(lines.len() as u16, FIRST_OPTION_ROW);
     for (i, opt) in OPTIONS.iter().enumerate() {
@@ -160,7 +212,7 @@ pub fn render_permission_modal(
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "[↑/↓] Select  [Enter/Y] Confirm  [Esc/N] Deny  [Ctrl+E] Explain  [Ctrl+D] Raw",
+        "[↑/↓] Select  [Enter/Y] Confirm  [Esc/N] Deny  [Tab] Scope  [Ctrl+D] Detail",
         theme::text_dim(),
     )));
 

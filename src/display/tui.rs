@@ -348,6 +348,19 @@ fn run_tui(
                                 state.permission_selected = cursor.selected;
                                 engine.mark_dirty();
                             }
+                            KeyCode::Tab => {
+                                // Cycle scope: Turn → Session → Project → Turn
+                                state.permission_scope =
+                                    (state.permission_scope + 1) % permission::SCOPES.len();
+                                engine.mark_dirty();
+                            }
+                            KeyCode::Char('d')
+                                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                            {
+                                // Toggle detail panel
+                                state.show_permission_detail = !state.show_permission_detail;
+                                engine.mark_dirty();
+                            }
                             _ => {
                                 if let Some(req) = state.permission_request.take() {
                                     let action = match key.code {
@@ -365,6 +378,7 @@ fn run_tui(
                                     };
                                     let _ = req.response_tx.send(action);
                                     state.show_permission_modal = false;
+                                    state.show_permission_detail = false;
                                     engine.mark_dirty();
                                 }
                             }

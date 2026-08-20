@@ -136,10 +136,20 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
         ));
     }
 
-    // Permission mode indicator
+    // Permission mode indicator — styled badge with distinct color per mode
+    let (badge_text, badge_color) = match state.permission_mode {
+        crate::display::state::PermissionMode::Default => (" MANUAL ", theme::fg_subtle()),
+        crate::display::state::PermissionMode::AcceptEdits => (" EDITS ", theme::success()),
+        crate::display::state::PermissionMode::Plan => (" PLAN ", theme::thinking_green()),
+        crate::display::state::PermissionMode::Auto => (" AUTO ", theme::thinking_green()),
+        crate::display::state::PermissionMode::DontAsk => (" YOLO ", theme::error()),
+        crate::display::state::PermissionMode::BypassPermissions => (" BYPASS ", theme::error()),
+    };
     right_spans.push(Span::styled(
-        format!("⏵⏵ {}   ", state.permission_mode.label()),
-        Style::default().fg(theme::fg_dim()),
+        format!(" {} ", badge_text),
+        Style::default().fg(badge_color).add_modifier(
+            ratatui::style::Modifier::BOLD,
+        ),
     ));
 
     if let Some((msg, _)) = &state.notice {

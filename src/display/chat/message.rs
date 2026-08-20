@@ -115,9 +115,17 @@ pub fn render_assistant_message(
     // Content as markdown
     lines.extend(render_markdown(content, config.width, config));
 
-    // Tool calls
-    for tool_call in tool_calls {
-        lines.extend(render_tool_call(tool_call, config));
+    // Tool calls — collapse consecutive read-only operations
+    let groups = group_tool_calls(tool_calls);
+    for group in groups {
+        match group {
+            ToolCallGroup::Single(idx) => {
+                lines.extend(render_tool_call(&tool_calls[idx], config));
+            }
+            ToolCallGroup::CollapsedRead { count, tools } => {
+                lines.extend(render_collapsed_read_group(count, &tools));
+            }
+        }
     }
 
     lines
@@ -222,6 +230,92 @@ pub enum ToolCallStatus {
     Running,
     Done,
     Failed,
+}
+
+/// Check if a tool is read-only (safe to collapse).
+#[allow(dead_code)]
+fn is_read_only_tool(name: &str) -> bool {
+    matches!(name, "read" | "glob" | "grep" | "list")
+}
+
+/// Group consecutive read-only tool calls into collapsed summaries.
+fn group_tool_calls(calls: &[ToolCallDisplay]) -> Vec<ToolCallGroup> {
+    let mut groups: Vec<ToolCallGroup> = Vec::new();
+    let mut read_only_buf: Vec<(usize, &'static str)> = Vec::new();
+
+    for (i, tc) in calls.iter().enumerate() {
+        if let Some(static_name) = read_only_tool_name(&tc.tool_name) {
+            if tc.status == ToolCallStatus::Done {
+                read_only_buf.push((i, static_name));
+                continue;
+            }
+        }
+        if !read_only_buf.is_empty() {
+            groups.push(flush_read_only_group(&read_only_buf));
+            read_only_buf.clear();
+        }
+        groups.push(ToolCallGroup::Single(i));
+    }
+    if !read_only_buf.is_empty() {
+        groups.push(flush_read_only_group(&read_only_buf));
+    }
+    groups
+}
+
+/// Map a tool name to a `'static str` if it's a known read-only tool.
+fn read_only_tool_name(name: &str) -> Option<&'static str> {
+    match name {
+        "read" => Some("read"),
+        "glob" => Some("glob"),
+        "grep" => Some("grep"),
+        "list" => Some("list"),
+        _ => None,
+    }
+}
+
+/// A rendered tool call group — either a single call or a collapsed summary.
+enum ToolCallGroup {
+    Single(usize),
+    CollapsedRead {
+        count: usize,
+        tools: Vec<&'static str>,
+    },
+}
+
+/// Collapse a buffer of consecutive read-only calls into a summary.
+fn flush_read_only_group(calls: &[(usize, &'static str)]) -> ToolCallGroup {
+    let mut tool_counts: Vec<(&str, usize)> = Vec::new();
+    for &(_, name) in calls {
+        if let Some(entry) = tool_counts.iter_mut().find(|(t, _)| *t == name) {
+            entry.1 += 1;
+        } else {
+            tool_counts.push((name, 1));
+        }
+    }
+    let tools: Vec<&'static str> = tool_counts.into_iter().map(|(t, _)| t).collect();
+    ToolCallGroup::CollapsedRead {
+        count: calls.len(),
+        tools,
+    }
+}
+
+/// Render a collapsed read-only group as a single dimmed line.
+fn render_collapsed_read_group(count: usize, tools: &[&str]) -> Vec<Line<'static>> {
+    let tool_desc = if tools.len() == 1 {
+        match tools[0] {
+            "read" => format!("Read {} files", count),
+            "glob" => format!("Searched {} patterns", count),
+            "grep" => format!("Grep {} queries", count),
+            "list" => format!("Listed {} directories", count),
+            other => format!("{} × {} calls", other, count),
+        }
+    } else {
+        format!("{} read-only operations", count)
+    };
+    vec![Line::from(Span::styled(
+        format!("  ⎿ {} (collapsed)", tool_desc),
+        Style::default().fg(Color::DarkGray),
+    ))]
 }
 
 /// System level for system messages.

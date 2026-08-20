@@ -226,7 +226,8 @@ impl Page for DiffPage {
     }
 }
 
-/// Render a unified diff with line numbers and word-level intra-line highlighting.
+/// Render a unified diff with line numbers, word-level intra-line highlighting,
+/// and hunk clustering (groups nearby hunks with visual separators).
 fn render_diff_with_line_numbers(
     diff: &str,
     show_line_numbers: bool,
@@ -235,12 +236,12 @@ fn render_diff_with_line_numbers(
     let mut lines = Vec::new();
     let mut old_line = 0u32;
     let mut new_line = 0u32;
-    // Track the previous deletion so we can word-diff it against the next addition.
     let mut prev_deletion: Option<String> = None;
+    let mut last_hunk_end: Option<u32> = None;
+    let mut hunk_count_in_cluster = 0u32;
 
     for raw_line in diff.lines() {
         if raw_line.starts_with("diff --git") || raw_line.starts_with("index ") {
-            // File header — dim + bold
             lines.push(Line::from(Span::styled(
                 raw_line.to_string(),
                 Style::default()
@@ -248,7 +249,6 @@ fn render_diff_with_line_numbers(
                     .add_modifier(Modifier::BOLD),
             )));
         } else if raw_line.starts_with("---") || raw_line.starts_with("+++") {
-            // File name header
             lines.push(Line::from(Span::styled(
                 raw_line.to_string(),
                 Style::default()
@@ -256,8 +256,23 @@ fn render_diff_with_line_numbers(
                     .add_modifier(Modifier::BOLD),
             )));
         } else if raw_line.starts_with("@@") {
-            // Hunk header — extract line numbers
             if let Some((o, n)) = parse_hunk_header(raw_line) {
+                // Cluster nearby hunks (within 10 lines of each other)
+                if let Some(prev_end) = last_hunk_end {
+                    let gap = n.saturating_sub(prev_end);
+                    if gap > 10 {
+                        // Different cluster — add separator
+                        if hunk_count_in_cluster > 1 {
+                            lines.push(Line::from(Span::styled(
+                                "  · · ·",
+                                Style::default().fg(theme::fg_dim()),
+                            )));
+                        }
+                        hunk_count_in_cluster = 0;
+                    }
+                }
+                hunk_count_in_cluster += 1;
+                last_hunk_end = Some(n);
                 old_line = o;
                 new_line = n;
             }
