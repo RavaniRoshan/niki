@@ -57,7 +57,11 @@ pub fn load_shared_skills(override_dir: Option<&Path>) -> Vec<SkillsFile> {
 fn dirs_home() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_default())
+        .unwrap_or_else(|| {
+            std::env::var("USERPROFILE")
+                .map(PathBuf::from)
+                .unwrap_or_default()
+        })
 }
 
 pub struct ProjectKnowledge {

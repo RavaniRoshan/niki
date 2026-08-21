@@ -72,7 +72,7 @@ impl AgenticDisplay {
     pub fn new() -> Self {
         let term = Term::stdout();
         let is_tty = term.is_term();
-Self {
+        Self {
             theme: Theme::new(),
             term,
             is_tty,

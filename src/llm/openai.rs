@@ -343,7 +343,11 @@ impl LlmProvider for OpenAiProvider {
             .as_ref()
             .ok_or_else(|| anyhow!("API key not configured for this provider"))?;
         // OpenAI-compatible STT endpoint: <base>/audio/transcriptions
-        let base = self.config.base_url.as_deref().unwrap_or("https://api.openai.com/v1");
+        let base = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1");
         let base = base.trim_end_matches('/');
         let url = if base.ends_with("/audio/transcriptions") {
             base.to_string()

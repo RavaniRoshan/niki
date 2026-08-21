@@ -17,7 +17,10 @@ pub struct AcpArgs {
 
 /// Entry point for `niki acp`.
 pub async fn handle(args: &AcpArgs) -> anyhow::Result<()> {
-    let project_dir = args.project.canonicalize().unwrap_or_else(|_| args.project.clone());
+    let project_dir = args
+        .project
+        .canonicalize()
+        .unwrap_or_else(|_| args.project.clone());
     crate::acp::server::run(project_dir).await?;
     Ok(())
 }

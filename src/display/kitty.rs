@@ -56,7 +56,10 @@ pub fn decode_csi_u(input: &str) -> Option<KeyEvent> {
     let inner = body.strip_suffix('u')?;
     let mut parts = inner.split(';');
     let code = parts.next()?.parse::<u32>().ok()?;
-    let mods_raw = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+    let mods_raw = parts
+        .next()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
 
     let mut modifiers = KeyModifiers::NONE;
     if mods_raw & 1 != 0 {

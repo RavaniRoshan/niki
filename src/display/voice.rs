@@ -78,8 +78,12 @@ pub fn record_clip(duration: Duration) -> anyhow::Result<PathBuf> {
 
     match status {
         Ok(s) if s.success() => Ok(out),
-        Ok(_) => Err(anyhow::anyhow!("ffmpeg recording failed (exit code non-zero)")),
-        Err(e) => Err(anyhow::anyhow!("failed to run ffmpeg for voice recording: {e}")),
+        Ok(_) => Err(anyhow::anyhow!(
+            "ffmpeg recording failed (exit code non-zero)"
+        )),
+        Err(e) => Err(anyhow::anyhow!(
+            "failed to run ffmpeg for voice recording: {e}"
+        )),
     }
 }
 

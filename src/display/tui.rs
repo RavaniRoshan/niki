@@ -694,8 +694,7 @@ fn run_tui(
                                 } else {
                                     // Scrollbar click/drag-to-jump (gaps P0 — "Drag to scroll").
                                     let msg_area_h = chunks[1].height.saturating_sub(3) as usize;
-                                    let sb_col =
-                                        chunks[1].x + chunks[1].width.saturating_sub(1);
+                                    let sb_col = chunks[1].x + chunks[1].width.saturating_sub(1);
                                     let on_scrollbar = (clicking
                                         || matches!(mouse.kind, MouseEventKind::Drag(_)))
                                         && mouse.column == sb_col
@@ -707,16 +706,14 @@ fn run_tui(
                                         if total > msg_area_h && msg_area_h > 0 {
                                             let frac = (mouse.row - chunks[1].y) as f64
                                                 / msg_area_h as f64;
-                                            let target =
-                                                (frac * total as f64).round() as usize;
-                                            state.scroll_offset =
-                                                target.min(total - msg_area_h);
+                                            let target = (frac * total as f64).round() as usize;
+                                            state.scroll_offset = target.min(total - msg_area_h);
                                             state.auto_scroll =
                                                 state.scroll_offset >= total - msg_area_h;
                                             engine.mark_dirty();
                                         }
                                     } else if hovering {
-                                    // Hover hit-test for chat elements
+                                        // Hover hit-test for chat elements
                                         let row = mouse.row.saturating_sub(chunks[1].y) as usize;
                                         let total = state.chat_lines.len();
                                         let visible = chunks[1].height as usize;
