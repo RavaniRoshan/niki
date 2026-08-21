@@ -22,3 +22,4 @@ pub mod state;
 pub mod theme;
 pub mod tips;
 pub mod tui;
+pub mod voice;

@@ -805,7 +805,10 @@ impl Page for ChatPage {
                     } else if trimmed == "/voice" {
                         state.chat_log.push((
                             "system".to_string(),
-                            "Voice input: not yet wired (post-MVP).".to_string(),
+                            "Voice input: `niki voice` records via ffmpeg and transcribes \
+                             through your configured provider's STT endpoint. Set up a \
+                             provider (e.g. OpenAI) in niki.toml or via OPENAI_API_KEY."
+                                .to_string(),
                         ));
                     } else {
                         state

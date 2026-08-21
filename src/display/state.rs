@@ -864,6 +864,8 @@ pub struct AppState {
     pub cache_read_tokens: usize,
     /// Total session cache-write tokens.
     pub cache_write_tokens: usize,
+    /// Push-to-talk voice input state (Ctrl+Shift+V).
+    pub voice: crate::display::voice::VoiceState,
 }
 
 /// Stage information (mirrors existing StageInfo).
@@ -1004,6 +1006,7 @@ impl AppState {
             output_tokens: 0,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
+            voice: crate::display::voice::VoiceState::new(),
         }
     }
 

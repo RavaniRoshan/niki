@@ -53,10 +53,14 @@ enum Commands {
     Doctor(niki::cli::doctor::DoctorArgs),
     /// Interactive chat session (TUI)
     Chat(niki::cli::chat::ChatArgs),
+    /// Run NIKI as an Agent Client Protocol (ACP) server over stdio
+    Acp(niki::cli::acp::AcpArgs),
     /// Run a smoke test: quick pipeline check to verify your setup works end-to-end
     Smoke(niki::cli::smoke::SmokeArgs),
     /// Search the web and return a cited summary
     Research(niki::cli::research::ResearchArgs),
+    /// Record and transcribe a voice message
+    Voice(niki::cli::voice::VoiceArgs),
     /// Capture a screenshot for visual verification
     Verify(niki::cli::verify::VerifyArgs),
 }
@@ -79,6 +83,7 @@ async fn main() -> Result<()> {
 
     match &command {
         Commands::Run(args) => niki::cli::run::handle(args).await?,
+        Commands::Acp(args) => niki::cli::acp::handle(args).await?,
         Commands::Status(args) => niki::cli::status::handle(args).await?,
         Commands::Report(args) => niki::cli::report::handle(args).await?,
         Commands::Config { command } => niki::cli::config::handle(command).await?,
@@ -94,6 +99,7 @@ async fn main() -> Result<()> {
         Commands::Smoke(args) => niki::cli::smoke::handle(args).await?,
         Commands::Research(args) => niki::cli::research::handle(args).await?,
         Commands::Verify(args) => niki::cli::verify::handle(args)?,
+        Commands::Voice(args) => niki::cli::voice::handle(args).await?,
     }
 
     Ok(())

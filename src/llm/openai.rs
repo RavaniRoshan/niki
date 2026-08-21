@@ -335,6 +335,48 @@ impl LlmProvider for OpenAiProvider {
             tool_calls: Vec::new(),
         })
     }
+
+    async fn transcribe(&self, audio: &[u8], language: Option<&str>) -> Result<String> {
+        let api_key = self
+            .config
+            .api_key
+            .as_ref()
+            .ok_or_else(|| anyhow!("API key not configured for this provider"))?;
+        // OpenAI-compatible STT endpoint: <base>/audio/transcriptions
+        let base = self.config.base_url.as_deref().unwrap_or("https://api.openai.com/v1");
+        let base = base.trim_end_matches('/');
+        let url = if base.ends_with("/audio/transcriptions") {
+            base.to_string()
+        } else {
+            format!("{base}/audio/transcriptions")
+        };
+
+        let mut form = reqwest::multipart::Form::new()
+            .part(
+                "file",
+                reqwest::multipart::Part::bytes(audio.to_vec())
+                    .mime_str("audio/wav")
+                    .unwrap(),
+            )
+            .text("model", "whisper-1");
+        if let Some(lang) = language {
+            form = form.text("language", lang.to_string());
+        }
+
+        let resp = crate::llm::provider::http_client()?
+            .post(&url)
+            .bearer_auth(api_key)
+            .multipart(form)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("STT request failed: {body}"));
+        }
+        let data: serde_json::Value = resp.json().await?;
+        let text = data["text"].as_str().unwrap_or("").to_string();
+        Ok(text)
+    }
 }
 
 #[cfg(test)]
