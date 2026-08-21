@@ -690,10 +690,17 @@ impl Page for ChatPage {
                     } else if trimmed == "/version" {
                         state.chat_log.push((
                             "system".to_string(),
-                            format!("niki v{} — Claude Code parity build", env!("CARGO_PKG_VERSION")),
+                            format!(
+                                "niki v{} — Claude Code parity build",
+                                env!("CARGO_PKG_VERSION")
+                            ),
                         ));
                     } else if trimmed.starts_with("/rename") {
-                        let name = trimmed.strip_prefix("/rename").unwrap_or("").trim().to_string();
+                        let name = trimmed
+                            .strip_prefix("/rename")
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
                         if name.is_empty() {
                             state.chat_log.push((
                                 "system".to_string(),
@@ -711,7 +718,11 @@ impl Page for ChatPage {
                             "Session forked (new branch created from current state).".to_string(),
                         ));
                     } else if trimmed.starts_with("/branch") {
-                        let name = trimmed.strip_prefix("/branch").unwrap_or("").trim().to_string();
+                        let name = trimmed
+                            .strip_prefix("/branch")
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
                         if name.is_empty() {
                             state.chat_log.push((
                                 "system".to_string(),
@@ -734,7 +745,11 @@ impl Page for ChatPage {
                             ),
                         ));
                     } else if trimmed.starts_with("/effort") {
-                        let level = trimmed.strip_prefix("/effort").unwrap_or("").trim().to_string();
+                        let level = trimmed
+                            .strip_prefix("/effort")
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
                         state.chat_log.push((
                             "system".to_string(),
                             if level.is_empty() {
@@ -754,7 +769,9 @@ impl Page for ChatPage {
                             "Skills: shared from ~/.agents/skills/ (read/write). Add a folder with /add-dir.".to_string(),
                         ));
                     } else if trimmed == "/copy" {
-                        if let Some(last) = state.chat_log.iter().rev().find(|(r, _)| r == "assistant") {
+                        if let Some(last) =
+                            state.chat_log.iter().rev().find(|(r, _)| r == "assistant")
+                        {
                             let text = last.1.clone();
                             if !text.is_empty() {
                                 copy_to_clipboard(&text);
@@ -785,12 +802,15 @@ impl Page for ChatPage {
                             "Security audit queued (Reviewer → SecurityAuditor stage).".to_string(),
                         ));
                     } else if trimmed.starts_with("/add-dir") {
-                        let path = trimmed.strip_prefix("/add-dir").unwrap_or("").trim().to_string();
+                        let path = trimmed
+                            .strip_prefix("/add-dir")
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
                         if path.is_empty() {
-                            state.chat_log.push((
-                                "system".to_string(),
-                                "Usage: /add-dir <path>".to_string(),
-                            ));
+                            state
+                                .chat_log
+                                .push(("system".to_string(), "Usage: /add-dir <path>".to_string()));
                         } else {
                             state.chat_log.push((
                                 "system".to_string(),

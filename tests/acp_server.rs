@@ -52,7 +52,8 @@ fn acp_initialize_advertises_capabilities() {
 
 #[test]
 fn acp_rejects_empty_prompt() {
-    let stdout = run_acp(r#"{"jsonrpc":"2.0","id":2,"method":"prompt/send","params":{"prompt":""}}"#);
+    let stdout =
+        run_acp(r#"{"jsonrpc":"2.0","id":2,"method":"prompt/send","params":{"prompt":""}}"#);
     let resp = acp_response(&stdout, 2);
     assert!(resp["error"].is_object(), "expected an error response");
     assert_eq!(resp["error"]["code"], -32602);

@@ -311,10 +311,22 @@ mod tests {
         };
         let checker = PermissionChecker::new(config);
         assert_eq!(checker.check_command("rm -rf build"), Permission::Ask);
-        assert_eq!(checker.check_command("sudo apt-get install"), Permission::Ask);
-        assert_eq!(checker.check_command("curl https://evil.example"), Permission::Ask);
-        assert_eq!(checker.check_command("git push origin main"), Permission::Ask);
-        assert_eq!(checker.check_command("chmod 777 src/main.rs"), Permission::Ask);
+        assert_eq!(
+            checker.check_command("sudo apt-get install"),
+            Permission::Ask
+        );
+        assert_eq!(
+            checker.check_command("curl https://evil.example"),
+            Permission::Ask
+        );
+        assert_eq!(
+            checker.check_command("git push origin main"),
+            Permission::Ask
+        );
+        assert_eq!(
+            checker.check_command("chmod 777 src/main.rs"),
+            Permission::Ask
+        );
         // A benign command returns the configured bash permission (Ask by default).
         assert_eq!(checker.check_command("cargo test"), Permission::Ask);
     }

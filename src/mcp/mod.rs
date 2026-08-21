@@ -153,11 +153,7 @@ impl McpServerConfig {
 
         let mut s = String::new();
         match &self.server_type {
-            McpServerType::Local {
-                command,
-                args,
-                env,
-            } => {
+            McpServerType::Local { command, args, env } => {
                 s.push_str("local:");
                 s.push_str(command);
                 s.push(':');

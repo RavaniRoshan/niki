@@ -158,11 +158,8 @@ mod tests {
 
     #[test]
     fn response_serializes_error_when_failed() {
-        let resp = JsonRpcResponse::err(
-            serde_json::json!(2),
-            -32600,
-            "method not found".to_string(),
-        );
+        let resp =
+            JsonRpcResponse::err(serde_json::json!(2), -32600, "method not found".to_string());
         let s = serde_json::to_string(&resp).unwrap();
         assert!(s.contains(r#""error":{"code":-32600,"message":"method not found"}"#));
     }

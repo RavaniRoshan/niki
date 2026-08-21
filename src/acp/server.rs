@@ -72,8 +72,7 @@ async fn run_prompt(
 
     // Container runtime: best-effort; the worktree backend needs no daemon.
     let docker = connect_runtime(&config).await;
-    let containers: ActiveContainers =
-        Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let containers: ActiveContainers = Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
     let result = execute_pipeline(
         &task,
@@ -125,10 +124,9 @@ async fn run_prompt(
                 "stage.revision",
                 serde_json::json!({ "round": round, "max": max, "issues": issues }),
             ),
-            crate::display::tui::DisplayEvent::DiffContent(diff) => (
-                "task.diff",
-                serde_json::json!({ "diff": diff }),
-            ),
+            crate::display::tui::DisplayEvent::DiffContent(diff) => {
+                ("task.diff", serde_json::json!({ "diff": diff }))
+            }
             _ => continue,
         };
         notify(out, method, params);
@@ -220,7 +218,6 @@ pub async fn run(project_dir: PathBuf) -> std::io::Result<()> {
     let cancel = Arc::new(AtomicBool::new(false));
 
     while let Some(line) = crate::acp::protocol::read_message(&mut reader)? {
-
         let request: JsonRpcRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {

@@ -25,7 +25,7 @@ pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),    // messages area
+            Constraint::Min(3),          // messages area
             Constraint::Length(input_h), // input box (grows for multi-line)
         ])
         .split(area);
