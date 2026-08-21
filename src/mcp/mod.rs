@@ -71,11 +71,130 @@ impl Default for McpGovernance {
     }
 }
 
+/// MCP trust store — the "up front" gate for project MCP servers.
+///
+/// Project MCP servers are arbitrary local processes or remote endpoints:
+/// a malicious server can exfiltrate the agent's context. Niki therefore
+/// requires explicit trust before connecting: each server is identified by a
+/// fingerprint of its command/args/url, so a swap of the underlying binary is
+/// detected even if the server name is unchanged. Persisted to disk so the
+/// user only ever answers "trust this server?" once.
+///
+/// Default state: nothing is trusted. Opt in with [`McpManager::with_trust_store`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct McpTrustStore {
+    /// server name → fingerprint of the last-allowed configuration.
+    pub allowed: HashMap<String, String>,
+    /// server names explicitly denied (never auto-trusted).
+    pub denied: Vec<String>,
+}
+
+impl McpTrustStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether `config` is currently trusted (allowed + fingerprint unchanged).
+    pub fn is_allowed(&self, config: &McpServerConfig) -> bool {
+        if self.denied.contains(&config.name) {
+            return false;
+        }
+        match self.allowed.get(&config.name) {
+            Some(fp) => fp == &config.fingerprint(),
+            None => false,
+        }
+    }
+
+    /// Whether the server needs an explicit trust decision before connecting.
+    pub fn needs_gate(&self, config: &McpServerConfig) -> bool {
+        !self.is_allowed(config)
+    }
+
+    /// Trust this exact configuration.
+    pub fn allow(&mut self, config: &McpServerConfig) {
+        self.allowed
+            .insert(config.name.clone(), config.fingerprint());
+        self.denied.retain(|n| n != &config.name);
+    }
+
+    /// Explicitly deny this server (never auto-trusted).
+    pub fn deny(&mut self, name: &str) {
+        self.allowed.remove(name);
+        if !self.denied.contains(&name.to_string()) {
+            self.denied.push(name.to_string());
+        }
+    }
+
+    /// Load the trust store from disk (missing file → empty).
+    pub fn load(path: &Path) -> Self {
+        match std::fs::read_to_string(path) {
+            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
+    }
+
+    /// Persist the trust store to disk.
+    pub fn save(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let content = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, content)?;
+        Ok(())
+    }
+}
+
+impl McpServerConfig {
+    /// Stable fingerprint of this server's configuration. Used by the trust
+    /// store to detect a swapped command/args/url under an unchanged name.
+    pub fn fingerprint(&self) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut s = String::new();
+        match &self.server_type {
+            McpServerType::Local {
+                command,
+                args,
+                env,
+            } => {
+                s.push_str("local:");
+                s.push_str(command);
+                s.push(':');
+                s.push_str(&args.join(","));
+                for (k, v) in env {
+                    s.push_str(&format!("{}={}", k, v));
+                }
+            }
+            McpServerType::Remote { url, headers } => {
+                s.push_str("remote:");
+                s.push_str(url);
+                for k in headers.keys() {
+                    s.push_str(k);
+                }
+            }
+        }
+        let mut hasher = DefaultHasher::new();
+        s.hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    }
+}
+
+/// Default trust-store path: project-local `.niki/mcp_trust.json`.
+pub fn trust_store_path(project_path: &Path) -> std::path::PathBuf {
+    project_path.join(".niki").join("mcp_trust.json")
+}
+
 /// Manages MCP server connections and tool discovery.
 pub struct McpManager {
     servers: Vec<McpServerConfig>,
     tools: Vec<McpTool>,
     governance: McpGovernance,
+    /// Optional trust store for the "up front" MCP trust gate. When set,
+    /// servers that need an explicit trust decision are skipped (and
+    /// warned) until the user allows them. When `None`, behavior is
+    /// unchanged (all enabled servers connect).
+    trust_store: Option<McpTrustStore>,
 }
 
 impl McpManager {
@@ -85,6 +204,7 @@ impl McpManager {
             servers: Vec::new(),
             tools: Vec::new(),
             governance: McpGovernance::default(),
+            trust_store: None,
         }
     }
 
@@ -94,9 +214,28 @@ impl McpManager {
         self
     }
 
+    /// Attach the trust store for the up-front MCP trust gate.
+    pub fn with_trust_store(mut self, trust_store: McpTrustStore) -> Self {
+        self.trust_store = Some(trust_store);
+        self
+    }
+
     /// Get the governance policy.
     pub fn governance(&self) -> &McpGovernance {
         &self.governance
+    }
+
+    /// Get the trust store, if configured.
+    pub fn trust_store(&self) -> Option<&McpTrustStore> {
+        self.trust_store.as_ref()
+    }
+
+    /// Whether `config` is currently trusted.
+    pub fn is_trusted(&self, config: &McpServerConfig) -> bool {
+        match &self.trust_store {
+            Some(ts) => ts.is_allowed(config),
+            None => true, // no gate configured -> trust by default
+        }
     }
 
     /// Load MCP server configurations from a config file.
@@ -131,11 +270,26 @@ impl McpManager {
     }
 
     /// Connect to all enabled servers and discover their tools.
+    ///
+    /// When a trust store is attached, servers that need an explicit trust
+    /// decision are skipped (and warned) until the user allows them — the
+    /// "up front" gate from S5 §7.
     pub async fn connect_all(&mut self) -> Result<()> {
         let enabled: Vec<McpServerConfig> =
             self.servers.iter().filter(|s| s.enabled).cloned().collect();
 
         for server_config in &enabled {
+            if let Some(ts) = &self.trust_store
+                && ts.needs_gate(server_config)
+            {
+                tracing::warn!(
+                    "MCP server '{}' is not trusted — skipping until allowed \
+                     (run `niki mcp trust {}` or edit .niki/mcp_trust.json)",
+                    server_config.name,
+                    server_config.name
+                );
+                continue;
+            }
             match client::connect_server(server_config).await {
                 Ok((_conn, tools)) => {
                     tracing::info!(
@@ -229,5 +383,64 @@ mod tests {
         let mut manager = McpManager::new();
         let result = manager.load_config(Path::new("/nonexistent/path.json"));
         assert!(result.is_ok());
+    }
+
+    fn local_server(name: &str, command: &str) -> McpServerConfig {
+        McpServerConfig {
+            name: name.to_string(),
+            server_type: McpServerType::Local {
+                command: command.to_string(),
+                args: vec!["--foo".to_string()],
+                env: HashMap::new(),
+            },
+            enabled: true,
+            timeout_ms: 5000,
+        }
+    }
+
+    #[test]
+    fn trust_store_untrusted_by_default() {
+        let ts = McpTrustStore::new();
+        let cfg = local_server("fs", "npx");
+        assert!(!ts.is_allowed(&cfg));
+        assert!(ts.needs_gate(&cfg));
+    }
+
+    #[test]
+    fn trust_store_allow_then_deny() {
+        let mut ts = McpTrustStore::new();
+        let cfg = local_server("fs", "npx");
+        ts.allow(&cfg);
+        assert!(ts.is_allowed(&cfg));
+        ts.deny("fs");
+        assert!(!ts.is_allowed(&cfg));
+    }
+
+    #[test]
+    fn trust_store_detects_swapped_command() {
+        let mut ts = McpTrustStore::new();
+        let cfg = local_server("fs", "npx");
+        ts.allow(&cfg);
+        // Same name, different command -> fingerprint mismatch -> not trusted.
+        let swapped = local_server("fs", "node");
+        assert!(!ts.is_allowed(&swapped));
+    }
+
+    #[test]
+    fn manager_without_trust_store_trusts_everything() {
+        let cfg = local_server("fs", "npx");
+        let manager = McpManager::new();
+        assert!(manager.is_trusted(&cfg));
+    }
+
+    #[test]
+    fn trust_store_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("mcp_trust.json");
+        let mut ts = McpTrustStore::new();
+        ts.allow(&local_server("fs", "npx"));
+        ts.save(&path).unwrap();
+        let loaded = McpTrustStore::load(&path);
+        assert!(loaded.is_allowed(&local_server("fs", "npx")));
     }
 }
