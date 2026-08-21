@@ -50,3 +50,4 @@ docs/screenshots/
 *.swp
 *.log
 Add
+__pycache__/
