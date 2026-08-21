@@ -19,6 +19,7 @@
 use anyhow::anyhow;
 use include_dir::{Dir, include_dir};
 
+pub mod acp;
 pub mod activity;
 pub mod agents;
 pub mod artifacts;

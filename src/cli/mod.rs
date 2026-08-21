@@ -1,3 +1,4 @@
+pub mod acp;
 pub mod auth;
 pub mod chat;
 pub mod config;
@@ -14,3 +15,4 @@ pub mod run;
 pub mod smoke;
 pub mod status;
 pub mod verify;
+pub mod voice;

@@ -32,6 +32,9 @@ pub struct StageState {
     pub summary_lines: Vec<String>,
 }
 
+use std::sync::Arc;
+use std::sync::Mutex;
+
 pub struct AgenticDisplay {
     theme: Theme,
     term: Term,
@@ -47,6 +50,10 @@ pub struct AgenticDisplay {
     /// Optional cancellation flag shared with the pipeline so a TUI quit can
     /// abort the run (Phase 6 — runtime interactivity).
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Buffered copy of every emitted event. Populated unconditionally so an
+    /// ACP/IDE driver that runs NIKI headlessly can replay the run's progress
+    /// as structured notifications. Drained by [`take_events`].
+    events: Arc<Mutex<Vec<DisplayEvent>>>,
 }
 
 fn role_label(role: AgentRole) -> &'static str {
@@ -65,7 +72,7 @@ impl AgenticDisplay {
     pub fn new() -> Self {
         let term = Term::stdout();
         let is_tty = term.is_term();
-        Self {
+Self {
             theme: Theme::new(),
             term,
             is_tty,
@@ -75,6 +82,7 @@ impl AgenticDisplay {
             tui_thread: None,
             current_role: None,
             cancel: None,
+            events: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -98,6 +106,7 @@ impl AgenticDisplay {
             tui_thread: None,
             current_role: None,
             cancel: None,
+            events: self.events.clone(),
         }
     }
 
@@ -130,8 +139,21 @@ impl AgenticDisplay {
 
     /// Forward an event to the TUI thread if it's active.
     fn emit(&self, ev: DisplayEvent) {
+        // Always buffer so a headless ACP/IDE driver can replay progress.
+        if let Ok(mut guard) = self.events.lock() {
+            guard.push(ev.clone());
+        }
         if let Some(tx) = &self.tui {
             let _ = tx.send(ev);
+        }
+    }
+
+    /// Drain the buffered events since the last drain (ACP/IDE driver use).
+    pub fn take_events(&self) -> Vec<DisplayEvent> {
+        if let Ok(mut guard) = self.events.lock() {
+            guard.drain(..).collect()
+        } else {
+            Vec::new()
         }
     }
 

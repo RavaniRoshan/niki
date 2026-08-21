@@ -744,6 +744,10 @@ pub struct PipelineStageConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
     pub max_revision_rounds: u32,
+    /// ISO-639-1 language hint for speech-to-text (e.g. `"en"`). `None` lets
+    /// the STT engine auto-detect. Used by `niki voice` / push-to-talk.
+    #[serde(default)]
+    pub language: Option<String>,
     #[serde(default = "default_output_dir")]
     pub output_dir: String,
     /// Optional per-run spend ceiling in USD. `0.0` (default) means unlimited.
@@ -768,6 +772,7 @@ impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
             max_revision_rounds: 3,
+            language: None,
             output_dir: ".niki".to_string(),
             spend_cap_usd: 0.0,
             max_diff_lines: 0,

@@ -39,6 +39,18 @@ pub trait LlmProvider: Send + Sync {
     ) -> Result<CompletionResponse> {
         self.complete(request).await
     }
+
+    /// Speech-to-text: transcribe a WAV audio blob via the provider's STT
+    /// endpoint (OpenAI `/v1/audio/transcriptions` and compatible APIs).
+    ///
+    /// Default: unsupported. Callers should fall back to a local STT engine
+    /// (e.g. `whisper`) when every provider reports unsupported.
+    async fn transcribe(&self, _audio: &[u8], _language: Option<&str>) -> Result<String> {
+        Err(anyhow::anyhow!(
+            "provider {} does not support speech-to-text",
+            self.provider_name()
+        ))
+    }
 }
 
 /// Build an HTTP client with a bounded request timeout. Without this, a hung
