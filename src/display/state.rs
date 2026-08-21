@@ -272,6 +272,15 @@ pub struct InputState {
     /// are treated as newlines rather than submits. Set by the paste handler,
     /// cleared automatically after the burst window expires.
     pub paste_burst_until: Option<Instant>,
+    /// Kill ring (Emacs-style): text deleted by word/line kills, yanked back
+    /// with Ctrl+Y and cycled with Alt+Y (yank-pop). Most-recent entry is last.
+    pub kill_ring: Vec<String>,
+    /// Undo stack of (buffer, caret) snapshots for the input editor.
+    pub undo_stack: Vec<(String, usize)>,
+    /// Redo stack, populated when an undo is performed.
+    pub redo_stack: Vec<(String, usize)>,
+    /// Range (start, end) of the most recent yank, used to replace it on yank-pop.
+    pub last_yank_range: Option<(usize, usize)>,
 }
 
 impl InputState {
@@ -504,6 +513,84 @@ impl InputState {
             None => false,
         }
     }
+
+    /// Snapshot the current (buffer, caret) onto the undo stack and clear redo.
+    /// Call before any mutating edit so it can be reverted with [`undo`].
+    pub fn push_undo(&mut self) {
+        self.undo_stack.push((self.buffer.clone(), self.cursor_pos));
+        self.redo_stack.clear();
+        if self.undo_stack.len() > 200 {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Revert the last edit. Returns true if something was undone.
+    pub fn undo(&mut self) -> bool {
+        if let Some((buf, cur)) = self.undo_stack.pop() {
+            self.redo_stack.push((self.buffer.clone(), self.cursor_pos));
+            self.buffer = buf;
+            self.cursor_pos = cur;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Redo the last undone edit. Returns true if something was redone.
+    pub fn redo(&mut self) -> bool {
+        if let Some((buf, cur)) = self.redo_stack.pop() {
+            self.undo_stack.push((self.buffer.clone(), self.cursor_pos));
+            self.buffer = buf;
+            self.cursor_pos = cur;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Push deleted text into the kill ring (most-recent last).
+    pub fn push_kill(&mut self, text: String) {
+        if !text.is_empty() {
+            self.kill_ring.push(text);
+            if self.kill_ring.len() > 50 {
+                self.kill_ring.remove(0);
+            }
+        }
+    }
+
+    /// Yank the most-recent kill at the caret. Returns true if text was inserted.
+    pub fn yank(&mut self) -> bool {
+        if let Some(text) = self.kill_ring.last().cloned() {
+            let start = self.cursor_pos;
+            self.buffer.insert_str(self.cursor_pos, &text);
+            self.cursor_pos += text.len();
+            self.last_yank_range = Some((start, self.cursor_pos));
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Replace the previous yank with the next-most-recent kill (yank-pop).
+    pub fn yank_pop(&mut self) -> bool {
+        let (start, end) = match self.last_yank_range {
+            Some(r) => r,
+            None => return false,
+        };
+        let idx = match self.kill_ring.len() {
+            n if n >= 2 => n - 2,
+            _ => return false,
+        };
+        let prev = self.kill_ring[idx].clone();
+        self.buffer.drain(start..end);
+        self.buffer.insert_str(start, &prev);
+        let new_end = start + prev.len();
+        self.cursor_pos = new_end;
+        self.last_yank_range = Some((start, new_end));
+        let used = self.kill_ring.pop().unwrap();
+        self.kill_ring.insert(0, used);
+        true
+    }
 }
 
 /// A single message in the conversation.
@@ -591,6 +678,28 @@ pub enum CommandAction {
     Config,
     Init,
     TerminalSetup,
+}
+
+/// What the mouse cursor is hovering over — drives highlight rendering and click routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HoverTarget {
+    None,
+    StageHeader(usize),
+    ChatMessage(usize),
+    InputBox,
+    StatusBarMode,
+    StatusBarCost,
+    StatusBarBranch,
+    StatusBarCtx,
+    TabBar(usize),
+    ModalConfirm,
+    ModalCancel,
+    ModalRetry,
+    HelpSection(usize),
+    FleetCard(usize),
+    SessionTab(usize),
+    PipelineCard(usize),
+    ScrollUpIndicator,
 }
 
 /// The main application state — single source of truth for the UI.
@@ -701,6 +810,16 @@ pub struct AppState {
     pub chat_lines: Vec<ChatLine>,
     /// Content hash of the last chat_lines build (for skip-if-unchanged).
     pub chat_content_hash: u64,
+    /// What the mouse cursor is hovering over (drives highlight rendering).
+    pub hover_target: HoverTarget,
+    /// When the current hover started (for fade-in timing).
+    pub hover_time: Option<std::time::Instant>,
+    /// Timestamp of last mouse click (for double-click detection).
+    pub last_click_time: Option<std::time::Instant>,
+    /// Position of last mouse click (for double-click detection).
+    pub last_click_pos: Option<(u16, u16)>,
+    /// Click flash position and expiry (for visual click feedback).
+    pub click_flash: Option<((u16, u16), std::time::Instant)>,
     /// Chat log — (role, text) pairs.
     pub chat_log: Vec<(String, String)>,
     /// Stages expanded in chat view (by index). Collapsed by default.
@@ -855,6 +974,11 @@ impl AppState {
             chat_copied: None,
             chat_lines: Vec::new(),
             chat_content_hash: 0,
+            hover_target: HoverTarget::None,
+            hover_time: None,
+            last_click_time: None,
+            last_click_pos: None,
+            click_flash: None,
             chat_log: Vec::new(),
             expanded_stages: std::collections::HashSet::new(),
             chat_width: std::cell::Cell::new(80),
@@ -896,6 +1020,20 @@ impl AppState {
         if let Some((_, until)) = self.notice {
             if Instant::now() >= until {
                 self.notice = None;
+            }
+        }
+    }
+
+    /// Trigger a brief click flash at the given position (150ms duration).
+    pub fn trigger_click_flash(&mut self, pos: (u16, u16)) {
+        self.click_flash = Some((pos, Instant::now() + Duration::from_millis(150)));
+    }
+
+    /// Clear the click flash if it has expired. Call once per render tick.
+    pub fn clear_stale_click_flash(&mut self) {
+        if let Some((_, until)) = self.click_flash {
+            if Instant::now() >= until {
+                self.click_flash = None;
             }
         }
     }
@@ -1457,5 +1595,46 @@ mod tests {
         input.insert_str("line1\r\nline2\rline3\nline4");
         assert_eq!(input.buffer, "line1\nline2\nline3\nline4");
         assert_eq!(input.cursor_pos, input.buffer.len());
+    }
+
+    #[test]
+    fn input_state_kill_ring_yank() {
+        let mut input = InputState::new();
+        input.buffer = "hello world".to_string();
+        input.cursor_pos = 5; // before " world"
+        input.push_kill(" world".to_string());
+        input.yank();
+        assert_eq!(input.buffer, "hello world world");
+        assert_eq!(input.cursor_pos, 11);
+    }
+
+    #[test]
+    fn input_state_kill_ring_yank_pop_cycles() {
+        let mut input = InputState::new();
+        input.buffer = "a".to_string();
+        input.cursor_pos = 1;
+        input.push_kill("X".to_string());
+        input.push_kill("Y".to_string());
+        input.yank(); // inserts Y -> "aY"
+        assert_eq!(input.buffer, "aY");
+        assert!(input.yank_pop()); // replaces Y with X -> "aX"
+        assert_eq!(input.buffer, "aX");
+    }
+
+    #[test]
+    fn input_state_undo_redo() {
+        let mut input = InputState::new();
+        input.push_undo();
+        input.insert_char('a');
+        input.insert_char('b');
+        assert_eq!(input.buffer, "ab");
+        assert!(input.undo());
+        assert_eq!(input.buffer, "");
+        assert!(input.redo());
+        assert_eq!(input.buffer, "ab");
+        // Undo again returns to the pre-edit (empty) snapshot.
+        assert!(input.undo());
+        assert_eq!(input.buffer, "");
+        assert!(!input.undo()); // stack exhausted
     }
 }

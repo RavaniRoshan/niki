@@ -37,7 +37,7 @@ use super::components::permission;
 use super::modal::{self, ModalAction};
 use super::onboarding::{self, OnboardingAction};
 use super::pages::chat;
-use super::pages::{AppState, Page, PageId, PageRouter};
+use super::pages::{AppState, HoverTarget, Page, PageId, PageRouter};
 use super::persistence;
 use super::state::InputMode;
 
@@ -127,6 +127,7 @@ struct RestoreGuard;
 impl Drop for RestoreGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
+        let _ = crate::display::kitty::disable_kitty_keyboard();
         let _ = execute!(
             io::stdout(),
             LeaveAlternateScreen,
@@ -169,6 +170,11 @@ fn run_tui(
         EnableMouseCapture,
         ratatui::crossterm::event::EnableBracketedPaste
     );
+    // Progressive adoption of the Kitty keyboard protocol (I4): disambiguates
+    // Shift+Enter from Enter on supporting terminals. Disabled on exit.
+    if crate::display::kitty::kitty_capable() {
+        let _ = crate::display::kitty::enable_kitty_keyboard();
+    }
 
     // Best-effort DEC 2026 synchronized output — eliminates flicker on
     // supporting terminals (kitty, Ghostty, xterm.js ≥6.0, newer tmux).
@@ -263,6 +269,7 @@ fn run_tui(
             }
 
             state.clear_stale_notice();
+            state.clear_stale_click_flash();
             state.refresh_fleet();
             let s = &state;
             engine.begin_frame();
@@ -354,9 +361,7 @@ fn run_tui(
                                     (state.permission_scope + 1) % permission::SCOPES.len();
                                 engine.mark_dirty();
                             }
-                            KeyCode::Char('d')
-                                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                            {
+                            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 // Toggle detail panel
                                 state.show_permission_detail = !state.show_permission_detail;
                                 engine.mark_dirty();
@@ -397,7 +402,7 @@ fn run_tui(
                         // Ctrl+C: first press cancels a running stage / clears input;
                         // a second press within 2s exits the TUI.
                         if state.has_running_stage() {
-                            state.request_cancel("Stopping… (Ctrl+C)");
+                            state.request_cancel("Stopping… (Ctrl+C again to exit)");
                         } else {
                             state.input_state.buffer.clear();
                             state.input_state.cursor_pos = 0;
@@ -411,6 +416,8 @@ fn run_tui(
                         if exit {
                             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
                             break;
+                        } else if !state.has_running_stage() {
+                            state.set_notice("Press Ctrl+C again to exit", 3000);
                         }
                         engine.mark_dirty();
                     } else if state.show_command_menu {
@@ -553,6 +560,8 @@ fn run_tui(
                     let hovering =
                         matches!(mouse.kind, MouseEventKind::Moved | MouseEventKind::Drag(_));
                     let clicking = matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left));
+                    let scrolling_up = matches!(mouse.kind, MouseEventKind::ScrollUp);
+                    let scrolling_down = matches!(mouse.kind, MouseEventKind::ScrollDown);
                     let full = engine
                         .terminal()
                         .size()
@@ -563,7 +572,16 @@ fn run_tui(
                     // sees the mouse when no overlay owns it.
                     match active_focus(&state) {
                         FocusState::Permission => {
-                            if let Some(full) = full
+                            if scrolling_up || scrolling_down {
+                                let mut cursor = permission::cursor(&state);
+                                if scrolling_up {
+                                    cursor.prev();
+                                } else {
+                                    cursor.next();
+                                }
+                                state.permission_selected = cursor.selected;
+                                engine.mark_dirty();
+                            } else if let Some(full) = full
                                 && let Some(idx) =
                                     permission::click_index(full, mouse.column, mouse.row)
                             {
@@ -586,7 +604,15 @@ fn run_tui(
                             }
                         }
                         FocusState::CommandPalette => {
-                            if let Some(full) = full
+                            if scrolling_up || scrolling_down {
+                                if scrolling_up {
+                                    command_palette.cursor.prev();
+                                } else {
+                                    command_palette.cursor.next();
+                                }
+                                state.command_selected = command_palette.cursor.selected;
+                                engine.mark_dirty();
+                            } else if let Some(full) = full
                                 && let Some(idx) = super::command_palette::click_index(
                                     &command_palette,
                                     full,
@@ -605,22 +631,38 @@ fn run_tui(
                             }
                         }
                         FocusState::CommandMenu => {
-                            if let Some(full) = full
+                            if scrolling_up || scrolling_down {
+                                let mut cursor = command_menu::cursor(&state);
+                                if scrolling_up {
+                                    cursor.prev();
+                                } else {
+                                    cursor.next();
+                                }
+                                state.command_selected = cursor.selected;
+                                engine.mark_dirty();
+                            } else if let Some(full) = full
                                 && let Some(idx) =
                                     command_menu::click_index(&state, full, mouse.column, mouse.row)
                             {
-                                let mut cursor = command_menu::cursor(&state);
-                                let changed = if hovering {
-                                    cursor.hover(idx)
-                                } else if clicking {
-                                    cursor.click(idx).is_some()
-                                } else {
-                                    false
-                                };
-                                if changed {
-                                    state.command_selected = cursor.selected;
-                                    engine.mark_dirty();
+                                state.command_selected = idx;
+                                // Execute the command on click (same as Enter)
+                                if let Some(name) =
+                                    crate::display::components::command_menu::get_selected_command(
+                                        &state,
+                                    )
+                                {
+                                    state.input_state.buffer = format!("/{}", name);
+                                    state.input_state.cursor_pos = state.input_state.buffer.len();
+                                    state.input_state.mode = InputMode::Insert;
+                                    state.show_command_menu = false;
+                                    state.command_filter.clear();
+                                    state.command_selected = 0;
+                                    let enter =
+                                        event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+                                    let mut page = chat::ChatPage::new();
+                                    page.handle_key(enter, &mut state);
                                 }
+                                engine.mark_dirty();
                             }
                         }
                         FocusState::Chat => {
@@ -635,10 +677,275 @@ fn run_tui(
                                         Constraint::Length(1),
                                     ])
                                     .split(full);
-                                chat::ChatPage::handle_mouse(&mut state, mouse, chunks[1]);
+                                // Scroll wheel in chat viewport
+                                if scrolling_up || scrolling_down {
+                                    let total = state.chat_lines.len();
+                                    let visible = chunks[1].height as usize;
+                                    if scrolling_up {
+                                        state.scroll_offset = state.scroll_offset.saturating_sub(3);
+                                    } else {
+                                        let max_scroll = total.saturating_sub(visible);
+                                        state.scroll_offset =
+                                            (state.scroll_offset + 3).min(max_scroll);
+                                    }
+                                    state.auto_scroll =
+                                        state.scroll_offset >= total.saturating_sub(visible);
+                                    engine.mark_dirty();
+                                } else {
+                                    // Scrollbar click/drag-to-jump (gaps P0 — "Drag to scroll").
+                                    let msg_area_h = chunks[1].height.saturating_sub(3) as usize;
+                                    let sb_col =
+                                        chunks[1].x + chunks[1].width.saturating_sub(1);
+                                    let on_scrollbar = (clicking
+                                        || matches!(mouse.kind, MouseEventKind::Drag(_)))
+                                        && mouse.column == sb_col
+                                        && mouse.row >= chunks[1].y
+                                        && mouse.row
+                                            < chunks[1].y + chunks[1].height.saturating_sub(3);
+                                    if on_scrollbar {
+                                        let total = state.chat_lines.len();
+                                        if total > msg_area_h && msg_area_h > 0 {
+                                            let frac = (mouse.row - chunks[1].y) as f64
+                                                / msg_area_h as f64;
+                                            let target =
+                                                (frac * total as f64).round() as usize;
+                                            state.scroll_offset =
+                                                target.min(total - msg_area_h);
+                                            state.auto_scroll =
+                                                state.scroll_offset >= total - msg_area_h;
+                                            engine.mark_dirty();
+                                        }
+                                    } else if hovering {
+                                    // Hover hit-test for chat elements
+                                        let row = mouse.row.saturating_sub(chunks[1].y) as usize;
+                                        let total = state.chat_lines.len();
+                                        let visible = chunks[1].height as usize;
+                                        let offset = chat::scroll_offset(total, visible);
+                                        let abs_row = offset + row;
+                                        let new_target = if row < chunks[1].height as usize
+                                            && let Some(line) = state.chat_lines.get(abs_row)
+                                        {
+                                            if line.header_stage.is_some() {
+                                                HoverTarget::StageHeader(
+                                                    line.header_stage.unwrap_or(0),
+                                                )
+                                            } else if line.is_input {
+                                                HoverTarget::InputBox
+                                            } else if line.msg_index != usize::MAX {
+                                                HoverTarget::ChatMessage(line.msg_index)
+                                            } else {
+                                                HoverTarget::None
+                                            }
+                                        } else {
+                                            HoverTarget::None
+                                        };
+                                        if state.hover_target != new_target {
+                                            state.hover_target = new_target;
+                                            state.hover_time = Some(std::time::Instant::now());
+                                            engine.mark_dirty();
+                                        }
+                                    } else {
+                                        chat::ChatPage::handle_mouse(&mut state, mouse, chunks[1]);
+                                        engine.mark_dirty();
+                                    }
+                                }
+                                // Click-to-position cursor in input box
+                                if clicking && state.current_page == PageId::Chat {
+                                    let input_chunks = Layout::default()
+                                        .direction(Direction::Vertical)
+                                        .constraints([Constraint::Min(3), Constraint::Length(3)])
+                                        .split(chunks[1]);
+                                    if super::components::input_box::handle_click(
+                                        &mut state,
+                                        mouse.column,
+                                        input_chunks[1],
+                                    ) {
+                                        engine.mark_dirty();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Modal click handling (always active when modal is present)
+                    if clicking
+                        && let Some(ref modal) = state.modal
+                        && let Some(full) = full
+                    {
+                        if let Some(action) =
+                            modal::modal_hit_test(mouse.column, mouse.row, full, modal)
+                        {
+                            match action {
+                                ModalAction::Confirm => {
+                                    state.modal = None;
+                                    if let Some(req) = state.permission_request.take() {
+                                        let _ = req
+                                            .response_tx
+                                            .send(crate::permissions::PermissionAction::Allow);
+                                    }
+                                    engine.mark_dirty();
+                                }
+                                ModalAction::Retry => {
+                                    state.modal = None;
+                                    // Retry is handled by the key handler
+                                    engine.mark_dirty();
+                                }
+                                ModalAction::Config => {
+                                    state.modal = None;
+                                    state.current_page = PageId::Config;
+                                    engine.mark_dirty();
+                                }
+                                ModalAction::Dismiss => {
+                                    state.modal = None;
+                                    engine.mark_dirty();
+                                }
+                                ModalAction::None | ModalAction::Skip => {}
+                            }
+                        }
+                    }
+                    // Status bar hover detection (always active, regardless of overlay focus)
+                    if hovering && let Some(full) = full {
+                        let status_area = Rect {
+                            x: 0,
+                            y: full.height.saturating_sub(1),
+                            width: full.width,
+                            height: 1,
+                        };
+                        if mouse.row == status_area.y {
+                            let new_target = super::components::status_bar::hover_test(
+                                mouse.column,
+                                status_area,
+                                &state,
+                            );
+                            if hovering {
+                                if state.hover_target != new_target {
+                                    state.hover_target = new_target;
+                                    state.hover_time = Some(std::time::Instant::now());
+                                    engine.mark_dirty();
+                                }
+                            }
+                            if clicking {
+                                // Handle status bar clicks
+                                match new_target {
+                                    HoverTarget::StatusBarMode => {
+                                        // Cycle permission modes
+                                        state.permission_mode = match state.permission_mode {
+                                            crate::display::state::PermissionMode::Default => crate::display::state::PermissionMode::AcceptEdits,
+                                            crate::display::state::PermissionMode::AcceptEdits => crate::display::state::PermissionMode::Plan,
+                                            crate::display::state::PermissionMode::Plan => crate::display::state::PermissionMode::Auto,
+                                            crate::display::state::PermissionMode::Auto => crate::display::state::PermissionMode::DontAsk,
+                                            crate::display::state::PermissionMode::DontAsk => crate::display::state::PermissionMode::BypassPermissions,
+                                            crate::display::state::PermissionMode::BypassPermissions => crate::display::state::PermissionMode::Default,
+                                        };
+                                        state.set_notice(
+                                            &format!(
+                                                "Permission mode: {:?}",
+                                                state.permission_mode
+                                            ),
+                                            1500,
+                                        );
+                                        engine.mark_dirty();
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        } else if matches!(
+                            state.hover_target,
+                            HoverTarget::StatusBarMode
+                                | HoverTarget::StatusBarCost
+                                | HoverTarget::StatusBarBranch
+                                | HoverTarget::StatusBarCtx
+                        ) {
+                            // Mouse left the status bar
+                            state.hover_target = HoverTarget::None;
+                            engine.mark_dirty();
+                        }
+                    }
+                    // Tab bar click handling (always active)
+                    if clicking && let Some(full) = full {
+                        let tab_area = Rect {
+                            x: 0,
+                            y: full.y,
+                            width: full.width,
+                            height: 1,
+                        };
+                        if mouse.row == tab_area.y {
+                            if let Some(page_id) = super::layout::tab_bar_hit_test(
+                                mouse.column,
+                                tab_area,
+                                &state,
+                                full.width as usize,
+                            ) {
+                                state.view = crate::display::state::ViewMode::Page(page_id);
+                                state.current_page = page_id;
                                 engine.mark_dirty();
                             }
                         }
+                    }
+                    // Hover hit-test for tab bar
+                    if hovering && let Some(full) = full {
+                        let tab_area = Rect {
+                            x: 0,
+                            y: full.y,
+                            width: full.width,
+                            height: 1,
+                        };
+                        if mouse.row == tab_area.y {
+                            if let Some(page_id) = super::layout::tab_bar_hit_test(
+                                mouse.column,
+                                tab_area,
+                                &state,
+                                full.width as usize,
+                            ) {
+                                let idx = [
+                                    PageId::Pipeline,
+                                    PageId::Agents,
+                                    PageId::Diff,
+                                    PageId::Verdict,
+                                    PageId::Cost,
+                                    PageId::Artifacts,
+                                ]
+                                .iter()
+                                .position(|p| *p == page_id)
+                                .unwrap_or(0);
+                                let new_target = HoverTarget::TabBar(idx);
+                                if state.hover_target != new_target {
+                                    state.hover_target = new_target;
+                                    state.hover_time = Some(std::time::Instant::now());
+                                    engine.mark_dirty();
+                                }
+                            } else if matches!(state.hover_target, HoverTarget::TabBar(_)) {
+                                state.hover_target = HoverTarget::None;
+                                engine.mark_dirty();
+                            }
+                        } else if matches!(state.hover_target, HoverTarget::TabBar(_)) {
+                            state.hover_target = HoverTarget::None;
+                            engine.mark_dirty();
+                        }
+                    }
+                    // Fleet card click handling
+                    if clicking
+                        && state.current_page == PageId::Fleet
+                        && let Some(full) = full
+                    {
+                        if state.fleet.handle_click(mouse.column, mouse.row, full) {
+                            engine.mark_dirty();
+                        }
+                    }
+                    // Scroll wheel for non-chat pages (sends synthetic Up/Down keys)
+                    if (scrolling_up || scrolling_down) && state.current_page != PageId::Chat {
+                        let key_code = if scrolling_up {
+                            KeyCode::Up
+                        } else {
+                            KeyCode::Down
+                        };
+                        let key = KeyEvent::new(key_code, KeyModifiers::NONE);
+                        router.handle_key(key, &mut state);
+                        engine.mark_dirty();
+                    }
+                    // Click feedback flash (brief visual indicator on any click)
+                    if clicking {
+                        state.trigger_click_flash((mouse.column, mouse.row));
+                        engine.mark_dirty();
                     }
                 }
                 Ok(Event::Paste(pasted)) => {
@@ -731,6 +1038,10 @@ pub fn run_chat(
         EnableMouseCapture,
         ratatui::crossterm::event::EnableBracketedPaste
     );
+    // Progressive adoption of the Kitty keyboard protocol (I4) — see run_tui.
+    if crate::display::kitty::kitty_capable() {
+        let _ = crate::display::kitty::enable_kitty_keyboard();
+    }
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).expect("failed to create terminal");
 

@@ -452,7 +452,9 @@ impl ToolRegistry {
         };
 
         // Fire PostToolUse hook
-        if let Ok(payload) = serde_json::to_string(&serde_json::json!({"tool": name, "status": format!("{:?}", result.status)})) {
+        if let Ok(payload) = serde_json::to_string(
+            &serde_json::json!({"tool": name, "status": format!("{:?}", result.status)}),
+        ) {
             let _ = self.hook_bus.run(HookEvent::PostToolUse, &payload);
         }
 

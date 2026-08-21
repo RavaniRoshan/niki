@@ -76,6 +76,11 @@ pub struct KnowledgeConfig {
     /// Max characters ingested per external source, bounding context size.
     #[serde(default = "default_max_source_chars")]
     pub max_source_chars: usize,
+    /// Optional override for the shared skills directory (portable
+    /// `~/.agents/skills/` layer). When set, Niki reads skills from here
+    /// instead of the default home-directory location.
+    #[serde(default)]
+    pub skills_dir: Option<String>,
 }
 
 /// Per-role security policy controlling which commands an agent may execute.

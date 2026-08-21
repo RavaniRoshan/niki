@@ -140,7 +140,9 @@ pub fn render_permission_modal(
         if let Some(ref params) = request.params {
             lines.push(Line::from(Span::styled(
                 "  Raw parameters:",
-                Style::default().fg(theme::text_dim()).add_modifier(Modifier::ITALIC),
+                Style::default()
+                    .fg(theme::text_dim())
+                    .add_modifier(Modifier::ITALIC),
             )));
             for line in params.lines().take(5) {
                 lines.push(Line::from(Span::styled(
@@ -172,10 +174,7 @@ pub fn render_permission_modal(
             ]
         })
         .collect();
-    lines.push(Line::from(Span::styled(
-        "  Scope:",
-        theme::text_dim(),
-    )));
+    lines.push(Line::from(Span::styled("  Scope:", theme::text_dim())));
     lines.push(Line::from(scope_spans));
     lines.push(Line::from(""));
 

@@ -4,10 +4,10 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use crate::display::pages::chat;
-use crate::display::state::{AppState, PageId};
+use crate::display::state::{AppState, HoverTarget, PageId};
 use crate::display::theme;
 
 /// Render the main chat layout (conversational view).
@@ -16,37 +16,82 @@ pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
         return;
     }
 
+    // Multi-line composer: grow the input region up to ~1/3 of the screen when
+    // the buffer contains newlines (Shift+Enter), otherwise keep it compact.
+    let input_lines = state.input_state.buffer.lines().count().max(1);
+    let max_input = ((area.height as usize) / 3).max(3);
+    let input_h = (input_lines + 2).min(max_input).max(3) as u16;
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(3),    // messages area
-            Constraint::Length(3), // input box (borders + 1 inner row)
+            Constraint::Length(input_h), // input box (grows for multi-line)
         ])
         .split(area);
 
+    // Reserve a 1-column scrollbar on the right of the message area.
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(chunks[0]);
+    let msg_area = body[0];
+
     // Render messages using the existing build_chat_lines (handles stages,
     // progressive disclosure, chat log). Skip inline input — rendered below.
-    let lines = chat::build_chat_lines(state, area.width as usize, false);
-    let visible = (area.height as usize).saturating_sub(3);
-    let scroll = state.scroll_offset.min(lines.len().saturating_sub(visible));
+    let lines = chat::build_chat_lines(state, msg_area.width as usize, false);
+    let visible = chunks[0].height as usize;
+    let total = lines.len();
+    let max_scroll = total.saturating_sub(visible);
+    let scroll = state.scroll_offset.min(max_scroll);
+
+    // Scroll indicator: show "↑ more" when scrolled up
+    let mut display_lines: Vec<Line> = Vec::with_capacity(visible);
+    if scroll > 0 {
+        let indicator_text = format!("  ↑ {} lines above  ", scroll);
+        let indicator_style = Style::default()
+            .fg(theme::fg_subtle())
+            .add_modifier(ratatui::style::Modifier::ITALIC);
+        display_lines.push(Line::from(Span::styled(indicator_text, indicator_style)));
+    }
+
     let visible_lines: Vec<Line> = lines
         .iter()
         .skip(scroll)
-        .take(visible)
+        .take(visible.saturating_sub(display_lines.len()))
         .map(|cl| {
             cl.rich
                 .clone()
                 .unwrap_or_else(|| Line::from(cl.text.clone()))
         })
         .collect();
-    let mut display_lines = visible_lines;
+    display_lines.extend(visible_lines);
     while display_lines.len() < visible {
         display_lines.push(Line::from(""));
     }
-    frame.render_widget(Paragraph::new(display_lines), chunks[0]);
+    frame.render_widget(Paragraph::new(display_lines), msg_area);
 
-    // Render input box (Claude Code elevated capsule)
-    super::components::render_input_box(frame, state, chunks[1]);
+    // Visible scrollbar (product-gaps P0: "users can't navigate without it").
+    if total > visible && visible > 0 {
+        let mut sb_state = ScrollbarState::new(total)
+            .position(scroll)
+            .viewport_content_length(visible);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_style(Style::default().fg(theme::scrollbar_thumb()))
+                .track_style(Style::default().fg(theme::text_dim())),
+            body[1],
+            &mut sb_state,
+        );
+    }
+
+    // Render input box (Claude Code elevated capsule). Use the multi-line
+    // renderer when the composer holds newlines so long prompts stay readable.
+    if state.input_state.buffer.contains('\n') {
+        super::components::render_input_box_multiline(frame, &state.input_state, chunks[1]);
+    } else {
+        super::components::render_input_box(frame, state, chunks[1]);
+    }
 }
 
 /// Render the page layout (tab-based page view).
@@ -98,8 +143,15 @@ fn render_tab_bar(state: &AppState, width: usize) -> Line<'_> {
         if spans.iter().map(|s: &Span| s.content.len()).sum::<usize>() + title.len() + 4 > width {
             break;
         }
-        let style = if matches!(state.view, crate::display::state::ViewMode::Page(p) if p == *page)
-        {
+        let is_hovered = matches!(state.hover_target, HoverTarget::TabBar(idx) if idx == pages.iter().position(|p| p == page).unwrap_or(0));
+        let is_active =
+            matches!(state.view, crate::display::state::ViewMode::Page(p) if p == *page);
+        let style = if is_hovered {
+            Style::default()
+                .fg(theme::primary())
+                .bg(ratatui::style::Color::Rgb(40, 44, 52))
+                .add_modifier(Modifier::BOLD)
+        } else if is_active {
             Style::default()
                 .fg(theme::primary())
                 .add_modifier(Modifier::BOLD)
@@ -110,6 +162,37 @@ fn render_tab_bar(state: &AppState, width: usize) -> Line<'_> {
     }
 
     Line::from(spans)
+}
+
+/// Hit-test a mouse position against tab bar regions.
+pub fn tab_bar_hit_test(
+    mouse_col: u16,
+    area: Rect,
+    _state: &AppState,
+    width: usize,
+) -> Option<PageId> {
+    let pages = [
+        PageId::Pipeline,
+        PageId::Agents,
+        PageId::Diff,
+        PageId::Verdict,
+        PageId::Cost,
+        PageId::Artifacts,
+    ];
+
+    let mut col_offset = area.x as usize;
+    for page in &pages {
+        let title = page.title();
+        let tab_width = title.len() + 4; // "[title] "
+        if col_offset + tab_width > width {
+            break;
+        }
+        if mouse_col >= col_offset as u16 && mouse_col < (col_offset + tab_width) as u16 {
+            return Some(*page);
+        }
+        col_offset += tab_width;
+    }
+    None
 }
 
 use ratatui::style::Modifier;

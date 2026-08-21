@@ -3,8 +3,62 @@ use anyhow::Result;
 use git2::Repository;
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+
+/// Resolve the shared skills directory used by Niki's portable skills layer.
+///
+/// Order of preference: an explicit `skills_dir` override, then the shared
+/// `~/.agents/skills/` layout (zero-migration portability, S6 Dec4), then the
+/// legacy `~/.niki/skills/` directory. Returns `None` when none exist.
+pub fn shared_skills_dir(override_dir: Option<&Path>) -> Option<PathBuf> {
+    if let Some(dir) = override_dir {
+        if dir.is_dir() {
+            return Some(dir.to_path_buf());
+        }
+    }
+    let home = dirs_home();
+    for sub in ["agents/skills", "niki/skills"] {
+        let dir = home.join(sub);
+        if dir.is_dir() {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+/// Read every skill file from the shared skills directory (one skill per
+/// file, content bounded to avoid prompt blow-up).
+pub fn load_shared_skills(override_dir: Option<&Path>) -> Vec<SkillsFile> {
+    let Some(dir) = shared_skills_dir(override_dir) else {
+        return Vec::new();
+    };
+    let mut skills = Vec::new();
+    for entry in WalkDir::new(&dir).max_depth(2).into_iter().flatten() {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".md") && !name.ends_with(".skill") {
+            continue;
+        }
+        if let Ok(content) = fs::read_to_string(entry.path()) {
+            let content: String = content.chars().take(8000).collect();
+            skills.push(SkillsFile {
+                path: entry.path().to_string_lossy().to_string(),
+                content,
+            });
+        }
+    }
+    skills
+}
+
+/// Best-effort home-directory resolution (cross-platform).
+fn dirs_home() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_default())
+}
 
 pub struct ProjectKnowledge {
     pub file_tree: String,
@@ -234,6 +288,13 @@ pub async fn index_project(path: &Path, config: &NikiConfig) -> Result<ProjectKn
         ProjectSize::Large
     };
 
+    // --- Shared skills (portable `~/.agents/skills/` layer, S6 Dec4) ---
+    // Merge project-level skills first, then append shared skills so the
+    // portable layer is always available regardless of project.
+    skills_files.extend(load_shared_skills(
+        config.knowledge.skills_dir.as_deref().map(Path::new),
+    ));
+
     // --- External source ingestion ([knowledge] config) ---
     let mut external_sources = Vec::new();
 
@@ -367,5 +428,41 @@ fn is_private_or_reserved(ip: std::net::IpAddr) -> bool {
                 || is_link_local
                 || is_unique_local
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn shared_skills_dir_override_wins() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skills = tmp.path().join("skills");
+        fs::create_dir_all(&skills).unwrap();
+        fs::write(skills.join("a.md"), "# Skill A\n").unwrap();
+        let found = shared_skills_dir(Some(&skills));
+        assert_eq!(found, Some(skills));
+    }
+
+    #[test]
+    fn load_shared_skills_reads_md_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skills = tmp.path().join("skills");
+        fs::create_dir_all(&skills).unwrap();
+        fs::write(skills.join("one.md"), "alpha").unwrap();
+        fs::write(skills.join("two.md"), "beta").unwrap();
+        fs::write(skills.join("ignore.txt"), "skip me").unwrap();
+        let loaded = load_shared_skills(Some(&skills));
+        assert_eq!(loaded.len(), 2);
+        let contents: Vec<&str> = loaded.iter().map(|s| s.content.as_str()).collect();
+        assert!(contents.iter().any(|c| c.contains("alpha")));
+        assert!(contents.iter().any(|c| c.contains("beta")));
+    }
+
+    #[test]
+    fn shared_skills_dir_missing_returns_none() {
+        assert!(shared_skills_dir(Some(Path::new("/nonexistent/path/here"))).is_none());
     }
 }

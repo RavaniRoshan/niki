@@ -273,6 +273,14 @@ impl CommandRegistry {
                 &[],
             ),
             SlashCommand::with_meta(
+                "exit",
+                "Exit Niki",
+                "Quit the application. Same as pressing Ctrl+C twice.",
+                "system",
+                CommandCategory::System,
+                &["quit", "q"],
+            ),
+            SlashCommand::with_meta(
                 "undo",
                 "Undo last change",
                 "",

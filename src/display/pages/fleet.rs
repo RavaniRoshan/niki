@@ -1,6 +1,7 @@
 //! Fleet dashboard — mission control for multiple autonomous missions.
 
 use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
@@ -40,6 +41,34 @@ impl FleetState {
         if new < self.missions.len() {
             self.selected = new;
         }
+    }
+
+    /// Handle a mouse click on the fleet grid, selecting the clicked card.
+    pub fn handle_click(&mut self, mouse_col: u16, mouse_row: u16, area: Rect) -> bool {
+        if self.missions.is_empty() {
+            return false;
+        }
+
+        // Header is row 0, cards start at row 2
+        if mouse_row < area.y + 2 {
+            return false;
+        }
+
+        let cols: usize = if area.width >= 80 { 2 } else { 1 };
+        let card_w = (area.width / cols as u16).saturating_sub(2);
+        let card_h: u16 = 7;
+
+        // Calculate which card was clicked
+        let card_row = (mouse_row - area.y - 2) / (card_h + 1);
+        let card_col = (mouse_col - area.x) / (card_w + 2);
+
+        let idx = card_row as usize * cols + card_col as usize;
+        if idx < self.missions.len() {
+            self.selected = idx;
+            return true;
+        }
+
+        false
     }
 }
 

@@ -9,6 +9,7 @@ pub mod diff_display;
 pub mod engine;
 pub mod ime;
 pub mod input;
+pub mod kitty;
 pub mod layout;
 pub mod logo;
 pub mod modal;
