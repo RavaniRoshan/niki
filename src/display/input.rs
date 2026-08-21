@@ -50,6 +50,7 @@ impl InputHandler {
                 InputAction::ReverseSearch
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                state.push_undo();
                 state.clear();
                 InputAction::None
             }
@@ -119,11 +120,30 @@ impl InputHandler {
                 delete_to_end(state);
                 InputAction::None
             }
+            KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                state.push_undo();
+                state.yank();
+                InputAction::None
+            }
+            KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::ALT) => {
+                state.yank_pop();
+                InputAction::None
+            }
+            KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                state.undo();
+                InputAction::None
+            }
+            KeyCode::Char('_') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                state.undo();
+                InputAction::None
+            }
             KeyCode::Backspace => {
+                state.push_undo();
                 state.delete_back();
                 InputAction::None
             }
             KeyCode::Delete => {
+                state.push_undo();
                 state.delete_forward();
                 InputAction::None
             }
@@ -142,6 +162,7 @@ impl InputHandler {
                     state.history_index = None;
                     InputAction::None
                 } else {
+                    state.push_undo();
                     state.insert_char(c);
                     InputAction::None
                 }
@@ -253,11 +274,13 @@ fn should_trigger_autocomplete(buffer: &str, cursor_pos: usize) -> bool {
     }
 }
 
-/// Delete a word backward (Ctrl+W behavior).
+/// Delete a word backward (Ctrl+W behavior). The deleted text is saved to the
+/// kill ring and the prior state is pushed to the undo stack.
 fn delete_word_backward(state: &mut InputState) {
     if state.cursor_pos == 0 {
         return;
     }
+    state.push_undo();
     let buf = &state.buffer;
     let end = state.cursor_pos;
     let before = &buf[..end];
@@ -266,16 +289,19 @@ fn delete_word_backward(state: &mut InputState) {
     let trimmed_end = before.trim_end().len();
     if trimmed_end == 0 {
         // Delete everything to start
+        let killed = state.buffer[..end].to_string();
         state.buffer.replace_range(..end, "");
         state.cursor_pos = 0;
+        state.push_kill(killed);
         return;
     }
 
     // Find start of word
     let word_start = before[..trimmed_end].rfind(' ').map(|p| p + 1).unwrap_or(0);
-
+    let killed = state.buffer[word_start..end].to_string();
     state.buffer.replace_range(word_start..end, "");
     state.cursor_pos = word_start;
+    state.push_kill(killed);
 }
 
 /// Delete from cursor to start of line (Ctrl+U behavior).
@@ -283,8 +309,11 @@ fn delete_to_start(state: &mut InputState) {
     if state.cursor_pos == 0 {
         return;
     }
+    state.push_undo();
+    let killed = state.buffer[..state.cursor_pos].to_string();
     state.buffer.replace_range(..state.cursor_pos, "");
     state.cursor_pos = 0;
+    state.push_kill(killed);
 }
 
 /// Delete from cursor to end of line (Ctrl+K behavior).
@@ -292,7 +321,10 @@ fn delete_to_end(state: &mut InputState) {
     if state.cursor_pos >= state.buffer.len() {
         return;
     }
+    state.push_undo();
+    let killed = state.buffer[state.cursor_pos..].to_string();
     state.buffer.replace_range(state.cursor_pos.., "");
+    state.push_kill(killed);
 }
 
 #[cfg(test)]

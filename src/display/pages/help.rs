@@ -228,6 +228,48 @@ impl Page for HelpPage {
     }
 }
 
+impl HelpPage {
+    /// Handle a mouse click on the help page.
+    pub fn handle_click(&mut self, _mouse_col: u16, mouse_row: u16, area: Rect) -> bool {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // header
+                Constraint::Min(5),    // content
+                Constraint::Length(1), // footer
+            ])
+            .split(area);
+
+        // Check if click is in the content area
+        if mouse_row < chunks[1].y || mouse_row >= chunks[1].y + chunks[1].height {
+            return false;
+        }
+
+        // Calculate which section was clicked
+        let content_row = mouse_row - chunks[1].y - 1; // Account for border
+        let scroll = self.scroll_offset as usize;
+        let absolute_row = content_row as usize + scroll;
+
+        // Find which section this row belongs to
+        let mut current_row = 0;
+        for (i, section) in self.sections.iter_mut().enumerate() {
+            if current_row == absolute_row {
+                // Clicked on a section header
+                self.selected_section = i;
+                section.collapsed = !section.collapsed;
+                return true;
+            }
+            current_row += 1; // Section header
+
+            if !section.collapsed {
+                current_row += section.items.len();
+            }
+        }
+
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

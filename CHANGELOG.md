@@ -4,6 +4,26 @@ All notable changes to NIKI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-08-21
+
+Claude Code parity — interaction, trust, and ecosystem surface.
+
+### Added
+- Visible, draggable scrollbar in the chat viewport (ratatui `Scrollbar`, thumb + track, click/drag-to-jump)
+- Mouse hover system: `HoverTarget` hit-tests across stage headers, messages, status bar, tab bar, modals, help, fleet; click flash + double-click word select in the input box
+- Scroll-wheel routing on every page (chat, pages, permission/palette/menu overlays) with auto-follow pause
+- Kill ring + yank: `Ctrl+Y` yanks the most recent kill, `Alt+Y` cycles (yank-pop); `Ctrl+W/U/K` now delete into the ring
+- Input undo/redo: `Ctrl+Z` / `Ctrl+_` undo, `Ctrl+Y` yank; every edit is snapshot-able
+- Multi-line composer: input area grows to ~1/3 of the screen for multi-line prompts (`render_input_box_multiline` now live)
+- Protected paths & destructive-command enforcement: `.git`, `.ssh`, `/etc`, `rm -rf`, `sudo`, `curl`, `git push`, etc. always prompt regardless of mode
+- Shared skills portability: reads `~/.agents/skills/` (override via `knowledge.skills_dir`), zero-migration
+- Kitty keyboard protocol (progressive adoption, I4): enable/disable around the session + CSI-u decoding for Shift+Enter disambiguation
+- Expanded slash-command set: `/status`, `/permissions`, `/plan`, `/version`, `/rename`, `/fork`, `/branch`, `/usage`, `/effort`, `/mcp`, `/skills`, `/copy`, `/export-md`, `/btw`, `/code-review`, `/security-review`, `/add-dir`, `/loop`, `/voice`
+
+### Changed
+- Chat render now virtualizes to the visible window and renders a live scrollbar
+- Permission modal detail panel (Ctrl+D) and scope selector (Tab) wired to the live permission flow
+
 ## [0.5.0] - 2026-08-19
 
 Claude Code UI parity + bug fixes + demo refresh.

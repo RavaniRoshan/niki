@@ -202,6 +202,89 @@ pub fn render_input_box_multiline(frame: &mut Frame, state: &InputState, area: R
     );
 }
 
+/// Handle a mouse click inside the input box, positioning the cursor.
+/// Returns true if the click was handled.
+pub fn handle_click(state: &mut AppState, mouse_col: u16, area: Rect) -> bool {
+    let inner = Block::default()
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .inner(area);
+
+    if mouse_col < inner.x || mouse_col >= inner.x + inner.width {
+        return false;
+    }
+
+    let col_in_inner = (mouse_col - inner.x) as usize;
+    let inner_width = inner.width as usize;
+
+    // Calculate mode indicator length (same as render)
+    let mode_len = match state.input_state.mode {
+        InputMode::Shell => 7,   // "▎ Shell "
+        InputMode::Command => 5, // "▎ Cmd "
+        InputMode::Insert => 7,  // "▎ Build "
+    };
+
+    if col_in_inner < mode_len {
+        return false;
+    }
+
+    let text_col = col_in_inner - mode_len;
+    let buffer_chars: Vec<char> = state.input_state.buffer.chars().collect();
+    let avail = inner_width.saturating_sub(mode_len + 1);
+
+    // Calculate the scroll window (same logic as render)
+    let cursor = state.input_state.cursor_pos.min(buffer_chars.len());
+    let (start, _end) = if buffer_chars.len() <= avail {
+        (0, buffer_chars.len())
+    } else if cursor < avail {
+        (0, avail)
+    } else {
+        let s = cursor + 1 - avail;
+        (s, (s + avail).min(buffer_chars.len()))
+    };
+
+    // Map click position to buffer position
+    let new_cursor = (start + text_col).min(buffer_chars.len());
+
+    // Check for double-click (select word)
+    let now = std::time::Instant::now();
+    let is_double_click = if let Some(last_time) = state.last_click_time {
+        let elapsed = now.duration_since(last_time).as_millis();
+        elapsed < 500 // Double-click within 500ms
+    } else {
+        false
+    };
+
+    if is_double_click {
+        // Move cursor to start of word at click position
+        let word_start = find_word_start(&buffer_chars, new_cursor);
+        state.input_state.cursor_pos = word_start;
+    } else {
+        state.input_state.cursor_pos = new_cursor;
+    }
+
+    state.last_click_time = Some(now);
+    state.last_click_pos = Some((mouse_col, 0));
+    true
+}
+
+/// Find the start of the word at the given position.
+fn find_word_start(chars: &[char], pos: usize) -> usize {
+    if pos == 0 {
+        return 0;
+    }
+    let mut i = pos;
+    // Skip non-word characters
+    while i > 0 && !chars[i - 1].is_alphanumeric() && chars[i - 1] != '_' {
+        i -= 1;
+    }
+    // Skip word characters
+    while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
+        i -= 1;
+    }
+    i
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

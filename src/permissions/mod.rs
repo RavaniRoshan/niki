@@ -105,6 +105,10 @@ pub struct PermissionConfig {
     pub mode: PermissionMode,
     /// Scope at which approvals are promoted.
     pub scope: PermissionScope,
+    /// Paths that are always prompted for, regardless of mode (e.g. `.git`,
+    /// `.claude`, `~/.ssh`, `~/.aws`). These are host-reaching or security-
+    /// sensitive surfaces that Niki refuses to touch silently.
+    pub protected_paths: Vec<String>,
 }
 
 /// Permission checker — evaluates whether an action is allowed.
@@ -130,7 +134,7 @@ impl PermissionChecker {
     pub fn resolve_tool(&self, tool: &str, in_sandbox: bool) -> Permission {
         match self.config.mode {
             PermissionMode::DontAsk | PermissionMode::BypassPermissions => {
-                return Permission::Allow
+                return Permission::Allow;
             }
             PermissionMode::Auto => {
                 let sandbox_safe = matches!(
@@ -167,6 +171,8 @@ impl PermissionChecker {
 
     /// Check a command against bash permission rules.
     pub fn check_command(&self, command: &str) -> Permission {
+        // 1. Security-policy deny-list wins: explicitly denied commands map to
+        //    Deny regardless of mode (sandbox enforcement).
         for rule in self.config.rules.values() {
             if let Some(ref pattern) = rule.pattern
                 && command.contains(pattern)
@@ -174,12 +180,74 @@ impl PermissionChecker {
                 return rule.permission;
             }
         }
+        // 2. Destructive / host-reaching patterns always prompt (gaps §10 —
+        //    "Protected paths") as a safety net for anything not on the deny-list.
+        if self.is_protected_command(command) {
+            return Permission::Ask;
+        }
         self.config.tools.bash
     }
 
     /// Check if auto-approve is enabled.
     pub fn auto_approve(&self) -> bool {
         self.config.auto_approve
+    }
+
+    /// Default set of paths that are always prompted for — host-reaching and
+    /// security-sensitive surfaces Niki refuses to touch silently (used when
+    /// no custom `protected_paths` are configured).
+    fn default_protected_paths() -> Vec<&'static str> {
+        vec![
+            ".git",
+            ".claude",
+            ".niki",
+            ".ssh",
+            ".aws",
+            ".gnupg",
+            ".env",
+            "node_modules",
+            "/etc",
+            "/proc",
+            "/sys",
+            "/dev",
+        ]
+    }
+
+    /// Whether `path` is on the protected list (always prompted).
+    pub fn is_protected_path(&self, path: &str) -> bool {
+        let lower = path.to_lowercase();
+        let list: Vec<&str> = if self.config.protected_paths.is_empty() {
+            Self::default_protected_paths()
+        } else {
+            self.config
+                .protected_paths
+                .iter()
+                .map(|s| s.as_str())
+                .collect()
+        };
+        list.iter().any(|p| lower.contains(p))
+    }
+
+    /// Whether `command` is a destructive / host-reaching pattern that must
+    /// always be prompted for, regardless of permission mode.
+    pub fn is_protected_command(&self, command: &str) -> bool {
+        let lower = command.to_lowercase();
+        [
+            "rm -rf",
+            "sudo ",
+            "curl ",
+            "wget ",
+            "git push",
+            "git reset --hard",
+            "chmod 777",
+            "mkfs",
+            "dd if=",
+            "sh -c",
+            "/etc/passwd",
+            "/etc/shadow",
+        ]
+        .iter()
+        .any(|p| lower.contains(p))
     }
 }
 
@@ -233,6 +301,32 @@ mod tests {
             Permission::Allow
         );
         assert_eq!(checker.check_command("rm -rf /"), Permission::Ask);
+    }
+
+    #[test]
+    fn checker_protected_command_always_asks() {
+        let config = PermissionConfig {
+            auto_approve: true,
+            ..Default::default()
+        };
+        let checker = PermissionChecker::new(config);
+        assert_eq!(checker.check_command("rm -rf build"), Permission::Ask);
+        assert_eq!(checker.check_command("sudo apt-get install"), Permission::Ask);
+        assert_eq!(checker.check_command("curl https://evil.example"), Permission::Ask);
+        assert_eq!(checker.check_command("git push origin main"), Permission::Ask);
+        assert_eq!(checker.check_command("chmod 777 src/main.rs"), Permission::Ask);
+        // A benign command returns the configured bash permission (Ask by default).
+        assert_eq!(checker.check_command("cargo test"), Permission::Ask);
+    }
+
+    #[test]
+    fn checker_protected_path_detection() {
+        let config = PermissionConfig::default();
+        let checker = PermissionChecker::new(config);
+        assert!(checker.is_protected_path(".git/config"));
+        assert!(checker.is_protected_path("/etc/passwd"));
+        assert!(checker.is_protected_path("/home/alice/.ssh/id_rsa"));
+        assert!(!checker.is_protected_path("src/main.rs"));
     }
 
     #[test]

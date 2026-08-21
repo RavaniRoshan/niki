@@ -766,6 +766,19 @@ pub fn block_border_active() -> Style {
     Style::default().fg(fg(palette().border_active))
 }
 
+/// Style for elements when hovered (subtle background tint).
+pub fn hover_style() -> Style {
+    Style::default().bg(Color::Rgb(40, 44, 52))
+}
+
+/// Stronger hover style for interactive elements (buttons, links).
+pub fn hover_strong_style() -> Style {
+    Style::default()
+        .fg(fg(palette().fg_bright))
+        .bg(Color::Rgb(40, 44, 52))
+        .add_modifier(Modifier::BOLD)
+}
+
 // ── Unicode-aware text utilities ────────────────────────────────────────
 
 /// Truncate a string to fit within `max_width` terminal cells.

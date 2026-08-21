@@ -172,9 +172,9 @@ fn run_page_renders_status_and_pipeline() {
         latency_ms: 0,
         summary: vec![],
         start: Some(std::time::Instant::now()),
-            prompt_file: None,
-            retry_count: 0,
-            error_message: None,
+        prompt_file: None,
+        retry_count: 0,
+        error_message: None,
     });
     let out = render_page(120, 40, &state);
     assert!(out.chars().any(|c| c != ' '), "blank run page");

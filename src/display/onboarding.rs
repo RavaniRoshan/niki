@@ -295,7 +295,9 @@ impl OnboardingModal {
             Line::from(""),
             Line::from(Span::styled(
                 "  Security Note:",
-                Style::default().fg(theme::AMBER()).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::AMBER())
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
                 "  AI agents can make mistakes and there are prompt",

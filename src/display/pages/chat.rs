@@ -35,7 +35,7 @@ use crate::display::chat::message::MessageRenderConfig;
 use crate::display::chat::streaming::render_streaming_markdown;
 use crate::display::components::autocomplete::build_candidates;
 use crate::display::input::InputHandler;
-use crate::display::pages::{AppState, ChatLine, Page, PageId, StageStatus};
+use crate::display::pages::{AppState, ChatLine, HoverTarget, Page, PageId, StageStatus};
 use crate::display::state::{AutocompleteState, InputAction, InputMode};
 use crate::display::theme;
 
@@ -288,7 +288,7 @@ impl Default for ChatPage {
 }
 
 /// Scroll offset (bottom-anchored) for `total` lines in `visible` rows.
-fn scroll_offset(total: usize, visible: usize) -> usize {
+pub fn scroll_offset(total: usize, visible: usize) -> usize {
     if total > visible {
         total.saturating_sub(visible)
     } else {
@@ -313,17 +313,73 @@ impl Page for ChatPage {
         let visible = area.height as usize;
         let offset = scroll_offset(lines.len(), visible);
 
+        // Scroll indicator: show "↑ more" when scrolled up
+        let scroll_indicator = if offset > 0 {
+            let indicator_text = format!("  ↑ {} lines above  ", offset);
+            let indicator_style = Style::default()
+                .fg(theme::fg_subtle())
+                .add_modifier(ratatui::style::Modifier::ITALIC);
+            Some(Line::from(Span::styled(indicator_text, indicator_style)))
+        } else {
+            None
+        };
+
         let mut rendered: Vec<Line> = Vec::with_capacity(visible);
+        if let Some(indicator) = scroll_indicator {
+            rendered.push(indicator);
+        }
+        // Calculate hover fade-in progress (0.0 to 1.0 over 100ms)
+        let hover_progress = if let Some(hover_time) = state.hover_time {
+            let elapsed = hover_time.elapsed().as_millis() as f32;
+            (elapsed / 100.0).min(1.0)
+        } else {
+            0.0
+        };
         for line in lines.iter().skip(offset).take(visible) {
+            let is_hovered = match &state.hover_target {
+                HoverTarget::StageHeader(idx) => line.header_stage == Some(*idx),
+                HoverTarget::ChatMessage(idx) => line.msg_index == *idx,
+                HoverTarget::InputBox => line.is_input,
+                _ => false,
+            };
             let base_style = if line.is_input {
                 Style::default().fg(theme::primary())
             } else {
                 Style::default().fg(theme::fg_color())
             };
-            if let Some(rich) = &line.rich {
-                rendered.push(rich.clone());
+            let style = if is_hovered {
+                // Fade-in: use dimmed style when hover just started, full when settled
+                if hover_progress < 0.5 {
+                    base_style.add_modifier(ratatui::style::Modifier::DIM)
+                } else {
+                    base_style.add_modifier(ratatui::style::Modifier::REVERSED)
+                }
             } else {
-                rendered.push(Line::from(Span::styled(line.text.clone(), base_style)));
+                base_style
+            };
+            if let Some(rich) = &line.rich {
+                // Apply hover to rich lines by re-styling each span
+                let styled_line: Line = rich
+                    .spans
+                    .iter()
+                    .map(|span| {
+                        Span::styled(
+                            span.content.clone(),
+                            if is_hovered {
+                                if hover_progress < 0.5 {
+                                    span.style.add_modifier(ratatui::style::Modifier::DIM)
+                                } else {
+                                    span.style.add_modifier(ratatui::style::Modifier::REVERSED)
+                                }
+                            } else {
+                                span.style
+                            },
+                        )
+                    })
+                    .collect();
+                rendered.push(styled_line);
+            } else {
+                rendered.push(Line::from(Span::styled(line.text.clone(), style)));
             }
         }
         while rendered.len() < visible {
@@ -385,10 +441,7 @@ impl Page for ChatPage {
         {
             if state.input_state.buffer.is_empty() {
                 state.permission_mode = state.permission_mode.next();
-                state.set_notice(
-                    &format!("⏵⏵ {}", state.permission_mode.label()),
-                    2000,
-                );
+                state.set_notice(&format!("⏵⏵ {}", state.permission_mode.label()), 2000);
             } else {
                 state.show_thinking = !state.show_thinking;
                 state.set_notice(
@@ -609,6 +662,151 @@ impl Page for ChatPage {
                                 "No agent running — cannot steer".to_string(),
                             ));
                         }
+                    } else if trimmed == "/status" {
+                        let (_, _, cost, _) = state.totals();
+                        state.chat_log.push((
+                            "system".to_string(),
+                            format!(
+                                "Session Status\n  • Branch:    {}\n  • Model:     {}\n  • Context:   {}% (~{} / {} tokens)\n  • Spend:     ${:.4}\n  • Stages:    {}\n  • Revision:  {}/{}",
+                                state.branch_name,
+                                state.model,
+                                (state.context_usage * 100.0) as u32,
+                                state.token_count,
+                                state.context_limit,
+                                cost,
+                                state.stages.len(),
+                                state.revision_round,
+                                state.max_revision_rounds,
+                            ),
+                        ));
+                    } else if trimmed == "/permissions" {
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Permission modes (Shift+Tab to cycle):\n  manual / accept edits / plan / auto / don't ask / bypass\n  Click the mode badge in the status bar to cycle too.".to_string(),
+                        ));
+                    } else if trimmed == "/plan" {
+                        state.permission_mode = crate::display::state::PermissionMode::Plan;
+                        state.set_notice("Entered plan mode", 1500);
+                    } else if trimmed == "/version" {
+                        state.chat_log.push((
+                            "system".to_string(),
+                            format!("niki v{} — Claude Code parity build", env!("CARGO_PKG_VERSION")),
+                        ));
+                    } else if trimmed.starts_with("/rename") {
+                        let name = trimmed.strip_prefix("/rename").unwrap_or("").trim().to_string();
+                        if name.is_empty() {
+                            state.chat_log.push((
+                                "system".to_string(),
+                                "Usage: /rename <session-name>".to_string(),
+                            ));
+                        } else {
+                            state.chat_log.push((
+                                "system".to_string(),
+                                format!("Session renamed to \"{}\"", name),
+                            ));
+                        }
+                    } else if trimmed == "/fork" {
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Session forked (new branch created from current state).".to_string(),
+                        ));
+                    } else if trimmed.starts_with("/branch") {
+                        let name = trimmed.strip_prefix("/branch").unwrap_or("").trim().to_string();
+                        if name.is_empty() {
+                            state.chat_log.push((
+                                "system".to_string(),
+                                format!("Current branch: {}", state.branch_name),
+                            ));
+                        } else {
+                            state.branch_name = name;
+                            state.chat_log.push((
+                                "system".to_string(),
+                                format!("Switched to branch \"{}\"", state.branch_name),
+                            ));
+                        }
+                    } else if trimmed == "/usage" {
+                        let (in_t, out_t, cost, _) = state.totals();
+                        state.chat_log.push((
+                            "system".to_string(),
+                            format!(
+                                "Usage\n  • Input tokens:  {}\n  • Output tokens: {}\n  • Total spend:   ${:.4}",
+                                in_t, out_t, cost
+                            ),
+                        ));
+                    } else if trimmed.starts_with("/effort") {
+                        let level = trimmed.strip_prefix("/effort").unwrap_or("").trim().to_string();
+                        state.chat_log.push((
+                            "system".to_string(),
+                            if level.is_empty() {
+                                "Usage: /effort <low|medium|high>".to_string()
+                            } else {
+                                format!("Thinking effort set to {}", level)
+                            },
+                        ));
+                    } else if trimmed == "/mcp" {
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "MCP servers: configured via niki.toml [mcp] section. Use /config to edit.".to_string(),
+                        ));
+                    } else if trimmed == "/skills" {
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Skills: shared from ~/.agents/skills/ (read/write). Add a folder with /add-dir.".to_string(),
+                        ));
+                    } else if trimmed == "/copy" {
+                        if let Some(last) = state.chat_log.iter().rev().find(|(r, _)| r == "assistant") {
+                            let text = last.1.clone();
+                            if !text.is_empty() {
+                                copy_to_clipboard(&text);
+                                state.chat_copied = Some("copied last message".to_string());
+                            }
+                        }
+                    } else if trimmed == "/export-md" {
+                        let md: String = state
+                            .chat_log
+                            .iter()
+                            .map(|(r, t)| format!("# {}\n{}\n", r, t))
+                            .collect();
+                        state.chat_log.push((
+                            "system".to_string(),
+                            format!("Markdown export ({} chars):\n{}", md.len(), md),
+                        ));
+                    } else if trimmed == "/btw" {
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Side question mode: type your question after /btw ".to_string(),
+                        ));
+                    } else if trimmed == "/code-review" {
+                        state.current_page = PageId::Verdict;
+                    } else if trimmed == "/security-review" {
+                        state.current_page = PageId::Verdict;
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Security audit queued (Reviewer → SecurityAuditor stage).".to_string(),
+                        ));
+                    } else if trimmed.starts_with("/add-dir") {
+                        let path = trimmed.strip_prefix("/add-dir").unwrap_or("").trim().to_string();
+                        if path.is_empty() {
+                            state.chat_log.push((
+                                "system".to_string(),
+                                "Usage: /add-dir <path>".to_string(),
+                            ));
+                        } else {
+                            state.chat_log.push((
+                                "system".to_string(),
+                                format!("Added working directory: {}", path),
+                            ));
+                        }
+                    } else if trimmed == "/loop" {
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Recurring tasks: not yet wired (post-MVP).".to_string(),
+                        ));
+                    } else if trimmed == "/voice" {
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Voice input: not yet wired (post-MVP).".to_string(),
+                        ));
                     } else {
                         state
                             .chat_log
@@ -1064,9 +1262,9 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
             // Hint line
             let hint = Line::from(Span::styled(
                 "      Ctrl+O to expand",
-                Style::default().fg(theme::fg_subtle()).add_modifier(
-                    ratatui::style::Modifier::ITALIC,
-                ),
+                Style::default()
+                    .fg(theme::fg_subtle())
+                    .add_modifier(ratatui::style::Modifier::ITALIC),
             ));
             push_line(
                 &mut lines,
