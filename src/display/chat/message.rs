@@ -73,7 +73,7 @@ pub fn render_user_message(
     lines.push(Line::from(""));
 
     // Content as markdown
-    lines.extend(render_markdown(content, config.width, config));
+    lines.extend(render_markdown(content, config.width, config, true));
 
     // Timestamp (if enabled)
     if config.show_timestamps {
@@ -113,7 +113,7 @@ pub fn render_assistant_message(
     lines.push(Line::from(""));
 
     // Content as markdown
-    lines.extend(render_markdown(content, config.width, config));
+    lines.extend(render_markdown(content, config.width, config, true));
 
     // Tool calls — collapse consecutive read-only operations
     let groups = group_tool_calls(tool_calls);

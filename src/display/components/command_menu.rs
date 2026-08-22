@@ -1,5 +1,6 @@
 //! Slash command menu overlay.
 
+use nucleo::{Matcher, Utf32Str};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -13,13 +14,40 @@ use crate::display::theme;
 /// Maximum number of command rows shown at once.
 const MAX_VISIBLE: usize = 10;
 
+/// Lazily-built fuzzy matcher for command filtering.
+fn matcher() -> Matcher {
+    Matcher::default()
+}
+
 /// Commands matching the current filter, in row order.
+///
+/// Uses nucleo fuzzy matching (subsequence + scoring) instead of naive substring
+/// so e.g. `/co` matches `/compact` and `/cost` and `/commit` without requiring a
+/// contiguous substring. Empty filter shows everything.
 fn filtered_commands(state: &AppState) -> Vec<&Command> {
     let filter = state.command_filter.trim_start_matches('/');
+    if filter.is_empty() {
+        return state.commands.iter().collect();
+    }
+    let query = filter.to_ascii_lowercase();
+    let mut m = matcher();
     state
         .commands
         .iter()
-        .filter(|c| filter.is_empty() || c.name.contains(filter) || c.description.contains(filter))
+        .filter(|c| {
+            let name = c.name.to_ascii_lowercase();
+            let desc = c.description.to_ascii_lowercase();
+            m.fuzzy_match(
+                Utf32Str::Ascii(name.as_bytes()),
+                Utf32Str::Ascii(query.as_bytes()),
+            )
+            .is_some()
+                || m.fuzzy_match(
+                    Utf32Str::Ascii(desc.as_bytes()),
+                    Utf32Str::Ascii(query.as_bytes()),
+                )
+                .is_some()
+        })
         .collect()
 }
 

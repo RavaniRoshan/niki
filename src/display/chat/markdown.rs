@@ -17,19 +17,42 @@ use super::code_block::render_code_block;
 use super::message::MessageRenderConfig;
 
 /// Render markdown text to a list of `Line`s.
+///
+/// When `highlight` is `false` (used while a message is still streaming) code
+/// blocks are rendered without syntax highlighting. This is the first phase of a
+/// two-phase render: the raw text appears instantly (low TTFT), then the final
+/// message is re-rendered with `highlight = true` so the syntax colors land in
+/// one stable pass instead of flickering back to plain mid-stream.
 pub fn render_markdown(
     input: &str,
     width: usize,
     config: &MessageRenderConfig,
+    highlight: bool,
 ) -> Vec<Line<'static>> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
 
     let parser = Parser::new_ext(input, options);
-    let mut renderer = MarkdownRenderer::new(width, config);
+    let mut renderer = MarkdownRenderer::new(width, config, highlight);
     renderer.run(parser);
     renderer.finish()
+}
+
+/// Plain (un-highlighted) code block for two-phase streaming render.
+fn render_code_block_plain(
+    code: &str,
+    _width: usize,
+    config: &MessageRenderConfig,
+) -> Vec<Line<'static>> {
+    code.lines()
+        .map(|l| {
+            Line::from(Span::styled(
+                l.to_string(),
+                Style::default().fg(config.border_color),
+            ))
+        })
+        .collect()
 }
 
 /// Internal markdown renderer state.
@@ -38,6 +61,7 @@ struct MarkdownRenderer<'a> {
     current_line: Line<'static>,
     config: &'a MessageRenderConfig,
     width: usize,
+    highlight: bool,
     in_code_block: bool,
     code_lang: String,
     code_content: String,
@@ -46,12 +70,13 @@ struct MarkdownRenderer<'a> {
 }
 
 impl<'a> MarkdownRenderer<'a> {
-    fn new(width: usize, config: &'a MessageRenderConfig) -> Self {
+    fn new(width: usize, config: &'a MessageRenderConfig, highlight: bool) -> Self {
         Self {
             lines: Vec::new(),
             current_line: Line::default(),
             config,
             width,
+            highlight,
             in_code_block: false,
             code_lang: String::new(),
             code_content: String::new(),
@@ -165,8 +190,11 @@ impl<'a> MarkdownRenderer<'a> {
             }
             TagEnd::CodeBlock => {
                 self.in_code_block = false;
-                let code_lines =
-                    render_code_block(&self.code_content, &self.code_lang, self.width, self.config);
+                let code_lines = if self.highlight {
+                    render_code_block(&self.code_content, &self.code_lang, self.width, self.config)
+                } else {
+                    render_code_block_plain(&self.code_content, self.width, self.config)
+                };
                 self.lines.extend(code_lines);
                 self.code_content.clear();
                 self.code_lang.clear();
@@ -316,14 +344,14 @@ mod tests {
     #[test]
     fn render_plain_text() {
         let config = test_config();
-        let lines = render_markdown("Hello world", 80, &config);
+        let lines = render_markdown("Hello world", 80, &config, true);
         assert!(!lines.is_empty());
     }
 
     #[test]
     fn render_heading() {
         let config = test_config();
-        let lines = render_markdown("# Title", 80, &config);
+        let lines = render_markdown("# Title", 80, &config, true);
         assert!(!lines.is_empty());
         // Heading should contain a '#' marker
         assert!(
@@ -336,7 +364,7 @@ mod tests {
     #[test]
     fn render_inline_code() {
         let config = test_config();
-        let lines = render_markdown("Use `cargo build`", 80, &config);
+        let lines = render_markdown("Use `cargo build`", 80, &config, true);
         assert!(!lines.is_empty());
     }
 
@@ -344,7 +372,7 @@ mod tests {
     fn render_code_block() {
         let config = test_config();
         let input = "```rust\nfn main() {}\n```";
-        let lines = render_markdown(input, 80, &config);
+        let lines = render_markdown(input, 80, &config, true);
         assert!(lines.len() >= 2); // at least border + code line
     }
 
@@ -352,7 +380,7 @@ mod tests {
     fn render_list() {
         let config = test_config();
         let input = "- item 1\n- item 2";
-        let lines = render_markdown(input, 80, &config);
+        let lines = render_markdown(input, 80, &config, true);
         assert!(!lines.is_empty());
         // Should contain list items
         assert!(
@@ -365,7 +393,7 @@ mod tests {
     #[test]
     fn render_empty() {
         let config = test_config();
-        let lines = render_markdown("", 80, &config);
+        let lines = render_markdown("", 80, &config, true);
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].spans.len(), 0);
     }
@@ -373,14 +401,14 @@ mod tests {
     #[test]
     fn render_blockquote() {
         let config = test_config();
-        let lines = render_markdown("> Quote", 80, &config);
+        let lines = render_markdown("> Quote", 80, &config, true);
         assert!(!lines.is_empty());
     }
 
     #[test]
     fn render_rule() {
         let config = test_config();
-        let lines = render_markdown("---", 80, &config);
+        let lines = render_markdown("---", 80, &config, true);
         assert!(
             lines
                 .iter()

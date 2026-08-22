@@ -297,6 +297,40 @@ fn run_tui(
         if event::poll(Duration::from_millis(16)).unwrap_or(false) {
             match event::read() {
                 Ok(Event::Key(key)) => {
+                    // Global keys that work even inside chat input.
+                    if key.code == KeyCode::Char('?') {
+                        // `?` toggles the which-key style keybinding overlay.
+                        state.show_help = !state.show_help;
+                        engine.mark_dirty();
+                        continue;
+                    }
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && key.code == KeyCode::Char('e')
+                    {
+                        // Ctrl+E toggles mouse capture so the terminal's native
+                        // drag-to-select works. Keyboard scrolling stays the
+                        // default; this reconciles scroll vs text-selection.
+                        state.mouse_capture = !state.mouse_capture;
+                        if state.mouse_capture {
+                            let _ =
+                                ratatui::crossterm::execute!(std::io::stdout(), EnableMouseCapture);
+                        } else {
+                            let _ = ratatui::crossterm::execute!(
+                                std::io::stdout(),
+                                DisableMouseCapture
+                            );
+                        }
+                        engine.mark_dirty();
+                        continue;
+                    }
+                    // Help overlay captures all input until dismissed.
+                    if state.show_help {
+                        if key.code == KeyCode::Esc {
+                            state.show_help = false;
+                        }
+                        engine.mark_dirty();
+                        continue;
+                    }
                     // Onboarding modal takes priority
                     if let Some(ref mut onboard) = state.onboarding {
                         match onboard.handle_key(key) {
@@ -556,6 +590,12 @@ fn run_tui(
                 }
                 Ok(Event::Mouse(mouse)) => {
                     use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+                    // Clicking anywhere dismisses the help overlay.
+                    if state.show_help {
+                        state.show_help = false;
+                        engine.mark_dirty();
+                        continue;
+                    }
                     // Hover (move/drag) moves the highlight; a left press activates.
                     let hovering =
                         matches!(mouse.kind, MouseEventKind::Moved | MouseEventKind::Drag(_));
@@ -1108,6 +1148,33 @@ pub fn run_chat(
                     continue;
                 }
 
+                // Global keys that work even inside chat input.
+                if key.code == KeyCode::Char('?') {
+                    state.show_help = !state.show_help;
+                    needs_render = true;
+                    continue;
+                }
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('e') {
+                    state.mouse_capture = !state.mouse_capture;
+                    if state.mouse_capture {
+                        let _ = ratatui::crossterm::execute!(std::io::stdout(), EnableMouseCapture);
+                    } else {
+                        let _ =
+                            ratatui::crossterm::execute!(std::io::stdout(), DisableMouseCapture);
+                    }
+                    needs_render = true;
+                    continue;
+                }
+
+                // Help overlay captures all input until dismissed.
+                if state.show_help {
+                    if key.code == KeyCode::Esc {
+                        state.show_help = false;
+                    }
+                    needs_render = true;
+                    continue;
+                }
+
                 if let Some(ref modal) = state.modal.clone() {
                     match modal::handle_modal_key(key, modal) {
                         ModalAction::Dismiss | ModalAction::Skip => {
@@ -1288,7 +1355,13 @@ fn render_activity_spinner(
         progress,
         (area.width as usize).saturating_sub(24),
     );
-    let spinner = crate::display::components::SpinnerState::with_tick(state.tick);
+    let reduced_motion =
+        state.config.ui.reduced_motion || std::env::var_os("NIKI_REDUCED_MOTION").is_some();
+    let spinner = crate::display::components::SpinnerState::with_tick(if reduced_motion {
+        0
+    } else {
+        state.tick
+    });
     let mut spans = vec![spinner.render()];
     spans.push(ratatui::text::Span::styled(
         format!(
@@ -1374,6 +1447,11 @@ fn render(
     // Render command palette overlay if present
     if state.show_command_palette {
         super::command_palette::render_command_palette(frame, command_palette, size);
+    }
+
+    // Render which-key style help overlay if present
+    if state.show_help {
+        super::help_overlay::render_help_overlay(frame, size);
     }
 
     // Render slash command menu overlay if present (was dead component — now live)
