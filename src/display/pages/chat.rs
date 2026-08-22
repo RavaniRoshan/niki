@@ -959,7 +959,7 @@ fn markdown_rows(body: &str, width: usize, streaming: bool) -> Vec<ChatLine> {
     let rendered = if streaming {
         render_streaming_markdown(body, inner, &cfg)
     } else {
-        render_markdown(body, inner, &cfg)
+        render_markdown(body, inner, &cfg, true)
     };
     let mut out = Vec::with_capacity(rendered.len());
     for l in rendered {

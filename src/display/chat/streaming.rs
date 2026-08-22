@@ -38,7 +38,7 @@ pub fn render_streaming_markdown(
     config: &MessageRenderConfig,
 ) -> Vec<Line<'static>> {
     let trimmed = trim_partial_closing_fences(body);
-    render_markdown(&trimmed, width, config)
+    render_markdown(&trimmed, width, config, false)
 }
 
 #[cfg(test)]

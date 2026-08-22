@@ -453,6 +453,9 @@ pub struct UiConfig {
     /// reporting. Disabled by default because it is a no-op under tmux/screen
     /// and in test environments.
     pub ime_anchor: bool,
+    #[serde(default)]
+    /// Disable spinner/animation motion (honors `NIKI_REDUCED_MOTION` env too).
+    pub reduced_motion: bool,
 }
 
 /// Transcript view configuration.

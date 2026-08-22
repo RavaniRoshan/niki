@@ -714,6 +714,9 @@ pub struct AppState {
     pub scroll_offset: usize,
     /// Auto-scroll to bottom on new messages.
     pub auto_scroll: bool,
+    /// Whether terminal mouse capture is enabled (toggle with Ctrl+E so native
+    /// drag-to-select works). Defaults to true.
+    pub mouse_capture: bool,
     /// Conversation messages.
     pub messages: Vec<Message>,
     /// Current input state.
@@ -933,6 +936,7 @@ impl AppState {
             current_page: PageId::Run,
             scroll_offset: 0,
             auto_scroll: true,
+            mouse_capture: true,
             messages: Vec::new(),
             input_state: InputState::new(),
             show_command_menu: false,
