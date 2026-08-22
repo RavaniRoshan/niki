@@ -1,0 +1,50 @@
+# TUI Smoke (tmux)
+#
+# Black-box smoke tests for the real `niki` binary, driven through a dedicated
+# tmux server (isolated socket). Offline / headless-first: no model call, no
+# network, no credentials. Complements tests/headless_tui.py (tuiwright) by
+# exercising the actual terminal boundary (real PTY) rather than an emulator.
+#
+# See research/headless-tui-testing.md (S10) for the rationale.
+
+name: TUI Smoke (tmux)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'tests/tui_smoke/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/tui-smoke.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tui-smoke:
+    name: TUI smoke (tmux PTY)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Build release binary
+        run: cargo build --release
+      - name: Run TUI smoke suite
+        env:
+          REQUIRE_TMUX: "1"
+          NIKI_BIN: target/release/niki
+        run: ./tests/tui_smoke/run.sh
+      - name: Upload failure captures
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tui-smoke-logs
+          path: tui-smoke-logs/**
