@@ -166,7 +166,7 @@ pub fn render_tool_call(
     let mut lines = vec![];
 
     let (icon, color) = match tool_call.status {
-        ToolCallStatus::Running => ("⏵ ", config.primary_color),
+        ToolCallStatus::Running => ("⏵ ", crate::display::theme::warning()),
         ToolCallStatus::Done => ("⎿ ", config.success_color),
         ToolCallStatus::Failed => ("✗ ", config.error_color),
     };

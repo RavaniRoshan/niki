@@ -344,7 +344,8 @@ fn render_diff_with_line_numbers(
                 format!("-{}", content),
                 Style::default()
                     .fg(theme::DIFF_DEL_FG())
-                    .bg(theme::DIFF_DEL_BG()),
+                    .bg(theme::DIFF_DEL_BG())
+                    .add_modifier(Modifier::DIM),
             ));
             lines.push(Line::from(spans));
             prev_deletion = Some(content.to_string());
