@@ -14,6 +14,7 @@ use std::io::{self};
 use std::time::{Duration, Instant};
 
 use ratatui::Terminal;
+use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
 
 /// Rolling frame-time statistics for performance monitoring.
@@ -110,17 +111,21 @@ pub enum FrameTarget {
 
 /// Thin shell around the `ratatui` terminal that owns the frame-rate policy and
 /// dirty flag. All actual pixel work happens in `ratatui::Terminal::draw`.
-pub struct RenderEngine {
-    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+///
+/// Generic over `ratatui::backend::Backend` so tests can drive the engine with
+/// a `TestBackend` — unit tests must not require a real TTY (headless CI has
+/// none, which is exactly what broke these tests before).
+pub struct RenderEngine<B: Backend = CrosstermBackend<io::Stdout>> {
+    terminal: Terminal<B>,
     target: FrameTarget,
     dirty: bool,
     frame_start: Option<Instant>,
     stats: FrameStats,
 }
 
-impl RenderEngine {
+impl<B: Backend> RenderEngine<B> {
     /// Create a new render engine, taking ownership of the terminal.
-    pub fn new(terminal: Terminal<CrosstermBackend<io::Stdout>>, _synchronized: bool) -> Self {
+    pub fn new(terminal: Terminal<B>, _synchronized: bool) -> Self {
         Self {
             terminal,
             target: FrameTarget::Low,
@@ -159,12 +164,12 @@ impl RenderEngine {
     }
 
     /// Get a reference to the terminal (for size queries etc.).
-    pub fn terminal(&self) -> &Terminal<CrosstermBackend<io::Stdout>> {
+    pub fn terminal(&self) -> &Terminal<B> {
         &self.terminal
     }
 
     /// Get a mutable reference to the terminal (the caller does the real draw).
-    pub fn terminal_mut(&mut self) -> &mut Terminal<CrosstermBackend<io::Stdout>> {
+    pub fn terminal_mut(&mut self) -> &mut Terminal<B> {
         &mut self.terminal
     }
 
@@ -189,6 +194,7 @@ impl RenderEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::TestBackend;
 
     #[test]
     fn frame_target_intervals() {
@@ -198,8 +204,7 @@ mod tests {
 
     #[test]
     fn engine_dirty_flag_lifecycle() {
-        let backend = CrosstermBackend::new(io::stdout());
-        let terminal = Terminal::new(backend).expect("terminal");
+        let terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         let mut engine = RenderEngine::new(terminal, false);
         assert!(engine.needs_render());
         engine.mark_clean_for_render();
@@ -210,8 +215,7 @@ mod tests {
 
     #[test]
     fn engine_frame_interval_matches_target() {
-        let backend = CrosstermBackend::new(io::stdout());
-        let terminal = Terminal::new(backend).expect("terminal");
+        let terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         let mut engine = RenderEngine::new(terminal, false);
         assert_eq!(engine.frame_interval_ms(), 33);
         engine.set_target(FrameTarget::High);
@@ -244,8 +248,7 @@ mod tests {
 
     #[test]
     fn engine_begin_end_frame_records_stats() {
-        let backend = CrosstermBackend::new(io::stdout());
-        let terminal = Terminal::new(backend).expect("terminal");
+        let terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal");
         let mut engine = RenderEngine::new(terminal, false);
         assert_eq!(engine.stats().len(), 0);
         engine.begin_frame();
