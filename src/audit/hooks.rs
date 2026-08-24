@@ -171,9 +171,11 @@ fn run_one(command: &str, event: HookEvent, payload: &str) -> HookOutcome {
 
     let stdin = child.stdin.take();
     if let Some(mut s) = stdin {
-        if s.write_all(payload.as_bytes()).is_err() {
-            return HookOutcome::Noop;
-        }
+        // Best-effort payload delivery: a hook that exits without reading
+        // stdin (e.g. `exit 2` scripts) can close the pipe before we finish
+        // writing. That must NOT veto the verdict — the exit code carries it.
+        // Dropping `s` here flushes/closes our end either way.
+        let _ = s.write_all(payload.as_bytes());
     }
 
     let output = match child.wait_with_output() {
