@@ -44,16 +44,27 @@ tui_new_session() {
   local proj="$1"
   SMOKE_SOCK="niki-tui-smoke-$$-$RANDOM"
   SMOKE_SESS="niki-smoke"
+  # Pin the terminal type/size so layout assertions are deterministic.
+  # Override with TUI_TERM if a case needs a different terminfo entry.
   tmux -L "$SMOKE_SOCK" new-session -d -s "$SMOKE_SESS" -x "$TUI_COLS" -y "$TUI_ROWS" \
-    "env TERM=tmux-256color LANG=C.UTF-8 TZ=UTC '$NIKI_BIN' chat -p '$proj'"
-  # Give the PTY a beat to attach, then dismiss the onboarding modal.
-  sleep 1
+    "env TERM=${TUI_TERM:-tmux-256color} LANG=C.UTF-8 TZ=UTC '$NIKI_BIN' chat -p '$proj'"
+  # Poll for first paint (never a fixed sleep), then dismiss the onboarding
+  # modal once the UI is actually up to receive the key.
+  local deadline=$((SECONDS + 10))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if [ -n "$(tui_capture | tr -d '[:space:]')" ]; then break; fi
+    sleep 0.1
+  done
   tmux -L "$SMOKE_SOCK" send-keys -t "$SMOKE_SESS" Escape
 }
 
 tui_send() { tmux -L "$SMOKE_SOCK" send-keys -t "$SMOKE_SESS" "$@"; }
 
 tui_capture() { tmux -L "$SMOKE_SOCK" capture-pane -t "$SMOKE_SESS" -p 2>/dev/null || true; }
+
+# Attribute-preserving capture (escape sequences retained) for cases that
+# assert on colors/styles rather than plain text.
+tui_capture_esc() { tmux -L "$SMOKE_SOCK" capture-pane -t "$SMOKE_SESS" -p -e 2>/dev/null || true; }
 
 # Poll the rendered screen until `pattern` (ERE) appears, or time out.
 tui_wait_for() {

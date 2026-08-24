@@ -14,19 +14,36 @@ Env:  NIKI_BIN=/path/to/niki   (default: target/release/niki)
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import pytest
 
-pytestmark = pytest.mark.headless
+pytestmark = [
+    pytest.mark.headless,
+    # tuiwright drives a POSIX PTY via ptyprocess; there is no ConPTY path yet.
+    # The Windows lane is covered by the shell-use/tui-test pilot instead.
+    pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="PTY harness is POSIX-only (see research/ultimate-test-suite-niki.md Phase 2)",
+    ),
+]
 
-BIN = os.environ.get("NIKI_BIN", "target/release/niki")
+BIN = os.environ.get(
+    "NIKI_BIN",
+    "target/release/niki.exe" if sys.platform == "win32" else "target/release/niki",
+)
 COLS = int(os.environ.get("NIKI_COLS", "120"))
 ROWS = int(os.environ.get("NIKI_ROWS", "30"))
 
+# Failure artifacts (screen dumps) land here for CI upload.
+ARTIFACT_DIR = os.environ.get("NIKI_TUI_ARTIFACTS", ".niki/tui-failures")
+
 
 def _session():
-    from tuiwright import TuiSession
-
+    try:
+        from tuiwright import TuiSession
+    except ImportError:
+        pytest.skip("tuiwright not installed (pip install tuiwright pytest-asyncio)")
     return TuiSession()
 
 
@@ -172,3 +189,27 @@ async def test_session_exits_cleanly():
     await s.press("ctrl+c")
     code = await s.stop(timeout=5.0)
     assert code == 0
+
+
+# ---------------------------------------------------------------------------
+# Failure diagnostics: dump the last rendered screen so a red CI run tells you
+# WHAT the pane looked like, not just that an await timed out.
+# ---------------------------------------------------------------------------
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    if report.when != "call" or not report.failed:
+        return
+    session = item.funcargs.get("chat") if hasattr(item, "funcargs") else None
+    if session is None or not hasattr(session, "screen"):
+        return
+    try:
+        os.makedirs(ARTIFACT_DIR, exist_ok=True)
+        path = os.path.join(ARTIFACT_DIR, f"{item.name}.screen.txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(str(session.screen))
+        report.sections.append(("Captured TUI screen", f"saved to {path}"))
+    except Exception:  # noqa: BLE001 - diagnostics must never mask the test failure
+        pass

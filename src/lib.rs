@@ -48,6 +48,7 @@ pub mod runtime;
 pub mod safety;
 pub mod sandbox;
 pub mod session;
+pub mod shell;
 pub mod tools;
 pub mod util;
 

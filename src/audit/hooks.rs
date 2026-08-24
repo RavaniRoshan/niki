@@ -152,7 +152,10 @@ impl HookBus {
 
 /// Run a single hook command and interpret its exit contract.
 fn run_one(command: &str, event: HookEvent, payload: &str) -> HookOutcome {
-    let mut child = match Command::new("sh")
+    let Some(shell) = crate::shell::resolve_shell() else {
+        return HookOutcome::Noop;
+    };
+    let mut child = match Command::new(shell)
         .arg("-c")
         .arg(command)
         .env("NIKI_HOOK_EVENT", event.as_str())

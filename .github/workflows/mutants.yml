@@ -1,0 +1,42 @@
+# Nightly mutation testing (cargo-mutants), non-blocking trend lane.
+#
+# Policy (research report Phase 4):
+#   - Full sweeps are nightly + informational; they cost mutants x suite-time
+#     and must never block merges.
+#   - For fast per-PR signal, run diff-scoped checks locally:
+#       cargo mutants --in-diff <(git diff master) -- --lib
+#   - Prerequisite: a flaky-free suite — mutants results are meaningless if
+#     tests can fail spuriously (nextest ci profile enforces flaky-result=fail).
+
+name: Mutation Testing (nightly)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutants:
+    name: cargo-mutants (lib)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@cargo-mutants
+      - name: Run mutation testing (library surface)
+        continue-on-error: true
+        run: cargo mutants --no-shuffle -v -- --lib
+      - name: Upload mutant results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutants-out
+          path: mutants.out/**
+          retention-days: 30

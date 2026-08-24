@@ -1,6 +1,6 @@
 ---
 title: CLI Overview
-description: Complete inventory of all 16 NIKI CLI commands.
+description: Complete inventory of all 18 NIKI CLI commands.
 sidebar:
   order: 1
   label: CLI Overview
@@ -8,7 +8,7 @@ sidebar:
 
 # NIKI CLI Command Overview
 
-NIKI ships with 16 top-level CLI commands organized into 4 logical categories:
+NIKI ships with 18 top-level CLI commands organized into 4 logical categories:
 
 ---
 
@@ -32,12 +32,15 @@ NIKI ships with 16 top-level CLI commands organized into 4 logical categories:
 ## 3. Autonomous Agents & Memory
 * **`niki goal`**: Autonomous long-running goal runner with self-healing and drift recovery.
 * **`niki memory`**: Inspect, query, tag, or prune hierarchical cross-session project memory.
-* **`niki research <query>`**: Autonomous web search & cited technical summary generator.
+* **`niki research query <q>`**: Autonomous web search & cited technical summary generator.
 
 ---
 
-## 4. Interactive TUI, Benchmarking & Verification
-* **`niki chat`**: Interactive terminal chat interface with streaming markdown and slash commands.
+## 4. Interactive TUI, IDE Integration, Benchmarking & Verification
+* **`niki chat`**: Interactive terminal chat interface with streaming markdown and slash commands (the default when invoked bare).
+* **`niki acp`**: Run NIKI as an Agent Client Protocol (ACP) JSON-RPC server over stdio for IDEs like Zed (`--project <dir>`).
+* **`niki voice`**: Record a push-to-talk clip via `ffmpeg` and transcribe it through your provider's STT endpoint (`--seconds`, `--language`).
 * **`niki smoke`**: End-to-end smoke testing harness for pipeline verification.
 * **`niki eval`**: Benchmark NIKI on seeded defect datasets.
 * **`niki verify`**: Visual screenshot regression testing and manifest tracking.
+

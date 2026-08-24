@@ -54,3 +54,14 @@ __pycache__/
 
 # TUI smoke suite transient captures
 tui-smoke-logs/
+
+# Goal-runner local state (machine-specific env paths)
+.kilo/
+
+# Local build/probe artifacts
+target-build*.log
+tui-failures/
+mutants.out*/
+
+# xwin MSVC/SDK cache (machine-local build tooling)
+.xwin-cache/

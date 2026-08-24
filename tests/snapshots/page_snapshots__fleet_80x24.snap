@@ -1,0 +1,28 @@
+---
+source: tests/page_snapshots.rs
+expression: narrow
+---
+ NIKI / FLEET  1 missions · 1 active · $0.01                                    
+                                                                                
+┌add a health endpoint───────────────┐                                          
+│● RUNNING                           │                                          
+│                                    │                                          
+│0 agents                            │                                          
+│50% · $0.01 · 0s                    │                                          
+│                                    │                                          
+└────────────────────────────────────┘                                          
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+ ↑↓ Navigate · Enter Open · P Pause · R Resume · K Kill · V Diff · Esc Back

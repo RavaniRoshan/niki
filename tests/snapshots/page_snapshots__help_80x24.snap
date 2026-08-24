@@ -1,0 +1,28 @@
+---
+source: tests/page_snapshots.rs
+expression: narrow
+---
+ help                                                                           
+┌ KEY BINDINGS ────────────────────────────────────────────────────────────────┐
+│  ▾ GLOBAL                                                                    │
+│    [q] quit              Quit NIKI                                           │
+│    [Esc] close/back      Close current modal or return to previous page      │
+│    [?] this help         Toggle this help page                               │
+│    [Ctrl+P] commands     Open command palette                                │
+│    [Ctrl+T] theme        Cycle light/dark/auto themes                        │
+│  ▾ PAGES                                                                     │
+│    [p] pipeline          View pipeline stage cards and status                │
+│    [a] agents            View agent transcripts and token usage              │
+│    [d] diff              View code changes with line numbers                 │
+│    [v] verdict           View reviewer verdict and report                    │
+│    [c] cost              View token usage and cost breakdown                 │
+│    [f] artifacts         Browse generated artifacts                          │
+│    [h] history           View past runs from .niki/tasks/                    │
+│    [,] config            View and edit niki.toml settings                    │
+│  ▾ RUN                                                                       │
+│    [Space] pause/resume  Pause or resume live stream                         │
+│    [g/G] top/bottom      Scroll to top or bottom of stream                   │
+│    [j/k] scroll          Scroll up/down line by line                         │
+│  ▾ PIPELINE / AGENTS                                                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+ [j/k] navigate sections   [Enter] toggle   [?] or [Esc] close help

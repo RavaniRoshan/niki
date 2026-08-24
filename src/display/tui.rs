@@ -15,6 +15,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::artifacts::types::AgentRole;
+use crate::display::perf;
 use crate::display::theme;
 use crate::permissions::PermissionAction;
 use ratatui::Terminal;
@@ -245,6 +246,8 @@ fn run_tui(
     let mut last_render = std::time::Instant::now();
     // Tracks the previous Ctrl+C press for the two-press-to-exit behaviour.
     let mut last_ctrl_c: Option<std::time::Instant> = None;
+    // Optional frame/latency instrumentation (NIKI_PERF=1).
+    let mut perf = perf::PerfRecorder::from_env();
 
     loop {
         // Adapt frame target: 60fps while a stage is streaming, else 30fps idle.
@@ -291,10 +294,12 @@ fn run_tui(
 
             engine.mark_clean_for_render();
             last_render = now;
+            perf.note_frame();
         }
 
         // Handle input events (non-blocking, ~16ms poll)
         if event::poll(Duration::from_millis(16)).unwrap_or(false) {
+            perf.note_input();
             match event::read() {
                 Ok(Event::Key(key)) => {
                     // Global keys that work even inside chat input.
@@ -1026,6 +1031,10 @@ fn run_tui(
             io::stdout(),
             ratatui::crossterm::terminal::EndSynchronizedUpdate
         );
+    }
+
+    if perf.enabled() {
+        eprintln!("{}", perf.report());
     }
 }
 

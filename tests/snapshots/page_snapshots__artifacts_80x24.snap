@@ -1,0 +1,28 @@
+---
+source: tests/page_snapshots.rs
+expression: narrow
+---
+ artifacts · niki/e5c8f1                                                        
+┌ FILES ───────────────────────┐┌ PREVIEW ─────────────────────────────────────┐
+│  .niki/e5c8f1/               ││--- a/src/list.rs                             │
+│  ├── report.md   ──          ││+++ b/src/list.rs                             │
+│human-readable summary        ││@@ -28,7 +28,7 @@                             │
+│  ├── changes.patch   ──      ││-    let end = start + size - 1;              │
+│unified diff                  ││+    let end = start + size;                  │
+│  ├── cost.json   ── per-agent││                                              │
+│cost breakdown                ││                                              │
+│  ├── artifacts/              ││                                              │
+│  │   ├── 01_planner.json   ──││                                              │
+│TaskSpec ✓                    ││                                              │
+│  │   ├── 02_coder.json   ──  ││                                              │
+│CodeDiff ✓                    ││                                              │
+│  │   ├── 03_tester.json   ── ││                                              │
+│TestReport ✓                  ││                                              │
+│  │   └── 04_reviewer.json    ││                                              │
+│── ReviewVerdict ✓            ││                                              │
+│  └── logs/                   ││                                              │
+│      ├── planner.log         ││                                              │
+│      ├── coder.log           ││                                              │
+│      ├── tester.log          ││                                              │
+└──────────────────────────────┘└──────────────────────────────────────────────┘
+ [j/k] navigate   [Esc] back

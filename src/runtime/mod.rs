@@ -905,7 +905,12 @@ impl Tool for BashTool {
         };
         let timeout_ms = input.int("timeout_ms").unwrap_or(30_000) as u64;
 
-        let mut cmd = tokio::process::Command::new("sh");
+        let Some(shell) = crate::shell::resolve_shell() else {
+            return make_error_result(
+                "no POSIX shell found (install Git for Windows or set NIKI_SHELL)",
+            );
+        };
+        let mut cmd = tokio::process::Command::new(shell);
         cmd.arg("-c").arg(command).current_dir(&ctx.project_path);
         #[cfg(unix)]
         cmd.process_group(0);

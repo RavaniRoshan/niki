@@ -2,10 +2,16 @@ name: CI
 
 on:
   workflow_dispatch:
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [master, "goal/**"]
   pull_request:
     branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,6 +22,7 @@ jobs:
   check:
     name: Check (fmt + clippy)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -31,6 +38,7 @@ jobs:
   audit:
     name: Audit (supply chain)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -55,21 +63,50 @@ jobs:
 
   # ── Phase 2: Unit + integration tests ─────────────────────────────
   test:
-    name: Tests
+    name: Tests (nextest + doctests)
     runs-on: ubuntu-latest
     needs: check
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v7
-      - name: Run unit + integration tests
-        run: cargo test --verbose
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
+      - name: Run unit + integration tests (nextest, ci profile)
+        run: cargo nextest run --profile ci
+      # nextest does not run doctests — they would silently vanish from both
+      # execution and coverage without this leg (see research report Phase 1).
+      - name: Run doctests
+        run: cargo test --doc
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nextest-junit
+          path: target/nextest-ci/junit.xml
+          retention-days: 14
       - name: Build release binary
         run: cargo build --release
       - name: Verify binary runs
         run: |
           ./target/release/niki --version
           ./target/release/niki --help
+
+  # ── Phase 2b: Windows compile+lib smoke lane ──────────────────────
+  windows-smoke:
+    name: Windows smoke (lib tests)
+    runs-on: windows-latest
+    needs: check
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Full-screen TUI assertion stays POSIX-only; this lane guards
+      # Windows-specific compilation and the lib test surface.
+      - name: Run lib tests
+        run: cargo test --lib
 
   # ── Phase 3: Multi-platform build verification ────────────────────
   build-matrix:
