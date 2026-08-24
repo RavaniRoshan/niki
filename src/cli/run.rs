@@ -4,7 +4,9 @@ use crate::orchestrator::pipeline::{Task, execute_pipeline};
 use crate::orchestrator::state::{TaskRecord, TaskStatus};
 use crate::sandbox::SandboxBackend;
 use crate::sandbox::docker::ActiveContainers;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+#[cfg(unix)]
+use anyhow::anyhow;
 use bollard::Docker;
 use clap::Args;
 use std::env;
@@ -233,6 +235,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // moves them. (String/PathBuf don't impl Copy, so an `async move` would
     // otherwise leave nothing for the second handler.) See research report S13.
     let output_dir = config.general.output_dir.clone();
+    #[cfg(unix)]
     let project_dir_for_signal = project_dir.clone();
     let project_dir_for_ctrlc = project_dir.clone();
     let output_dir_for_ctrlc = output_dir.clone();
@@ -241,6 +244,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
 
     {
+        #[cfg(unix)]
         let containers = containers.clone();
         let task_dir = task_dir.clone();
         let task_id_str = task.id.to_string();
@@ -252,6 +256,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
             if signal::ctrl_c().await.is_ok() {
                 eprintln!("\n Shutting down — cleaning up...");
 
+                #[cfg(unix)]
                 let ids = containers.lock().await.clone();
                 #[cfg(unix)]
                 if !ids.is_empty()

@@ -11,16 +11,22 @@ name: TUI Smoke (tmux)
 
 on:
   workflow_dispatch:
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [master]
   pull_request:
     branches: [master]
     paths:
       - 'src/**'
-      - 'tests/tui_smoke/**'
+      - 'tests/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/tui-smoke.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -42,9 +48,19 @@ jobs:
           REQUIRE_TMUX: "1"
           NIKI_BIN: target/release/niki
         run: ./tests/tui_smoke/run.sh
+      - name: Run tuiwright PTY harness (pytest)
+        env:
+          NIKI_BIN: target/release/niki
+          NIKI_TUI_ARTIFACTS: tui-failures
+        run: |
+          pipx install tuiwright || pip install --user tuiwright pytest-asyncio
+          python -m pytest -c pytest_headless.ini -q
       - name: Upload failure captures
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: tui-smoke-logs
-          path: tui-smoke-logs/**
+          name: tui-failures
+          path: |
+            tui-smoke-logs/**
+            tui-failures/**
+          retention-days: 14

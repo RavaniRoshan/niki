@@ -1,0 +1,28 @@
+---
+source: tests/page_snapshots.rs
+expression: narrow
+---
+  ↑ 8 lines above                                                               
+                                                                                
+ ▸ ◈ Planner   ✓ 150 tok · $0.0010                                              
+  └ plan ready                                                                  
+    transcript: plan ready                                                      
+      Ctrl+O to expand                                                          
+                                                                                
+ ▸ ⟠ Coder     ✓ 150 tok · $0.0010                                              
+  └ patch applied                                                               
+    transcript: patch applied                                                   
+      Ctrl+O to expand                                                          
+                                                                                
+ ▸ ◉ Tester    ✓ 150 tok · $0.0010                                              
+  └ tests green                                                                 
+    transcript: tests green                                                     
+      Ctrl+O to expand                                                          
+                                                                                
+ ▸ ◆ Reviewer  ✓ 150 tok · $0.0010                                              
+  └ approved                                                                    
+    transcript: approved                                                        
+      Ctrl+O to expand                                                          
+                                                                                
+────────────────────────────────────────────────────────────────────────────────
+>

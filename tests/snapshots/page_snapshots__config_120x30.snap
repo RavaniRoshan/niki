@@ -1,0 +1,34 @@
+---
+source: tests/page_snapshots.rs
+expression: wide
+---
+ config · /tmp/niki-page-snapshots                                                                                      
+┌ ▸ niki.toml  ────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  GENERAL                                                                                                             │
+│    max_revision_rounds    [ 3 ]                                                                                      │
+│    output_dir             [ .niki ]                                                                                  │
+│                                                                                                                      │
+│  AGENTS                                                                                                              │
+│    Planner   provider [ anthropic  ]model [ claude-sonnet-4-20250514 ]                                               │
+│    Coder     provider [ anthropic  ]model [ claude-sonnet-4-20250514 ]                                               │
+│    Tester    provider [ openai     ]model [ gpt-4o-mini          ]                                                   │
+│    Reviewer  provider [ anthropic  ]model [ claude-sonnet-4-20250514 ]                                               │
+│                                                                                                                      │
+│  SANDBOX                                                                                                             │
+│    base_image       [ niki-sandbox:24.04 ]                                                                           │
+│    memory_limit     [ 2g ]   cpu_limit [ 2 ]                                                                         │
+│                                                                                                                      │
+│  PIPELINE                                                                                                            │
+│    topology         [ Auto ]                                                                                         │
+│                                                                                                                      │
+│  SECURITY                                                                                                            │
+│    enabled          [   ]                                                                                            │
+│                                                                                                                      │
+│  PARALLEL                                                                                                            │
+│    enabled          [   ]   coder_count [ 2 ]                                                                        │
+│  THEME                                                                                                               │
+│    theme             [ auto ]                                                                                        │
+│    tips              [ on ]                                                                                          │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ [Tab] next field   [Esc] back

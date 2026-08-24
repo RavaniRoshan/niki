@@ -1,0 +1,34 @@
+---
+source: tests/page_snapshots.rs
+expression: wide
+---
+ artifacts · niki/e5c8f1                                                                                                
+┌ FILES ───────────────────────────────────────┐┌ PREVIEW ─────────────────────────────────────────────────────────────┐
+│  .niki/e5c8f1/                               ││--- a/src/list.rs                                                     │
+│  ├── report.md   ── human-readable summary   ││+++ b/src/list.rs                                                     │
+│  ├── changes.patch   ── unified diff         ││@@ -28,7 +28,7 @@                                                     │
+│  ├── cost.json   ── per-agent cost breakdown ││-    let end = start + size - 1;                                      │
+│  ├── artifacts/                              ││+    let end = start + size;                                          │
+│  │   ├── 01_planner.json   ── TaskSpec ✓     ││                                                                      │
+│  │   ├── 02_coder.json   ── CodeDiff ✓       ││                                                                      │
+│  │   ├── 03_tester.json   ── TestReport ✓    ││                                                                      │
+│  │   └── 04_reviewer.json   ── ReviewVerdict ││                                                                      │
+│✓                                             ││                                                                      │
+│  └── logs/                                   ││                                                                      │
+│      ├── planner.log                         ││                                                                      │
+│      ├── coder.log                           ││                                                                      │
+│      ├── tester.log                          ││                                                                      │
+│      └── reviewer.log                        ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+└──────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘
+ [j/k] navigate   [Esc] back

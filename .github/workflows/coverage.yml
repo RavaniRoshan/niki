@@ -1,0 +1,45 @@
+# Code coverage via cargo-llvm-cov, uploaded to Codecov.
+#
+# Policy (research report Phase 4): coverage is a ratchet + patch signal,
+# not a vanity gate — no hard threshold here; watch the trend and the
+# patch-coverage on PRs.
+
+name: Coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: llvm-cov + Codecov
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      # Vendored C deps (libgit2) are excluded implicitly: measuring them needs
+      # --include-ffi plus a matching clang toolchain, which most projects —
+      # including this one — skip. Rust-side coverage is the signal we track.
+      - name: Generate coverage (tests + doctests)
+        run: |
+          cargo llvm-cov --workspace --lcov --output-path lcov.info
+          cargo llvm-cov --doc --no-report 2>/dev/null || true
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}

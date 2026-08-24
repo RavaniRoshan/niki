@@ -1,0 +1,28 @@
+---
+source: tests/page_snapshots.rs
+expression: narrow
+---
+ pipeline                                                                       
+  MODE default   SECURITY off   PARALLEL off                                    
+                                                                                
+                                                                                
+                                                                                
+ ┌────────────────────────────────────┐  ┌────────────────────────────────────┐ 
+ │ ◈ Planner                          │  │ ⟠ Coder                            │ 
+ │ ✓ ✓                                │  │ ✓ ✓                                │ 
+ │ Breaks task into structured spec   │  │ Implements changes in an isolate   │ 
+ └────────────────────────────────────┘  └────────────────────────────────────┘ 
+                                                                                
+ ┌────────────────────────────────────┐  ┌────────────────────────────────────┐ 
+ │ ◉ Tester                           │  │ ◆ Reviewer                         │ 
+ │ ✓ ✓                                │  │ ✓ ✓                                │ 
+ │ Runs test suite and reports fail   │  │ Independent verification of chan   │ 
+ └────────────────────────────────────┘  └────────────────────────────────────┘ 
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+┌ MODELS ──────────────────────────────────────────────────────────────────────┐
+│▸ ◈ Planner   anthropic/claude-sonnet-4-20250514                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ [j/k] next/prev   [Esc] back

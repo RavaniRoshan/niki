@@ -21,6 +21,19 @@ The `--backend worktree` path needs neither.
 3. Run the tests: `cargo test`.
 4. Open a pull request describing the *why* and the *what*.
 
+### Testing the TUI
+
+The TUI has two black-box suites that drive the real binary offline (no model
+calls, no network, no credentials):
+
+```bash
+./tests/tui_smoke/run.sh --build   # tmux smoke suite (cases in cases/*.sh)
+pytest -c pytest_headless.ini      # headless PTY harness (needs Python + pytest)
+```
+
+CI runs both (`tui-smoke.yml`). If your change affects rendered output or
+keybindings, add or update a case — see `tests/tui_smoke/README.md`.
+
 ## Code style
 
 - Run `cargo fmt` before committing.

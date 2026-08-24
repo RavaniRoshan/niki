@@ -4,6 +4,34 @@ All notable changes to NIKI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **ACP server** (`niki acp --project <dir>`): Agent Client Protocol JSON-RPC 2.0
+  server over stdio so IDEs (e.g. Zed) can drive the pipeline
+  (`src/acp/protocol.rs`, `src/acp/server.rs`; tests in `tests/acp_server.rs`).
+- **Voice / STT** (`niki voice`, `/voice`): push-to-talk recording via `ffmpeg`,
+  transcription through `LlmProvider::transcribe()` (implemented by OpenAI);
+  optional `--language` hint / `general.language` config.
+- **MCP trust gate** (S5 §7): project MCP servers are untrusted by default;
+  explicit trust decisions with config fingerprinting persist to
+  `.niki/mcp_trust.json` (`McpTrustStore`).
+- **Codex-style side-by-side diff renderer** (`display/diff_display.rs`) plus
+  status-colored tool cards.
+- **Fuzzy slash-command menu** backed by `nucleo` (`display/components/command_menu.rs`)
+  with live filtering.
+- **Which-key help overlay** (`display/help_overlay.rs`): press-a-prefix key hints.
+- Two-phase streaming highlight in chat markdown; `[ui] reduced_motion` config;
+  runtime mouse-capture toggle.
+- Headless PTY test harness ("tuiwright", `tests/headless_tui.py` +
+  `pytest_headless.ini`) driving the real binary offline.
+- tmux-based black-box smoke suite (`tests/tui_smoke/run.sh`, cases in
+  `tests/tui_smoke/cases/*.sh`) asserting on rendered pane text; CI runs it via
+  `.github/workflows/tui-smoke.yml`.
+
+### Changed
+- Chat markdown rendering refined for streaming output (two-phase highlight).
+
 ## [0.6.0] - 2026-08-21
 
 Claude Code parity — interaction, trust, and ecosystem surface.

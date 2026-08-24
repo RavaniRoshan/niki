@@ -214,7 +214,11 @@ niki run "..." --backend worktree   # no container runtime
 | `niki report [id]` | Print a task's report (UUID or short prefix). |
 | `niki doctor` | Diagnostics: install, config, providers, sandbox, security. |
 | `niki smoke` | Quick pipeline verification. |
-| `niki chat` | Interactive TUI session. |
+| `niki chat` | Interactive TUI session (also the default when invoked bare). |
+| `niki acp` | Run as an Agent Client Protocol (ACP) JSON-RPC server over stdio for IDEs like Zed. |
+| `niki voice` | Record a push-to-talk clip (`ffmpeg`) and transcribe it via your provider's STT endpoint. |
+| `niki research query <q>` | Search the web and return a cited summary. |
+| `niki verify <description>` | Capture a screenshot for visual verification against a baseline. |
 | `niki config` | Manage configuration. |
 | `niki recommend` | Per-agent model recommendations. |
 | `niki dashboard [id]` | Static HTML diff viewer. |
@@ -233,18 +237,22 @@ src/
 ├── agents/        # Planner, Coder, Tester, Reviewer
 ├── orchestrator/  # pipeline sequencing + task state
 ├── sandbox/       # Sandbox trait: Podman/Docker / git-worktree backends
-├── llm/           # provider clients (anthropic, openai, google, ollama)
+├── llm/           # provider clients (anthropic, openai, google, ollama) + STT
 ├── runtime/       # tool registry + 22 baseline tools
+├── acp/           # Agent Client Protocol JSON-RPC server (IDE integration)
+├── mcp/           # MCP client + up-front trust gate (.niki/mcp_trust.json)
+├── permissions/   # permission modes, protected paths, destructive-command guard
+├── commands/      # user-defined custom slash commands (markdown files)
 ├── mission/       # mission/session/agent stores
 ├── activity/      # agent state grammar (12 states)
 ├── event/         # event bus (typed domain events)
 ├── persistence/   # mission-scoped JSON storage
 ├── output/        # git branch/commit, patch, report generation
 ├── artifacts/     # typed artifacts + JSON-schema validation
-├── knowledge/     # repository indexing for agent context
+├── knowledge/     # repository indexing for agent context + shared skills dir
 ├── config/        # niki.toml loading & env overrides
-├── display/       # streaming TUI + non-TTY log fallback
-└── cli/           # run / status / report / config
+├── display/       # TUI: RenderEngine, pages, components, diff renderer, overlays
+└── cli/           # run / chat / acp / voice / status / report / …
 prompts/           # externalized agent prompts (*.md)
 docker/            # sandbox image (Dockerfile)
 ```
@@ -257,6 +265,19 @@ docker/            # sandbox image (Dockerfile)
 - **Not magic on huge codebases.** Works best on tasks with a clear spec and testable outcome.
 
 ## Roadmap
+
+### v0.6.0 (shipped)
+- [x] Claude Code–style TUI parity: permission modal, context gauge, scrollbars, mouse hover/scroll, kill-ring + undo/redo, multi-line composer
+- [x] Protected paths & destructive-command enforcement (always prompt)
+- [x] Shared skills portability (`~/.agents/skills/`)
+- [x] Kitty keyboard protocol (Shift+Enter disambiguation)
+
+### Unreleased (post-0.6.0, on `master`)
+- [x] ACP server — run NIKI from IDEs (Zed) over JSON-RPC stdio
+- [x] Voice: push-to-talk recording + provider STT (`niki voice`, `/voice`)
+- [x] MCP trust gate — project servers untrusted by default, fingerprinted trust decisions in `.niki/mcp_trust.json`
+- [x] Codex-style side-by-side diff renderer + status-colored tool cards
+- [x] Fuzzy slash-command menu (nucleo), which-key help overlay, reduced-motion + mouse-capture toggles
 
 ### v0.4.0 (shipped)
 - [x] Cost & performance analytics

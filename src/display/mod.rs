@@ -17,6 +17,7 @@ pub mod modal;
 pub mod notify;
 pub mod onboarding;
 pub mod pages;
+pub mod perf;
 pub mod persistence;
 pub mod pipeline_status;
 pub mod state;
