@@ -210,6 +210,51 @@ impl Page for RunPage {
             )]));
         }
 
+        // ── Tool execution cards (Claude Code parity) ─────────────────
+        if !state.tool_cards.is_empty() {
+            pipeline_lines.push(Line::from(vec![Span::styled("", Style::default())]));
+            pipeline_lines.push(Line::from(vec![Span::styled(
+                "  Recent tool calls:",
+                Style::default().fg(theme::fg_subtle()),
+            )]));
+            // Show last 3 tool cards as compact one-liners
+            for card in state.tool_cards.iter().rev().take(3).rev() {
+                let glyph = card.status_glyph();
+                let color = card.status_color();
+                let summary = if card.summary.len() > 50 {
+                    format!("{}...", &card.summary[..47])
+                } else {
+                    card.summary.clone()
+                };
+                pipeline_lines.push(Line::from(vec![
+                    Span::styled("    ", Style::default()),
+                    Span::styled(
+                        format!("{} ", glyph),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("{:<8}", card.tool_name),
+                        Style::default().fg(theme::fg_bright()),
+                    ),
+                    Span::styled(summary, Style::default().fg(theme::fg_dim())),
+                    if let Some(timing) = card.timing() {
+                        Span::styled(
+                            format!(" ({})", timing),
+                            Style::default().fg(theme::fg_subtle()),
+                        )
+                    } else {
+                        Span::raw("")
+                    },
+                ]));
+            }
+            if state.tool_cards.len() > 3 {
+                pipeline_lines.push(Line::from(vec![Span::styled(
+                    format!("    ... and {} more", state.tool_cards.len() - 3),
+                    Style::default().fg(theme::fg_subtle()),
+                )]));
+            }
+        }
+
         // Scroll support
         let total_lines = pipeline_lines.len() as u16;
         let view_h = chunks[2].height;

@@ -105,6 +105,24 @@ pub enum DisplayEvent {
     /// TUI sender for /steer corrections — the pipeline polls this shared state
     /// between agent streaming chunks for user corrections.
     SteerChannel(std::sync::Arc<std::sync::Mutex<Option<String>>>),
+    /// A tool call was dispatched to the sandbox — render a pending card.
+    /// `summary` is the one-line description (command string, file path, etc.).
+    ToolCall {
+        role: AgentRole,
+        tool_name: String,
+        summary: String,
+    },
+    /// A tool call completed (success or failure). The TUI updates the matching
+    /// card by `tool_name` + insertion order (first unmatched pending/running
+    /// card of that name). `output` is stdout/stderr on success, or empty.
+    ToolResult {
+        role: AgentRole,
+        tool_name: String,
+        success: bool,
+        error: Option<String>,
+        output: Option<String>,
+        duration_ms: u64,
+    },
 }
 
 /// Which panel currently owns list navigation / mouse routing. Overlays win

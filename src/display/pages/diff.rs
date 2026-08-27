@@ -41,6 +41,17 @@ impl Page for DiffPage {
             return;
         }
 
+        // On wide terminals, show a file sidebar on the left (25% width).
+        let (sidebar_area, main_area) = if area.width > 80 {
+            let split = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
+                .split(area);
+            (Some(split[0]), split[1])
+        } else {
+            (None, area)
+        };
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -49,7 +60,12 @@ impl Page for DiffPage {
                 Constraint::Min(3),    // diff content
                 Constraint::Length(1), // footer
             ])
-            .split(area);
+            .split(main_area);
+
+        // ── File sidebar (wide terminals only) ─────────────────────────
+        if let Some(sidebar) = sidebar_area {
+            self.render_file_sidebar(frame, sidebar, state);
+        }
 
         // Header — use clay orange for page title (Claude Code style)
         let header = Line::from(vec![
@@ -221,7 +237,81 @@ impl Page for DiffPage {
                 state.current_page = PageId::Verdict;
                 true
             }
+            KeyCode::Char('[') => {
+                // Previous hunk: find the hunk header above current scroll.
+                if let Some(diff) = &state.diff_content {
+                    self.scroll_offset = self.find_hunk(diff, self.scroll_offset, false);
+                }
+                true
+            }
+            KeyCode::Char(']') => {
+                // Next hunk: find the hunk header below current scroll.
+                if let Some(diff) = &state.diff_content {
+                    self.scroll_offset = self.find_hunk(diff, self.scroll_offset, true);
+                }
+                true
+            }
             _ => false,
+        }
+    }
+}
+
+impl DiffPage {
+    /// Render the file sidebar (left 25% on wide terminals).
+    fn render_file_sidebar(&self, frame: &mut Frame, area: Rect, state: &AppState) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::border_dim()))
+            .title(" Files ");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if let Some(diff) = &state.diff_content {
+            let mut file_lines: Vec<Line> = Vec::new();
+            for raw in diff.lines().filter(|l| l.starts_with("diff --git")) {
+                let path = raw
+                    .strip_prefix("diff --git a/")
+                    .unwrap_or(raw)
+                    .split(" b/")
+                    .next()
+                    .unwrap_or(raw);
+                // Count adds/dels for this file (simplified — scan until next diff --git).
+                file_lines.push(Line::from(vec![
+                    Span::styled("▸ ", Style::default().fg(theme::clay())),
+                    Span::styled(path.to_string(), Style::default().fg(theme::fg_color())),
+                ]));
+            }
+            let _ = inner.height as usize;
+            frame.render_widget(Paragraph::new(file_lines), inner);
+        }
+    }
+
+    /// Find the next (`forward=true`) or previous hunk header line offset.
+    fn find_hunk(&self, diff: &str, current_scroll: u16, forward: bool) -> u16 {
+        let hunk_positions: Vec<u16> = diff
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| l.starts_with("@@"))
+            .map(|(i, _)| i as u16)
+            .collect();
+        if hunk_positions.is_empty() {
+            return current_scroll;
+        }
+        if forward {
+            // First hunk below current scroll + 1 (to skip the current hunk).
+            hunk_positions
+                .iter()
+                .find(|&&p| p > current_scroll)
+                .copied()
+                .unwrap_or(*hunk_positions.last().unwrap())
+        } else {
+            // Last hunk above current scroll.
+            hunk_positions
+                .iter()
+                .rev()
+                .find(|&&p| p < current_scroll.saturating_sub(1))
+                .copied()
+                .unwrap_or(0)
         }
     }
 }
