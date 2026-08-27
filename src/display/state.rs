@@ -869,6 +869,17 @@ pub struct AppState {
     pub cache_write_tokens: usize,
     /// Push-to-talk voice input state (Ctrl+Shift+V).
     pub voice: crate::display::voice::VoiceState,
+    // --- Tool execution cards (Claude Code / Kimi Code parity) ---
+    /// Tool call cards accumulated during the current run.
+    pub tool_cards: Vec<crate::display::components::tool_card::ToolCard>,
+    /// Index of the tool card currently open in the detail modal (None = closed).
+    pub tool_detail_index: Option<usize>,
+    /// Scroll offset for the tool detail modal body.
+    pub tool_detail_scroll: usize,
+    /// Set of expanded tool card indices (for chat view).
+    pub expanded_tools: std::collections::HashSet<usize>,
+    /// Index of the currently-running tool (for status bar indicator).
+    pub current_tool_index: Option<usize>,
 }
 
 /// Stage information (mirrors existing StageInfo).
@@ -1011,6 +1022,11 @@ impl AppState {
             cache_read_tokens: 0,
             cache_write_tokens: 0,
             voice: crate::display::voice::VoiceState::new(),
+            tool_cards: Vec::new(),
+            tool_detail_index: None,
+            tool_detail_scroll: 0,
+            expanded_tools: std::collections::HashSet::new(),
+            current_tool_index: None,
         }
     }
 
@@ -1271,6 +1287,42 @@ impl AppState {
             }
             DisplayEvent::SteerChannel(tx) => {
                 self.steer_channel = Some(tx);
+            }
+            DisplayEvent::ToolCall {
+                tool_name, summary, ..
+            } => {
+                let mut card =
+                    crate::display::components::tool_card::ToolCard::new(tool_name, summary);
+                card.set_running();
+                self.current_tool_index = Some(self.tool_cards.len());
+                self.tool_cards.push(card);
+            }
+            DisplayEvent::ToolResult {
+                tool_name,
+                success,
+                error,
+                output,
+                duration_ms,
+                ..
+            } => {
+                // Find the first unmatched pending/running card with this tool name.
+                if let Some(idx) = self.tool_cards.iter().position(|c| {
+                    c.tool_name == tool_name
+                        && matches!(
+                            c.status,
+                            crate::display::components::tool_card::ToolStatus::Pending
+                                | crate::display::components::tool_card::ToolStatus::Running { .. }
+                        )
+                }) {
+                    if success {
+                        self.tool_cards[idx].set_success(output, duration_ms);
+                    } else {
+                        self.tool_cards[idx].set_failed(error.unwrap_or_default());
+                    }
+                    if self.current_tool_index == Some(idx) {
+                        self.current_tool_index = None;
+                    }
+                }
             }
         }
     }

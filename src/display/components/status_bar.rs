@@ -16,7 +16,38 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
         return;
     }
 
-    let left_spans = if width >= 80 {
+    // Model badge + current tool indicator (left side, before shortcuts).
+    let mut left_spans = vec![];
+    if width >= 40 {
+        let model_display = if state.model.len() > 12 {
+            format!("{:.12}…", &state.model)
+        } else {
+            state.model.clone()
+        };
+        left_spans.push(Span::styled(
+            format!(" {} ", model_display),
+            Style::default()
+                .fg(theme::fg_bright())
+                .add_modifier(Modifier::BOLD),
+        ));
+        if let Some(idx) = state.current_tool_index {
+            if let Some(card) = state.tool_cards.get(idx) {
+                let glyph = card.status_glyph();
+                let color = card.status_color();
+                let tool_text = if card.summary.len() > 20 {
+                    format!("{}: {:.20}…", card.tool_name, card.summary)
+                } else {
+                    format!("{}: {}", card.tool_name, card.summary)
+                };
+                left_spans.push(Span::styled(
+                    format!(" │ {} {} ", glyph, tool_text),
+                    Style::default().fg(color),
+                ));
+            }
+        }
+    }
+
+    let shortcut_spans = if width >= 80 {
         vec![
             Span::styled(
                 "tab ",
@@ -91,6 +122,7 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
             ),
         ]
     };
+    left_spans.extend(shortcut_spans);
 
     // Right-aligned status info
     let mut right_spans = vec![];

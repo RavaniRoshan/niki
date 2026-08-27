@@ -18,6 +18,8 @@ pub mod permission;
 pub mod progress;
 pub mod spinner;
 pub mod status_bar;
+pub mod tool_card;
+pub mod tool_detail;
 
 // Re-exports
 pub use autocomplete::render_autocomplete;
@@ -29,3 +31,5 @@ pub use permission::render_permission_modal;
 pub use progress::render_progress_bar;
 pub use spinner::{Spinner, SpinnerState, SpinnerStyle};
 pub use status_bar::render_status_bar;
+pub use tool_card::{ToolCard, ToolStatus, render_tool_card};
+pub use tool_detail::render_tool_detail;

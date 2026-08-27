@@ -936,6 +936,68 @@ impl Page for ChatPage {
             }
             InputAction::None => false,
         };
+
+        // Tool card interactions (handled after input dispatch so they work
+        // even when the input box is focused).
+        if state.tool_detail_index.is_some() {
+            // Tool detail modal is open — handle its keys.
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    state.tool_detail_index = None;
+                    state.tool_detail_scroll = 0;
+                    return true;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.tool_detail_scroll += 1;
+                    return true;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state.tool_detail_scroll = state.tool_detail_scroll.saturating_sub(1);
+                    return true;
+                }
+                KeyCode::Char('y') => {
+                    if let Some(idx) = state.tool_detail_index {
+                        if let Some(card) = state.tool_cards.get(idx) {
+                            if let Some(output) = &card.output {
+                                copy_to_clipboard(output);
+                                state.chat_copied = Some("copied tool output".to_string());
+                            }
+                        }
+                    }
+                    return true;
+                }
+                _ => {}
+            }
+        } else {
+            // No modal — check for Enter on a tool card to open detail.
+            if key.code == KeyCode::Enter {
+                let (row, _) = state.chat_cursor_pos;
+                // Find which tool card (if any) the cursor is on.
+                let tool_start_row = state
+                    .chat_lines
+                    .iter()
+                    .enumerate()
+                    .find(|(_, line)| line.text.contains("Tool Execution"))
+                    .map(|(current_row, _)| current_row);
+                if let Some(start) = tool_start_row {
+                    let rel_row = row.saturating_sub(start + 1); // +1 for header
+                    let mut rows_consumed = 0;
+                    let chat_width = state.chat_width.get().max(40) as u16;
+                    for (idx, card) in state.tool_cards.iter().enumerate() {
+                        let h = crate::display::components::tool_card::tool_card_height(
+                            card, chat_width,
+                        );
+                        if rel_row >= rows_consumed && rel_row < rows_consumed + h {
+                            state.tool_detail_index = Some(idx);
+                            state.tool_detail_scroll = 0;
+                            return true;
+                        }
+                        rows_consumed += h;
+                    }
+                }
+            }
+        }
+
         self.sync_input_overlays(state);
         handled
     }
@@ -1310,6 +1372,71 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
             0,
             false,
             None,
+            None,
+        );
+    }
+
+    // ── Tool execution cards (Claude Code parity) ─────────────────────
+    if !state.tool_cards.is_empty() {
+        push_line(&mut lines, String::new(), usize::MAX, 0, false, None, None);
+        push_line(
+            &mut lines,
+            "  ┌─ Tool Execution ─────────────────────────────┐".to_string(),
+            usize::MAX,
+            0,
+            false,
+            Some(Line::from(Span::styled(
+                "  ┌─ Tool Execution ─────────────────────────────┐",
+                Style::default().fg(theme::border_dim()),
+            ))),
+            None,
+        );
+        for (idx, card) in state.tool_cards.iter().enumerate() {
+            let card_width = width.saturating_sub(4).max(20) as u16;
+            let card_lines =
+                crate::display::components::tool_card::render_tool_card(card, card_width);
+            for card_line in card_lines {
+                let plain_text = card_line
+                    .spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>();
+                push_line(
+                    &mut lines,
+                    plain_text,
+                    usize::MAX,
+                    0,
+                    false,
+                    Some(card_line),
+                    None,
+                );
+            }
+            // Toggle hint if expanded
+            if state.expanded_tools.contains(&idx) && state.tool_detail_index.is_none() {
+                push_line(
+                    &mut lines,
+                    "  └─ Enter to view all output · y to copy ──────┘".to_string(),
+                    usize::MAX,
+                    0,
+                    false,
+                    Some(Line::from(Span::styled(
+                        "  └─ Enter to view all output · y to copy ──────┘",
+                        Style::default().fg(theme::fg_subtle()),
+                    ))),
+                    None,
+                );
+            }
+        }
+        push_line(
+            &mut lines,
+            "  └──────────────────────────────────────────────┘".to_string(),
+            usize::MAX,
+            0,
+            false,
+            Some(Line::from(Span::styled(
+                "  └──────────────────────────────────────────────┘",
+                Style::default().fg(theme::border_dim()),
+            ))),
             None,
         );
     }
