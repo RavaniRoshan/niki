@@ -1324,6 +1324,33 @@ impl AppState {
                     }
                 }
             }
+            DisplayEvent::LoadDemo {
+                force_onboarding, ..
+            } => {
+                // Apply a deterministic, fully-populated demo state for
+                // marketing / docs capture. See `display::capture`.
+                crate::display::capture::apply_demo_state(self, force_onboarding);
+            }
+            DisplayEvent::OpenPermissionModal {
+                tool_name,
+                command,
+                description,
+                params,
+            } => {
+                // Drop any pre-existing request first so the modal re-renders
+                // cleanly. We use a no-op response channel because the capture
+                // never receives a real answer.
+                let (tx, _rx) = std::sync::mpsc::channel();
+                self.permission_request = Some(PermissionRequest {
+                    tool_name: tool_name.clone(),
+                    command: command.clone(),
+                    description: description.clone(),
+                    params: params.clone(),
+                    response_tx: tx,
+                });
+                self.permission_selected = 0;
+                self.show_permission_modal = true;
+            }
         }
     }
 

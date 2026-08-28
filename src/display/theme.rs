@@ -551,6 +551,13 @@ pub fn surface_dark() -> Color {
     bg_deep()
 }
 
+/// Background for the dim scrim drawn under modal overlays (permission,
+/// command palette, onboarding). Slightly darker than the surface so
+/// modals pop without washing out the underlying page.
+pub fn scrim() -> Color {
+    bg_deep()
+}
+
 // ── Backward-compat aliases (old const names → new palette fns) ─────────
 // Mechanical sweep converts theme::OLD → theme::OLD() across all files.
 // These will be removed once all sites use the semantic accessors directly.

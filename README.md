@@ -53,11 +53,15 @@ NIKI's TUI has 14 distinct views — here are the key ones:
 
 | Run (live pipeline) | Diff (unified diff) | Cost (breakdown) | Verdict (approval) |
 |:---:|:---:|:---:|:---:|
-| ![Run](assets/screenshots/run.png) | ![Diff](assets/screenshots/diff-wide.png) | ![Cost](assets/screenshots/cost-page.png) | ![Verdict](assets/screenshots/verdict.png) |
+| ![Run](assets/screenshots/page-run.png) | ![Diff](assets/screenshots/page-diff.png) | ![Cost](assets/screenshots/page-cost.png) | ![Verdict](assets/screenshots/page-verdict.png) |
 
 | Agents (transcripts) | Fleet (missions) | Config (settings) | Help (keybindings) |
 |:---:|:---:|:---:|:---:|
-| ![Agents](assets/screenshots/agents.png) | ![Fleet](assets/screenshots/fleet.png) | ![Config](assets/screenshots/config.png) | ![Help](assets/screenshots/help.png) |
+| ![Agents](assets/screenshots/page-agents.png) | ![Fleet](assets/screenshots/page-fleet.png) | ![Config](assets/screenshots/page-config.png) | ![Help](assets/screenshots/page-help.png) |
+
+| Permission modal | Command palette | Onboarding |
+|:---:|:---:|:---:|
+| ![Permission](assets/screenshots/permission-modal.png) | ![Palette](assets/screenshots/command-palette.png) | ![Onboarding](assets/screenshots/onboarding-step1.png) |
 
 ```bash
 niki run "Add a GET /health endpoint returning { status: 'ok', uptime }" --project ./my-app

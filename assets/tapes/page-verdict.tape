@@ -1,4 +1,4 @@
-Output assets/demo-real-chat.gif
+Output assets/screenshots/page-verdict.png
 
 Set Shell "bash"
 Set FontSize 13
@@ -15,30 +15,11 @@ Set BorderRadius 10
 Set Theme { "background": "#1a1716", "foreground": "#faf8f5", "cursor": "#cc785c", "selection": "#383330", "black": "#141211", "red": "#e76f51", "green": "#4ebe82", "yellow": "#e09f3e", "blue": "#6a9bcc", "magenta": "#cc785c", "cyan": "#d4a373", "white": "#f3efea", "brightBlack": "#383330", "brightRed": "#f08060", "brightGreen": "#34d399", "brightYellow": "#f4a261", "brightBlue": "#8ecae6", "brightMagenta": "#d48b70", "brightCyan": "#e6dfd5", "brightWhite": "#faf8f5" }
 
 Hide
-Type "cd /home/shiva/projects/niki && export NIKI_DEMO_TIMEOUT_SECS=18 && ./target/release/niki run 'Add a /health endpoint' --backend worktree --tui --demo"
+Type "cd /home/shiva/projects/niki && export NIKI_DEMO_TIMEOUT_SECS=12 && ./target/release/niki run 'Add a /health endpoint' --backend worktree --tui --demo"
 Enter
 Sleep 6s
 Show
 Sleep 500ms
-# Run page
-Screenshot assets/screenshots/demo-1-run.png
-Sleep 500ms
-# Switch to Pipeline
-Type "p"
-Sleep 500ms
-Screenshot assets/screenshots/demo-2-pipeline.png
-Sleep 500ms
-# Switch to Diff
-Type "d"
-Sleep 1s
-Screenshot assets/screenshots/demo-3-diff.png
-Sleep 500ms
-# Switch to Verdict
 Type "v"
 Sleep 500ms
-Screenshot assets/screenshots/demo-4-verdict.png
-Sleep 500ms
-# Back to Run
-Type "tab"
-Sleep 500ms
-Screenshot assets/screenshots/demo-5-run.png
+Screenshot assets/screenshots/page-verdict.png

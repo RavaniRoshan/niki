@@ -1,6 +1,7 @@
 pub mod agent_stream;
 pub mod artifact_render;
 pub mod banner;
+pub mod capture;
 pub mod chat;
 pub mod command_palette;
 pub mod completion;

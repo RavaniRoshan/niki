@@ -120,6 +120,21 @@ pub struct RunArgs {
     /// inline streaming view. Requires a TTY; ignored when piped.
     #[arg(long)]
     pub tui: bool,
+
+    /// Populate a deterministic, fully-populated demo state for marketing /
+    /// docs / capture purposes. No LLM call, no sandbox, no git mutation.
+    #[arg(long)]
+    pub demo: bool,
+
+    /// After a short delay, fire a `PermissionRequest` so the permission
+    /// modal can be captured. Pairs with `--demo`.
+    #[arg(long)]
+    pub trigger_permission: bool,
+
+    /// Force the onboarding modal to show on startup (even if the user has
+    /// dismissed it before). Useful for capture.
+    #[arg(long)]
+    pub force_onboarding: bool,
 }
 
 /// CLI spelling of the sandbox backend; maps onto [`crate::sandbox::SandboxBackend`].
@@ -151,10 +166,49 @@ fn role_filename(role: AgentRole) -> &'static str {
 }
 
 pub async fn handle(args: &RunArgs) -> Result<()> {
+    // Validate task description upfront — reject empty/whitespace-only descriptions
+    // before any config loading or API calls.
+    let description = args.description.trim().to_string();
+    if description.is_empty() {
+        return Err(anyhow!(
+            "Task description cannot be empty. Describe what you want NIKI to do.\n\
+             Example: niki run \"Add a GET /health endpoint returning {{status: ok}}\""
+        ));
+    }
+
     let project_dir = match &args.project {
         Some(p) => p.canonicalize()?,
         None => env::current_dir()?,
     };
+
+    // Verify project path is a git repository before proceeding.
+    if !project_dir.join(".git").exists() {
+        return Err(anyhow!(
+            "Project path '{}' is not a git repository.\n\
+             NIKI requires a git repository to create branches and track changes.\n\
+             Initialize one with: git init",
+            project_dir.display()
+        ));
+    }
+
+    // Capture mode: skip all pre-TUI notices so the captured frame is clean.
+    let capture_mode = args.tui || std::env::var("NIKI_CAPTURE").is_ok() || args.demo || args.quiet;
+
+    // Warn about uncommitted changes that won't be in the NIKI branch.
+    if !capture_mode
+        && git2::Repository::open(&project_dir)
+            .ok()
+            .is_some_and(|repo| {
+                repo.statuses(None)
+                    .ok()
+                    .is_some_and(|statuses| !statuses.is_empty())
+            })
+    {
+        eprintln!(
+            "note: uncommitted changes detected — they won't be included in the NIKI branch.\n\
+             Commit or stash them first if you want them in the output branch."
+        );
+    }
 
     let mut config = NikiConfig::load(&project_dir)?;
 
@@ -186,14 +240,15 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     let uses_docker = matches!(backend, SandboxBackend::Docker);
 
     // Trust & cost notices (launch-plan B3 / S6 / G9).
-    if matches!(backend, SandboxBackend::Worktree) {
+    // Suppressed in TUI/capture/demo mode so the captured frame is clean.
+    if matches!(backend, SandboxBackend::Worktree) && !capture_mode {
         eprintln!(
             "warning: worktree backend runs agent commands as local processes on YOUR host \
              with your privileges — there is no VM/container isolation. Prefer the default \
              container backend for untrusted tasks."
         );
     }
-    if config.general.spend_cap_usd > 0.0 {
+    if config.general.spend_cap_usd > 0.0 && !capture_mode {
         eprintln!(
             "note: spend cap active — this run will abort before a branch is created if estimated cost exceeds ${:.2}",
             config.general.spend_cap_usd
@@ -202,7 +257,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
 
     let task = Task {
         id: Uuid::new_v4(),
-        description: args.description.clone(),
+        description: description.clone(),
         project_path: project_dir.clone(),
     };
 
@@ -213,10 +268,35 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // and subsequent events are routed to the render thread.
     if args.tui {
         display.enable_tui(
-            task.description.clone(),
+            description.clone(),
             task.project_path.clone(),
             cancel.clone(),
         );
+    }
+
+    // Demo / capture mode: populate a deterministic, fully-populated state
+    // and skip the entire pipeline. Used for marketing assets and docs.
+    if args.demo || std::env::var("NIKI_CAPTURE").is_ok() {
+        // Suppress onboarding auto-show in the TUI thread.
+        // SAFETY: single-threaded at this point (no other readers).
+        unsafe {
+            std::env::set_var("NIKI_CAPTURE", "1");
+        }
+        if !args.tui {
+            // Demo mode implies the TUI; force it.
+            display.enable_tui(
+                description.clone(),
+                task.project_path.clone(),
+                cancel.clone(),
+            );
+        }
+        display.apply_demo_state(args.force_onboarding);
+        if args.trigger_permission {
+            let req = crate::display::capture::build_demo_permission_request();
+            display.apply_permission_request(req);
+        }
+        // Park the run loop until the user quits the TUI.
+        return display.wait_for_tui_exit();
     }
 
     if !args.quiet {

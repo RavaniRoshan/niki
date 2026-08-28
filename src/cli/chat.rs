@@ -16,6 +16,15 @@ pub struct ChatArgs {
     /// Initial message to send (optional)
     #[arg(short, long)]
     pub message: Option<String>,
+
+    /// Populate a deterministic, fully-populated demo state for marketing /
+    /// docs / capture purposes. No LLM call, no sandbox, no git mutation.
+    #[arg(long)]
+    pub demo: bool,
+
+    /// Force the onboarding modal to show on startup.
+    #[arg(long)]
+    pub force_onboarding: bool,
 }
 
 /// Build a provider from the configured providers map or environment variables.
@@ -151,26 +160,37 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
     });
 
     // Spawn the message processor: each submitted user message gets an LLM reply
-    // streamed back as an assistant turn.
-    let proc_tx = tui_tx.clone();
-    let proc_config = config.clone();
-    std::thread::spawn(move || {
-        while let Ok(user_text) = on_submit_rx.recv() {
-            process_message(&proc_tx, &proc_config, &user_text);
-        }
-    });
+    // streamed back as an assistant turn. In demo mode we never start it.
+    if !args.demo {
+        let proc_tx = tui_tx.clone();
+        let proc_config = config.clone();
+        let _ = std::thread::spawn(move || {
+            while let Ok(user_text) = on_submit_rx.recv() {
+                process_message(&proc_tx, &proc_config, &user_text);
+            }
+        });
+    }
 
-    // Send an initial message if provided.
-    if let Some(msg) = &args.message {
-        let _ = tui_tx.send(DisplayEvent::ChatMessage {
-            role: "user".to_string(),
-            text: msg.clone(),
+    // Demo / capture mode: inject a deterministic populated state and skip
+    // the LLM message processor so the captured frame shows real content.
+    if args.demo {
+        let _ = tui_tx.send(DisplayEvent::LoadDemo {
+            marker: (),
+            force_onboarding: args.force_onboarding,
         });
-        let _ = tui_tx.send(DisplayEvent::ChatMessage {
-            role: "assistant".to_string(),
-            text: "(thinking…)".to_string(),
-        });
-        let _ = on_submit_tx.send(msg.clone());
+    } else {
+        // Send an initial message if provided.
+        if let Some(msg) = &args.message {
+            let _ = tui_tx.send(DisplayEvent::ChatMessage {
+                role: "user".to_string(),
+                text: msg.clone(),
+            });
+            let _ = tui_tx.send(DisplayEvent::ChatMessage {
+                role: "assistant".to_string(),
+                text: "(thinking…)".to_string(),
+            });
+            let _ = on_submit_tx.send(msg.clone());
+        }
     }
 
     // Keep the sender alive so the TUI thread doesn't see Disconnect.

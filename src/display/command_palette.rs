@@ -250,6 +250,12 @@ pub fn click_index(palette: &CommandPalette, area: Rect, x: u16, y: u16) -> Opti
 }
 
 pub fn render_command_palette(frame: &mut Frame, palette: &CommandPalette, area: Rect) {
+    // Dim scrim covers the full screen so chat text under the palette does
+    // not bleed through.
+    let scrim = Block::default().style(Style::default().bg(theme::scrim()));
+    frame.render_widget(scrim, area);
+    frame.render_widget(Clear, area);
+
     let popup_area = popup_rect(palette, area);
     frame.render_widget(Clear, popup_area);
 
