@@ -1,0 +1,64 @@
+name: Render Marketing Assets
+
+on:
+  push:
+    paths:
+      - 'assets/tapes/*.tape'
+      - 'src/display/**'
+      - 'scripts/render_demo_terminal.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install VHS
+        uses: charmbracelet/vhs-action@v2
+        with:
+          install-fonts: true
+
+      - name: Install ffmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Start mock LLM
+        run: |
+          python3 tests/integration/mock_llm.py &
+          sleep 2
+
+      - name: Render all tapes
+        run: |
+          for tape in assets/tapes/*.tape; do
+            echo "Rendering $tape..."
+            vhs "$tape"
+          done
+
+      - name: Generate MP4 variants
+        run: |
+          for gif in assets/*.gif assets/screenshots/*.gif; do
+            if [ -f "$gif" ]; then
+              mp4="${gif%.gif}.mp4"
+              ffmpeg -y -i "$gif" -movflags faststart -pix_fmt yuv420p -vf "fps=30,scale=1200:-2" "$mp4"
+            fi
+          done
+
+      - name: Optimize PNGs
+        run: |
+          sudo apt-get install -y oxipng
+          oxipng -o 4 --strip safe assets/screenshots/*.png assets/social/*.png
+
+      - name: Commit and push assets
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          file_pattern: "assets/*.gif assets/*.mp4 assets/screenshots/*.png assets/social/*.png"
+          commit_message: "chore: regenerate marketing assets via VHS CI"
