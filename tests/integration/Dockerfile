@@ -24,7 +24,20 @@ RUN git config --global user.email "test@niki.dev" && \
 # Create a sample test project inside the container
 RUN mkdir -p /test-project && cd /test-project && \
     git init && \
-    echo '# Test App\n\nconsole.log("hello");' > index.js && \
+    echo '# Test App\n\nconst http = require('http');
+
+const server = http.createServer((req, res) => {
+  if (req.url === '/health' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok' }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('Not Found');
+});
+server.listen(3000, () => {
+  console.log('Server running on port 3000');
+});' > index.js && \
     echo 'node_modules/\n.niki/' > .gitignore && \
     git add . && git commit -m "initial"
 

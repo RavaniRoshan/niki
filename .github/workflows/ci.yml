@@ -129,7 +129,20 @@ jobs:
           git init
           git config user.email "ci@niki.dev"
           git config user.name "CI"
-          echo 'console.log("hello");' > index.js
+          echo 'const http = require('http');
+
+const server = http.createServer((req, res) => {
+  if (req.url === '/health' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok' }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('Not Found');
+});
+server.listen(3000, () => {
+  console.log('Server running on port 3000');
+});' > index.js
           echo 'node_modules/' > .gitignore
           git add . && git commit -m "initial"
           sed 's|base_url = "http://localhost:8080"|base_url = "http://localhost:8080"|' \
