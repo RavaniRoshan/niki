@@ -42,10 +42,22 @@ Your working tree is never touched.
 ## See it run
 
 <p align="center">
-  <img src="assets/demo.gif" alt="NIKI Demo" />
+  <img src="assets/demo-real-chat.gif" alt="NIKI Demo — conversational chat with live pipeline streaming, /cost output, and context gauge" />
 </p>
 
 Describe a change in plain English. NIKI runs a four-stage agent pipeline in an isolated container and gives you back a branch to review — nothing lands on `main` until you say so.
+
+### Terminal UI pages
+
+NIKI's TUI has 14 distinct views — here are the key ones:
+
+| Run (live pipeline) | Diff (unified diff) | Cost (breakdown) | Verdict (approval) |
+|:---:|:---:|:---:|:---:|
+| ![Run](assets/screenshots/run.png) | ![Diff](assets/screenshots/diff-wide.png) | ![Cost](assets/screenshots/cost-page.png) | ![Verdict](assets/screenshots/verdict.png) |
+
+| Agents (transcripts) | Fleet (missions) | Config (settings) | Help (keybindings) |
+|:---:|:---:|:---:|:---:|
+| ![Agents](assets/screenshots/agents.png) | ![Fleet](assets/screenshots/fleet.png) | ![Config](assets/screenshots/config.png) | ![Help](assets/screenshots/help.png) |
 
 ```bash
 niki run "Add a GET /health endpoint returning { status: 'ok', uptime }" --project ./my-app
