@@ -202,15 +202,16 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
 
     let left_len: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
 
-    // Build the final line greedily so it can never overflow the frame:
-    // left shortcuts first, then as many right-aligned extras as fit, then a
-    // trailing pad. This guarantees `total <= width` in every branch.
+    // Build the final line greedily so it can never overflow the frame.
+    // The right side is right-aligned: we measure the right-spans total
+    // length, then take as many as fit (`used + n < width` — strict to leave
+    // at least one column of breathing room) and pad the gap with spaces.
     let mut spans = left_spans;
     let mut used = left_len;
     let mut kept_right = Vec::new();
     for s in &right_spans {
         let n = s.content.chars().count();
-        if used + n <= width {
+        if used + n < width {
             kept_right.push(s.clone());
             used += n;
         } else {

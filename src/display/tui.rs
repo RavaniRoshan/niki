@@ -123,6 +123,22 @@ pub enum DisplayEvent {
         output: Option<String>,
         duration_ms: u64,
     },
+    /// Inject a deterministic demo / capture state. Used by `--demo` to
+    /// render a fully-populated session for marketing assets without
+    /// running a real pipeline.
+    LoadDemo {
+        #[allow(dead_code)]
+        marker: (),
+        force_onboarding: bool,
+    },
+    /// Inject a permission request and open the modal. Used by
+    /// `--trigger-permission` to capture the permission modal.
+    OpenPermissionModal {
+        tool_name: String,
+        command: String,
+        description: String,
+        params: Option<String>,
+    },
 }
 
 /// Which panel currently owns list navigation / mouse routing. Overlays win
@@ -251,8 +267,12 @@ fn run_tui(
     let mut router = PageRouter::new();
     let mut command_palette = CommandPalette::new();
 
-    // Show onboarding modal if needed
-    if onboarding::should_show_onboarding(&project_path) {
+    // Show onboarding modal if needed. Suppressed in capture/demo mode so
+    // the captured frame doesn't show the welcome modal instead of the
+    // intended page.
+    if std::env::var("NIKI_CAPTURE").is_err()
+        && onboarding::should_show_onboarding(&project_path)
+    {
         state.onboarding = Some(onboarding::OnboardingModal::new());
     }
 
@@ -349,7 +369,10 @@ fn run_tui(
                         engine.mark_dirty();
                         continue;
                     }
-                    // Onboarding modal takes priority
+                    // Onboarding modal takes priority. The modal owns the
+                    // key event — do not let it fall through to other
+                    // handlers (e.g. the chat input would consume `n` as
+                    // command-menu navigation).
                     if let Some(ref mut onboard) = state.onboarding {
                         match onboard.handle_key(key) {
                             OnboardingAction::None => {}
@@ -362,6 +385,8 @@ fn run_tui(
                                 engine.mark_dirty();
                             }
                         }
+                        engine.mark_dirty();
+                        continue;
                     } else if let Some(ref modal) = state.modal {
                         // Regular modal key handling
                         match modal::handle_modal_key(key, modal) {
@@ -568,13 +593,18 @@ fn run_tui(
                             let _ = crate::config::types::NikiConfig::save_theme(new_pref);
                             engine.mark_dirty();
                         } else if state.current_page == PageId::Run {
-                            // On Run page: q/Esc shows quit confirm modal
+                            // On Run page: q/Esc shows quit confirm modal.
+                            // Other single-key presses may be page hotkeys
+                            // (p, a, d, v, c, f, h, ',', '?', l, g, s).
                             if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
                                 state.modal = Some(super::pages::Modal::Confirm {
                                     title: "Quit NIKI?".to_string(),
                                     message: "The pipeline will continue in the background."
                                         .to_string(),
                                 });
+                                engine.mark_dirty();
+                            } else if let Some(target) = page_key_target(key) {
+                                state.current_page = target;
                                 engine.mark_dirty();
                             } else if router.handle_key(key, &mut state) {
                                 engine.mark_dirty();
@@ -597,6 +627,10 @@ fn run_tui(
                             } else {
                                 state.current_page = PageId::Session;
                             }
+                            engine.mark_dirty();
+                        } else if let Some(target) = page_key_target(key) {
+                            // Global page hotkeys (p, a, d, v, c, f, h, ',', '?', l).
+                            state.current_page = target;
                             engine.mark_dirty();
                         } else {
                             // On sub-pages: page-specific key handling
@@ -1509,6 +1543,19 @@ fn handle_fleet_nav(key: KeyEvent, state: &mut AppState) {
         KeyCode::Enter => state.open_selected_mission(),
         KeyCode::Esc => state.current_page = PageId::Chat,
         _ => {}
+    }
+}
+
+/// Map a key event to a target page, if the key is a global page hotkey.
+/// Used by both the Run page and other pages to support one-keystroke
+/// navigation (p → Pipeline, a → Agents, d → Diff, etc.).
+fn page_key_target(key: KeyEvent) -> Option<PageId> {
+    if !key.modifiers.is_empty() {
+        return None;
+    }
+    match key.code {
+        KeyCode::Char(c) => PageId::from_key(c),
+        _ => None,
     }
 }
 

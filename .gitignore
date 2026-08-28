@@ -16,7 +16,9 @@ research/
 
 # Dev-only and temporary demo scripts
 demo.sh
+# VHS tapes for marketing assets are tracked; only ignore ad-hoc ones.
 *.tape
+!assets/tapes/*.tape
 scripts/render_demo_terminal.py
 scripts/generate_screenshots.py
 scripts/render_buffers.py
@@ -34,6 +36,11 @@ screenshot*
 !assets/*.png
 !assets/*.gif
 !assets/*.mp4
+# Marketing assets: tracked in repo so the README/docs can embed them.
+!assets/screenshots/*.png
+!assets/screenshots/*.gif
+!assets/social/*.png
+!assets/screenshots/page-*.png
 *Zone.Identifier*
 *.identifier
 

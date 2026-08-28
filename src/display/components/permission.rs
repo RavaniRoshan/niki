@@ -89,6 +89,13 @@ pub fn render_permission_modal(
 ) {
     let modal_area = modal_rect(area);
 
+    // Dim scrim covers the full screen so chat text under the modal does
+    // not bleed through. Without this, the underlying page content shows
+    // through the empty space around the centered modal.
+    let scrim = Block::default().style(Style::default().bg(theme::scrim()));
+    frame.render_widget(scrim, area);
+    frame.render_widget(Clear, area);
+
     frame.render_widget(Clear, modal_area);
 
     let block = Block::default()

@@ -137,6 +137,62 @@ impl AgenticDisplay {
         }
     }
 
+    /// Inject a deterministic, fully-populated demo state. Used for
+    /// marketing assets, docs, and screenshot capture. Pairs with
+    /// `display::capture::apply_demo_state`.
+    pub fn apply_demo_state(&self, force_onboarding: bool) {
+        self.emit(DisplayEvent::LoadDemo {
+            marker: (),
+            force_onboarding,
+        });
+    }
+
+    /// Open the permission modal with a representative command.
+    /// Used by `--trigger-permission` capture.
+    pub fn apply_permission_request(&self, req: crate::display::state::PermissionRequest) {
+        self.emit(DisplayEvent::OpenPermissionModal {
+            tool_name: req.tool_name,
+            command: req.command,
+            description: req.description,
+            params: req.params,
+        });
+    }
+
+    /// Block the current thread until the TUI is closed (user pressed
+    /// `q` / `Esc`, or the sender was dropped). Demo / capture mode
+    /// uses this to keep the TUI alive for the duration of a screenshot.
+    ///
+    /// Honors `NIKI_DEMO_TIMEOUT_SECS` (default 600) so a long-running
+    /// capture session has a deterministic exit. The sender is kept alive
+    /// so the TUI thread doesn't observe a closed channel.
+    pub fn wait_for_tui_exit(&mut self) -> anyhow::Result<()> {
+        let timeout_secs: u64 = std::env::var("NIKI_DEMO_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(600);
+
+        if let Some(handle) = self.tui_thread.take() {
+            // Keep `self.tui` alive so the channel stays open.
+            // The TUI thread will continue to run; we park this thread
+            // until the timeout, then we drop the sender so the TUI
+            // observes a closed channel and exits cleanly.
+            let _alive = self.tui.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(timeout_secs));
+                // Drop the cloned sender so the TUI thread can exit.
+                drop(_alive);
+            });
+            // Re-attach the handle so we can wait on it. The TUI thread
+            // will exit when the spawned timeout sender is dropped, or
+            // earlier if the user pressed q/Esc.
+            self.tui_thread = Some(handle);
+            if let Some(handle) = self.tui_thread.take() {
+                let _ = handle.join();
+            }
+        }
+        Ok(())
+    }
+
     /// Forward an event to the TUI thread if it's active.
     fn emit(&self, ev: DisplayEvent) {
         // Always buffer so a headless ACP/IDE driver can replay progress.

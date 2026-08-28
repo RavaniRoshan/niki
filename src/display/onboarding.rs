@@ -129,6 +129,12 @@ impl OnboardingModal {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
+        // Dim scrim covers the full screen so chat text under the modal does
+        // not bleed through.
+        let scrim = Block::default().style(Style::default().bg(theme::scrim()));
+        frame.render_widget(scrim, area);
+        frame.render_widget(Clear, area);
+
         let popup_width = 64.min(area.width.saturating_sub(4));
         let popup_height = (area.height.saturating_sub(4)).min(24);
         let x = (area.width.saturating_sub(popup_width)) / 2;
