@@ -23,24 +23,29 @@ scripts/render_demo_terminal.py
 scripts/generate_screenshots.py
 scripts/render_buffers.py
 
-# Reference screenshots, images, and attachments (root and subdirs)
-Screenshot*
-screenshot*
-*.png
-*.gif
-*.jpg
-*.jpeg
-*.webp
-*.mp4
+# Reference screenshots, images, and attachments — root level only.
+# We use `/` prefixes so the rules only match the project root, not
+# any subdirectory like assets/screenshots/ (where we want the
+# marketing assets tracked).
+/Screenshot*
+/screenshot*
+# Catch-all for loose image files at the project root.
+/*.png
+/*.gif
+/*.jpg
+/*.jpeg
+/*.webp
+/*.mp4
+
+# Marketing assets: tracked in repo so the README/docs can embed them.
 !assets/*.svg
 !assets/*.png
 !assets/*.gif
 !assets/*.mp4
-# Marketing assets: tracked in repo so the README/docs can embed them.
 !assets/screenshots/*.png
 !assets/screenshots/*.gif
 !assets/social/*.png
-!assets/screenshots/page-*.png
+
 *Zone.Identifier*
 *.identifier
 
