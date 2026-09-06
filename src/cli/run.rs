@@ -114,6 +114,17 @@ pub struct RunArgs {
     #[arg(long)]
     pub plan: Option<String>,
 
+    /// Machine-readable output contract for CI/scripts: `text` (default,
+    /// human streaming) or `json` (one JSON envelope on stdout at the end).
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub output_format: OutputFormat,
+
+    /// Deterministic-inputs mode for CI: skip project memory, MCP discovery,
+    /// and external knowledge-URL fetching. Model sampling nondeterminism and
+    /// failover retries still apply — bare means "no ambient inputs".
+    #[arg(long)]
+    pub bare: bool,
+
     /// Minimal output — no streaming, just final report
     #[arg(long)]
     pub quiet: bool,
@@ -139,6 +150,13 @@ pub struct RunArgs {
 pub enum BackendArg {
     Docker,
     Worktree,
+}
+
+/// Machine-readable output contract for scripts and CI.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputFormat {
+    Text,
+    Json,
 }
 
 impl From<BackendArg> for crate::sandbox::SandboxBackend {
@@ -220,6 +238,55 @@ fn write_plan_md(task_dir: &std::path::Path, task: &Task, result: &PipelineResul
     }
 }
 
+/// Machine-readable result envelope for `--output-format json` (CI/scripts).
+/// Stable contract: `status` is `completed`, `failed`, or `error`.
+/// `tests_passed`/`mutation_passed` are null when no suite ran.
+fn result_envelope(
+    task: &Task,
+    record: &TaskRecord,
+    result: Option<&crate::orchestrator::pipeline::PipelineResult>,
+    branch: Option<&str>,
+    branch_block: Option<&str>,
+    forced_branch: bool,
+    bare: bool,
+    task_dir: &std::path::Path,
+) -> serde_json::Value {
+    let (verdict, revisions, tests_passed, mutation_passed) = match result {
+        Some(r) => (
+            format!("{:?}", r.verdict),
+            r.revision_rounds,
+            r.test_execution.as_ref().map(|te| te.passed),
+            r.test_execution
+                .as_ref()
+                .and_then(|te| te.mutation.as_ref().map(|m| m.passed)),
+        ),
+        None => ("unknown".to_string(), 0, None, None),
+    };
+    serde_json::json!({
+        "task_id": task.id.to_string(),
+        "description": task.description,
+        "status": match &record.status {
+            TaskStatus::Completed => "completed",
+            TaskStatus::Failed { .. } => "failed",
+            TaskStatus::Running => "running",
+            TaskStatus::Cancelled => "cancelled",
+        },
+        "branch": branch,
+        "branch_blocked": branch_block,
+        "forced_branch": forced_branch,
+        "bare": bare,
+        "verdict": verdict,
+        "revision_rounds": revisions,
+        "tests_passed": tests_passed,
+        "mutation_passed": mutation_passed,
+        "cost_usd": record.total_cost_usd,
+        "input_tokens": record.total_input_tokens,
+        "output_tokens": record.total_output_tokens,
+        "report": task_dir.join("report.md").display().to_string(),
+        "task_dir": task_dir.display().to_string(),
+    })
+}
+
 fn role_filename(role: AgentRole) -> &'static str {
     match role {
         AgentRole::Planner => "planner",
@@ -290,6 +357,14 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
 
     let mut display = AgenticDisplay::new();
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    // JSON output mode mutes every terminal write so stdout carries only the
+    // final envelope (pipe-purity for scripts/CI). Progress still flows to
+    // stderr-free event buffers, never to stdout.
+    let json_mode = args.output_format == OutputFormat::Json;
+    if json_mode {
+        display.set_muted(true);
+    }
 
     // Opt-in rich TUI. Must be enabled before any display call so the banner
     // and subsequent events are routed to the render thread.
@@ -475,7 +550,12 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
             })?;
             let _: crate::artifacts::types::TaskSpec = serde_json::from_str(&json)
                 .map_err(|e| anyhow!("approved plan is not a valid TaskSpec: {e}"))?;
-            println!("Using approved plan from task {resolved} (Planner LLM call skipped).");
+            // Progress goes to stderr in JSON mode so stdout stays parseable.
+            if json_mode {
+                eprintln!("Using approved plan from task {resolved} (Planner LLM call skipped).");
+            } else {
+                println!("Using approved plan from task {resolved} (Planner LLM call skipped).");
+            }
             Some(json)
         }
     };
@@ -490,6 +570,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         cancel.clone(),
         &task_dir,
         plan_override_json,
+        args.bare,
     )
     .await
     {
@@ -521,6 +602,18 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 crate::display::notify::pipeline_complete(false, "");
             }
             display.finish_tui();
+            if args.output_format == OutputFormat::Json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "task_id": task.id.to_string(),
+                        "description": task.description,
+                        "status": "error",
+                        "error": e.to_string(),
+                        "task_dir": task_dir.display().to_string(),
+                    })
+                );
+            }
             return Err(e);
         }
     };
@@ -558,12 +651,22 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // `artifacts/planner.json`; `plan.md` is the review surface.
     if args.dry_run {
         write_plan_md(&task_dir, &task, &result);
-        println!(
-            "\nPlan written to {}/plan.md — review it, then execute with:\n  niki run --plan {} --project {}",
-            task_dir.display(),
-            &task.id.to_string()[..8],
-            project_dir.display(),
-        );
+        // Progress goes to stderr in JSON mode so stdout stays parseable.
+        if json_mode {
+            eprintln!(
+                "Plan written to {}/plan.md — review it, then execute with: niki run --plan {} --project {}",
+                task_dir.display(),
+                &task.id.to_string()[..8],
+                project_dir.display(),
+            );
+        } else {
+            println!(
+                "\nPlan written to {}/plan.md — review it, then execute with:\n  niki run --plan {} --project {}",
+                task_dir.display(),
+                &task.id.to_string()[..8],
+                project_dir.display(),
+            );
+        }
     }
 
     // Generate the static HTML dashboard (diff viewer + annotations).
@@ -770,8 +873,35 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                     task_dir.display()
                 );
             }
-            None => display.show_completion(&result, &branch_name, &task_dir),
+            None => {
+                // Human completion summary is stdout noise in JSON mode — the
+                // envelope below is the contract.
+                if !json_mode {
+                    display.show_completion(&result, &branch_name, &task_dir);
+                }
+            }
         }
+    }
+
+    if args.output_format == OutputFormat::Json {
+        let branch = if branch_block_note.is_some() {
+            None
+        } else {
+            Some(branch_name.as_str())
+        };
+        println!(
+            "{}",
+            result_envelope(
+                &task,
+                &record,
+                Some(&result),
+                branch,
+                branch_block_note.as_deref(),
+                forced_branch,
+                args.bare,
+                &task_dir,
+            )
+        );
     }
 
     // Tear down the TUI (if active): this joins the render thread, which

@@ -54,6 +54,9 @@ pub struct AgenticDisplay {
     /// ACP/IDE driver that runs NIKI headlessly can replay the run's progress
     /// as structured notifications. Drained by [`take_events`].
     events: Arc<Mutex<Vec<DisplayEvent>>>,
+    /// Mute all terminal writes (for `--output-format json`): stdout carries
+    /// only the final JSON envelope. Event buffering is unaffected.
+    muted: bool,
 }
 
 fn role_label(role: AgentRole) -> &'static str {
@@ -76,6 +79,7 @@ impl AgenticDisplay {
             theme: Theme::new(),
             term,
             is_tty,
+            muted: false,
             stages: vec![],
             current_streaming_lines: 0,
             tui: None,
@@ -88,6 +92,12 @@ impl AgenticDisplay {
 
     pub fn is_tty(&self) -> bool {
         self.is_tty
+    }
+
+    /// Silence every terminal write (stdout stays clean for machine parsing).
+    /// Buffered events and TUI forwarding are unaffected.
+    pub fn set_muted(&mut self, muted: bool) {
+        self.muted = muted;
     }
 
     /// Create a cheap independent instance of the display that forwards events to the
@@ -107,6 +117,7 @@ impl AgenticDisplay {
             current_role: None,
             cancel: None,
             events: self.events.clone(),
+            muted: self.muted,
         }
     }
 
@@ -169,6 +180,9 @@ impl AgenticDisplay {
 
     /// Plain timestamped log line, used only in non-TTY (piped/CI) mode.
     fn log(&self, label: &str, msg: &str) {
+        if self.muted {
+            return;
+        }
         if !self.is_tty {
             let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
             let _ = self
@@ -182,6 +196,9 @@ impl AgenticDisplay {
             self.emit(DisplayEvent::Banner {
                 description: task.description.clone(),
             });
+            return;
+        }
+        if self.muted {
             return;
         }
         crate::display::banner::show_banner(task, config, self.is_tty);
@@ -242,6 +259,12 @@ impl AgenticDisplay {
             summary_lines: vec![],
         });
 
+        if self.muted {
+            // Muted (machine output): bookkeeping above is kept, but no
+            // terminal writes at all.
+            return;
+        }
+
         if !self.is_tty {
             self.log(role_label(role), "Starting...");
             self.current_streaming_lines = 0;
@@ -273,6 +296,9 @@ impl AgenticDisplay {
             return;
         }
 
+        if self.muted {
+            return;
+        }
         if !self.is_tty {
             // In non-TTY mode we skip streaming entirely and only show summaries.
             return;
@@ -327,6 +353,10 @@ impl AgenticDisplay {
         };
 
         let total_tokens = usage.input_tokens + usage.output_tokens;
+
+        if self.muted {
+            return;
+        }
 
         if !self.is_tty {
             let secs = elapsed.map(|d| d.as_secs()).unwrap_or(0);
@@ -396,6 +426,9 @@ impl AgenticDisplay {
             return;
         }
 
+        if self.muted {
+            return;
+        }
         self.clear_streaming_output();
         if !self.is_tty {
             self.log(role_label(role), &format!("Error: {}", error));
@@ -407,6 +440,9 @@ impl AgenticDisplay {
     }
 
     pub fn agent_warning(&mut self, role: AgentRole, message: &str) {
+        if self.muted {
+            return;
+        }
         self.clear_streaming_output();
         if !self.is_tty {
             self.log(role_label(role), &format!("Warning: {}", message));
@@ -432,6 +468,9 @@ impl AgenticDisplay {
             return;
         }
 
+        if self.muted {
+            return;
+        }
         self.clear_streaming_output();
 
         if !self.is_tty {

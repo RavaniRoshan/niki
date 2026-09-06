@@ -49,6 +49,9 @@ impl WorktreeSandbox {
         // Blocking git operation — run off the async runtime.
         let repo = source_repo.to_path_buf();
         let wt_clone = wt.clone();
+        // Capture (don't inherit) child output: `git worktree add` prints
+        // informational lines ("Preparing worktree...") that would otherwise
+        // leak onto our stdout and break `--output-format json` pipe-purity.
         let status = tokio::task::spawn_blocking(move || {
             Command::new("git")
                 .arg("-C")
@@ -58,7 +61,8 @@ impl WorktreeSandbox {
                 .arg("--force")
                 .arg(&wt_clone)
                 .arg("HEAD")
-                .status()
+                .output()
+                .map(|o| o.status)
         })
         .await
         .map_err(|e| anyhow!("worktree spawn failed: {e}"))?;
