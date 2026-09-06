@@ -628,6 +628,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     }
 
     // Persist final task record.
+    record.topology = Some(result.topology);
+    record.topology_reason = Some(result.topology_reason.clone());
     if let Some(note) = &branch_block_note {
         record.status = TaskStatus::Failed {
             error: note.clone(),

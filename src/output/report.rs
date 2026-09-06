@@ -631,7 +631,7 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
 - Verdict: {{ verdict }}
 - Revision Rounds: {{ revision_rounds }}
 - Topology: {{ topology_line }}
-
+{{ model_sharing_note }}
 {{ safety_section }}
 {{ red_blue_section }}
  {{ isolation_section }}
@@ -656,6 +656,7 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
         verdict => format!("{:?}", result.verdict),
         revision_rounds => result.revision_rounds,
         topology_line => topology_line(result),
+        model_sharing_note => model_sharing_note(result).unwrap_or_default(),
         safety_section => render_safety_section(result),
         red_blue_section => render_red_blue_section(result),
         isolation_section => render_isolation_section(result),
@@ -687,8 +688,10 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
 /// (BUILD_PLAN 3.2, P2.2). The single-agent fast-path is named honestly: it
 /// collapses Tester/Reviewer/Red into one solo Coder, so there is no
 /// independent adversarial review — the trade-off is surfaced, never hidden.
+/// The selection reason (auto-rule outcome or explicit config) is appended so
+/// a collapse is self-describing.
 pub fn topology_line(result: &PipelineResult) -> String {
-    match result.topology {
+    let base = match result.topology {
         TopologyMode::SingleAgent => {
             "single-agent fast-path (Planner + solo Coder; Tester/Reviewer/Red collapsed)"
                 .to_string()
@@ -696,6 +699,48 @@ pub fn topology_line(result: &PipelineResult) -> String {
         TopologyMode::MultiAgent | TopologyMode::Auto => {
             "multi-agent (Planner → Coder → Tester → Red → Reviewer)".to_string()
         }
+    };
+    if result.topology_reason.is_empty() {
+        base
+    } else {
+        format!("{}\n- Topology reason: {}", base, result.topology_reason)
+    }
+}
+
+/// Warn when a reviewing role runs on the exact same provider+model as the
+/// Coder: architectural independence without model diversity is weaker review
+/// (goal-a3f9c2, Phase 3). Returns `None` when reviewers differ or no
+/// reviewer metrics exist.
+pub fn model_sharing_note(result: &PipelineResult) -> Option<String> {
+    use crate::artifacts::types::AgentRole::*;
+    let coder_models: Vec<(&str, &str)> = result
+        .metrics
+        .iter()
+        .filter(|m| matches!(m.role, Coder))
+        .map(|m| (m.provider.as_str(), m.model.as_str()))
+        .collect();
+    if coder_models.is_empty() {
+        return None;
+    }
+    let mut shared: Vec<String> = Vec::new();
+    for m in &result.metrics {
+        if matches!(m.role, Reviewer | SecurityAuditor | Red)
+            && coder_models.contains(&(m.provider.as_str(), m.model.as_str()))
+            && !shared.contains(&m.model)
+        {
+            shared.push(format!(
+                "{:?} shares the Coder's exact model {} ({})",
+                m.role, m.model, m.provider
+            ));
+        }
+    }
+    if shared.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Model-sharing note: {}. Independence here is architectural (separate sessions/artifacts), not model-diverse — consider mixing providers across Coder and reviewers.",
+            shared.join("; ")
+        ))
     }
 }
 
@@ -734,6 +779,7 @@ mod tests {
             safety_proof: proof,
             isolation: vec![],
             topology: TopologyMode::Auto,
+            topology_reason: String::new(),
             test_execution: None,
         }
     }
@@ -790,6 +836,40 @@ mod tests {
         let result = result_with_proof(None);
         let section = render_safety_section(&result);
         assert!(section.is_empty());
+    }
+
+    #[test]
+    fn model_sharing_note_flags_same_model_review() {
+        use crate::orchestrator::state::StageMetric;
+        fn metric(role: AgentRole, provider: &str, model: &str) -> StageMetric {
+            StageMetric {
+                role,
+                provider: provider.into(),
+                model: model.into(),
+                input_tokens: 1,
+                output_tokens: 1,
+                latency_ms: 1,
+                cost_usd: 0.0,
+                retry_count: 0,
+                ttft_ms: 0,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
+            }
+        }
+        let mut shared = result_with_proof(None);
+        shared.metrics = vec![
+            metric(AgentRole::Coder, "anthropic", "claude-sonnet-4"),
+            metric(AgentRole::Reviewer, "anthropic", "claude-sonnet-4"),
+        ];
+        let note = model_sharing_note(&shared).expect("shared model must warn");
+        assert!(note.contains("Reviewer"), "note names the role: {note}");
+
+        let mut diverse = result_with_proof(None);
+        diverse.metrics = vec![
+            metric(AgentRole::Coder, "anthropic", "claude-sonnet-4"),
+            metric(AgentRole::Reviewer, "anthropic", "claude-opus-4"),
+        ];
+        assert!(model_sharing_note(&diverse).is_none());
     }
 
     #[test]
@@ -851,6 +931,7 @@ mod tests {
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
+            topology_reason: String::new(),
             test_execution: None,
         };
 
@@ -902,6 +983,7 @@ mod tests {
                 },
             ],
             topology: TopologyMode::Auto,
+            topology_reason: String::new(),
             test_execution: None,
         };
         let section = render_isolation_section(&result);
@@ -973,6 +1055,7 @@ mod tests {
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
+            topology_reason: String::new(),
             test_execution: None,
         }
     }
@@ -1069,6 +1152,7 @@ index 3333333..4444444 100644
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
+            topology_reason: String::new(),
             test_execution: None,
         }
     }
