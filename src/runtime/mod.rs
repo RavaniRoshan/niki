@@ -1568,6 +1568,11 @@ impl Tool for TaskListTool {
 }
 
 /// Ask user tool — prompt user for input.
+///
+/// Honesty contract (goal-a3f9c2): this tool REALLY asks. On a TTY it prints
+/// the question (plus `options`/`default` when provided) and blocks on stdin.
+/// When stdin is not interactive it FAILS instead of inventing an answer —
+/// a fabricated user response is worse than no response.
 pub struct AskUserTool;
 
 #[async_trait::async_trait]
@@ -1575,7 +1580,7 @@ impl Tool for AskUserTool {
     fn def(&self) -> &ToolDef {
         static DEF: ToolDef = ToolDef {
             name: "ask_user",
-            description: "Ask the user a question and wait for response",
+            description: "Ask the user a question and wait for response. Fails when stdin is not interactive.",
             category: ToolCategory::Human,
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
@@ -1585,16 +1590,51 @@ impl Tool for AskUserTool {
     }
 
     async fn execute(&self, input: ToolInput, _ctx: &ToolContext) -> ToolResult {
-        let question = input.str("question").unwrap_or("?");
-        // In real execution, this blocks for user input via TUI
+        use std::io::IsTerminal;
+        let question = input.str("question").unwrap_or("?").to_string();
+        let options = input.str("options").unwrap_or("").to_string();
+        let default = input.str("default").unwrap_or("").to_string();
+        if !std::io::stdin().is_terminal() {
+            return ToolResult {
+                tool_id: ToolId::generate(),
+                tool_name: "ask_user".into(),
+                status: ToolStatus::Failed,
+                summary: format!("cannot ask (non-interactive stdin): {}", question),
+                data: ToolData::UserResponse {
+                    question: question.to_string(),
+                    response: String::new(),
+                },
+                duration: Duration::ZERO,
+                artifacts: Vec::new(),
+                diagnostics: Vec::new(),
+                metadata: HashMap::new(),
+            };
+        }
+        if options.is_empty() {
+            println!("{}:", question);
+        } else if default.is_empty() {
+            println!("{} [{}]:", question, options);
+        } else {
+            println!("{} [{}] (default: {}):", question, options, default);
+        }
+        let mut answer = String::new();
+        if std::io::stdin().read_line(&mut answer).is_err() {
+            answer = String::new();
+        }
+        let answer = answer.trim().to_string();
+        let answer = if answer.is_empty() && !default.is_empty() {
+            default
+        } else {
+            answer
+        };
         ToolResult {
             tool_id: ToolId::generate(),
             tool_name: "ask_user".into(),
             status: ToolStatus::Success,
-            summary: format!("asked: {}", question),
+            summary: format!("asked: {} → answered", question),
             data: ToolData::UserResponse {
                 question: question.to_string(),
-                response: "(awaiting TUI integration)".into(),
+                response: answer,
             },
             duration: Duration::ZERO,
             artifacts: Vec::new(),
@@ -1605,6 +1645,11 @@ impl Tool for AskUserTool {
 }
 
 /// Approval tool — request approval for a dangerous operation.
+///
+/// Honesty contract (goal-a3f9c2): this tool REALLY gates. On a TTY it prompts
+/// `y/N` (default: deny). When stdin is not interactive it DENIES with
+/// `PermissionDenied` — the previous behavior auto-approved everything, which
+/// made every downstream "approval" meaningless.
 pub struct ApprovalTool;
 
 #[async_trait::async_trait]
@@ -1612,7 +1657,7 @@ impl Tool for ApprovalTool {
     fn def(&self) -> &ToolDef {
         static DEF: ToolDef = ToolDef {
             name: "approval",
-            description: "Request approval before executing a dangerous operation",
+            description: "Request approval before executing a dangerous operation. Denies by default; denies always when non-interactive.",
             category: ToolCategory::Human,
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
@@ -1622,15 +1667,53 @@ impl Tool for ApprovalTool {
     }
 
     async fn execute(&self, input: ToolInput, _ctx: &ToolContext) -> ToolResult {
-        let command = input.str("command").unwrap_or("unknown");
+        use std::io::IsTerminal;
+        let command = input.str("command").unwrap_or("unknown").to_string();
+        if !std::io::stdin().is_terminal() {
+            return ToolResult {
+                tool_id: ToolId::generate(),
+                tool_name: "approval".into(),
+                status: ToolStatus::PermissionDenied,
+                summary: format!("denied (non-interactive stdin): {}", command),
+                data: ToolData::ApprovalResult {
+                    approved: false,
+                    reason: Some(
+                        "non-interactive stdin: approvals require a human at a TTY".into(),
+                    ),
+                },
+                duration: Duration::ZERO,
+                artifacts: Vec::new(),
+                diagnostics: Vec::new(),
+                metadata: HashMap::new(),
+            };
+        }
+        println!(
+            "Agent requests approval to run:\n  {}\nApprove? [y/N]:",
+            command
+        );
+        let mut answer = String::new();
+        let approved = std::io::stdin().read_line(&mut answer).is_ok()
+            && matches!(answer.trim().to_lowercase().as_str(), "y" | "yes");
         ToolResult {
             tool_id: ToolId::generate(),
             tool_name: "approval".into(),
-            status: ToolStatus::Success,
-            summary: format!("approval for: {}", command),
+            status: if approved {
+                ToolStatus::Success
+            } else {
+                ToolStatus::PermissionDenied
+            },
+            summary: format!(
+                "{}: {}",
+                if approved { "approved" } else { "denied" },
+                command
+            ),
             data: ToolData::ApprovalResult {
-                approved: true,
-                reason: Some("auto-approved for testing".into()),
+                approved,
+                reason: Some(if approved {
+                    "human approved at TTY".into()
+                } else {
+                    "human denied (or empty answer, default deny)".into()
+                }),
             },
             duration: Duration::ZERO,
             artifacts: Vec::new(),
@@ -2289,5 +2372,50 @@ mod tests {
         assert_eq!(cancel.status, ToolStatus::Success);
         assert!(matches!(cancel.data, ToolData::None));
         assert_eq!(store.status(&task_id).unwrap().status, "cancelled");
+    }
+
+    fn human_ctx() -> ToolContext {
+        ToolContext {
+            agent_id: crate::mission::AgentId("a1".into()),
+            mission_id: crate::mission::MissionId("m1".into()),
+            role: "coder".into(),
+            project_path: std::env::temp_dir(),
+            permissions: HashMap::new(),
+            task_store: None,
+        }
+    }
+
+    /// `cargo test` stdin is never a TTY, so these assert the non-interactive
+    /// contract deterministically: ask FAILS (never invents an answer) and
+    /// approval DENIES (never auto-approves).
+    #[tokio::test]
+    async fn ask_user_fails_when_non_interactive() {
+        let registry = build_baseline_registry();
+        let out = registry
+            .execute(
+                "ask_user",
+                ToolInput::new(serde_json::json!({"question": "proceed?"})),
+                &human_ctx(),
+            )
+            .await;
+        assert_eq!(out.status, ToolStatus::Failed);
+        assert!(out.summary.contains("non-interactive"));
+    }
+
+    #[tokio::test]
+    async fn approval_denies_when_non_interactive() {
+        let registry = build_baseline_registry();
+        let out = registry
+            .execute(
+                "approval",
+                ToolInput::new(serde_json::json!({"command": "rm -rf /"})),
+                &human_ctx(),
+            )
+            .await;
+        assert_eq!(out.status, ToolStatus::PermissionDenied);
+        match out.data {
+            ToolData::ApprovalResult { approved, .. } => assert!(!approved),
+            other => panic!("expected ApprovalResult, got {:?}", other),
+        }
     }
 }

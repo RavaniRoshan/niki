@@ -50,6 +50,8 @@ enum Commands {
     Goal(niki::cli::goal::GoalArgs),
     /// Research and propose a change without making it (plan mode)
     Plan(niki::cli::plan::PlanArgs),
+    /// Inspect and rewind chat/pipeline sessions
+    Session(niki::cli::session::SessionArgs),
     /// Manage API credentials (login, logout, status)
     Auth {
         #[command(subcommand)]
@@ -107,6 +109,7 @@ async fn main() -> Result<()> {
         Commands::Memory(args) => niki::cli::memory::handle(args)?,
         Commands::Goal(args) => niki::cli::goal::handle(args).await?,
         Commands::Plan(args) => niki::cli::plan::handle(args).await?,
+        Commands::Session(args) => niki::cli::session::handle(args)?,
         Commands::Auth { command } => niki::cli::auth::handle(command).await?,
         Commands::Providers(args) => niki::cli::providers::handle(args)?,
         Commands::Doctor(args) => niki::cli::doctor::handle(args)?,
