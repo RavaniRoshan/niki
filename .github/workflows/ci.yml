@@ -27,8 +27,7 @@ jobs:
       - name: Clippy lints
         run: set -eo pipefail; cargo clippy --all-targets 2>&1 | tail -40
 
-  # ── Phase 1b: Supply-chain audit (cargo-audit + cargo-deny) ────────
-  audit:
+  # ── Phase 1b: Supply-chain audit (cargo-audit + cargo-deny) ────────  audit:
     name: Audit (supply chain)
     runs-on: ubuntu-latest
     steps:
@@ -52,6 +51,36 @@ jobs:
         run: command -v cargo-deny >/dev/null 2>&1 || cargo install cargo-deny --locked
       - name: Run cargo-deny (advisories + licenses + sources)
         run: cargo deny check
+
+  # ── Phase 1c: Release-manifest URL liveness ─────────────────────────
+  # Manifests may legitimately lag Cargo.toml (they track the latest release
+  # *with uploaded assets*), but their URLs must never 404. v0.6.0 shipped a
+  # tag without assets while manifests pointed at v0.4.0 — this job pins that
+  # invariant: every download URL referenced by a manifest must exist.
+  manifest-parity:
+    name: Manifest parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check manifest download URLs resolve
+        run: |
+          set -euo pipefail
+          urls=$(grep -rhoE 'https://github\.com/[^ "]*\.tar\.gz' homebrew/ ; grep -rhoE 'https://github\.com/[^ "]*\.zip' scoop/ winget/)
+          echo "$urls"
+          fail=0
+          for u in $urls; do
+            if curl -fIsS --max-time 30 "$u" -o /dev/null; then
+              echo "OK   $u"
+            else
+              echo "DEAD $u"; fail=1
+            fi
+          done
+          exit $fail
+      - name: Flag crate/manifest version skew (informational)
+        run: |
+          crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "crate=$crate scoop=$(python3 -c "import json; print(json.load(open('scoop/niki.json'))['version'])")"
+          echo "If crate is ahead of manifests, the release workflow not uploading assets is the gap to fix, not the manifests."
 
   # ── Phase 2: Unit + integration tests ─────────────────────────────
   test:

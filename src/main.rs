@@ -32,6 +32,12 @@ enum Commands {
         #[command(subcommand)]
         command: niki::cli::config::ConfigCommands,
     },
+    /// Initialize a new niki.toml configuration file (alias for `config init`)
+    Init {
+        /// Run interactively (prompt for settings, check env vars)
+        #[arg(short, long)]
+        interactive: bool,
+    },
     /// Recommend per-agent models (cost/quality tradeoffs)
     Recommend(niki::cli::recommend::RecommendArgs),
     /// Generate/locate the static HTML dashboard for a task
@@ -87,6 +93,12 @@ async fn main() -> Result<()> {
         Commands::Status(args) => niki::cli::status::handle(args).await?,
         Commands::Report(args) => niki::cli::report::handle(args).await?,
         Commands::Config { command } => niki::cli::config::handle(command).await?,
+        Commands::Init { interactive } => {
+            niki::cli::config::handle(&niki::cli::config::ConfigCommands::Init {
+                interactive: *interactive,
+            })
+            .await?
+        }
         Commands::Recommend(args) => niki::cli::recommend::handle(args)?,
         Commands::Dashboard(args) => niki::cli::dashboard::handle(args)?,
         Commands::Eval(args) => niki::cli::eval::handle(args).await?,

@@ -18,7 +18,7 @@ Control memory quotas, CPU limits, capabilities, and network behavior in `niki.t
 
 ```toml
 [docker]
-backend          = "docker"              # "docker" or "podman"
+backend          = "docker"              # "docker" (container) or "worktree" (git worktree, no isolation)
 base_image       = "niki-sandbox:24.04"  # base image
 memory_limit     = "2g"                  # memory limit
 cpu_limit        = 2.0                   # max CPU cores

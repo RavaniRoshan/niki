@@ -16,7 +16,7 @@ Every task creates a directory `.niki/tasks/<task-id>/` containing all generated
 ├── code_diff.json        # Coder hunks
 ├── test_report.json      # Tester output & test runner logs
 ├── review_verdict.json   # Reviewer scores & revision loops
-├── safety_proof.json     # Sandbox deny-list & capability proof
+├── safety_proof.json     # Post-run git invariants (branch added, history preserved, no force-push)
 ├── changes.patch         # Unified git patch
 └── report.md             # Rendered human report
 ```
