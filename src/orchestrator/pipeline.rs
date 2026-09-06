@@ -898,6 +898,10 @@ pub async fn execute_pipeline(
     dry_run: bool,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     task_dir: &Path,
+    // Pre-approved plan: validated `planner.json` from `niki plan`, reviewed
+    // by the user. When `Some`, the Planner LLM call is skipped and this spec
+    // drives the run. `None` runs the Planner normally.
+    plan_override_json: Option<String>,
 ) -> Result<PipelineResult> {
     // 1. Index Project
     let knowledge = index_project(&task.project_path, config).await?;
@@ -948,13 +952,24 @@ pub async fn execute_pipeline(
     let stages = ensure_planner(resolve_stages(config), config);
 
     // --- Planner (entry point) ---
-    let planner_stage = stages
-        .iter()
-        .find(|s| s.role == AgentRole::Planner && !s.skip)
-        .ok_or_else(|| crate::NikiError::Config("No Planner stage configured".to_string()))?;
-    let planner_llm = provider_for(&planner_stage.provider, &planner_stage.fallbacks, config)?;
+    // An approved plan (`niki run --plan <id>`) skips the Planner LLM call:
+    // the user-reviewed spec drives the run directly. The JSON is re-validated
+    // here so stale or hand-edited plans fail fast instead of confusing stages.
+    // Metrics stay empty for the skipped stage so reported costs remain honest.
+    let planner_json: String = if let Some(approved) = plan_override_json {
+        let _: TaskSpec = serde_json::from_str(&approved).map_err(|e| {
+            crate::NikiError::Config(format!("--plan artifact is not a valid TaskSpec: {e}"))
+        })?;
+        tracing::info!(target: "niki::pipeline", "using approved plan, Planner LLM call skipped");
+        approved
+    } else {
+        let planner_stage = stages
+            .iter()
+            .find(|s| s.role == AgentRole::Planner && !s.skip)
+            .ok_or_else(|| crate::NikiError::Config("No Planner stage configured".to_string()))?;
+        let planner_llm = provider_for(&planner_stage.provider, &planner_stage.fallbacks, config)?;
 
-    let planner_json = run_stage(
+        run_stage(
         AgentRole::Planner,
         planner_llm.as_ref(),
         &planner_stage.model,
@@ -973,7 +988,8 @@ pub async fn execute_pipeline(
         planner_stage.temperature,
         steer_rx,
     )
-    .await?;
+    .await?
+    };
     let task_spec: TaskSpec = serde_json::from_str(&planner_json)?;
     artifacts.push((AgentRole::Planner, planner_json.clone()));
     isolation.push(IsolationRecord {
@@ -982,9 +998,22 @@ pub async fn execute_pipeline(
         context_sources: isolation_sources_for(AgentRole::Planner, config.red_blue.enabled),
         saw_other_reasoning: false,
     });
-    let pm = metrics
-        .last()
-        .unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
+    // Approved-plan runs skip the Planner LLM call, so no metric exists for
+    // this stage — report zero usage rather than crashing on the assumption
+    // that the Planner always ran.
+    let pm = metrics.last().cloned().unwrap_or_else(|| StageMetric {
+        role: AgentRole::Planner,
+        provider: String::new(),
+        model: String::new(),
+        input_tokens: 0,
+        output_tokens: 0,
+        cached_input_tokens: 0,
+        reasoning_tokens: 0,
+        latency_ms: 0,
+        cost_usd: 0.0,
+        retry_count: 0,
+        ttft_ms: 0,
+    });
     display.agent_done(
         AgentRole::Planner,
         crate::display::artifact_render::render_task_spec_summary(&task_spec),

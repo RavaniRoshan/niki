@@ -453,6 +453,7 @@ pub async fn run_case_live(
             .join(&niki_cfg.general.output_dir)
             .join("tasks")
             .join(niki_task.id.to_string()),
+        None,
     )
     .await?;
 
@@ -475,6 +476,7 @@ pub async fn run_case_live(
             .join(&base_cfg.general.output_dir)
             .join("tasks")
             .join(base_task.id.to_string()),
+        None,
     )
     .await?;
 

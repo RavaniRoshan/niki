@@ -1,6 +1,6 @@
 use crate::config::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
-use crate::orchestrator::pipeline::{Task, execute_pipeline};
+use crate::orchestrator::pipeline::{PipelineResult, Task, execute_pipeline};
 use crate::orchestrator::state::{TaskRecord, TaskStatus};
 use crate::sandbox::SandboxBackend;
 use crate::sandbox::docker::ActiveContainers;
@@ -108,6 +108,12 @@ pub struct RunArgs {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Execute from a user-approved plan: full UUID or short prefix of a task
+    /// whose `niki plan` (or `--dry-run`) output you reviewed. Skips the
+    /// Planner LLM call and drives the run from that spec.
+    #[arg(long)]
+    pub plan: Option<String>,
+
     /// Minimal output — no streaming, just final report
     #[arg(long)]
     pub quiet: bool,
@@ -141,6 +147,76 @@ impl From<BackendArg> for crate::sandbox::SandboxBackend {
             BackendArg::Docker => crate::sandbox::SandboxBackend::Docker,
             BackendArg::Worktree => crate::sandbox::SandboxBackend::Worktree,
         }
+    }
+}
+
+/// Render the Planner's spec as a human-readable `plan.md` for the plan mode
+/// (`niki plan` / `--dry-run`). Machine-readable truth stays in
+/// `artifacts/planner.json`; this file is the approval surface.
+fn write_plan_md(task_dir: &std::path::Path, task: &Task, result: &PipelineResult) {
+    let Some(planner_json) = result
+        .artifacts
+        .iter()
+        .find(|(r, _)| *r == AgentRole::Planner)
+        .map(|(_, j)| j.as_str())
+    else {
+        return;
+    };
+    let spec: crate::artifacts::types::TaskSpec = match serde_json::from_str(planner_json) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "Warning: could not parse planner artifact for plan.md: {}",
+                e
+            );
+            return;
+        }
+    };
+    let mut out = format!(
+        "# Plan — {}\n\n> Produced by `niki plan` (task `{}`). Review, edit the approach if needed, then execute with `niki run --plan {}`.\n\n## Summary\n\n{}\n\n## Approach\n\n{}\n\n",
+        task.description,
+        task.id,
+        &task.id.to_string()[..8],
+        spec.summary,
+        spec.approach,
+    );
+    out.push_str("## Files to touch\n\n");
+    for f in &spec.files_to_modify {
+        out.push_str(&format!(
+            "- `{}` ({:?}): {}\n",
+            f.path, f.action, f.description
+        ));
+    }
+    out.push_str("\n## Acceptance criteria\n\n");
+    for c in &spec.acceptance_criteria {
+        out.push_str(&format!("- [ ] {}\n", c));
+    }
+    if !spec.constraints.is_empty() {
+        out.push_str("\n## Constraints\n\n");
+        for c in &spec.constraints {
+            out.push_str(&format!("- {}\n", c));
+        }
+    }
+    if let Some(u) = &spec.uncertainties {
+        if !u.is_empty() {
+            out.push_str("\n## Open questions (planner uncertainties)\n\n");
+            for q in u {
+                out.push_str(&format!("- {}\n", q));
+            }
+        }
+    }
+    out.push_str(&format!(
+        "\n## Topology\n\n{}\n\n## Cost of planning\n\n",
+        result.topology_reason
+    ));
+    for m in &result.metrics {
+        out.push_str(&format!(
+            "- {:?} {} ({}): {} in / {} out tok, ${:.4}\n",
+            m.role, m.model, m.provider, m.input_tokens, m.output_tokens, m.cost_usd
+        ));
+    }
+    if let Err(e) = crate::util::write_restricted(&task_dir.join("plan.md"), out) {
+        eprintln!("Warning: could not write plan.md: {}", e);
     }
 }
 
@@ -381,6 +457,29 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         }
     };
 
+    // --plan: load a user-approved planner artifact from a previous `niki plan`
+    // (or dry-run) task. Accepts a full UUID or unique short prefix, resolved
+    // exactly like `niki report`. The JSON is validated as a TaskSpec here so
+    // a stale or hand-broken plan fails with a clear error before the run.
+    let plan_override_json: Option<String> = match &args.plan {
+        None => None,
+        Some(id) => {
+            let tasks_dir = project_dir.join(&config.general.output_dir).join("tasks");
+            let resolved = crate::cli::report::resolve_task_id(&tasks_dir, id)?;
+            let path = tasks_dir.join(&resolved).join("artifacts/planner.json");
+            let json = std::fs::read_to_string(&path).map_err(|_| {
+                anyhow!(
+                    "no approved plan found: {} (run `niki plan` first)",
+                    path.display()
+                )
+            })?;
+            let _: crate::artifacts::types::TaskSpec = serde_json::from_str(&json)
+                .map_err(|e| anyhow!("approved plan is not a valid TaskSpec: {e}"))?;
+            println!("Using approved plan from task {resolved} (Planner LLM call skipped).");
+            Some(json)
+        }
+    };
+
     let mut result = match execute_pipeline(
         &task,
         &config,
@@ -390,6 +489,7 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         args.dry_run,
         cancel.clone(),
         &task_dir,
+        plan_override_json,
     )
     .await
     {
@@ -451,6 +551,19 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 eprintln!("Warning: could not save test_execution artifact: {}", e);
             }
         }
+    }
+
+    // Plan mode (`niki plan` / `--dry-run`): persist a human-readable plan and
+    // point at the approval command. The machine-readable spec already lives at
+    // `artifacts/planner.json`; `plan.md` is the review surface.
+    if args.dry_run {
+        write_plan_md(&task_dir, &task, &result);
+        println!(
+            "\nPlan written to {}/plan.md — review it, then execute with:\n  niki run --plan {} --project {}",
+            task_dir.display(),
+            &task.id.to_string()[..8],
+            project_dir.display(),
+        );
     }
 
     // Generate the static HTML dashboard (diff viewer + annotations).
@@ -563,8 +676,10 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     }
 
     // Create the git branch + commit (no-op when there is no diff; skipped
-    // entirely when the red-suite gate blocked the branch).
-    if branch_block_note.is_none() {
+    // entirely when the red-suite gate blocked the branch, and in dry-run /
+    // plan mode where a branch — even an empty ref — would misrepresent a
+    // proposal as a result).
+    if branch_block_note.is_none() && !args.dry_run {
         if let Err(e) = crate::output::git::create_branch_and_commit(
             &project_dir,
             &branch_name,
