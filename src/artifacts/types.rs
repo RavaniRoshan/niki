@@ -122,7 +122,29 @@ pub struct TestCase {
     pub file_path: String,
     pub description: String,
     pub status: TestStatus,
+    #[serde(default)]
     pub error_message: Option<String>,
+    /// Where the expected values come from. `Derived` means read off the
+    /// implementation under test — circular, cannot validate intent.
+    /// Defaults to `Derived` for reports written before this field existed.
+    #[serde(default)]
+    pub oracle_source: OracleSource,
+    /// Which spec/plan statement the expectations trace to (required for `Spec`).
+    #[serde(default)]
+    pub spec_reference: Option<String>,
+}
+
+/// Provenance of a test's expected values (the oracle problem, goal-a3f9c2).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OracleSource {
+    /// Expectations traced to the task spec/plan — an independent oracle.
+    Spec,
+    /// Expectations read off the implementation — circular, validates nothing.
+    #[default]
+    Derived,
+    /// Invariant over generated inputs (property-based test).
+    Property,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

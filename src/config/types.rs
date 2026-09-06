@@ -834,6 +834,7 @@ fn default_red_agent() -> AgentConfig {
         temperature: 0.0,
         fallbacks: Vec::new(),
         test_command: None,
+        mutation_command: None,
     }
 }
 
@@ -845,6 +846,7 @@ fn default_anthropic_agent() -> AgentConfig {
         temperature: 0.0,
         fallbacks: Vec::new(),
         test_command: None,
+        mutation_command: None,
     }
 }
 
@@ -856,6 +858,7 @@ fn default_openai_agent() -> AgentConfig {
         temperature: 0.0,
         fallbacks: Vec::new(),
         test_command: None,
+        mutation_command: None,
     }
 }
 
@@ -879,6 +882,14 @@ pub struct AgentConfig {
     /// go.mod). The real exit code + output are recorded in every run's audit trail.
     #[serde(default)]
     pub test_command: Option<String>,
+    /// Optional mutation-testing command the Tester runs after the suite passes
+    /// (e.g. `cargo mutants`, `mutmut run`, `stryker run`). Unlike `test_command`
+    /// there is no auto-detection — runner semantics differ per ecosystem, so
+    /// this only runs when explicitly configured. A non-zero exit (surviving
+    /// mutants) is recorded in the audit trail and blocks the branch unless
+    /// `--force` is passed, exactly like a failing suite.
+    #[serde(default)]
+    pub mutation_command: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -890,6 +901,7 @@ impl Default for AgentConfig {
             temperature: 0.0,
             fallbacks: Vec::new(),
             test_command: None,
+            mutation_command: None,
         }
     }
 }

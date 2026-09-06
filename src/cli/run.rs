@@ -112,6 +112,12 @@ pub struct RunArgs {
     #[arg(long)]
     pub quiet: bool,
 
+    /// Create the branch even when the executed test suite (or mutation gate)
+    /// failed. The override is recorded in the report and task record — a
+    /// forced branch is explicitly NOT a verified branch.
+    #[arg(long)]
+    pub force: bool,
+
     /// Show full agent reasoning (not just summaries)
     #[arg(long)]
     pub verbose: bool,
@@ -510,11 +516,45 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         eprintln!("Failed to generate patch: {}", e);
     }
 
+    // Red-suite gate (goal-a3f9c2, Phase 2): a failing executed suite — or a
+    // failing mutation gate — blocks the branch. The evidence (patch, report,
+    // test output) is still written so the failure is inspectable, but no
+    // `niki/<id>` branch is created and the task is recorded as Failed.
+    // `--force` overrides with the override itself recorded; a forced branch
+    // is explicitly not a verified branch.
+    let suite_failed = result
+        .test_execution
+        .as_ref()
+        .is_some_and(|te| !te.passed || te.mutation.as_ref().is_some_and(|m| !m.passed));
+    let mut branch_block_note: Option<String> = None;
+    if suite_failed && !args.force {
+        let what = match result.test_execution.as_ref() {
+            Some(te) if !te.passed => {
+                format!("test suite `{}` failed (exit {})", te.command, te.exit_code)
+            }
+            Some(te) => format!(
+                "mutation gate `{}` failed (exit {})",
+                te.mutation
+                    .as_ref()
+                    .map(|m| m.command.as_str())
+                    .unwrap_or("?"),
+                te.mutation.as_ref().map(|m| m.exit_code).unwrap_or(-1),
+            ),
+            None => "verification failed".to_string(),
+        };
+        branch_block_note = Some(format!(
+            "Branch blocked: {}. Re-run with `--force` to create the branch anyway (recorded as forced, not verified).",
+            what
+        ));
+    }
+    let forced_branch = suite_failed && args.force;
+
     // For the worktree backend the change still lives inside the sandbox copy (a
     // separate git worktree), so `working_tree_diff` on the host would be empty.
     // Apply the sandbox's diff to the host working tree first; the Docker backend
     // already wrote through the bind mount and skips this step.
-    if !uses_docker
+    if branch_block_note.is_none()
+        && !uses_docker
         && !result.final_diff.trim().is_empty()
         && let Err(e) =
             crate::output::git::apply_diff_to_working_tree(&project_dir, &result.final_diff)
@@ -522,22 +562,28 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         eprintln!("Warning: could not apply sandbox diff to host: {}", e);
     }
 
-    // Create the git branch + commit (no-op when there is no diff).
-    if let Err(e) = crate::output::git::create_branch_and_commit(
-        &project_dir,
-        &branch_name,
-        &result.final_diff,
-        &task.id.to_string(),
-    ) {
-        eprintln!("Warning: git branch/commit failed: {}", e);
+    // Create the git branch + commit (no-op when there is no diff; skipped
+    // entirely when the red-suite gate blocked the branch).
+    if branch_block_note.is_none() {
+        if let Err(e) = crate::output::git::create_branch_and_commit(
+            &project_dir,
+            &branch_name,
+            &result.final_diff,
+            &task.id.to_string(),
+        ) {
+            eprintln!("Warning: git branch/commit failed: {}", e);
+        }
     }
 
     // Hermetic safety proof (BUILD_PLAN 1.1): with the branch now committed,
     // verify the committed repo state is unchanged except for that one branch.
     // Emit `safety_proof.json` next to the report and attach it to the result.
     // Skip when there was no diff (no branch was created), so a no-op run isn't
-    // misreported as NON-HERMETIC.
-    if !result.final_diff.trim().is_empty()
+    // misreported as NON-HERMETIC — and skip when the red-suite gate blocked
+    // the branch, since `prove()` in strict mode would abort a correctly
+    // blocked run for the missing branch.
+    if branch_block_note.is_none()
+        && !result.final_diff.trim().is_empty()
         && let Some(pre) = &pre_snapshot
     {
         // Enforce the hermetic guarantee (research report S9). Previously this used
@@ -562,10 +608,35 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     if let Err(e) = crate::output::report::generate_report(&task, &config, &result) {
         eprintln!("Warning: could not generate report: {}", e);
     }
+    // Record a red-suite block / force override directly in the report so the
+    // audit trail states the branch decision in plain language.
+    if branch_block_note.is_some() || forced_branch {
+        let notice = match (&branch_block_note, forced_branch) {
+            (Some(note), _) => format!("\n## Branch decision\n\n{}\n", note),
+            (None, true) => "## Branch decision\n\nBranch created with `--force` over a failing suite/mutation gate. This branch is explicitly NOT verified.\n".to_string(),
+            _ => String::new(),
+        };
+        if !notice.is_empty() {
+            use std::fmt::Write as _;
+            let path = task_dir.join("report.md");
+            let mut existing = std::fs::read_to_string(&path).unwrap_or_default();
+            let _ = write!(existing, "{notice}");
+            if let Err(e) = crate::util::write_restricted(&path, existing) {
+                eprintln!("Warning: could not append branch decision to report: {}", e);
+            }
+        }
+    }
 
     // Persist final task record.
-    record.status = TaskStatus::Completed;
-    record.branch = Some(branch_name.clone());
+    if let Some(note) = &branch_block_note {
+        record.status = TaskStatus::Failed {
+            error: note.clone(),
+        };
+        record.branch = None;
+    } else {
+        record.status = TaskStatus::Completed;
+        record.branch = Some(branch_name.clone());
+    }
     record.verdict = Some(format!("{:?}", result.verdict));
     record.revision_rounds = result.revision_rounds;
     record.add_metrics(&result.metrics);
@@ -574,7 +645,16 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     }
 
     if !args.quiet {
-        display.show_completion(&result, &branch_name, &task_dir);
+        match &branch_block_note {
+            Some(note) => {
+                eprintln!("\n{note}");
+                eprintln!(
+                    "Evidence preserved in {} (report.md, changes.patch, artifacts/).",
+                    task_dir.display()
+                );
+            }
+            None => display.show_completion(&result, &branch_name, &task_dir),
+        }
     }
 
     // Tear down the TUI (if active): this joins the render thread, which

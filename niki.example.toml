@@ -78,6 +78,11 @@ model = "llama-3.1-70b-versatile"
 # NIKI auto-detects from the project layout. The real exit code + output are
 # recorded in every run's audit trail as artifacts/test_execution.json.
 # test_command = "cargo test --locked"
+# Optional: mutation-testing command run after the suite (e.g. "cargo mutants",
+# "mutmut run", "stryker run"). No auto-detection — set explicitly to opt in.
+# A non-zero exit (surviving mutants) is recorded and blocks the branch unless
+# `niki run --force` is passed, exactly like a failing suite.
+# mutation_command = "cargo mutants --no-shuffle"
 # Fallback providers: if Groq is rate-limited or down, try OpenRouter, then OpenAI.
 # Only transient errors (429, 503, timeout, connection) trigger failover.
 fallbacks = ["openrouter", "openai"]

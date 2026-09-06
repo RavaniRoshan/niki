@@ -15,7 +15,7 @@ use std::path::Path;
 const TEST_OUTPUT_LIMIT: usize = 24_000;
 
 /// The result of running the project's real test suite inside the sandbox.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct TestExecution {
     /// The command that was executed.
     pub command: String,
@@ -31,6 +31,10 @@ pub struct TestExecution {
     pub truncated: bool,
     /// Optional human note (e.g. why execution was skipped or failed to start).
     pub note: Option<String>,
+    /// Mutation-testing result, attached when `[agents.tester] mutation_command`
+    /// is configured. Boxed: the audit trail nests one execution inside another.
+    #[serde(default)]
+    pub mutation: Option<Box<TestExecution>>,
 }
 
 /// Auto-detect a test command from the project layout when the user has not
@@ -93,6 +97,7 @@ pub async fn run_tests(
                 stderr: String::new(),
                 truncated: false,
                 note: Some(format!("test command could not be executed: {e}")),
+                ..Default::default()
             });
         }
     };
@@ -114,6 +119,62 @@ pub async fn run_tests(
         stderr,
         truncated: so_trunc || se_trunc,
         note,
+        ..Default::default()
+    })
+}
+
+/// Run the configured mutation-testing command inside the sandbox, if any.
+///
+/// There is deliberately no auto-detection: mutation runners differ per
+/// ecosystem (`cargo mutants`, `mutmut run`, `stryker run`, …) and each has
+/// its own exit-code contract, so this only runs when
+/// `[agents.tester] mutation_command` is set explicitly. A non-zero exit
+/// (surviving mutants) fails exactly like a failing suite: it is recorded in
+/// the audit trail and blocks the branch unless `--force` is passed.
+pub async fn run_mutation(
+    sandbox: &dyn Sandbox,
+    config: &NikiConfig,
+    _project_path: &Path,
+) -> Option<TestExecution> {
+    let command = config.agents.tester.mutation_command.clone()?;
+
+    let out: ExecOutput = match sandbox
+        .exec(&["sh", "-lc", &command], Some(&AgentRole::Tester))
+        .await
+    {
+        Ok(o) => o,
+        Err(e) => {
+            return Some(TestExecution {
+                command,
+                exit_code: -1,
+                passed: false,
+                stdout: String::new(),
+                stderr: String::new(),
+                truncated: false,
+                note: Some(format!("mutation command could not be executed: {e}")),
+                ..Default::default()
+            });
+        }
+    };
+
+    let (stdout, so_trunc) = truncate(&out.stdout);
+    let (stderr, se_trunc) = truncate(&out.stderr);
+    let passed = out.exit_code == 0;
+    let note = if !passed && out.exit_code != -1 {
+        Some("mutation testing reported surviving mutants (non-zero exit)".to_string())
+    } else {
+        None
+    };
+
+    Some(TestExecution {
+        command,
+        exit_code: out.exit_code,
+        passed,
+        stdout,
+        stderr,
+        truncated: so_trunc || se_trunc,
+        note,
+        ..Default::default()
     })
 }
 
