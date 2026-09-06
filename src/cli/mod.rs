@@ -13,6 +13,7 @@ pub mod recommend;
 pub mod report;
 pub mod research;
 pub mod run;
+pub mod session;
 pub mod smoke;
 pub mod status;
 pub mod verify;
