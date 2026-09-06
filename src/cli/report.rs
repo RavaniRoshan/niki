@@ -52,7 +52,7 @@ pub async fn handle(args: &ReportArgs) -> Result<()> {
 
 /// Resolve a user-supplied task id (full UUID or a short prefix) to a concrete
 /// task directory name. Errors if nothing matches or the prefix is ambiguous.
-fn resolve_task_id(tasks_dir: &Path, input: &str) -> Result<String> {
+pub(crate) fn resolve_task_id(tasks_dir: &Path, input: &str) -> Result<String> {
     // Exact directory match (full UUID) wins immediately.
     if tasks_dir.join(input).join("task.json").is_file() {
         return Ok(input.to_string());

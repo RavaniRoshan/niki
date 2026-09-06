@@ -157,6 +157,7 @@ impl TestHarness {
             false,
             cancel,
             &task_dir,
+            None,
         )
         .await
         .expect("pipeline should succeed")
@@ -185,6 +186,7 @@ impl TestHarness {
             true,
             cancel,
             &task_dir,
+            None,
         )
         .await
         .expect("pipeline should succeed")
@@ -213,6 +215,7 @@ impl TestHarness {
             false,
             cancel,
             &task_dir,
+            None,
         )
         .await
         .unwrap_err()
