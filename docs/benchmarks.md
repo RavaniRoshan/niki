@@ -10,8 +10,11 @@ real benchmark — it is reproducible and inspectable by you, not a number we pr
 - **Revision rounds** — how many times the Reviewer bounced work back to the Coder before approval.
 - **Verdict** — Approved / Changes requested / Forced-complete, with the reviewer's scored
   reasoning (correctness / quality / coverage).
-- **Hermetic proof** — NIKI asserts that, for the default container backend, your working tree
-  was never mutated mid-run. This is enforced, not claimed (security audit S9, `strict` mode).
+- **Hermetic proof** — NIKI asserts that, for the default container backend, existing
+  branches and history were untouched by the run. This is enforced, not claimed (security
+  audit S9, `strict` mode). Note the scope: the proof covers committed git state, not the
+  host working tree (which NIKI intentionally mutates to apply the diff for your review),
+  and it is skipped on empty diffs where no branch is created.
 
 ## What we do NOT claim
 We do **not** publish head-to-head SWE-bench / Terminal-Bench scores for NIKI. Reasons, stated
@@ -72,5 +75,6 @@ the other tool's exact config; best-of-N numbers without stating the selection p
 ## Cost routing (a real, measured win)
 Because you can assign a cheap model to the Tester and a strong model to the Planner/Reviewer,
 NIKI's per-run cost is dominated by the roles you choose. `niki recommend` prints per-role
-cost/quality tradeoffs from your own run history. This per-task model routing is the practical
+cost/quality tradeoffs from built-in per-role pairings (history-driven recommendations
+are planned, not yet implemented). This per-task model routing is the practical
 "better per dollar" lever competitors mostly lack.

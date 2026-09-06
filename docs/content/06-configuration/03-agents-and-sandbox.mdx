@@ -38,7 +38,7 @@ test_command = "npm test -- --bail" # Explicit test runner override
 
 ```toml
 [docker]
-backend          = "docker"             # "docker" or "podman"
+backend          = "docker"             # "docker" (container) or "worktree" (git worktree, no isolation)
 base_image       = "niki-sandbox:24.04" # Container base image
 memory_limit     = "2g"                 # Max memory
 cpu_limit        = 2.0                  # Max CPU cores

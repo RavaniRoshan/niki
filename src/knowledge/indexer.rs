@@ -181,7 +181,13 @@ pub async fn index_project(path: &Path, config: &NikiConfig) -> Result<ProjectKn
                 return true;
             }
             let name = e.file_name().to_string_lossy();
-            !name.starts_with('.') || name == ".cursorrules"
+            !name.starts_with('.')
+                || name == ".cursorrules"
+                || name == ".git"
+                || name == "target"
+                || name == "node_modules"
+                || name == "dist"
+                || name == "build"
         })
     {
         let entry = match entry {
