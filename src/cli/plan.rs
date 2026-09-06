@@ -38,6 +38,8 @@ pub async fn handle(args: &PlanArgs) -> Result<()> {
         tui: false,
         force: false,
         plan: None,
+        output_format: crate::cli::run::OutputFormat::Text,
+        bare: false,
     })
     .await
 }

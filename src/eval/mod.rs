@@ -454,6 +454,7 @@ pub async fn run_case_live(
             .join("tasks")
             .join(niki_task.id.to_string()),
         None,
+        false,
     )
     .await?;
 
@@ -477,6 +478,7 @@ pub async fn run_case_live(
             .join("tasks")
             .join(base_task.id.to_string()),
         None,
+        false,
     )
     .await?;
 

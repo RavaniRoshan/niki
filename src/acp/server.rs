@@ -84,6 +84,7 @@ async fn run_prompt(
         cancel,
         &task_dir,
         None,
+        false,
     )
     .await;
 

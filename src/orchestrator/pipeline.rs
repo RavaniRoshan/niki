@@ -489,6 +489,8 @@ async fn run_parallel_coders(
     base_display: &AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
     mcp_tools: &str,
+    // Bare mode: skip project-memory injection in spawned coders.
+    bare_memory: bool,
 ) -> Result<Vec<CodeDiff>> {
     let event_tx = base_display
         .tui_tx()
@@ -545,6 +547,7 @@ async fn run_parallel_coders(
                 0.0, // temperature: use agent default
                 &mcp_tools,
                 config_max_diff_lines(&config),
+                bare_memory,
                 None,
             )
             .await?;
@@ -665,13 +668,19 @@ async fn run_role(
     temperature: f32,
     mcp_tools: &str,
     max_diff_lines: Option<usize>,
+    // Bare mode: skip project-memory injection (ambient history off).
+    bare_memory: bool,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<(String, Vec<String>, RoleOutput)> {
     let task_spec_json = serde_json::to_string_pretty(task_spec)?;
     let (template, schema) = role_prompt(role);
 
-    // Load role-specific memory for prompt injection
-    let memory_str = crate::memory::render_memory_for_prompt(project_path, role, 10);
+    // Load role-specific memory for prompt injection (absent when bare).
+    let memory_str = if bare_memory {
+        String::new()
+    } else {
+        crate::memory::render_memory_for_prompt(project_path, role, 10)
+    };
 
     let ctx = match role {
         AgentRole::Coder => context! {
@@ -902,10 +911,35 @@ pub async fn execute_pipeline(
     // by the user. When `Some`, the Planner LLM call is skipped and this spec
     // drives the run. `None` runs the Planner normally.
     plan_override_json: Option<String>,
+    // Bare mode (`niki run --bare`): deterministic-inputs mode for CI.
+    // Skips project memory injection, MCP tool discovery, and external
+    // knowledge-URL fetching, so runs depend only on the repo + config.
+    // Model sampling nondeterminism and failover retries still apply — bare
+    // means "no ambient inputs", not "bit-identical output".
+    bare: bool,
 ) -> Result<PipelineResult> {
+    // In bare mode, strip the ambient-input config up front so every
+    // downstream consumer (indexer, memory, MCP) sees the same story.
+    let bare_config: Option<NikiConfig>;
+    let config: &NikiConfig = if bare {
+        let mut stripped = config.clone();
+        stripped.knowledge.urls.clear();
+        bare_config = Some(stripped);
+        bare_config.as_ref().unwrap()
+    } else {
+        config
+    };
     // 1. Index Project
     let knowledge = index_project(&task.project_path, config).await?;
     let knowledge_str = knowledge.render();
+    // Project memory is ambient history: present by default, absent when bare.
+    let memory_for = |role: AgentRole| {
+        if bare {
+            String::new()
+        } else {
+            crate::memory::render_memory_for_prompt(&task.project_path, role, 10)
+        }
+    };
 
     let mut state = super::state::PipelineState::new(task.id);
     let mut metrics: Vec<StageMetric> = Vec::new();
@@ -921,9 +955,12 @@ pub async fn execute_pipeline(
 
     // --- MCP tool discovery (optional, launch-plan C1) ---
     // When `[mcp] enabled = true`, connect configured servers now and surface their
-    // tools to every agent via the prompt context. The manager is wired into the
+    // tools to every agent via the prompt context. Skipped entirely when bare:
+    // external servers are ambient inputs. The manager is wired into the
     // runtime here; the agent→server tool-call execution loop remains a follow-up.
-    let mcp_tools: String = if config.mcp.enabled {
+    let mcp_tools: String = if bare {
+        String::new()
+    } else if config.mcp.enabled {
         let mut mgr = crate::mcp::McpManager::new();
         if let Err(e) = mgr.connect_all().await {
             eprintln!("Warning: MCP connect failed: {}", e);
@@ -970,25 +1007,25 @@ pub async fn execute_pipeline(
         let planner_llm = provider_for(&planner_stage.provider, &planner_stage.fallbacks, config)?;
 
         run_stage(
-        AgentRole::Planner,
-        planner_llm.as_ref(),
-        &planner_stage.model,
-        &planner_stage.provider,
-        "planner.md",
-        context! {
-            task_description => task.description.clone(),
-            project_knowledge => knowledge_str.clone(),
-            project_memory => crate::memory::render_memory_for_prompt(&task.project_path, AgentRole::Planner, 10),
-        },
-        "schemas/task_spec.schema.json",
-        display,
-        &mut metrics,
-        false, // Planner must not degrade — it's the pipeline entry point
-        planner_stage.max_tokens,
-        planner_stage.temperature,
-        steer_rx,
-    )
-    .await?
+            AgentRole::Planner,
+            planner_llm.as_ref(),
+            &planner_stage.model,
+            &planner_stage.provider,
+            "planner.md",
+            context! {
+                task_description => task.description.clone(),
+                project_knowledge => knowledge_str.clone(),
+                project_memory => memory_for(AgentRole::Planner),
+            },
+            "schemas/task_spec.schema.json",
+            display,
+            &mut metrics,
+            false, // Planner must not degrade — it's the pipeline entry point
+            planner_stage.max_tokens,
+            planner_stage.temperature,
+            steer_rx,
+        )
+        .await?
     };
     let task_spec: TaskSpec = serde_json::from_str(&planner_json)?;
     artifacts.push((AgentRole::Planner, planner_json.clone()));
@@ -1164,6 +1201,7 @@ pub async fn execute_pipeline(
                     display,
                     &mut metrics,
                     &mcp_tools,
+                    bare,
                 )
                 .await?;
 
@@ -1215,6 +1253,7 @@ pub async fn execute_pipeline(
                     synth_stage.temperature,
                     &mcp_tools,
                     config_max_diff_lines(config),
+                    bare,
                     steer_rx,
                 )
                 .await?;
@@ -1285,6 +1324,7 @@ pub async fn execute_pipeline(
                         stage.temperature,
                         &mcp_tools,
                         config_max_diff_lines(config),
+                        bare,
                         steer_rx,
                     )
                     .await?;
@@ -1359,6 +1399,7 @@ pub async fn execute_pipeline(
                             stage.temperature,
                             &mcp_tools,
                             config_max_diff_lines(config),
+                            bare,
                             steer_rx,
                         )
                         .await?;
@@ -1483,18 +1524,18 @@ pub async fn execute_pipeline(
                 context! {
                     task_description => task.description.clone(),
                     project_knowledge => knowledge_str.clone(),
-                    project_memory => crate::memory::render_memory_for_prompt(&task.project_path, AgentRole::Coder, 10),
+                    project_memory => memory_for(AgentRole::Coder),
                     current_files => current_files.clone(),
                 },
-                 "schemas/code_diff.schema.json",
-                 display,
-                 &mut metrics,
-                 false, // Solo mode: strict — no degradation
-                 coder_stage.max_tokens,
-                 coder_stage.temperature,
-                 steer_rx,
-             )
-             .await?;
+                "schemas/code_diff.schema.json",
+                display,
+                &mut metrics,
+                false, // Solo mode: strict — no degradation
+                coder_stage.max_tokens,
+                coder_stage.temperature,
+                steer_rx,
+            )
+            .await?;
             artifacts.push((AgentRole::Coder, solo_json.clone()));
             isolation.push(IsolationRecord {
                 role: AgentRole::Coder,
