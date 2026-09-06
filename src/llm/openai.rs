@@ -31,15 +31,9 @@ pub struct OpenAiProvider {
 }
 
 impl OpenAiProvider {
-    pub fn new(config: &ProviderConfig) -> Result<Self> {
-        let _api_key = config
-            .api_key
-            .clone()
-            .ok_or_else(|| anyhow!("API key not configured for this provider"))?;
-        // Derive provider name from base_url or config for logging
-        let provider_name = config
-            .base_url
-            .as_ref()
+    /// Provider slug from a base URL (for key-error hints and logging).
+    fn name_from_base_url(base_url: Option<&str>) -> String {
+        base_url
             .and_then(|url| {
                 if url.contains("openrouter") {
                     Some("openrouter")
@@ -56,7 +50,19 @@ impl OpenAiProvider {
                 }
             })
             .unwrap_or("openai")
-            .to_string();
+            .to_string()
+    }
+
+    pub fn new(config: &ProviderConfig) -> Result<Self> {
+        // Derive provider name first so the missing-key error names the exact
+        // env var (OPENAI_API_KEY vs GROQ_API_KEY paint very different fixes).
+        let provider_name = Self::name_from_base_url(config.base_url.as_deref());
+        let _api_key = config
+            .api_key
+            .clone()
+            .ok_or_else(|| super::provider::missing_key_error(&provider_name))?;
+        // Derive provider name from base_url or config for logging
+        let provider_name = Self::name_from_base_url(config.base_url.as_deref());
         Ok(Self {
             config: config.clone(),
             client: super::provider::http_client()?,
@@ -81,7 +87,7 @@ impl LlmProvider for OpenAiProvider {
             .config
             .api_key
             .as_ref()
-            .ok_or_else(|| anyhow!("API key not configured for this provider"))?;
+            .ok_or_else(|| super::provider::missing_key_error(&self.provider_name))?;
         let url = openai_endpoint(self.base_url());
 
         let payload = json!({
@@ -156,7 +162,7 @@ impl LlmProvider for OpenAiProvider {
             .config
             .api_key
             .as_ref()
-            .ok_or_else(|| anyhow!("API key not configured for this provider"))?;
+            .ok_or_else(|| super::provider::missing_key_error(&self.provider_name))?;
         let url = openai_endpoint(self.base_url());
 
         let payload = json!({
@@ -288,7 +294,7 @@ impl LlmProvider for OpenAiProvider {
             .config
             .api_key
             .as_ref()
-            .ok_or_else(|| anyhow!("API key not configured for this provider"))?;
+            .ok_or_else(|| super::provider::missing_key_error(&self.provider_name))?;
         let url = openai_endpoint(self.base_url());
 
         let payload = json!({
@@ -367,7 +373,7 @@ impl LlmProvider for OpenAiProvider {
             .config
             .api_key
             .as_ref()
-            .ok_or_else(|| anyhow!("API key not configured for this provider"))?;
+            .ok_or_else(|| super::provider::missing_key_error(&self.provider_name))?;
         // OpenAI-compatible STT endpoint: <base>/audio/transcriptions
         let base = self
             .config

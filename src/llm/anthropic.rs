@@ -2,7 +2,7 @@ use super::provider::{
     CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage, redact_secrets,
 };
 use crate::config::ProviderConfig;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use async_trait::async_trait;
 use futures::Stream;
 use reqwest::Client;
@@ -34,7 +34,7 @@ impl AnthropicProvider {
         let _api_key = config
             .api_key
             .clone()
-            .ok_or_else(|| anyhow!("Anthropic API key not configured"))?;
+            .ok_or_else(|| super::provider::missing_key_error("anthropic"))?;
         Ok(Self {
             config: config.clone(),
             client: super::provider::http_client()?,
@@ -49,7 +49,7 @@ impl LlmProvider for AnthropicProvider {
             .config
             .api_key
             .as_ref()
-            .ok_or_else(|| anyhow!("Anthropic API key not configured"))?;
+            .ok_or_else(|| super::provider::missing_key_error("anthropic"))?;
         let url = anthropic_endpoint(
             self.config
                 .base_url
@@ -132,7 +132,7 @@ impl LlmProvider for AnthropicProvider {
             .config
             .api_key
             .as_ref()
-            .ok_or_else(|| anyhow!("Anthropic API key not configured"))?;
+            .ok_or_else(|| super::provider::missing_key_error("anthropic"))?;
         let url = anthropic_endpoint(
             self.config
                 .base_url

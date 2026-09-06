@@ -35,7 +35,10 @@ pub async fn handle(args: &ReportArgs) -> Result<()> {
         None => match latest_task_id(&tasks_dir) {
             Some(id) => id,
             None => {
-                eprintln!("No tasks found in {}", tasks_dir.display());
+                eprintln!(
+                    "No tasks found in {}. Run `niki run \"<task>\"` to create one (or `niki plan \"<task>\"` to review a plan first).",
+                    tasks_dir.display()
+                );
                 return Ok(());
             }
         },
