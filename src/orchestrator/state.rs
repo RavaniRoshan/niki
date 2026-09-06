@@ -1,4 +1,5 @@
 use crate::artifacts::types::{AgentRole, ArtifactEnvelope, ReviewFeedback};
+use crate::config::types::TopologyMode;
 use crate::llm::provider::TokenUsage;
 use crate::memory::compression::ContextBudget;
 use anyhow::Result;
@@ -123,6 +124,12 @@ pub struct TaskRecord {
     /// Maximum TTFT across all agents (ms).
     #[serde(default)]
     pub max_ttft_ms: u32,
+    /// Topology the run executed under (recorded post-run; absent in old records).
+    #[serde(default)]
+    pub topology: Option<TopologyMode>,
+    /// Why that topology was selected (auto-rule or explicit config).
+    #[serde(default)]
+    pub topology_reason: Option<String>,
 }
 
 impl TaskRecord {
@@ -142,6 +149,8 @@ impl TaskRecord {
             total_latency_ms: 0,
             total_retry_count: 0,
             max_ttft_ms: 0,
+            topology: None,
+            topology_reason: None,
         }
     }
 

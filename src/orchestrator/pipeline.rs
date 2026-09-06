@@ -66,6 +66,9 @@ pub struct PipelineResult {
     /// `SingleAgent` (fast-path) or `MultiAgent` (full chain). Visible in the
     /// report so the auto-selection is self-describing, not asserted.
     pub topology: TopologyMode,
+    /// Why `topology` was selected (auto-rule outcome or explicit config).
+    /// Rendered in the report so a fast-path collapse is never silent.
+    pub topology_reason: String,
     /// Real test-suite execution result from inside the sandbox, recorded as
     /// verification evidence before the branch is created. `None` when no test
     /// command could be resolved or execution was skipped.
@@ -231,10 +234,42 @@ fn security_stage_target(config: &NikiConfig) -> (String, String) {
     )
 }
 
+/// Evidence-only view of the Coder's diff for the Red agent.
+///
+/// The Red agent must probe the change adversarially, which requires the
+/// *evidence* (edit blocks, files changed) but not the Coder's
+/// self-justification (`implementation_notes`, `spec_adherence`,
+/// `uncertainties`). Those rationale fields are kept in the audit trail but
+/// withheld from Red's prompt, so Red cannot be talked out of a finding by
+/// the Coder's own framing. Falls back to the full JSON when it does not
+/// parse as a `CodeDiff` (e.g. synthesis-replaced payloads of another shape).
+fn red_evidence_json(coder_json: &str) -> String {
+    match serde_json::from_str::<CodeDiff>(coder_json) {
+        Ok(diff) => serde_json::json!({
+            "edits": diff.edits,
+            "files_changed": diff.files_changed,
+        })
+        .to_string(),
+        Err(_) => {
+            tracing::debug!(
+                target: "niki::pipeline",
+                "coder JSON did not parse as CodeDiff; Red sees the full payload"
+            );
+            coder_json.to_string()
+        }
+    }
+}
+
 /// The published-artifact roles an agent receives as context, mirroring the
 /// `input_artifacts` each prompt is rendered with. This is the *complete* set of
-/// prior agents a role could have seen — and it is artifacts only, never reasoning.
+/// prior agents a role could have seen.
 /// `with_red` is true when the Red/Blue pass ran (the Reviewer then also sees Red).
+///
+/// Scope note (goal-a3f9c2, Phase 3): sources are *roles*, and each role's full
+/// typed artifact is shared — including its free-text rationale fields — with
+/// one exception: Red receives an evidence-only projection of the Coder diff
+/// (see [`red_evidence_json`]). Withholding rationale everywhere remains a
+/// follow-up; the record below describes wiring truthfully, not aspiration.
 fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
     use AgentRole::*;
     match role {
@@ -249,14 +284,11 @@ fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
             }
             v
         }
-        Synthesizer => vec![Planner],
-        SecurityAuditor => {
-            let mut v = vec![Planner, Coder, Tester, Reviewer];
-            if with_red {
-                v.push(Red);
-            }
-            v
-        }
+        Synthesizer => vec![Planner, Coder],
+        // The auditor's prompt is rendered with spec + coder diff only — it
+        // never receives Tester/Reviewer/Red artifacts, so the record says so
+        // even though that narrowness is itself a follow-up decision.
+        SecurityAuditor => vec![Planner, Coder],
     }
 }
 
@@ -287,6 +319,39 @@ pub fn select_topology(spec: &TaskSpec, config: &NikiConfig) -> TopologyMode {
     }
 }
 
+/// Human-readable reason for the topology decision, recorded in the task
+/// record and report so an `Auto` collapse is self-describing, never silent
+/// (goal-a3f9c2, Phase 3: the fast-path drops independent review, and the
+/// user deserves to know why it was chosen).
+pub fn topology_reason(spec: &TaskSpec, config: &NikiConfig) -> String {
+    match config.pipeline.topology {
+        TopologyMode::MultiAgent => "explicit [pipeline].topology = multiagent".to_string(),
+        TopologyMode::SingleAgent => "explicit [pipeline].topology = singleagent: fast-path requested (Planner + solo Coder; no independent Tester/Reviewer/Red)".to_string(),
+        TopologyMode::Auto => {
+            if config.security.enabled || config.parallel.enabled {
+                return "auto: security/parallel stages require the full multi-agent chain".to_string();
+            }
+            if (spec.estimated_complexity as u8)
+                <= (config.pipeline.single_agent_max_complexity as u8)
+            {
+                format!(
+                    "auto: estimated complexity {:?} <= max {:?}: collapsed to fast-path (Planner + solo Coder; no independent Tester/Reviewer/Red)",
+                    spec.estimated_complexity, config.pipeline.single_agent_max_complexity
+                )
+            } else {
+                format!(
+                    "auto: estimated complexity {:?} > max {:?}: full multi-agent chain",
+                    spec.estimated_complexity, config.pipeline.single_agent_max_complexity
+                )
+            }
+        }
+    }
+}
+///
+/// In `SingleAgent` mode only the `Coder` runs — the Tester, Reviewer, Red and
+/// (if present) SecurityAuditor/Synthesizer stages are collapsed into the one
+/// solo Coder session, which is the whole point of the fast-path: it avoids the
+/// multi-agent token tax of re-ingesting shared context in every session.
 /// The body stages (everything after the Planner) to run for a given topology.
 ///
 /// In `SingleAgent` mode only the `Coder` runs — the Tester, Reviewer, Red and
@@ -658,9 +723,11 @@ async fn run_role(
         }
         AgentRole::Red => context! {
             // The Red agent sees the same inputs as the Reviewer (spec + diff +
-            // tests) but has never seen the Coder's reasoning, so it probes
-            // adversarially — exactly the independence the product claims.
-            input_artifacts => vec![task_spec_json.clone(), coder_json.to_string(), tester_json.to_string()],
+            // tests) but only the *evidence* of the Coder's diff — rationale
+            // fields (implementation_notes, spec_adherence, uncertainties) are
+            // withheld (see `red_evidence_json`), so Red probes adversarially
+            // instead of being framed by the Coder's self-justification.
+            input_artifacts => vec![task_spec_json.clone(), red_evidence_json(coder_json), tester_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
             project_memory => memory_str,
             mcp_tools => mcp_tools.to_string(),
@@ -934,6 +1001,7 @@ pub async fn execute_pipeline(
     // The Planner has already derived `estimated_complexity`, so we can pick
     // the fast-path (single solo Coder) or the full multi-agent chain now.
     let topology = select_topology(&task_spec, config);
+    let topology_reason = topology_reason(&task_spec, config);
 
     // Dry-run: stop after the Planner and surface the spec without executing.
     if dry_run {
@@ -950,6 +1018,7 @@ pub async fn execute_pipeline(
             safety_proof: None,
             isolation,
             topology,
+            topology_reason: topology_reason.clone(),
             test_execution: None,
         });
     }
@@ -1020,6 +1089,10 @@ pub async fn execute_pipeline(
     let mut coder_json = String::new();
     let mut tester_json = String::new();
     let mut red_json = String::new();
+    // Revision feedback is intentionally latest-round-only: each Reviewer
+    // verdict OVERWRITES (never appends), so a retrying Coder sees the
+    // current critique, not an accumulation of stale guidance. Full history
+    // stays in the artifacts trail.
     let mut review_feedback: Option<String> = None;
     let mut verdict = Verdict::Approved;
     let mut round = 0;
@@ -1499,6 +1572,7 @@ pub async fn execute_pipeline(
         safety_proof: None,
         isolation,
         topology,
+        topology_reason: topology_reason.clone(),
         test_execution,
     })
 }
@@ -1693,6 +1767,70 @@ mod tests {
         c.pipeline.topology = TopologyMode::Auto;
         let spec = spec_with(Complexity::Low);
         assert_eq!(select_topology(&spec, &c), TopologyMode::SingleAgent);
+    }
+
+    #[test]
+    fn topology_reason_names_collapse_and_rationale() {
+        // A silent fast-path collapse is a vision violation; the reason string
+        // must name what was dropped.
+        let mut c = NikiConfig::default();
+        c.pipeline.topology = TopologyMode::Auto;
+        let reason = topology_reason(&spec_with(Complexity::Low), &c);
+        assert!(
+            reason.contains("collapsed to fast-path"),
+            "reason: {reason}"
+        );
+        assert!(
+            reason.contains("no independent Tester/Reviewer/Red"),
+            "reason: {reason}"
+        );
+        let reason_multi = topology_reason(&spec_with(Complexity::High), &c);
+        assert!(
+            reason_multi.contains("full multi-agent chain"),
+            "reason: {reason_multi}"
+        );
+    }
+
+    #[test]
+    fn red_evidence_json_strips_coder_rationale() {
+        let coder = serde_json::json!({
+            "edits": [{"search": "a", "replace": "b"}],
+            "files_changed": [{"path": "x.rs", "action": "modify", "language": "rust"}],
+            "implementation_notes": "I chose b because it felt right",
+            "spec_adherence": "Trust me",
+            "uncertainties": ["not sure about edge cases"]
+        })
+        .to_string();
+        let evidence = red_evidence_json(&coder);
+        assert!(evidence.contains("\"edits\""), "evidence keeps edits");
+        assert!(evidence.contains("x.rs"), "evidence keeps files");
+        assert!(!evidence.contains("felt right"), "rationale withheld");
+        assert!(
+            !evidence.contains("Trust me"),
+            "self-justification withheld"
+        );
+        assert!(!evidence.contains("not sure"), "uncertainties withheld");
+    }
+
+    #[test]
+    fn red_evidence_json_falls_back_on_unparseable_input() {
+        let raw = "not json at all";
+        assert_eq!(red_evidence_json(raw), raw);
+    }
+
+    #[test]
+    fn isolation_record_matches_wiring() {
+        // The record must mirror input_artifacts wiring, not aspiration:
+        // Synthesizer reconciles concatenated coder diffs; the auditor sees
+        // spec + coder diff only (never Tester/Reviewer/Red).
+        assert_eq!(
+            isolation_sources_for(AgentRole::Synthesizer, false),
+            vec![AgentRole::Planner, AgentRole::Coder]
+        );
+        assert_eq!(
+            isolation_sources_for(AgentRole::SecurityAuditor, true),
+            vec![AgentRole::Planner, AgentRole::Coder]
+        );
     }
 
     #[test]
