@@ -159,9 +159,17 @@ pub async fn run_agent(
                 let output_tokens = u
                     .output_tokens
                     .max(usage.map(|x| x.output_tokens).unwrap_or(0));
+                let cached_input_tokens = u
+                    .cached_input_tokens
+                    .max(usage.map(|x| x.cached_input_tokens).unwrap_or(0));
+                let reasoning_tokens = u
+                    .reasoning_tokens
+                    .max(usage.map(|x| x.reasoning_tokens).unwrap_or(0));
                 usage = Some(TokenUsage {
                     input_tokens,
                     output_tokens,
+                    cached_input_tokens,
+                    reasoning_tokens,
                 });
             }
             Err(e) => {
@@ -189,6 +197,7 @@ pub async fn run_agent(
     let token_usage = usage.unwrap_or(TokenUsage {
         input_tokens: 0,
         output_tokens: estimated_output_tokens,
+        ..Default::default()
     });
 
     // ===== Phase 2: Resilient parsing + repair + re-prompt =====
@@ -310,6 +319,14 @@ pub async fn run_agent(
                             .usage
                             .output_tokens
                             .max(usage.map(|x| x.output_tokens).unwrap_or(0)),
+                        cached_input_tokens: response
+                            .usage
+                            .cached_input_tokens
+                            .max(usage.map(|x| x.cached_input_tokens).unwrap_or(0)),
+                        reasoning_tokens: response
+                            .usage
+                            .reasoning_tokens
+                            .max(usage.map(|x| x.reasoning_tokens).unwrap_or(0)),
                     });
                 }
                 Err(e) => {

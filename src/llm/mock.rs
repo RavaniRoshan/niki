@@ -111,6 +111,7 @@ impl LlmProvider for MockProvider {
                         usage: TokenUsage {
                             input_tokens: response.input_tokens.unwrap_or(0),
                             output_tokens: response.output_tokens.unwrap_or(0),
+                            ..Default::default()
                         },
                         tool_calls: Vec::new(),
                     });
@@ -124,6 +125,7 @@ impl LlmProvider for MockProvider {
                 usage: TokenUsage {
                     input_tokens: response.input_tokens.unwrap_or(0),
                     output_tokens: response.output_tokens.unwrap_or(0),
+                    ..Default::default()
                 },
                 tool_calls: Vec::new(),
             })
@@ -149,6 +151,7 @@ impl LlmProvider for MockProvider {
                     let usage = TokenUsage {
                         input_tokens: response.input_tokens.unwrap_or(0),
                         output_tokens: response.output_tokens.unwrap_or(0),
+                        ..Default::default()
                     };
                     let chunks: Vec<Result<StreamChunk>> =
                         vec![Ok(StreamChunk::Text(msg)), Ok(StreamChunk::Usage(usage))];
@@ -164,6 +167,7 @@ impl LlmProvider for MockProvider {
         let usage = TokenUsage {
             input_tokens: response.input_tokens.unwrap_or(0),
             output_tokens: response.output_tokens.unwrap_or(0),
+            ..Default::default()
         };
 
         let mut chunks: Vec<Result<StreamChunk>> = Vec::new();

@@ -92,6 +92,7 @@ impl LlmProvider for OllamaProvider {
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
+                ..Default::default()
             },
             tool_calls: Vec::new(),
         })
@@ -182,6 +183,7 @@ impl LlmProvider for OllamaProvider {
                                                 as u32,
                                             output_tokens: json["eval_count"].as_u64().unwrap_or(0)
                                                 as u32,
+                                            ..Default::default()
                                         })))
                                         .is_err()
                                     {

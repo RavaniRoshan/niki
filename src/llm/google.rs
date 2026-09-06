@@ -89,6 +89,12 @@ impl LlmProvider for GoogleProvider {
         let output_tokens = data["usageMetadata"]["candidatesTokenCount"]
             .as_u64()
             .unwrap_or(0) as u32;
+        let cached_input_tokens = data["usageMetadata"]["cachedContentTokenCount"]
+            .as_u64()
+            .unwrap_or(0) as u32;
+        let reasoning_tokens = data["usageMetadata"]["thoughtsTokenCount"]
+            .as_u64()
+            .unwrap_or(0) as u32;
 
         Ok(CompletionResponse {
             content,
@@ -96,6 +102,8 @@ impl LlmProvider for GoogleProvider {
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
+                cached_input_tokens,
+                reasoning_tokens,
             },
             tool_calls: Vec::new(),
         })
@@ -178,6 +186,15 @@ impl LlmProvider for GoogleProvider {
                                                     .unwrap_or(0)
                                                     as u32,
                                                 output_tokens: usage["candidatesTokenCount"]
+                                                    .as_u64()
+                                                    .unwrap_or(0)
+                                                    as u32,
+                                                cached_input_tokens:
+                                                    usage["cachedContentTokenCount"]
+                                                        .as_u64()
+                                                        .unwrap_or(0)
+                                                        as u32,
+                                                reasoning_tokens: usage["thoughtsTokenCount"]
                                                     .as_u64()
                                                     .unwrap_or(0)
                                                     as u32,

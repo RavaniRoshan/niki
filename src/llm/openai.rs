@@ -128,6 +128,12 @@ impl LlmProvider for OpenAiProvider {
 
         let input_tokens = data["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
         let output_tokens = data["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
+        let cached_input_tokens = data["usage"]["prompt_tokens_details"]["cached_tokens"]
+            .as_u64()
+            .unwrap_or(0) as u32;
+        let reasoning_tokens = data["usage"]["completion_tokens_details"]["reasoning_tokens"]
+            .as_u64()
+            .unwrap_or(0) as u32;
 
         Ok(CompletionResponse {
             content,
@@ -135,6 +141,8 @@ impl LlmProvider for OpenAiProvider {
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
+                cached_input_tokens,
+                reasoning_tokens,
             },
             tool_calls: Vec::new(),
         })
@@ -221,6 +229,16 @@ impl LlmProvider for OpenAiProvider {
                                                     .unwrap_or(0)
                                                     as u32,
                                                 output_tokens: usage["completion_tokens"]
+                                                    .as_u64()
+                                                    .unwrap_or(0)
+                                                    as u32,
+                                                cached_input_tokens: usage["prompt_tokens_details"]
+                                                    ["cached_tokens"]
+                                                    .as_u64()
+                                                    .unwrap_or(0)
+                                                    as u32,
+                                                reasoning_tokens: usage["completion_tokens_details"]
+                                                    ["reasoning_tokens"]
                                                     .as_u64()
                                                     .unwrap_or(0)
                                                     as u32,
@@ -324,6 +342,12 @@ impl LlmProvider for OpenAiProvider {
 
         let input_tokens = data["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
         let output_tokens = data["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
+        let cached_input_tokens = data["usage"]["prompt_tokens_details"]["cached_tokens"]
+            .as_u64()
+            .unwrap_or(0) as u32;
+        let reasoning_tokens = data["usage"]["completion_tokens_details"]["reasoning_tokens"]
+            .as_u64()
+            .unwrap_or(0) as u32;
 
         Ok(CompletionResponse {
             content,
@@ -331,6 +355,8 @@ impl LlmProvider for OpenAiProvider {
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
+                cached_input_tokens,
+                reasoning_tokens,
             },
             tool_calls: Vec::new(),
         })
