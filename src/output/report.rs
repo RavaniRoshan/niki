@@ -388,6 +388,22 @@ fn render_verification_section(result: &PipelineResult) -> String {
             "\n_(output truncated in this report; full output in `artifacts/test_execution.json`)_\n",
         );
     }
+    if let Some(m) = &te.mutation {
+        let mstatus = if m.passed { "PASSED" } else { "FAILED" };
+        out.push_str(&format!(
+            "\n### Mutation gate (opt-in)\n\n- Command: `{}`\n- Result: **{}** (exit code {})\n",
+            m.command, mstatus, m.exit_code
+        ));
+        if let Some(note) = &m.note {
+            out.push_str(&format!("- Note: {}\n", note));
+        }
+        if !m.passed {
+            out.push_str(
+                "- Surviving mutants mean the suite passes code it cannot distinguish \
+                 from broken variants — treat green-with-survivors as unproven, not verified.\n",
+            );
+        }
+    }
     out.push('\n');
     out
 }

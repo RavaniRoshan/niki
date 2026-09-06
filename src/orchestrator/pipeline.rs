@@ -1462,7 +1462,15 @@ pub async fn execute_pipeline(
     // Verification in the loop: actually execute the project's test suite inside
     // the sandbox and record the real result as part of the audit trail, *before*
     // the branch is created. This is the "verified before you see it" guarantee.
-    let test_execution = tester::run_tests(&*sandbox, config, &task.project_path).await;
+    let mut test_execution = tester::run_tests(&*sandbox, config, &task.project_path).await;
+    // Mutation gate (opt-in): when configured, surviving mutants fail the run
+    // exactly like a failing suite. The result nests inside test_execution so
+    // the audit trail keeps one verification record per run.
+    if let Some(te) = test_execution.as_mut() {
+        te.mutation = tester::run_mutation(&*sandbox, config, &task.project_path)
+            .await
+            .map(Box::new);
+    }
 
     sandbox.destroy().await?;
 

@@ -31,5 +31,11 @@ You MUST output a single valid JSON object conforming to this schema:
 4. Report which tests pass and which fail based on your analysis of the diff.
 5. Identify any untested edge cases.
 6. You are analyzing the diff — simulate test execution based on the code logic.
+7. ORACLE GROUNDING (anti-confirmation-bias): for every test, set `oracle_source` and, for `spec`, `spec_reference`:
+   - `spec`: the expected value traces to a specific statement in the Task Specification above (quote or cite it in `spec_reference`). This is the only source that can validate intent.
+   - `derived`: the expected value was read off the implementation (constants, formulas, UI strings copied from the code). Mark these honestly — a `derived` test that passes proves consistency, NOT correctness.
+   - `property`: the test asserts an invariant over generated inputs (round-trip, idempotence, ordering, bounds) rather than one example. Prefer `property` tests for pure logic and parsers/serializers where example-oracles would just mirror the code.
+   - Business-logic expectations MUST be `spec` or `property`. If the spec does not pin down an expectation, say so in `tester_notes` instead of inventing a `derived` oracle and presenting it as verification.
+8. NEVER rewrite an existing assertion to match current behavior in order to make it pass ("healing" a test). If an approved test fails, the code is wrong until the spec says otherwise.
 
 IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.
