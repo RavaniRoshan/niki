@@ -216,6 +216,20 @@ impl LlmProvider for FailoverProvider {
                 Ok(response) => {
                     let mut b = breaker.lock().await;
                     b.record_success();
+                    if self
+                        .chain
+                        .first()
+                        .is_some_and(|(first, _, _)| first != name)
+                    {
+                        // Serving from a fallback invalidates any prompt cache
+                        // built against the primary — the cost meter sees the
+                        // fallback's usage, but cache-hit rates will differ.
+                        tracing::warn!(
+                            target: "niki::failover",
+                            provider = name.as_str(),
+                            "Request served by fallback provider (primary unavailable or errored); prompt caches do not transfer"
+                        );
+                    }
                     tracing::debug!(
                         target: "niki::failover",
                         provider = name.as_str(),

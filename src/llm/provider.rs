@@ -158,6 +158,13 @@ pub struct CompletionResponse {
 pub struct TokenUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Prompt-cache hits (Anthropic cache_read/create, OpenAI cached_tokens,
+    /// Google cachedContentTokenCount). Priced below input rate; `0` when the
+    /// provider did not report a split.
+    pub cached_input_tokens: u32,
+    /// Tokens spent on extended thinking / reasoning summaries (OpenAI
+    /// reasoning_tokens, Google thoughtsTokenCount). Priced at output rate.
+    pub reasoning_tokens: u32,
 }
 
 pub fn create_provider(name: &str, config: &ProviderConfig) -> Result<Box<dyn LlmProvider>> {

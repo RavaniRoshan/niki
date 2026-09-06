@@ -16,6 +16,8 @@ fn stage_metric_has_retry_count_field() {
         cost_usd: 0.001,
         retry_count: 2,
         ttft_ms: 150,
+        cached_input_tokens: 0,
+        reasoning_tokens: 0,
     };
     assert_eq!(metric.retry_count, 2);
 }
@@ -32,6 +34,8 @@ fn stage_metric_has_ttft_ms_field() {
         cost_usd: 0.002,
         retry_count: 1,
         ttft_ms: 450,
+        cached_input_tokens: 0,
+        reasoning_tokens: 0,
     };
     assert_eq!(metric.ttft_ms, 450);
 }
@@ -81,6 +85,8 @@ fn stage_metric_serializes_all_fields() {
         cost_usd: 0.001,
         retry_count: 3,
         ttft_ms: 120,
+        cached_input_tokens: 0,
+        reasoning_tokens: 0,
     };
     let json = serde_json::to_string(&metric).unwrap();
     assert!(
@@ -121,6 +127,8 @@ fn task_record_add_metrics_accumulates_retry_count() {
             cost_usd: 0.0001,
             retry_count: 1,
             ttft_ms: 10,
+            cached_input_tokens: 0,
+            reasoning_tokens: 0,
         },
         StageMetric {
             role: AgentRole::Coder,
@@ -132,6 +140,8 @@ fn task_record_add_metrics_accumulates_retry_count() {
             cost_usd: 0.0002,
             retry_count: 0,
             ttft_ms: 25,
+            cached_input_tokens: 0,
+            reasoning_tokens: 0,
         },
     ];
     record.add_metrics(&metrics);
@@ -153,6 +163,8 @@ fn task_record_add_metrics_tracks_max_ttft() {
             cost_usd: 0.0001,
             retry_count: 2,
             ttft_ms: 450,
+            cached_input_tokens: 0,
+            reasoning_tokens: 0,
         },
         StageMetric {
             role: AgentRole::Coder,
@@ -164,6 +176,8 @@ fn task_record_add_metrics_tracks_max_ttft() {
             cost_usd: 0.0002,
             retry_count: 1,
             ttft_ms: 120,
+            cached_input_tokens: 0,
+            reasoning_tokens: 0,
         },
     ];
     record.add_metrics(&metrics);
@@ -184,6 +198,8 @@ fn task_record_serializes_with_new_fields() {
         cost_usd: 0.001,
         retry_count: 2,
         ttft_ms: 300,
+        cached_input_tokens: 0,
+        reasoning_tokens: 0,
     };
     record.add_metrics(&[metric]);
 

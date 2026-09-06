@@ -47,6 +47,12 @@ pub struct StageMetric {
     pub model: String,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Prompt-cache hits for this stage (`0` when the provider reported no split).
+    #[serde(default)]
+    pub cached_input_tokens: u32,
+    /// Thinking/reasoning tokens for this stage (priced at output rate).
+    #[serde(default)]
+    pub reasoning_tokens: u32,
     /// Wall-clock time for this stage's LLM call, in milliseconds.
     pub latency_ms: u64,
     /// Estimated USD cost; `0.0` when the model is not in the price table.
@@ -62,7 +68,7 @@ pub struct StageMetric {
 
 impl StageMetric {
     pub fn total_tokens(&self) -> u32 {
-        self.input_tokens + self.output_tokens
+        self.input_tokens + self.output_tokens + self.cached_input_tokens + self.reasoning_tokens
     }
 
     /// Reconstitute the provider usage for this stage.
@@ -70,6 +76,8 @@ impl StageMetric {
         TokenUsage {
             input_tokens: self.input_tokens,
             output_tokens: self.output_tokens,
+            cached_input_tokens: self.cached_input_tokens,
+            reasoning_tokens: self.reasoning_tokens,
         }
     }
 }

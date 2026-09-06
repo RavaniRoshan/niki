@@ -552,6 +552,8 @@ async fn run_stage(
         model: model.to_string(),
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
+        cached_input_tokens: usage.cached_input_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
         latency_ms,
         cost_usd,
         retry_count,

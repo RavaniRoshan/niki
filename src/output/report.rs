@@ -414,8 +414,16 @@ fn render_cost_section(result: &PipelineResult) -> String {
         total_out += m.output_tokens;
         total_ms += m.latency_ms;
         total_cost += m.cost_usd;
+        // A $0.00 stage with real tokens on a billable provider means the
+        // model is missing from the price table — "unmeasured", not "free".
+        // Local providers (ollama/mock) are legitimately free.
+        let unpriced = m.cost_usd == 0.0
+            && m.input_tokens + m.output_tokens > 0
+            && crate::cost::is_unpriced(&m.provider, &m.model);
         let cost = if m.cost_usd > 0.0 {
             format!("${:.4}", m.cost_usd)
+        } else if unpriced {
+            "unpriced*".to_string()
         } else {
             "n/a".to_string()
         };
@@ -443,6 +451,16 @@ fn render_cost_section(result: &PipelineResult) -> String {
         total_ms as f64 / 1000.0,
         total_cost_str,
     ));
+    if result.metrics.iter().any(|m| {
+        m.cost_usd == 0.0
+            && m.input_tokens + m.output_tokens > 0
+            && crate::cost::is_unpriced(&m.provider, &m.model)
+    }) {
+        out.push_str(
+            "\n*`unpriced`: model missing from the price table — the total above \
+             UNDERSTATES real spend. See `PRICE_TABLE_AS_OF` in `src/cost.rs`.\n",
+        );
+    }
 
     // --- Cost transparency vs a single autonomous agent (BUILD_PLAN 2.3, P1.4) ---
     let total_tokens = total_in as u64 + total_out as u64;
@@ -694,6 +712,8 @@ mod tests {
                 cost_usd: 0.0,
                 retry_count: 0,
                 ttft_ms: 0,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             }],
             safety_proof: proof,
             isolation: vec![],
@@ -1051,6 +1071,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0100,
                 retry_count: 0,
                 ttft_ms: 10,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
             StageMetric {
                 role: AgentRole::Coder,
@@ -1062,6 +1084,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0200,
                 retry_count: 0,
                 ttft_ms: 12,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
             StageMetric {
                 role: AgentRole::Tester,
@@ -1073,6 +1097,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0050,
                 retry_count: 0,
                 ttft_ms: 5,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
             StageMetric {
                 role: AgentRole::Reviewer,
@@ -1084,6 +1110,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0150,
                 retry_count: 0,
                 ttft_ms: 15,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
         ];
         let result = cost_result(metrics);
@@ -1117,6 +1145,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0,
                 retry_count: 0,
                 ttft_ms: 0,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
             StageMetric {
                 role: AgentRole::Coder,
@@ -1128,6 +1158,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0,
                 retry_count: 0,
                 ttft_ms: 0,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
         ];
         let result = cost_result(metrics);
