@@ -2,7 +2,7 @@ use super::provider::{
     CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage, redact_secrets,
 };
 use crate::config::ProviderConfig;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use async_trait::async_trait;
 use futures::Stream;
 use reqwest::Client;
@@ -19,7 +19,7 @@ impl GoogleProvider {
         let _api_key = config
             .api_key
             .clone()
-            .ok_or_else(|| anyhow!("Google API key not configured"))?;
+            .ok_or_else(|| super::provider::missing_key_error("google"))?;
         Ok(Self {
             config: config.clone(),
             client: super::provider::http_client()?,
@@ -34,7 +34,7 @@ impl LlmProvider for GoogleProvider {
             .config
             .api_key
             .as_ref()
-            .ok_or_else(|| anyhow!("Google API key not configured"))?;
+            .ok_or_else(|| super::provider::missing_key_error("google"))?;
 
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
@@ -117,7 +117,7 @@ impl LlmProvider for GoogleProvider {
             .config
             .api_key
             .as_ref()
-            .ok_or_else(|| anyhow!("Google API key not configured"))?;
+            .ok_or_else(|| super::provider::missing_key_error("google"))?;
 
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse",

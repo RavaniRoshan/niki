@@ -197,6 +197,35 @@ pub fn default_base_url(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Actionable "no API key" error (V8 first-hour-error rule: what + where +
+/// exact fix). Keeps the legacy "API key not configured" prefix so existing
+/// assertions and user muscle memory still match.
+pub fn missing_key_error(provider_name: &str) -> anyhow::Error {
+    // (label, env var, `niki auth login` slug or None when login is unsupported)
+    let (label, env, slug): (&str, &str, Option<&str>) = match provider_name {
+        "anthropic" => ("Anthropic", "ANTHROPIC_API_KEY", Some("anthropic")),
+        "openai" => ("OpenAI", "OPENAI_API_KEY", Some("openai")),
+        "google" => ("Google", "GOOGLE_API_KEY", Some("google")),
+        "openrouter" => ("OpenRouter", "OPENROUTER_API_KEY", None),
+        "groq" => ("Groq", "GROQ_API_KEY", None),
+        "deepseek" => ("DeepSeek", "DEEPSEEK_API_KEY", None),
+        "together" => ("Together", "TOGETHER_API_KEY", None),
+        "nvidia" => ("NVIDIA", "NVIDIA_API_KEY", None),
+        _ => ("Provider", "PROVIDER_API_KEY", None),
+    };
+    let fix = match slug {
+        Some(s) => format!(
+            "Set {env}, add api_key under [providers.{provider_name}] in niki.toml, \
+             or run `niki auth login --provider {s}`."
+        ),
+        None => format!(
+            "Set {env} or add api_key under [providers.{provider_name}] in niki.toml \
+             (`niki auth login` supports anthropic/openai/google only)."
+        ),
+    };
+    anyhow::anyhow!("{label} API key not configured. {fix}")
+}
+
 pub fn redact_secrets(text: &str) -> String {
     let mut result = text.to_string();
     result = redact_bearer_tokens(&result);
@@ -245,4 +274,24 @@ fn redact_generic_patterns(text: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_key_error_names_exact_fix() {
+        // Legacy prefix preserved for existing assertions and muscle memory.
+        let e = missing_key_error("anthropic").to_string();
+        assert!(e.contains("Anthropic API key not configured"), "{e}");
+        assert!(e.contains("ANTHROPIC_API_KEY"), "{e}");
+        assert!(e.contains("niki auth login --provider anthropic"), "{e}");
+
+        // Providers without keyring login get env/file guidance instead of a
+        // login command that would fail.
+        let e = missing_key_error("groq").to_string();
+        assert!(e.contains("GROQ_API_KEY"), "{e}");
+        assert!(!e.contains("auth login --provider"), "{e}");
+    }
 }

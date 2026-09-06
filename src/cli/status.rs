@@ -54,7 +54,10 @@ pub async fn handle(args: &StatusArgs) -> Result<()> {
             println!("Report:     {}", dir.join("report.md").display());
         }
         None => {
-            println!("No tasks found in {}", tasks_dir.display());
+            println!(
+                "No tasks found in {}. Run `niki run \"<task>\"` to create one (or `niki plan \"<task>\"` to review a plan first).",
+                tasks_dir.display()
+            );
         }
     }
 
