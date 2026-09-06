@@ -63,6 +63,8 @@ enum Commands {
     Doctor(niki::cli::doctor::DoctorArgs),
     /// Interactive chat session (TUI)
     Chat(niki::cli::chat::ChatArgs),
+    /// Inspect custom slash commands
+    Commands(niki::cli::commands::CommandsArgs),
     /// Run NIKI as an Agent Client Protocol (ACP) server over stdio
     Acp(niki::cli::acp::AcpArgs),
     /// Run a smoke test: quick pipeline check to verify your setup works end-to-end
@@ -114,6 +116,7 @@ async fn main() -> Result<()> {
         Commands::Providers(args) => niki::cli::providers::handle(args)?,
         Commands::Doctor(args) => niki::cli::doctor::handle(args)?,
         Commands::Chat(args) => niki::cli::chat::handle(args).await?,
+        Commands::Commands(args) => niki::cli::commands::handle(args)?,
         Commands::Smoke(args) => niki::cli::smoke::handle(args).await?,
         Commands::Research(args) => niki::cli::research::handle(args).await?,
         Commands::Verify(args) => niki::cli::verify::handle(args)?,
