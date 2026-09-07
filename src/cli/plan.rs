@@ -41,6 +41,7 @@ pub async fn handle(args: &PlanArgs) -> Result<()> {
         output_format: crate::cli::run::OutputFormat::Text,
         bare: false,
         permission_mode: None,
+        otel_endpoint: None,
     })
     .await
 }

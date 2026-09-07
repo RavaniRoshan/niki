@@ -133,6 +133,12 @@ pub struct RunArgs {
     #[arg(long)]
     pub permission_mode: Option<String>,
 
+    /// OTLP/HTTP endpoint for trace export (e.g. http://localhost:4318).
+    /// Also reads `OTEL_EXPORTER_OTLP_ENDPOINT`. Export is best-effort and
+    /// warn-only: telemetry never fails a run.
+    #[arg(long)]
+    pub otel_endpoint: Option<String>,
+
     /// Minimal output — no streaming, just final report
     #[arg(long)]
     pub quiet: bool,
@@ -947,6 +953,38 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 &task_dir,
             )
         );
+    }
+
+    // Best-effort OTLP trace export. Telemetry failures warn and never fail
+    // the run — observability is subordinate to the user's task.
+    let otel_endpoint = args
+        .otel_endpoint
+        .clone()
+        .or_else(|| env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok());
+    if let Some(endpoint) = otel_endpoint {
+        let trace_path = task_dir.join("trace.jsonl");
+        match std::fs::read_to_string(&trace_path) {
+            Ok(text) => {
+                let spans: Vec<serde_json::Value> = text
+                    .lines()
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect();
+                let payload = crate::output::otel::otlp_payload(
+                    "niki",
+                    env!("CARGO_PKG_VERSION"),
+                    &crate::output::otel::trace_id_hex(&task.id.to_string()),
+                    &spans,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(0),
+                );
+                if let Err(e) = crate::output::otel::export_trace(&endpoint, &payload).await {
+                    eprintln!("Warning: OTLP trace export failed: {e}");
+                }
+            }
+            Err(e) => eprintln!("Warning: cannot read trace for OTLP export: {e}"),
+        }
     }
 
     // Tear down the TUI (if active): this joins the render thread, which
