@@ -48,8 +48,9 @@ impl HookEvent {
     /// Parse an event name from config (`[hooks]` keys). Accepts PascalCase
     /// (`PreAgentStart`) and snake_case (`pre_agent_start`), case-insensitive.
     /// Returns `None` for unknown names — callers warn and skip rather than
-    /// failing the run over a typo.
-    pub fn from_str(name: &str) -> Option<Self> {
+    /// failing the run over a typo. (Named `parse_event`, not `from_str`, to
+    /// avoid confusion with the standard `FromStr` trait.)
+    pub fn parse_event(name: &str) -> Option<Self> {
         let normalized: String = name
             .chars()
             .filter(|c| *c != '_' && *c != '-')
@@ -148,7 +149,7 @@ impl HookBus {
         let mut names: Vec<&String> = map.keys().collect();
         names.sort();
         for name in names {
-            match HookEvent::from_str(name) {
+            match HookEvent::parse_event(name) {
                 Some(event) => {
                     for command in &map[name] {
                         bus.register(event, command.clone());
@@ -261,23 +262,23 @@ mod tests {
     #[test]
     fn event_names_parse_both_cases() {
         assert_eq!(
-            HookEvent::from_str("PreAgentStart"),
+            HookEvent::parse_event("PreAgentStart"),
             Some(HookEvent::PreAgentStart)
         );
         assert_eq!(
-            HookEvent::from_str("pre_agent_start"),
+            HookEvent::parse_event("pre_agent_start"),
             Some(HookEvent::PreAgentStart)
         );
         assert_eq!(
-            HookEvent::from_str("POST_TASK_STOP"),
+            HookEvent::parse_event("POST_TASK_STOP"),
             Some(HookEvent::PostTaskStop)
         );
         assert_eq!(
-            HookEvent::from_str("PreToolUse"),
+            HookEvent::parse_event("PreToolUse"),
             Some(HookEvent::PreToolUse)
         );
-        assert_eq!(HookEvent::from_str("Nope"), None);
-        assert_eq!(HookEvent::from_str(""), None);
+        assert_eq!(HookEvent::parse_event("Nope"), None);
+        assert_eq!(HookEvent::parse_event(""), None);
     }
 
     #[test]
