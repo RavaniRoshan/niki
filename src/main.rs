@@ -64,6 +64,7 @@ enum Commands {
     /// Interactive chat session (TUI)
     Chat(niki::cli::chat::ChatArgs),
     /// Inspect custom slash commands
+    #[allow(clippy::enum_variant_names)]
     Commands(niki::cli::commands::CommandsArgs),
     /// Run NIKI as an Agent Client Protocol (ACP) server over stdio
     Acp(niki::cli::acp::AcpArgs),

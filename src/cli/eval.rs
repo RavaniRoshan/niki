@@ -108,6 +108,35 @@ pub async fn handle(args: &EvalArgs) -> Result<()> {
         }
     }
 
+    // Disclosure manifest (research report VG-12 / docs/benchmarks.md): every
+    // published number travels with harness commit, dataset, date, mode, and
+    // cost — the minimum for anyone else to reproduce or dispute the figures.
+    let manifest_out = args
+        .out
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(".niki/eval"));
+    std::fs::create_dir_all(&manifest_out)?;
+    let manifest = serde_json::json!({
+        "date_utc": report.run_date,
+        "niki_version": report.niki_version,
+        "mode": if report.live { "live" } else { "replay" },
+        "dataset": dataset.display().to_string(),
+        "n_cases": report.n_cases,
+        "harness_commit": report.harness_commit,
+        "harness_dirty": report.harness_dirty,
+        "niki_catch_rate": report.niki_catch_rate,
+        "baseline_catch_rate": report.baseline_catch_rate,
+        "false_approval_reduction_pct": report.false_approval_reduction_pct,
+        "total_cost_usd": report.total_cost_usd,
+        "cost_per_niki_caught": report.cost_per_niki_caught,
+        "success_definition": "seeded defect surfaced by reviewer issues or upheld Red challenge (test-passing only, not maintainer-merge grading)",
+    });
+    std::fs::write(
+        manifest_out.join("eval-manifest.json"),
+        serde_json::to_string_pretty(&manifest)?,
+    )?;
+    eprintln!("Wrote {}/eval-manifest.json", manifest_out.display());
+
     // Regression detection: exit non-zero if any expected-caught defect was missed
     let regressions = report
         .cases
@@ -207,6 +236,20 @@ fn recalculate_report(mut report: crate::eval::EvalReport) -> crate::eval::EvalR
     report
         .categories
         .sort_by(|a, b| format!("{:?}", a.category).cmp(&format!("{:?}", b.category)));
+
+    // Recompute spend totals over the filtered set so cost discipline survives
+    // --category/--difficulty/--limit slicing.
+    report.total_cost_usd = report.cases.iter().map(|c| c.cost_usd).sum();
+    let caught_n = report
+        .cases
+        .iter()
+        .filter(|c| c.expected_caught && c.niki.caught)
+        .count();
+    report.cost_per_niki_caught = if caught_n > 0 && report.total_cost_usd > 0.0 {
+        Some(report.total_cost_usd / caught_n as f64)
+    } else {
+        None
+    };
 
     report
 }
