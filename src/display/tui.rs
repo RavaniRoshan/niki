@@ -1408,14 +1408,14 @@ fn render_activity_spinner(
     } else {
         0.0
     };
-    let bar = crate::display::components::render_progress_bar(
-        frame,
-        area,
-        progress,
-        (area.width as usize).saturating_sub(24),
-    );
     let reduced_motion =
         state.config.ui.reduced_motion || std::env::var_os("NIKI_REDUCED_MOTION").is_some();
+    let bar = crate::display::components::render_progress_bar_shimmer(
+        progress,
+        (area.width as usize).saturating_sub(24),
+        state.tick,
+        reduced_motion,
+    );
     let spinner = crate::display::components::SpinnerState::with_tick(if reduced_motion {
         0
     } else {
