@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::process::Command;
 
-/// The 20 predefined hook events.
+/// The 22 predefined hook events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum HookEvent {
@@ -45,6 +45,22 @@ pub enum HookEvent {
 }
 
 impl HookEvent {
+    /// Parse an event name from config (`[hooks]` keys). Accepts PascalCase
+    /// (`PreAgentStart`) and snake_case (`pre_agent_start`), case-insensitive.
+    /// Returns `None` for unknown names — callers warn and skip rather than
+    /// failing the run over a typo. (Named `parse_event`, not `from_str`, to
+    /// avoid confusion with the standard `FromStr` trait.)
+    pub fn parse_event(name: &str) -> Option<Self> {
+        let normalized: String = name
+            .chars()
+            .filter(|c| *c != '_' && *c != '-')
+            .collect::<String>()
+            .to_lowercase();
+        Self::ALL
+            .iter()
+            .find(|e| e.as_str().to_lowercase() == normalized)
+            .copied()
+    }
     pub const ALL: [HookEvent; 22] = [
         HookEvent::PreToolUse,
         HookEvent::PostToolUse,
@@ -107,14 +123,9 @@ pub enum HookOutcome {
 }
 
 /// A registry of hook commands keyed by event, plus the runner.
+#[derive(Debug, Clone, Default)]
 pub struct HookBus {
     scripts: HashMap<HookEvent, Vec<String>>,
-}
-
-impl Default for HookBus {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl HookBus {
@@ -127,6 +138,32 @@ impl HookBus {
     /// Register a hook command for an event (multiple commands run in order).
     pub fn register(&mut self, event: HookEvent, command: String) {
         self.scripts.entry(event).or_default().push(command);
+    }
+
+    /// Build a bus from a raw `event -> commands` map (e.g. `[hooks]`
+    /// config). Unknown event names are skipped with a warning — a typo must
+    /// never silently deaden a policy the user thinks is enforced, nor fail
+    /// the run.
+    pub fn from_map(map: &std::collections::HashMap<String, Vec<String>>) -> Self {
+        let mut bus = Self::new();
+        let mut names: Vec<&String> = map.keys().collect();
+        names.sort();
+        for name in names {
+            match HookEvent::parse_event(name) {
+                Some(event) => {
+                    for command in &map[name] {
+                        bus.register(event, command.clone());
+                    }
+                }
+                None => {
+                    tracing::warn!(
+                        target: "niki::hooks",
+                        "unknown hook event '{name}' — skipped (valid: PreAgentStart, PostAgentStop, PreTaskStart, PostTaskStop, PreToolUse, ...)"
+                    );
+                }
+            }
+        }
+        bus
     }
 
     /// Whether any hook is registered for an event.
@@ -220,6 +257,39 @@ mod tests {
         for e in HookEvent::ALL {
             assert!(seen.insert(e), "duplicate event: {}", e.as_str());
         }
+    }
+
+    #[test]
+    fn event_names_parse_both_cases() {
+        assert_eq!(
+            HookEvent::parse_event("PreAgentStart"),
+            Some(HookEvent::PreAgentStart)
+        );
+        assert_eq!(
+            HookEvent::parse_event("pre_agent_start"),
+            Some(HookEvent::PreAgentStart)
+        );
+        assert_eq!(
+            HookEvent::parse_event("POST_TASK_STOP"),
+            Some(HookEvent::PostTaskStop)
+        );
+        assert_eq!(
+            HookEvent::parse_event("PreToolUse"),
+            Some(HookEvent::PreToolUse)
+        );
+        assert_eq!(HookEvent::parse_event("Nope"), None);
+        assert_eq!(HookEvent::parse_event(""), None);
+    }
+
+    #[test]
+    fn from_map_registers_known_and_skips_unknown() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("PreTaskStart".to_string(), vec!["exit 0".to_string()]);
+        map.insert("BogusEvent".to_string(), vec!["exit 2".to_string()]);
+        let bus = HookBus::from_map(&map);
+        assert!(bus.has_hooks(HookEvent::PreTaskStart));
+        // Unknown names never become events, so the exit-2 can never fire.
+        assert_eq!(bus.run(HookEvent::PreTaskStart, ""), HookOutcome::Allow);
     }
 
     #[test]

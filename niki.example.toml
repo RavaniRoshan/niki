@@ -5,7 +5,8 @@
 max_revision_rounds = 3
 # Task output directory (relative to project root)
 output_dir = ".niki"
-# Optional per-run spend ceiling in USD. 0.0 = unlimited.
+# Optional per-run spend ceiling in USD. 0.0 = unlimited (NOT recommended for
+# unattended runs — set an explicit cap so a runaway loop can't burn budget).
 # Hard mid-run ceiling: NIKI prints a pre-run estimate and aborts the run if the
 # cumulative estimated cost exceeds this amount before executing the next stage.
 spend_cap_usd = 0.0
@@ -59,6 +60,10 @@ default_model = "llama3.1"
 # Per-agent model assignment (BYOK mixing)
 # Each agent can use a different provider and model. This lets you optimize
 # for cost, speed, and quality across the pipeline.
+# Shorthands welcome: opus/sonnet/haiku (anthropic), 4o/4o-mini (openai),
+# flash/pro (google) resolve to canonical ids at load. Pinned versions pass
+# through untouched. Per-agent `effort = "low"|"medium"|"high"` tunes
+# temperature/tokens only when max_tokens/temperature are unset.
 [agents.planner]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"         # Best reasoning for planning
@@ -77,6 +82,11 @@ model = "llama-3.1-70b-versatile"
 # NIKI auto-detects from the project layout. The real exit code + output are
 # recorded in every run's audit trail as artifacts/test_execution.json.
 # test_command = "cargo test --locked"
+# Optional: mutation-testing command run after the suite (e.g. "cargo mutants",
+# "mutmut run", "stryker run"). No auto-detection — set explicitly to opt in.
+# A non-zero exit (surviving mutants) is recorded and blocks the branch unless
+# `niki run --force` is passed, exactly like a failing suite.
+# mutation_command = "cargo mutants --no-shuffle"
 # Fallback providers: if Groq is rate-limited or down, try OpenRouter, then OpenAI.
 # Only transient errors (429, 503, timeout, connection) trigger failover.
 fallbacks = ["openrouter", "openai"]
@@ -148,3 +158,37 @@ network_disabled = true
 # args = ["-y", "@modelcontextprotocol/server-filesystem"]
 # enabled = true
 # timeout_ms = 5000
+#
+# Remote servers use Streamable HTTP (plain JSON or SSE replies):
+# [[mcp.servers]]
+# name = "docs"
+# type = "remote"
+# url = "https://mcp.example.com/mcp"
+# enabled = false
+# timeout_ms = 5000
+
+# Permissions & trust posture for agent tool/command gates.
+# [permissions]
+# mode = "manual"  # manual (default) | auto | dontask | bypass. Overridable per run: niki run --permission-mode auto
+# disable_worktree = false  # Governance kill-switch: true refuses the unisolated worktree backend outright
+# fail_closed_headless = false  # true: headless Ask denies instead of allowing with a warning
+
+# Per-agent effort presets (low | medium | high) — apply only when max_tokens/
+# temperature are unset; explicit values always win. Example:
+# [agents.tester]
+# effort = "low"
+
+# Slash-command sources: extra dirs of *.md files (project-relative or
+# absolute), e.g. a committed command pack. .niki/commands/ always wins.
+# [commands]
+# extra_dirs = ["docs/commands"]
+
+# Shell hooks on pipeline lifecycle events ([hooks.commands] event -> commands).
+# Wired events: PreTaskStart, PostTaskStop, PreAgentStart, PostAgentStop
+# (plus PreToolUse/PostToolUse inside the runtime tool loop).
+# Contract per command: exit 2 (or stdout JSON {"deny": true}) BLOCKS and aborts
+# the run fail-closed; anything else allows. Payload arrives via
+# NIKI_HOOK_EVENT / NIKI_HOOK_PAYLOAD env vars. Unknown events warn + skip.
+# [hooks.commands]
+# PreTaskStart = ["echo \"starting $NIKI_HOOK_PAYLOAD\" >> .niki/hooks.log"]
+# PostTaskStop = ["echo \"finished $NIKI_HOOK_PAYLOAD\" >> .niki/hooks.log"]

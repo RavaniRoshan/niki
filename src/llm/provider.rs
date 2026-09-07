@@ -158,6 +158,13 @@ pub struct CompletionResponse {
 pub struct TokenUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Prompt-cache hits (Anthropic cache_read/create, OpenAI cached_tokens,
+    /// Google cachedContentTokenCount). Priced below input rate; `0` when the
+    /// provider did not report a split.
+    pub cached_input_tokens: u32,
+    /// Tokens spent on extended thinking / reasoning summaries (OpenAI
+    /// reasoning_tokens, Google thoughtsTokenCount). Priced at output rate.
+    pub reasoning_tokens: u32,
 }
 
 pub fn create_provider(name: &str, config: &ProviderConfig) -> Result<Box<dyn LlmProvider>> {
@@ -187,6 +194,74 @@ pub fn default_base_url(name: &str) -> Option<&'static str> {
         "groq" => Some("https://api.groq.com/openai/v1"),
         "deepseek" => Some("https://api.deepseek.com/v1"),
         _ => None,
+    }
+}
+
+/// Actionable "no API key" error (V8 first-hour-error rule: what + where +
+/// exact fix). Keeps the legacy "API key not configured" prefix so existing
+/// assertions and user muscle memory still match.
+pub fn missing_key_error(provider_name: &str) -> anyhow::Error {
+    // (label, env var, `niki auth login` slug or None when login is unsupported)
+    let (label, env, slug): (&str, &str, Option<&str>) = match provider_name {
+        "anthropic" => ("Anthropic", "ANTHROPIC_API_KEY", Some("anthropic")),
+        "openai" => ("OpenAI", "OPENAI_API_KEY", Some("openai")),
+        "google" => ("Google", "GOOGLE_API_KEY", Some("google")),
+        "openrouter" => ("OpenRouter", "OPENROUTER_API_KEY", None),
+        "groq" => ("Groq", "GROQ_API_KEY", None),
+        "deepseek" => ("DeepSeek", "DEEPSEEK_API_KEY", None),
+        "together" => ("Together", "TOGETHER_API_KEY", None),
+        "nvidia" => ("NVIDIA", "NVIDIA_API_KEY", None),
+        _ => ("Provider", "PROVIDER_API_KEY", None),
+    };
+    let fix = match slug {
+        Some(s) => format!(
+            "Set {env}, add api_key under [providers.{provider_name}] in niki.toml, \
+             or run `niki auth login --provider {s}`."
+        ),
+        None => format!(
+            "Set {env} or add api_key under [providers.{provider_name}] in niki.toml \
+             (`niki auth login` supports anthropic/openai/google only)."
+        ),
+    };
+    anyhow::anyhow!("{label} API key not configured. {fix}")
+}
+
+/// Well-known model shorthands, resolved per provider at config load.
+/// Aliases match the WHOLE model string (case-insensitive) — substrings never
+/// rewrite, so pinned versions like `claude-sonnet-4-20250514` pass through
+/// untouched, as do unknown providers and models.
+pub fn resolve_model_alias(provider: &str, model: &str) -> String {
+    let m = model.trim().to_lowercase();
+    let hit: Option<&str> = match provider.to_lowercase().as_str() {
+        "anthropic" => match m.as_str() {
+            "opus" => Some("claude-opus-4"),
+            "sonnet" => Some("claude-sonnet-4"),
+            "haiku" => Some("claude-haiku"),
+            _ => None,
+        },
+        "openai" => match m.as_str() {
+            "4o" => Some("gpt-4o"),
+            "4o-mini" | "mini" => Some("gpt-4o-mini"),
+            "o1" => Some("o1"),
+            "o3-mini" | "o3" => Some("o3-mini"),
+            _ => None,
+        },
+        "google" => match m.as_str() {
+            "flash" => Some("gemini-2.0-flash"),
+            "pro" => Some("gemini-2.5-pro"),
+            _ => None,
+        },
+        _ => None,
+    };
+    match hit {
+        Some(canonical) => {
+            tracing::info!(
+                target: "niki::model",
+                "model alias '{model}' resolved to '{canonical}' for provider '{provider}'"
+            );
+            canonical.to_string()
+        }
+        None => model.to_string(),
     }
 }
 
@@ -238,4 +313,24 @@ fn redact_generic_patterns(text: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_key_error_names_exact_fix() {
+        // Legacy prefix preserved for existing assertions and muscle memory.
+        let e = missing_key_error("anthropic").to_string();
+        assert!(e.contains("Anthropic API key not configured"), "{e}");
+        assert!(e.contains("ANTHROPIC_API_KEY"), "{e}");
+        assert!(e.contains("niki auth login --provider anthropic"), "{e}");
+
+        // Providers without keyring login get env/file guidance instead of a
+        // login command that would fail.
+        let e = missing_key_error("groq").to_string();
+        assert!(e.contains("GROQ_API_KEY"), "{e}");
+        assert!(!e.contains("auth login --provider"), "{e}");
+    }
 }

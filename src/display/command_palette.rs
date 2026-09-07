@@ -101,6 +101,18 @@ impl CommandPalette {
                 action: PaletteAction::Navigate(PageId::Help),
             },
             PaletteItem {
+                label: "fleet",
+                shortcut: "g",
+                page: Some(PageId::Fleet),
+                action: PaletteAction::Navigate(PageId::Fleet),
+            },
+            PaletteItem {
+                label: "session",
+                shortcut: "s",
+                page: Some(PageId::Session),
+                action: PaletteAction::Navigate(PageId::Session),
+            },
+            PaletteItem {
                 label: "pause / resume",
                 shortcut: "space",
                 page: None,

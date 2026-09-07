@@ -66,6 +66,9 @@ pub struct PipelineResult {
     /// `SingleAgent` (fast-path) or `MultiAgent` (full chain). Visible in the
     /// report so the auto-selection is self-describing, not asserted.
     pub topology: TopologyMode,
+    /// Why `topology` was selected (auto-rule outcome or explicit config).
+    /// Rendered in the report so a fast-path collapse is never silent.
+    pub topology_reason: String,
     /// Real test-suite execution result from inside the sandbox, recorded as
     /// verification evidence before the branch is created. `None` when no test
     /// command could be resolved or execution was skipped.
@@ -231,10 +234,42 @@ fn security_stage_target(config: &NikiConfig) -> (String, String) {
     )
 }
 
+/// Evidence-only view of the Coder's diff for the Red agent.
+///
+/// The Red agent must probe the change adversarially, which requires the
+/// *evidence* (edit blocks, files changed) but not the Coder's
+/// self-justification (`implementation_notes`, `spec_adherence`,
+/// `uncertainties`). Those rationale fields are kept in the audit trail but
+/// withheld from Red's prompt, so Red cannot be talked out of a finding by
+/// the Coder's own framing. Falls back to the full JSON when it does not
+/// parse as a `CodeDiff` (e.g. synthesis-replaced payloads of another shape).
+fn red_evidence_json(coder_json: &str) -> String {
+    match serde_json::from_str::<CodeDiff>(coder_json) {
+        Ok(diff) => serde_json::json!({
+            "edits": diff.edits,
+            "files_changed": diff.files_changed,
+        })
+        .to_string(),
+        Err(_) => {
+            tracing::debug!(
+                target: "niki::pipeline",
+                "coder JSON did not parse as CodeDiff; Red sees the full payload"
+            );
+            coder_json.to_string()
+        }
+    }
+}
+
 /// The published-artifact roles an agent receives as context, mirroring the
 /// `input_artifacts` each prompt is rendered with. This is the *complete* set of
-/// prior agents a role could have seen — and it is artifacts only, never reasoning.
+/// prior agents a role could have seen.
 /// `with_red` is true when the Red/Blue pass ran (the Reviewer then also sees Red).
+///
+/// Scope note (goal-a3f9c2, Phase 3): sources are *roles*, and each role's full
+/// typed artifact is shared — including its free-text rationale fields — with
+/// one exception: Red receives an evidence-only projection of the Coder diff
+/// (see [`red_evidence_json`]). Withholding rationale everywhere remains a
+/// follow-up; the record below describes wiring truthfully, not aspiration.
 fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
     use AgentRole::*;
     match role {
@@ -249,15 +284,40 @@ fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
             }
             v
         }
-        Synthesizer => vec![Planner],
-        SecurityAuditor => {
-            let mut v = vec![Planner, Coder, Tester, Reviewer];
-            if with_red {
-                v.push(Red);
-            }
-            v
+        Synthesizer => vec![Planner, Coder],
+        // The auditor's prompt is rendered with spec + coder diff only — it
+        // never receives Tester/Reviewer/Red artifacts, so the record says so
+        // even though that narrowness is itself a follow-up decision.
+        SecurityAuditor => vec![Planner, Coder],
+    }
+}
+
+/// Fire one lifecycle hook, failing the run closed on Block.
+/// No-ops (including unknown results) allow — hooks observe by default and
+/// only an explicit block stops the pipeline.
+fn fire_hook(
+    bus: &crate::audit::HookBus,
+    event: crate::audit::HookEvent,
+    payload: serde_json::Value,
+) -> Result<()> {
+    if !bus.has_hooks(event) {
+        return Ok(());
+    }
+    match bus.run(event, &payload.to_string()) {
+        crate::audit::HookOutcome::Allow | crate::audit::HookOutcome::Noop => Ok(()),
+        crate::audit::HookOutcome::Block(reason) => {
+            anyhow::bail!("hook blocked {}: {}", event.as_str(), reason)
         }
     }
+}
+
+/// Payload for per-agent hook events.
+fn agent_hook_payload(role: AgentRole, task_id: &Uuid, round: u32) -> serde_json::Value {
+    serde_json::json!({
+        "role": format!("{:?}", role),
+        "task_id": task_id.to_string(),
+        "round": round,
+    })
 }
 
 /// Pick the agent topology for this run (BUILD_PLAN 3.2, P2.2).
@@ -287,6 +347,39 @@ pub fn select_topology(spec: &TaskSpec, config: &NikiConfig) -> TopologyMode {
     }
 }
 
+/// Human-readable reason for the topology decision, recorded in the task
+/// record and report so an `Auto` collapse is self-describing, never silent
+/// (goal-a3f9c2, Phase 3: the fast-path drops independent review, and the
+/// user deserves to know why it was chosen).
+pub fn topology_reason(spec: &TaskSpec, config: &NikiConfig) -> String {
+    match config.pipeline.topology {
+        TopologyMode::MultiAgent => "explicit [pipeline].topology = multiagent".to_string(),
+        TopologyMode::SingleAgent => "explicit [pipeline].topology = singleagent: fast-path requested (Planner + solo Coder; no independent Tester/Reviewer/Red)".to_string(),
+        TopologyMode::Auto => {
+            if config.security.enabled || config.parallel.enabled {
+                return "auto: security/parallel stages require the full multi-agent chain".to_string();
+            }
+            if (spec.estimated_complexity as u8)
+                <= (config.pipeline.single_agent_max_complexity as u8)
+            {
+                format!(
+                    "auto: estimated complexity {:?} <= max {:?}: collapsed to fast-path (Planner + solo Coder; no independent Tester/Reviewer/Red)",
+                    spec.estimated_complexity, config.pipeline.single_agent_max_complexity
+                )
+            } else {
+                format!(
+                    "auto: estimated complexity {:?} > max {:?}: full multi-agent chain",
+                    spec.estimated_complexity, config.pipeline.single_agent_max_complexity
+                )
+            }
+        }
+    }
+}
+///
+/// In `SingleAgent` mode only the `Coder` runs — the Tester, Reviewer, Red and
+/// (if present) SecurityAuditor/Synthesizer stages are collapsed into the one
+/// solo Coder session, which is the whole point of the fast-path: it avoids the
+/// multi-agent token tax of re-ingesting shared context in every session.
 /// The body stages (everything after the Planner) to run for a given topology.
 ///
 /// In `SingleAgent` mode only the `Coder` runs — the Tester, Reviewer, Red and
@@ -424,6 +517,11 @@ async fn run_parallel_coders(
     base_display: &AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
     mcp_tools: &str,
+    // Bare mode: skip project-memory injection in spawned coders.
+    bare_memory: bool,
+    // Lifecycle hooks bus (cloned per spawned coder: shell-outs are brief).
+    hook_bus: crate::audit::HookBus,
+    hook_task_id: Uuid,
 ) -> Result<Vec<CodeDiff>> {
     let event_tx = base_display
         .tui_tx()
@@ -442,6 +540,7 @@ async fn run_parallel_coders(
         let mut disp = base_display.fork();
         let mcp_tools = mcp_tools.to_string();
         let event_tx = event_tx.clone();
+        let hook_bus = hook_bus.clone();
 
         tasks.push(tokio::spawn(async move {
             // Own worktree sandbox per coder → isolated changes.
@@ -480,6 +579,9 @@ async fn run_parallel_coders(
                 0.0, // temperature: use agent default
                 &mcp_tools,
                 config_max_diff_lines(&config),
+                bare_memory,
+                &hook_bus,
+                &hook_task_id,
                 None,
             )
             .await?;
@@ -552,6 +654,8 @@ async fn run_stage(
         model: model.to_string(),
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
+        cached_input_tokens: usage.cached_input_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
         latency_ms,
         cost_usd,
         retry_count,
@@ -598,13 +702,23 @@ async fn run_role(
     temperature: f32,
     mcp_tools: &str,
     max_diff_lines: Option<usize>,
+    // Bare mode: skip project-memory injection (ambient history off).
+    bare_memory: bool,
+    // Lifecycle hooks + owning task (PreAgentStart/PostAgentStop fire here,
+    // so every body stage — including parallel coders — is covered).
+    hooks: &crate::audit::HookBus,
+    hook_task_id: &Uuid,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<(String, Vec<String>, RoleOutput)> {
     let task_spec_json = serde_json::to_string_pretty(task_spec)?;
     let (template, schema) = role_prompt(role);
 
-    // Load role-specific memory for prompt injection
-    let memory_str = crate::memory::render_memory_for_prompt(project_path, role, 10);
+    // Load role-specific memory for prompt injection (absent when bare).
+    let memory_str = if bare_memory {
+        String::new()
+    } else {
+        crate::memory::render_memory_for_prompt(project_path, role, 10)
+    };
 
     let ctx = match role {
         AgentRole::Coder => context! {
@@ -656,9 +770,11 @@ async fn run_role(
         }
         AgentRole::Red => context! {
             // The Red agent sees the same inputs as the Reviewer (spec + diff +
-            // tests) but has never seen the Coder's reasoning, so it probes
-            // adversarially — exactly the independence the product claims.
-            input_artifacts => vec![task_spec_json.clone(), coder_json.to_string(), tester_json.to_string()],
+            // tests) but only the *evidence* of the Coder's diff — rationale
+            // fields (implementation_notes, spec_adherence, uncertainties) are
+            // withheld (see `red_evidence_json`), so Red probes adversarially
+            // instead of being framed by the Coder's self-justification.
+            input_artifacts => vec![task_spec_json.clone(), red_evidence_json(coder_json), tester_json.to_string()],
             project_knowledge => knowledge_str.to_string(),
             project_memory => memory_str,
             mcp_tools => mcp_tools.to_string(),
@@ -686,6 +802,12 @@ async fn run_role(
         }
     };
 
+    fire_hook(
+        hooks,
+        crate::audit::HookEvent::PreAgentStart,
+        agent_hook_payload(role, hook_task_id, round),
+    )?;
+
     let json = run_stage(
         role,
         llm,
@@ -702,7 +824,6 @@ async fn run_role(
         steer_rx,
     )
     .await?;
-
     let output = parse_role(role, &json)?;
     let summary = match &output {
         RoleOutput::Planner(s) => crate::display::artifact_render::render_task_spec_summary(s),
@@ -717,6 +838,11 @@ async fn run_role(
         }
         RoleOutput::Red(v) => crate::display::artifact_render::render_red_challenge_summary(v),
     };
+    fire_hook(
+        hooks,
+        crate::audit::HookEvent::PostAgentStop,
+        agent_hook_payload(role, hook_task_id, round),
+    )?;
     Ok((json, summary, output))
 }
 
@@ -829,10 +955,50 @@ pub async fn execute_pipeline(
     dry_run: bool,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     task_dir: &Path,
+    // Pre-approved plan: validated `planner.json` from `niki plan`, reviewed
+    // by the user. When `Some`, the Planner LLM call is skipped and this spec
+    // drives the run. `None` runs the Planner normally.
+    plan_override_json: Option<String>,
+    // Bare mode (`niki run --bare`): deterministic-inputs mode for CI.
+    // Skips project memory injection, MCP tool discovery, and external
+    // knowledge-URL fetching, so runs depend only on the repo + config.
+    // Model sampling nondeterminism and failover retries still apply — bare
+    // means "no ambient inputs", not "bit-identical output".
+    bare: bool,
 ) -> Result<PipelineResult> {
+    // In bare mode, strip the ambient-input config up front so every
+    // downstream consumer (indexer, memory, MCP) sees the same story.
+    let bare_config: Option<NikiConfig>;
+    let config: &NikiConfig = if bare {
+        let mut stripped = config.clone();
+        stripped.knowledge.urls.clear();
+        bare_config = Some(stripped);
+        bare_config.as_ref().unwrap()
+    } else {
+        config
+    };
     // 1. Index Project
     let knowledge = index_project(&task.project_path, config).await?;
     let knowledge_str = knowledge.render();
+    // Project memory is ambient history: present by default, absent when bare.
+    let memory_for = |role: AgentRole| {
+        if bare {
+            String::new()
+        } else {
+            crate::memory::render_memory_for_prompt(&task.project_path, role, 10)
+        }
+    };
+
+    // Shell-hook bus from `[hooks]` config. Wired subset: PreTaskStart,
+    // PostTaskStop, PreAgentStart, PostAgentStop. A Block outcome aborts the
+    // run fail-closed — hooks are policy, and policy violations must not be
+    // advisory. (PreToolUse/PostToolUse fire inside the runtime tool loop.)
+    let hook_bus = crate::audit::HookBus::from_map(&config.hooks.commands);
+    fire_hook(
+        &hook_bus,
+        crate::audit::HookEvent::PreTaskStart,
+        serde_json::json!({"task_id": task.id.to_string(), "description": task.description}),
+    )?;
 
     let mut state = super::state::PipelineState::new(task.id);
     let mut metrics: Vec<StageMetric> = Vec::new();
@@ -848,9 +1014,12 @@ pub async fn execute_pipeline(
 
     // --- MCP tool discovery (optional, launch-plan C1) ---
     // When `[mcp] enabled = true`, connect configured servers now and surface their
-    // tools to every agent via the prompt context. The manager is wired into the
+    // tools to every agent via the prompt context. Skipped entirely when bare:
+    // external servers are ambient inputs. The manager is wired into the
     // runtime here; the agent→server tool-call execution loop remains a follow-up.
-    let mcp_tools: String = if config.mcp.enabled {
+    let mcp_tools: String = if bare {
+        String::new()
+    } else if config.mcp.enabled {
         let mut mgr = crate::mcp::McpManager::new();
         if let Err(e) = mgr.connect_all().await {
             eprintln!("Warning: MCP connect failed: {}", e);
@@ -879,32 +1048,49 @@ pub async fn execute_pipeline(
     let stages = ensure_planner(resolve_stages(config), config);
 
     // --- Planner (entry point) ---
-    let planner_stage = stages
-        .iter()
-        .find(|s| s.role == AgentRole::Planner && !s.skip)
-        .ok_or_else(|| crate::NikiError::Config("No Planner stage configured".to_string()))?;
-    let planner_llm = provider_for(&planner_stage.provider, &planner_stage.fallbacks, config)?;
+    // An approved plan (`niki run --plan <id>`) skips the Planner LLM call:
+    // the user-reviewed spec drives the run directly. The JSON is re-validated
+    // here so stale or hand-edited plans fail fast instead of confusing stages.
+    // Metrics stay empty for the skipped stage so reported costs remain honest.
+    let planner_json: String = if let Some(approved) = plan_override_json.as_ref() {
+        let _: TaskSpec = serde_json::from_str(approved).map_err(|e| {
+            crate::NikiError::Config(format!("--plan artifact is not a valid TaskSpec: {e}"))
+        })?;
+        tracing::info!(target: "niki::pipeline", "using approved plan, Planner LLM call skipped");
+        approved.clone()
+    } else {
+        fire_hook(
+            &hook_bus,
+            crate::audit::HookEvent::PreAgentStart,
+            agent_hook_payload(AgentRole::Planner, &task.id, 0),
+        )?;
+        let planner_stage = stages
+            .iter()
+            .find(|s| s.role == AgentRole::Planner && !s.skip)
+            .ok_or_else(|| crate::NikiError::Config("No Planner stage configured".to_string()))?;
+        let planner_llm = provider_for(&planner_stage.provider, &planner_stage.fallbacks, config)?;
 
-    let planner_json = run_stage(
-        AgentRole::Planner,
-        planner_llm.as_ref(),
-        &planner_stage.model,
-        &planner_stage.provider,
-        "planner.md",
-        context! {
-            task_description => task.description.clone(),
-            project_knowledge => knowledge_str.clone(),
-            project_memory => crate::memory::render_memory_for_prompt(&task.project_path, AgentRole::Planner, 10),
-        },
-        "schemas/task_spec.schema.json",
-        display,
-        &mut metrics,
-        false, // Planner must not degrade — it's the pipeline entry point
-        planner_stage.max_tokens,
-        planner_stage.temperature,
-        steer_rx,
-    )
-    .await?;
+        run_stage(
+            AgentRole::Planner,
+            planner_llm.as_ref(),
+            &planner_stage.model,
+            &planner_stage.provider,
+            "planner.md",
+            context! {
+                task_description => task.description.clone(),
+                project_knowledge => knowledge_str.clone(),
+                project_memory => memory_for(AgentRole::Planner),
+            },
+            "schemas/task_spec.schema.json",
+            display,
+            &mut metrics,
+            false, // Planner must not degrade — it's the pipeline entry point
+            planner_stage.max_tokens,
+            planner_stage.temperature,
+            steer_rx,
+        )
+        .await?
+    };
     let task_spec: TaskSpec = serde_json::from_str(&planner_json)?;
     artifacts.push((AgentRole::Planner, planner_json.clone()));
     isolation.push(IsolationRecord {
@@ -913,15 +1099,36 @@ pub async fn execute_pipeline(
         context_sources: isolation_sources_for(AgentRole::Planner, config.red_blue.enabled),
         saw_other_reasoning: false,
     });
-    let pm = metrics
-        .last()
-        .unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
+    // Approved-plan runs skip the Planner LLM call, so no metric exists for
+    // this stage — report zero usage rather than crashing on the assumption
+    // that the Planner always ran.
+    let pm = metrics.last().cloned().unwrap_or_else(|| StageMetric {
+        role: AgentRole::Planner,
+        provider: String::new(),
+        model: String::new(),
+        input_tokens: 0,
+        output_tokens: 0,
+        cached_input_tokens: 0,
+        reasoning_tokens: 0,
+        latency_ms: 0,
+        cost_usd: 0.0,
+        retry_count: 0,
+        ttft_ms: 0,
+    });
     display.agent_done(
         AgentRole::Planner,
         crate::display::artifact_render::render_task_spec_summary(&task_spec),
         pm.usage(),
         pm.cost_usd,
     );
+    // No PostAgentStop when the Planner was skipped by --plan (no agent ran).
+    if plan_override_json.is_none() {
+        fire_hook(
+            &hook_bus,
+            crate::audit::HookEvent::PostAgentStop,
+            agent_hook_payload(AgentRole::Planner, &task.id, 0),
+        )?;
+    }
     display.update_pipeline_status();
 
     // T7+T8: Update context budget and save incremental task record after Planner.
@@ -932,9 +1139,15 @@ pub async fn execute_pipeline(
     // The Planner has already derived `estimated_complexity`, so we can pick
     // the fast-path (single solo Coder) or the full multi-agent chain now.
     let topology = select_topology(&task_spec, config);
+    let topology_reason = topology_reason(&task_spec, config);
 
     // Dry-run: stop after the Planner and surface the spec without executing.
     if dry_run {
+        fire_hook(
+            &hook_bus,
+            crate::audit::HookEvent::PostTaskStop,
+            serde_json::json!({"task_id": task.id.to_string(), "dry_run": true}),
+        )?;
         return Ok(PipelineResult {
             task_id: task.id,
             context_budget: state.context_budget.clone(),
@@ -948,6 +1161,7 @@ pub async fn execute_pipeline(
             safety_proof: None,
             isolation,
             topology,
+            topology_reason: topology_reason.clone(),
             test_execution: None,
         });
     }
@@ -1018,6 +1232,10 @@ pub async fn execute_pipeline(
     let mut coder_json = String::new();
     let mut tester_json = String::new();
     let mut red_json = String::new();
+    // Revision feedback is intentionally latest-round-only: each Reviewer
+    // verdict OVERWRITES (never appends), so a retrying Coder sees the
+    // current critique, not an accumulation of stale guidance. Full history
+    // stays in the artifacts trail.
     let mut review_feedback: Option<String> = None;
     let mut verdict = Verdict::Approved;
     let mut round = 0;
@@ -1060,6 +1278,9 @@ pub async fn execute_pipeline(
                     display,
                     &mut metrics,
                     &mcp_tools,
+                    bare,
+                    hook_bus.clone(),
+                    task.id,
                 )
                 .await?;
 
@@ -1111,6 +1332,9 @@ pub async fn execute_pipeline(
                     synth_stage.temperature,
                     &mcp_tools,
                     config_max_diff_lines(config),
+                    bare,
+                    &hook_bus,
+                    &task.id,
                     steer_rx,
                 )
                 .await?;
@@ -1181,6 +1405,9 @@ pub async fn execute_pipeline(
                         stage.temperature,
                         &mcp_tools,
                         config_max_diff_lines(config),
+                        bare,
+                        &hook_bus,
+                        &task.id,
                         steer_rx,
                     )
                     .await?;
@@ -1255,6 +1482,9 @@ pub async fn execute_pipeline(
                             stage.temperature,
                             &mcp_tools,
                             config_max_diff_lines(config),
+                            bare,
+                            &hook_bus,
+                            &task.id,
                             steer_rx,
                         )
                         .await?;
@@ -1370,6 +1600,11 @@ pub async fn execute_pipeline(
                 anyhow::anyhow!("Provider '{}' not found in cache", coder_stage.provider)
             })?;
             let current_files = build_current_files(&task_spec, &task.project_path);
+            fire_hook(
+                &hook_bus,
+                crate::audit::HookEvent::PreAgentStart,
+                agent_hook_payload(AgentRole::Coder, &task.id, 0),
+            )?;
             let solo_json = run_stage(
                 AgentRole::Coder,
                 &**coder_llm,
@@ -1379,19 +1614,24 @@ pub async fn execute_pipeline(
                 context! {
                     task_description => task.description.clone(),
                     project_knowledge => knowledge_str.clone(),
-                    project_memory => crate::memory::render_memory_for_prompt(&task.project_path, AgentRole::Coder, 10),
+                    project_memory => memory_for(AgentRole::Coder),
                     current_files => current_files.clone(),
                 },
-                 "schemas/code_diff.schema.json",
-                 display,
-                 &mut metrics,
-                 false, // Solo mode: strict — no degradation
-                 coder_stage.max_tokens,
-                 coder_stage.temperature,
-                 steer_rx,
-             )
-             .await?;
+                "schemas/code_diff.schema.json",
+                display,
+                &mut metrics,
+                false, // Solo mode: strict — no degradation
+                coder_stage.max_tokens,
+                coder_stage.temperature,
+                steer_rx,
+            )
+            .await?;
             artifacts.push((AgentRole::Coder, solo_json.clone()));
+            fire_hook(
+                &hook_bus,
+                crate::audit::HookEvent::PostAgentStop,
+                agent_hook_payload(AgentRole::Coder, &task.id, 0),
+            )?;
             isolation.push(IsolationRecord {
                 role: AgentRole::Coder,
                 backend: config.docker.backend,
@@ -1460,7 +1700,15 @@ pub async fn execute_pipeline(
     // Verification in the loop: actually execute the project's test suite inside
     // the sandbox and record the real result as part of the audit trail, *before*
     // the branch is created. This is the "verified before you see it" guarantee.
-    let test_execution = tester::run_tests(&*sandbox, config, &task.project_path).await;
+    let mut test_execution = tester::run_tests(&*sandbox, config, &task.project_path).await;
+    // Mutation gate (opt-in): when configured, surviving mutants fail the run
+    // exactly like a failing suite. The result nests inside test_execution so
+    // the audit trail keeps one verification record per run.
+    if let Some(te) = test_execution.as_mut() {
+        te.mutation = tester::run_mutation(&*sandbox, config, &task.project_path)
+            .await
+            .map(Box::new);
+    }
 
     sandbox.destroy().await?;
 
@@ -1476,6 +1724,12 @@ pub async fn execute_pipeline(
         &state,
     );
 
+    fire_hook(
+        &hook_bus,
+        crate::audit::HookEvent::PostTaskStop,
+        serde_json::json!({"task_id": task.id.to_string(), "verdict": format!("{:?}", verdict)}),
+    )?;
+
     Ok(PipelineResult {
         task_id: task.id,
         context_budget: state.context_budget.clone(),
@@ -1489,6 +1743,7 @@ pub async fn execute_pipeline(
         safety_proof: None,
         isolation,
         topology,
+        topology_reason: topology_reason.clone(),
         test_execution,
     })
 }
@@ -1683,6 +1938,70 @@ mod tests {
         c.pipeline.topology = TopologyMode::Auto;
         let spec = spec_with(Complexity::Low);
         assert_eq!(select_topology(&spec, &c), TopologyMode::SingleAgent);
+    }
+
+    #[test]
+    fn topology_reason_names_collapse_and_rationale() {
+        // A silent fast-path collapse is a vision violation; the reason string
+        // must name what was dropped.
+        let mut c = NikiConfig::default();
+        c.pipeline.topology = TopologyMode::Auto;
+        let reason = topology_reason(&spec_with(Complexity::Low), &c);
+        assert!(
+            reason.contains("collapsed to fast-path"),
+            "reason: {reason}"
+        );
+        assert!(
+            reason.contains("no independent Tester/Reviewer/Red"),
+            "reason: {reason}"
+        );
+        let reason_multi = topology_reason(&spec_with(Complexity::High), &c);
+        assert!(
+            reason_multi.contains("full multi-agent chain"),
+            "reason: {reason_multi}"
+        );
+    }
+
+    #[test]
+    fn red_evidence_json_strips_coder_rationale() {
+        let coder = serde_json::json!({
+            "edits": [{"search": "a", "replace": "b"}],
+            "files_changed": [{"path": "x.rs", "action": "modify", "language": "rust"}],
+            "implementation_notes": "I chose b because it felt right",
+            "spec_adherence": "Trust me",
+            "uncertainties": ["not sure about edge cases"]
+        })
+        .to_string();
+        let evidence = red_evidence_json(&coder);
+        assert!(evidence.contains("\"edits\""), "evidence keeps edits");
+        assert!(evidence.contains("x.rs"), "evidence keeps files");
+        assert!(!evidence.contains("felt right"), "rationale withheld");
+        assert!(
+            !evidence.contains("Trust me"),
+            "self-justification withheld"
+        );
+        assert!(!evidence.contains("not sure"), "uncertainties withheld");
+    }
+
+    #[test]
+    fn red_evidence_json_falls_back_on_unparseable_input() {
+        let raw = "not json at all";
+        assert_eq!(red_evidence_json(raw), raw);
+    }
+
+    #[test]
+    fn isolation_record_matches_wiring() {
+        // The record must mirror input_artifacts wiring, not aspiration:
+        // Synthesizer reconciles concatenated coder diffs; the auditor sees
+        // spec + coder diff only (never Tester/Reviewer/Red).
+        assert_eq!(
+            isolation_sources_for(AgentRole::Synthesizer, false),
+            vec![AgentRole::Planner, AgentRole::Coder]
+        );
+        assert_eq!(
+            isolation_sources_for(AgentRole::SecurityAuditor, true),
+            vec![AgentRole::Planner, AgentRole::Coder]
+        );
     }
 
     #[test]

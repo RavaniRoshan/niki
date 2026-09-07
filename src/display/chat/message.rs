@@ -314,7 +314,7 @@ fn render_collapsed_read_group(count: usize, tools: &[&str]) -> Vec<Line<'static
     };
     vec![Line::from(Span::styled(
         format!("  ⎿ {} (collapsed)", tool_desc),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(crate::display::theme::fg_dim()),
     ))]
 }
 

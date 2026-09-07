@@ -161,7 +161,7 @@ impl Page for CostPage {
                 ),
                 Span::styled(
                     format!("${:<7.4}", stage.cost_usd),
-                    Style::default().fg(theme::GREEN()),
+                    Style::default().fg(theme::success()),
                 ),
                 Span::styled(
                     fmt_duration(stage.latency_ms),
@@ -192,7 +192,7 @@ impl Page for CostPage {
             Span::styled(
                 format!("${:<7.4}", total_cost),
                 Style::default()
-                    .fg(theme::GREEN())
+                    .fg(theme::success())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(

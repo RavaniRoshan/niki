@@ -1,7 +1,7 @@
 use crate::artifacts::types::AgentRole;
 use crate::cost::lookup_price;
 use crate::recommend::{
-    RoleRec, estimate_cost, estimate_tokens, recommendations, role_prefers_strong,
+    RoleRec, estimate_cost, estimate_tokens, observed_spend, recommendations, role_prefers_strong,
 };
 use anyhow::Result;
 use clap::Args;
@@ -20,6 +20,10 @@ pub struct RecommendArgs {
     /// Preference: `balanced` (default), `strong`, or `cheap`.
     #[arg(long, default_value = "balanced")]
     pub preference: String,
+
+    /// Project directory whose `.niki/tasks` history informs observed spend.
+    #[arg(short, long, default_value = ".")]
+    pub project: String,
 }
 
 fn role_name(role: AgentRole) -> &'static str {
@@ -94,6 +98,47 @@ pub fn handle(args: &RecommendArgs) -> Result<()> {
         }
         println!();
     }
+
+    // Observed spend from this project's own history. Static heuristics above
+    // are generic; these numbers are what past runs actually cost here.
+    let tasks_dir = std::path::Path::new(&args.project).join(".niki/tasks");
+    let observed: Vec<_> = observed_spend(&tasks_dir)
+        .into_iter()
+        .filter(|o| match &args.role {
+            Some(r) => role_name(o.role) == r.to_lowercase(),
+            None => true,
+        })
+        .collect();
+    println!("## Observed in past runs  (`{}`)", tasks_dir.display());
+    if observed.is_empty() {
+        println!("  - No past runs found — figures above are static heuristics.");
+    } else {
+        let total_runs: usize = observed.iter().map(|o| o.runs).sum();
+        println!(
+            "  - Aggregated from {} stage executions in past runs.",
+            total_runs
+        );
+        for o in observed {
+            let unpriced_note =
+                if o.avg_cost_usd == 0.0 && crate::cost::is_unpriced(&o.provider, &o.model) {
+                    " — unpriced model, spend unmeasured"
+                } else {
+                    ""
+                };
+            println!(
+                "  - {} {} ({}): {} run(s), avg ${:.4} ({} in / {} out tok){}",
+                role_name(o.role),
+                o.model,
+                o.provider,
+                o.runs,
+                o.avg_cost_usd,
+                o.avg_input_tokens as u64,
+                o.avg_output_tokens as u64,
+                unpriced_note,
+            );
+        }
+    }
+    println!();
 
     println!(
         "Tip: set these via `[agents]` in niki.toml, or override per run with `--coder-model`, etc."

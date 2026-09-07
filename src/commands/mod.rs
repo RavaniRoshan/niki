@@ -112,6 +112,27 @@ pub struct CommandRegistry {
     alias_map: HashMap<String, String>,
 }
 
+/// Split optional `---` frontmatter from a command file body.
+/// Returns `(frontmatter, template)`. Without a leading `---` line the
+/// frontmatter is empty and the whole content is the template; an
+/// unterminated block is treated the same way.
+fn split_frontmatter(content: &str) -> (&str, &str) {
+    let mut lines = content.split_inclusive('\n');
+    let first = lines.next().unwrap_or("");
+    if first.trim() != "---" {
+        return ("", content);
+    }
+    let mut fm_end = first.len();
+    for line in lines {
+        fm_end += line.len();
+        if line.trim() == "---" {
+            let fm = content[first.len()..fm_end - line.len()].trim();
+            return (fm, content[fm_end..].trim_start_matches('\n'));
+        }
+    }
+    ("", content)
+}
+
 impl CommandRegistry {
     /// Create a new command registry with built-in commands.
     pub fn new() -> Self {
@@ -120,6 +141,27 @@ impl CommandRegistry {
             alias_map: HashMap::new(),
         };
         registry.register_builtins();
+        registry
+    }
+
+    /// Create a registry with built-ins plus the project's local user commands
+    /// from `<project>/.niki/commands/*.md` (filename → `/name`), plus any
+    /// `[commands] extra_dirs` (committed packs welcome). Later sources win:
+    /// extra dirs override each other in order, and `.niki/commands/` always
+    /// wins. A shared/committed tier is just an extra dir in version control.
+    pub fn with_project(project_path: &Path, extra_dirs: &[std::path::PathBuf]) -> Self {
+        let mut registry = Self::new();
+        for dir in extra_dirs {
+            let full = if dir.is_absolute() {
+                dir.clone()
+            } else {
+                project_path.join(dir)
+            };
+            // Best-effort: a missing dir simply means no commands there.
+            let _ = registry.load_from_dir(&full);
+        }
+        // Best-effort: a missing dir simply means no custom commands.
+        let _ = registry.load_from_dir(&project_path.join(".niki").join("commands"));
         registry
     }
 
@@ -199,17 +241,57 @@ impl CommandRegistry {
     }
 
     /// Parse a markdown file into a slash command.
+    ///
+    /// Optional frontmatter overrides the defaults:
+    /// ```markdown
+    /// ---
+    /// description: Review this diff for security issues
+    /// aliases: sec-review, sr
+    /// ---
+    /// <template body; `$ARGUMENTS` is replaced on expand>
+    /// ```
+    /// Without frontmatter the description is `Custom command: <name>` and the
+    /// whole file is the template.
     fn parse_command_file(path: &Path, content: &str) -> Option<SlashCommand> {
         let name = path.file_stem()?.to_str()?.to_string();
-        let description = format!("Custom command: {}", name);
+        let (frontmatter, template) = split_frontmatter(content);
+        let mut description = format!("Custom command: {}", name);
+        let mut aliases: Vec<String> = Vec::new();
+        for line in frontmatter.lines() {
+            let line = line.trim();
+            if let Some(rest) = line
+                .strip_prefix("description:")
+                .or_else(|| line.strip_prefix("Description:"))
+            {
+                let v = rest.trim().trim_matches('"').trim_matches('\'');
+                if !v.is_empty() {
+                    description = v.to_string();
+                }
+            } else if let Some(rest) = line
+                .strip_prefix("aliases:")
+                .or_else(|| line.strip_prefix("Aliases:"))
+            {
+                aliases = rest
+                    .split(',')
+                    .map(|a| {
+                        a.trim()
+                            .trim_matches('"')
+                            .trim_matches('\'')
+                            .trim_start_matches('/')
+                            .to_string()
+                    })
+                    .filter(|a| !a.is_empty())
+                    .collect();
+            }
+        }
         Some(SlashCommand {
             name,
             description,
-            template: content.to_string(),
+            template: template.to_string(),
             agent: None,
             model: None,
             group: Some("custom".to_string()),
-            aliases: Vec::new(),
+            aliases,
             category: CommandCategory::System,
         })
     }
@@ -395,5 +477,81 @@ mod tests {
         assert_eq!(CommandCategory::Session.as_str(), "session");
         assert_eq!(CommandCategory::Context.as_str(), "context");
         assert_eq!(CommandCategory::all().len(), 6);
+    }
+}
+
+#[cfg(test)]
+mod user_command_tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_cmd(dir: &std::path::Path, name: &str, content: &str) {
+        let mut f = std::fs::File::create(dir.join(name)).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn frontmatter_overrides_description_and_aliases() {
+        let dir = std::env::temp_dir().join(format!("niki-cmd-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        write_cmd(
+            &dir,
+            "sec.md",
+            "---\ndescription: Review for security issues\naliases: sr, /secrev\n---\nReview $ARGUMENTS for vulns.",
+        );
+        write_cmd(&dir, "plain.md", "Just do $ARGUMENTS.");
+
+        let mut registry = CommandRegistry::new();
+        registry.load_from_dir(&dir).unwrap();
+
+        let sec = registry.get("sec").expect("sec command loads");
+        assert_eq!(sec.description, "Review for security issues");
+        assert_eq!(
+            registry.expand("sr", "src/auth.rs").unwrap(),
+            "Review src/auth.rs for vulns."
+        );
+        assert_eq!(registry.get("secrev").unwrap().name, "sec");
+
+        let plain = registry.get("plain").expect("plain command loads");
+        assert_eq!(plain.description, "Custom command: plain");
+        assert_eq!(
+            registry.expand("plain", "things").unwrap(),
+            "Just do things."
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unterminated_frontmatter_is_template() {
+        let (fm, tpl) = split_frontmatter("---\ndescription: oops, no closer");
+        assert_eq!(fm, "");
+        assert!(tpl.contains("oops"));
+    }
+
+    #[test]
+    fn with_project_loads_niki_commands_dir() {
+        let proj = std::env::temp_dir().join(format!("niki-proj-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&proj);
+        let dir = proj.join(".niki").join("commands");
+        std::fs::create_dir_all(&dir).unwrap();
+        write_cmd(&dir, "deploy.md", "Deploy $ARGUMENTS to prod.");
+
+        let registry = CommandRegistry::with_project(&proj, &[]);
+        assert_eq!(
+            registry.expand("deploy", "v1.2").unwrap(),
+            "Deploy v1.2 to prod."
+        );
+        let _ = std::fs::remove_dir_all(&proj);
+    }
+
+    #[test]
+    fn with_project_without_dir_still_has_builtins() {
+        let proj = std::env::temp_dir().join(format!("niki-empty-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&proj);
+        std::fs::create_dir_all(&proj).unwrap();
+        let registry = CommandRegistry::with_project(&proj, &[]);
+        assert!(registry.get("help").is_some());
+        let _ = std::fs::remove_dir_all(&proj);
     }
 }

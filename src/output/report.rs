@@ -388,6 +388,22 @@ fn render_verification_section(result: &PipelineResult) -> String {
             "\n_(output truncated in this report; full output in `artifacts/test_execution.json`)_\n",
         );
     }
+    if let Some(m) = &te.mutation {
+        let mstatus = if m.passed { "PASSED" } else { "FAILED" };
+        out.push_str(&format!(
+            "\n### Mutation gate (opt-in)\n\n- Command: `{}`\n- Result: **{}** (exit code {})\n",
+            m.command, mstatus, m.exit_code
+        ));
+        if let Some(note) = &m.note {
+            out.push_str(&format!("- Note: {}\n", note));
+        }
+        if !m.passed {
+            out.push_str(
+                "- Surviving mutants mean the suite passes code it cannot distinguish \
+                 from broken variants — treat green-with-survivors as unproven, not verified.\n",
+            );
+        }
+    }
     out.push('\n');
     out
 }
@@ -414,8 +430,16 @@ fn render_cost_section(result: &PipelineResult) -> String {
         total_out += m.output_tokens;
         total_ms += m.latency_ms;
         total_cost += m.cost_usd;
+        // A $0.00 stage with real tokens on a billable provider means the
+        // model is missing from the price table — "unmeasured", not "free".
+        // Local providers (ollama/mock) are legitimately free.
+        let unpriced = m.cost_usd == 0.0
+            && m.input_tokens + m.output_tokens > 0
+            && crate::cost::is_unpriced(&m.provider, &m.model);
         let cost = if m.cost_usd > 0.0 {
             format!("${:.4}", m.cost_usd)
+        } else if unpriced {
+            "unpriced*".to_string()
         } else {
             "n/a".to_string()
         };
@@ -443,6 +467,16 @@ fn render_cost_section(result: &PipelineResult) -> String {
         total_ms as f64 / 1000.0,
         total_cost_str,
     ));
+    if result.metrics.iter().any(|m| {
+        m.cost_usd == 0.0
+            && m.input_tokens + m.output_tokens > 0
+            && crate::cost::is_unpriced(&m.provider, &m.model)
+    }) {
+        out.push_str(
+            "\n*`unpriced`: model missing from the price table — the total above \
+             UNDERSTATES real spend. See `PRICE_TABLE_AS_OF` in `src/cost.rs`.\n",
+        );
+    }
 
     // --- Cost transparency vs a single autonomous agent (BUILD_PLAN 2.3, P1.4) ---
     let total_tokens = total_in as u64 + total_out as u64;
@@ -583,7 +617,12 @@ pub fn render_guardrail_section(result: &PipelineResult) -> String {
     }
 }
 
-pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult) -> Result<()> {
+pub fn generate_report(
+    task: &Task,
+    config: &NikiConfig,
+    result: &PipelineResult,
+    branch: Option<&str>,
+) -> Result<()> {
     let mut env = Environment::new();
 
     let template = r#"
@@ -597,7 +636,7 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
 - Verdict: {{ verdict }}
 - Revision Rounds: {{ revision_rounds }}
 - Topology: {{ topology_line }}
-
+{{ model_sharing_note }}
 {{ safety_section }}
 {{ red_blue_section }}
  {{ isolation_section }}
@@ -622,6 +661,7 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
         verdict => format!("{:?}", result.verdict),
         revision_rounds => result.revision_rounds,
         topology_line => topology_line(result),
+        model_sharing_note => model_sharing_note(result).unwrap_or_default(),
         safety_section => render_safety_section(result),
         red_blue_section => render_red_blue_section(result),
         isolation_section => render_isolation_section(result),
@@ -646,6 +686,11 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
     let diff_path = output_dir.join("changes.patch");
     crate::util::write_restricted(&diff_path, &result.final_diff)?;
 
+    // Machine-readable run trace (spans per stage + task/test/verdict markers).
+    // Timelines are derived from recorded latencies, labeled as such inside.
+    let trace = super::trace::render_trace(&task.id.to_string(), &task.description, branch, result);
+    crate::util::write_restricted(&output_dir.join("trace.jsonl"), trace)?;
+
     Ok(())
 }
 
@@ -653,8 +698,10 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
 /// (BUILD_PLAN 3.2, P2.2). The single-agent fast-path is named honestly: it
 /// collapses Tester/Reviewer/Red into one solo Coder, so there is no
 /// independent adversarial review — the trade-off is surfaced, never hidden.
+/// The selection reason (auto-rule outcome or explicit config) is appended so
+/// a collapse is self-describing.
 pub fn topology_line(result: &PipelineResult) -> String {
-    match result.topology {
+    let base = match result.topology {
         TopologyMode::SingleAgent => {
             "single-agent fast-path (Planner + solo Coder; Tester/Reviewer/Red collapsed)"
                 .to_string()
@@ -662,6 +709,48 @@ pub fn topology_line(result: &PipelineResult) -> String {
         TopologyMode::MultiAgent | TopologyMode::Auto => {
             "multi-agent (Planner → Coder → Tester → Red → Reviewer)".to_string()
         }
+    };
+    if result.topology_reason.is_empty() {
+        base
+    } else {
+        format!("{}\n- Topology reason: {}", base, result.topology_reason)
+    }
+}
+
+/// Warn when a reviewing role runs on the exact same provider+model as the
+/// Coder: architectural independence without model diversity is weaker review
+/// (goal-a3f9c2, Phase 3). Returns `None` when reviewers differ or no
+/// reviewer metrics exist.
+pub fn model_sharing_note(result: &PipelineResult) -> Option<String> {
+    use crate::artifacts::types::AgentRole::*;
+    let coder_models: Vec<(&str, &str)> = result
+        .metrics
+        .iter()
+        .filter(|m| matches!(m.role, Coder))
+        .map(|m| (m.provider.as_str(), m.model.as_str()))
+        .collect();
+    if coder_models.is_empty() {
+        return None;
+    }
+    let mut shared: Vec<String> = Vec::new();
+    for m in &result.metrics {
+        if matches!(m.role, Reviewer | SecurityAuditor | Red)
+            && coder_models.contains(&(m.provider.as_str(), m.model.as_str()))
+            && !shared.contains(&m.model)
+        {
+            shared.push(format!(
+                "{:?} shares the Coder's exact model {} ({})",
+                m.role, m.model, m.provider
+            ));
+        }
+    }
+    if shared.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Model-sharing note: {}. Independence here is architectural (separate sessions/artifacts), not model-diverse — consider mixing providers across Coder and reviewers.",
+            shared.join("; ")
+        ))
     }
 }
 
@@ -694,10 +783,13 @@ mod tests {
                 cost_usd: 0.0,
                 retry_count: 0,
                 ttft_ms: 0,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             }],
             safety_proof: proof,
             isolation: vec![],
             topology: TopologyMode::Auto,
+            topology_reason: String::new(),
             test_execution: None,
         }
     }
@@ -733,7 +825,7 @@ mod tests {
             project_path: dir.clone(),
         };
         let cfg = crate::config::NikiConfig::default();
-        generate_report(&task, &cfg, &result).expect("report should render");
+        generate_report(&task, &cfg, &result, None).expect("report should render");
 
         let report = std::fs::read_to_string(
             dir.join(".niki")
@@ -754,6 +846,40 @@ mod tests {
         let result = result_with_proof(None);
         let section = render_safety_section(&result);
         assert!(section.is_empty());
+    }
+
+    #[test]
+    fn model_sharing_note_flags_same_model_review() {
+        use crate::orchestrator::state::StageMetric;
+        fn metric(role: AgentRole, provider: &str, model: &str) -> StageMetric {
+            StageMetric {
+                role,
+                provider: provider.into(),
+                model: model.into(),
+                input_tokens: 1,
+                output_tokens: 1,
+                latency_ms: 1,
+                cost_usd: 0.0,
+                retry_count: 0,
+                ttft_ms: 0,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
+            }
+        }
+        let mut shared = result_with_proof(None);
+        shared.metrics = vec![
+            metric(AgentRole::Coder, "anthropic", "claude-sonnet-4"),
+            metric(AgentRole::Reviewer, "anthropic", "claude-sonnet-4"),
+        ];
+        let note = model_sharing_note(&shared).expect("shared model must warn");
+        assert!(note.contains("Reviewer"), "note names the role: {note}");
+
+        let mut diverse = result_with_proof(None);
+        diverse.metrics = vec![
+            metric(AgentRole::Coder, "anthropic", "claude-sonnet-4"),
+            metric(AgentRole::Reviewer, "anthropic", "claude-opus-4"),
+        ];
+        assert!(model_sharing_note(&diverse).is_none());
     }
 
     #[test]
@@ -815,6 +941,7 @@ mod tests {
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
+            topology_reason: String::new(),
             test_execution: None,
         };
 
@@ -866,6 +993,7 @@ mod tests {
                 },
             ],
             topology: TopologyMode::Auto,
+            topology_reason: String::new(),
             test_execution: None,
         };
         let section = render_isolation_section(&result);
@@ -900,7 +1028,7 @@ mod tests {
             project_path: dir.clone(),
         };
         let cfg = crate::config::NikiConfig::default();
-        generate_report(&task, &cfg, result).expect("report should render");
+        generate_report(&task, &cfg, result, None).expect("report should render");
         let report = std::fs::read_to_string(
             dir.join(".niki")
                 .join("tasks")
@@ -937,6 +1065,7 @@ mod tests {
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
+            topology_reason: String::new(),
             test_execution: None,
         }
     }
@@ -1033,6 +1162,7 @@ index 3333333..4444444 100644
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::Auto,
+            topology_reason: String::new(),
             test_execution: None,
         }
     }
@@ -1051,6 +1181,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0100,
                 retry_count: 0,
                 ttft_ms: 10,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
             StageMetric {
                 role: AgentRole::Coder,
@@ -1062,6 +1194,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0200,
                 retry_count: 0,
                 ttft_ms: 12,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
             StageMetric {
                 role: AgentRole::Tester,
@@ -1073,6 +1207,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0050,
                 retry_count: 0,
                 ttft_ms: 5,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
             StageMetric {
                 role: AgentRole::Reviewer,
@@ -1084,6 +1220,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0150,
                 retry_count: 0,
                 ttft_ms: 15,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
         ];
         let result = cost_result(metrics);
@@ -1117,6 +1255,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0,
                 retry_count: 0,
                 ttft_ms: 0,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
             StageMetric {
                 role: AgentRole::Coder,
@@ -1128,6 +1268,8 @@ index 3333333..4444444 100644
                 cost_usd: 0.0,
                 retry_count: 0,
                 ttft_ms: 0,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
             },
         ];
         let result = cost_result(metrics);

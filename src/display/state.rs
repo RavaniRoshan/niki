@@ -732,7 +732,7 @@ pub struct AppState {
     /// Handle used to cancel the running pipeline (set by run_tui).
     pub cancel: Option<Arc<AtomicBool>>,
     /// Transient on-screen notice, e.g. "Esc — stopping…". Auto-clears after a few seconds.
-    pub notice: Option<(String, Instant)>,
+    pub notice: Option<Notice>,
     /// Whether reverse (incremental) history search is active (Ctrl+R).
     pub reverse_search: bool,
     /// Set while we are awaiting a terminal cursor-position report for IME
@@ -895,6 +895,8 @@ pub struct StageInfo {
     pub latency_ms: u64,
     pub summary: Vec<String>,
     pub start: Option<std::time::Instant>,
+    /// When the stage reached Done (for completion slide-in motion).
+    pub completed_at: Option<std::time::Instant>,
     /// Prompt file used for this stage (e.g. "planner.md").
     pub prompt_file: Option<String>,
     /// Number of retries attempted for this stage.
@@ -935,6 +937,17 @@ pub enum RunState {
     AwaitingApproval,
     Failed,
     Cancelled,
+}
+
+/// Transient on-screen notice with birth timestamp (for slide-in motion)
+///
+/// Previously a bare `(String, Instant)` tuple carrying only the expiry;
+/// the birth instant enables the 150ms entrance without a second clock.
+#[derive(Debug, Clone)]
+pub struct Notice {
+    pub msg: String,
+    pub since: Instant,
+    pub until: Instant,
 }
 
 impl AppState {
@@ -1032,16 +1045,18 @@ impl AppState {
 
     /// Show a transient notice (auto-cleared after `ttl_ms`).
     pub fn set_notice(&mut self, msg: &str, ttl_ms: u64) {
-        self.notice = Some((
-            msg.to_string(),
-            Instant::now() + Duration::from_millis(ttl_ms),
-        ));
+        let now = Instant::now();
+        self.notice = Some(Notice {
+            msg: msg.to_string(),
+            since: now,
+            until: now + Duration::from_millis(ttl_ms),
+        });
     }
 
     /// Drop the notice if its TTL has elapsed. Call once per render tick.
     pub fn clear_stale_notice(&mut self) {
-        if let Some((_, until)) = self.notice {
-            if Instant::now() >= until {
+        if let Some(n) = &self.notice {
+            if Instant::now() >= n.until {
                 self.notice = None;
             }
         }
@@ -1149,6 +1164,7 @@ impl AppState {
                     latency_ms: 0,
                     summary: Vec::new(),
                     start: Some(std::time::Instant::now()),
+                    completed_at: None,
                     prompt_file: Some(format!("{}.md", role_to_prompt_name(role))),
                     retry_count: 0,
                     error_message: None,
@@ -1190,6 +1206,7 @@ impl AppState {
                     s.output_tokens = output_tokens;
                     s.cost_usd = cost_usd;
                     s.latency_ms = latency_ms;
+                    s.completed_at = Some(std::time::Instant::now());
                     s.stream.clear();
                 }
                 let total = input_tokens.saturating_add(output_tokens) as usize;

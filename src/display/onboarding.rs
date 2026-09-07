@@ -190,7 +190,7 @@ impl OnboardingModal {
         let mut nav_spans = vec![
             Span::styled("  [←/→] prev/next", Style::default().fg(theme::fg_dim())),
             Span::styled(
-                format!("   {} {}", page_idx, total),
+                format!("   {}/{}", page_idx, total),
                 Style::default().fg(theme::fg_dim()),
             ),
         ];
@@ -198,12 +198,12 @@ impl OnboardingModal {
         if self.dont_show_again {
             nav_spans.push(Span::styled(
                 "   [s] on",
-                Style::default().fg(theme::GREEN()),
+                Style::default().fg(theme::success()),
             ));
         } else {
             nav_spans.push(Span::styled(
                 "   [s] off",
-                Style::default().fg(theme::AMBER()),
+                Style::default().fg(theme::warning()),
             ));
         }
 
@@ -215,7 +215,7 @@ impl OnboardingModal {
                 Span::styled(
                     "[Enter] start",
                     Style::default()
-                        .fg(theme::GREEN())
+                        .fg(theme::success())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("   [Esc] skip", Style::default().fg(theme::fg_dim())),
@@ -296,7 +296,7 @@ impl OnboardingModal {
             Line::from(Span::styled(
                 "  Security Note:",
                 Style::default()
-                    .fg(theme::AMBER())
+                    .fg(theme::warning())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
@@ -366,7 +366,7 @@ impl OnboardingModal {
             Line::from(""),
             Line::from(Span::styled(
                 "  Telemetry is OFF by default.",
-                Style::default().fg(theme::GREEN()),
+                Style::default().fg(theme::success()),
             )),
             Line::from(""),
             Line::from(Span::styled(

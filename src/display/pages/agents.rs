@@ -179,8 +179,18 @@ impl Page for AgentsPage {
         if let Some(stage) = state.stages.get(self.selected_tab) {
             let mut lines: Vec<Line> = Vec::new();
 
-            // Show summary if done
+            // Show summary if done (slides in over ~150ms on completion).
             if stage.status == StageStatus::Done && !stage.summary.is_empty() {
+                let age_ms = stage
+                    .completed_at
+                    .map(|t| t.elapsed().as_millis() as u64)
+                    .unwrap_or(u64::MAX);
+                let slide = crate::display::motion::slide_prefix(
+                    age_ms,
+                    150,
+                    4,
+                    crate::display::motion::reduced(state.config.ui.reduced_motion),
+                );
                 lines.push(Line::from(vec![Span::styled(
                     "  Summary:",
                     Style::default()
@@ -190,7 +200,10 @@ impl Page for AgentsPage {
                 for summ in &stage.summary {
                     lines.push(Line::from(vec![
                         Span::styled("    ", Style::default()),
-                        Span::styled(summ.clone(), Style::default().fg(theme::fg_color())),
+                        Span::styled(
+                            format!("{}{}", slide, summ),
+                            Style::default().fg(theme::fg_color()),
+                        ),
                     ]));
                 }
                 lines.push(Line::from(""));

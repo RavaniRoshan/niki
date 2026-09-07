@@ -121,6 +121,66 @@ pub struct CaseResult {
     pub expected_caught: bool,
     pub niki: RunOutcome,
     pub baseline: RunOutcome,
+    /// Combined NIKI + baseline measured spend for this case (USD). `0.0` in
+    /// replay mode (fixtures predate metering) — cost discipline applies to
+    /// live runs, where every stage reports provider-measured usage.
+    pub cost_usd: f64,
+}
+
+/// A maintainer's merge-worthiness judgment on one case (METR-style:
+/// would this diff merge into main, regardless of what the grader said?).
+/// Stored as `<dataset-dir>/grades/<case-id>.json` by `niki eval grade`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaintainerGrade {
+    pub case_id: String,
+    pub reviewer: String,
+    pub merge_worthy: bool,
+    #[serde(default)]
+    pub note: String,
+    pub date: String,
+}
+
+/// Load all maintainer grades from `<dataset-dir>/grades/*.json`.
+/// Missing dir (or unreadable files) yields an empty map — grading is opt-in.
+pub fn load_grades(
+    dataset_dir: &std::path::Path,
+) -> std::collections::HashMap<String, MaintainerGrade> {
+    let mut grades = std::collections::HashMap::new();
+    let dir = dataset_dir.join("grades");
+    let entries = std::fs::read_dir(&dir).map(|rd| rd.filter_map(|e| e.ok()).collect::<Vec<_>>());
+    for entry in entries.into_iter().flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Ok(content) = std::fs::read_to_string(&path)
+            && let Ok(grade) = serde_json::from_str::<MaintainerGrade>(&content)
+        {
+            grades.insert(grade.case_id.clone(), grade);
+        }
+    }
+    grades
+}
+
+/// Fraction of graded expected-caught cases where the maintainer's
+/// merge-worthiness agrees with NIKI's caught flag. `None` when nothing is
+/// graded — an ungraded eval makes no merge-worthiness claim at all.
+pub fn grader_agreement(
+    cases: &[CaseResult],
+    grades: &std::collections::HashMap<String, MaintainerGrade>,
+) -> Option<f64> {
+    let graded: Vec<&CaseResult> = cases
+        .iter()
+        .filter(|c| c.expected_caught && grades.contains_key(&c.case_id))
+        .collect();
+    if graded.is_empty() {
+        return None;
+    }
+    let agree = graded
+        .iter()
+        .filter(|c| grades[&c.case_id].merge_worthy == c.niki.caught)
+        .count();
+    Some(agree as f64 / graded.len() as f64)
 }
 
 /// Per-category metrics.
@@ -153,6 +213,32 @@ pub struct EvalReport {
     pub false_approval_reduction_pct: f64,
     /// Per-category breakdown.
     pub categories: Vec<CategoryMetrics>,
+    /// ISO-8601 date of the run (UTC).
+    pub run_date: String,
+    /// NIKI crate version that produced this report.
+    pub niki_version: String,
+    /// `true` when real pipelines ran against live models; `false` for
+    /// deterministic fixture replay (zero keys, zero cost).
+    pub live: bool,
+    /// Best-effort harness commit (`git rev-parse HEAD` in cwd). `None` when
+    /// the eval did not run from a git checkout — reproducibility's weakest
+    /// link, stated plainly instead of omitted.
+    pub harness_commit: Option<String>,
+    /// Whether that checkout was dirty when the eval ran.
+    pub harness_dirty: bool,
+    /// Sum of per-case measured spend (USD). `0.0` for replay runs.
+    pub total_cost_usd: f64,
+    /// Mean spend per NIKI-caught expected defect. `None` when nothing was
+    /// caught or spend is unmeasured — the 2026 cost-disclosure norm is
+    /// cost-per-accepted-result, not price-per-call.
+    pub cost_per_niki_caught: Option<f64>,
+    /// Maintainer merge-worthiness judgments by case id (opt-in human layer).
+    pub grades: std::collections::HashMap<String, MaintainerGrade>,
+    /// Cases with both expected_caught and a maintainer grade.
+    pub graded_cases: u32,
+    /// Grader-vs-harness agreement (see [`grader_agreement`]). `None` when
+    /// nothing is graded.
+    pub grader_agreement: Option<f64>,
 }
 
 impl EvalReport {
@@ -329,6 +415,7 @@ fn empty_result() -> PipelineResult {
         safety_proof: None,
         isolation: Vec::new(),
         topology: TopologyMode::MultiAgent,
+        topology_reason: String::new(),
         test_execution: None,
     }
 }
@@ -371,6 +458,7 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
             safety_proof: None,
             isolation: Vec::new(),
             topology: TopologyMode::MultiAgent,
+            topology_reason: String::new(),
             test_execution: None,
         },
         AgentRole::Reviewer,
@@ -391,6 +479,7 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
         safety_proof: None,
         isolation: Vec::new(),
         topology: TopologyMode::MultiAgent,
+        topology_reason: String::new(),
         test_execution: None,
     })
 }
@@ -414,6 +503,9 @@ pub fn replay_case(case: &EvalCase, dataset_dir: &Path) -> Result<Option<CaseRes
         expected_caught: case.seeded_defect.expected_caught,
         niki: score_result(&niki, &case.seeded_defect),
         baseline: score_result(&baseline, &case.seeded_defect),
+        // Replay fixtures predate per-stage metering: spend is unmeasured (0.0),
+        // never zero-cost. Only live runs populate cost_usd.
+        cost_usd: 0.0,
     }))
 }
 
@@ -450,6 +542,8 @@ pub async fn run_case_live(
             .join(&niki_cfg.general.output_dir)
             .join("tasks")
             .join(niki_task.id.to_string()),
+        None,
+        false,
     )
     .await?;
 
@@ -472,6 +566,8 @@ pub async fn run_case_live(
             .join(&base_cfg.general.output_dir)
             .join("tasks")
             .join(base_task.id.to_string()),
+        None,
+        false,
     )
     .await?;
 
@@ -482,6 +578,8 @@ pub async fn run_case_live(
         expected_caught: case.seeded_defect.expected_caught,
         niki: score_result(&niki_res, &case.seeded_defect),
         baseline: score_result(&base_res, &case.seeded_defect),
+        cost_usd: niki_res.metrics.iter().map(|m| m.cost_usd).sum::<f64>()
+            + base_res.metrics.iter().map(|m| m.cost_usd).sum::<f64>(),
     })
 }
 
@@ -515,11 +613,42 @@ pub async fn run_eval(dataset_path: &Path, live: bool, project_dir: &Path) -> Re
             cases.push(cr);
         }
     }
-    Ok(build_report(&ds, &cases))
+    let grades = load_grades(&dataset_dir);
+    Ok(build_report(&ds, &cases, live, &grades))
+}
+
+/// Best-effort harness provenance for the disclosure manifest: current UTC
+/// date, crate version, and (when run from a git checkout) commit + dirtiness.
+pub fn harness_provenance() -> (String, String, Option<String>, bool) {
+    let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let version = env!("CARGO_PKG_VERSION").to_string();
+    let commit = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+    let dirty = commit
+        .as_ref()
+        .map(|_| {
+            std::process::Command::new("git")
+                .args(["status", "--porcelain", "--untracked-files=no"])
+                .output()
+                .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
+    (date, version, commit, dirty)
 }
 
 /// Aggregate per-case outcomes into the publishable delta.
-pub fn build_report(ds: &EvalDataset, cases: &[CaseResult]) -> EvalReport {
+pub fn build_report(
+    ds: &EvalDataset,
+    cases: &[CaseResult],
+    live: bool,
+    grades: &std::collections::HashMap<String, MaintainerGrade>,
+) -> EvalReport {
     let expected: Vec<&CaseResult> = cases.iter().filter(|c| c.expected_caught).collect();
     let n = expected.len().max(1) as f64;
     let niki_caught = expected.iter().filter(|c| c.niki.caught).count() as f64;
@@ -564,6 +693,20 @@ pub fn build_report(ds: &EvalDataset, cases: &[CaseResult]) -> EvalReport {
         .collect();
     categories.sort_by(|a, b| format!("{:?}", a.category).cmp(&format!("{:?}", b.category)));
 
+    let total_cost_usd: f64 = cases.iter().map(|c| c.cost_usd).sum();
+    let niki_caught_n = expected.iter().filter(|c| c.niki.caught).count();
+    let cost_per_niki_caught = if niki_caught_n > 0 && total_cost_usd > 0.0 {
+        Some(total_cost_usd / niki_caught_n as f64)
+    } else {
+        None
+    };
+    let (run_date, niki_version, harness_commit, harness_dirty) = harness_provenance();
+
+    let graded_cases = cases
+        .iter()
+        .filter(|c| c.expected_caught && grades.contains_key(&c.case_id))
+        .count() as u32;
+
     EvalReport {
         dataset: ds.name.clone().unwrap_or_else(|| "eval".to_string()),
         n_cases: cases.len() as u32,
@@ -574,6 +717,16 @@ pub fn build_report(ds: &EvalDataset, cases: &[CaseResult]) -> EvalReport {
         baseline_false_approvals: baseline_fa,
         false_approval_reduction_pct,
         categories,
+        run_date,
+        niki_version,
+        live,
+        harness_commit,
+        harness_dirty,
+        total_cost_usd,
+        cost_per_niki_caught,
+        grades: grades.clone(),
+        graded_cases,
+        grader_agreement: grader_agreement(cases, grades),
     }
 }
 
@@ -602,6 +755,56 @@ pub fn render_report_md(report: &EvalReport) -> String {
         "| False-approval reduction | — | {:.0}% |\n",
         report.false_approval_reduction_pct
     ));
+    if report.live {
+        s.push_str(&format!(
+            "| Measured spend (both configs) | ${:.4} |  |\n",
+            report.total_cost_usd
+        ));
+    } else {
+        s.push_str(
+            "| Measured spend (both configs) | $0.0000 (replay: unmeasured, not free) |  |\n",
+        );
+    }
+    if let Some(c) = report.cost_per_niki_caught {
+        s.push_str(&format!("| Cost per NIKI-caught defect | ${:.4} |  |\n", c));
+    }
+    match report.grader_agreement {
+        Some(a) => s.push_str(&format!(
+            "| Grader agreement ({} graded) | {:.0}% |  |\n",
+            report.graded_cases,
+            a * 100.0
+        )),
+        None => s.push_str("| Grader agreement | ungraded (no maintainer judgments) |  |\n"),
+    }
+
+    s.push_str("\n## Disclosure manifest\n\n");
+    s.push_str(&format!(
+        "- Date (UTC): {}\n- NIKI version: {}\n- Mode: {}\n",
+        report.run_date,
+        report.niki_version,
+        if report.live {
+            "live (real pipelines, API keys, sandbox)"
+        } else {
+            "replay (recorded fixtures; deterministic, zero cost)"
+        },
+    ));
+    match &report.harness_commit {
+        Some(c) => s.push_str(&format!(
+            "- Harness commit: {}{}\n",
+            c,
+            if report.harness_dirty {
+                " (DIRTY tree — reproduce with caution)"
+            } else {
+                ""
+            }
+        )),
+        None => s.push_str("- Harness commit: unknown (eval did not run from a git checkout)\n"),
+    }
+    s.push_str(
+        "- Success definition: seeded defect surfaced by reviewer issues or an \
+         upheld Red challenge (test-passing only, not maintainer-merge grading — \
+         see research report VG-12).\n",
+    );
 
     // Per-category breakdown
     if !report.categories.is_empty() {
@@ -674,6 +877,7 @@ mod tests {
             safety_proof: None,
             isolation: vec![],
             topology: TopologyMode::MultiAgent,
+            topology_reason: String::new(),
             test_execution: None,
         }
     }
@@ -751,6 +955,7 @@ mod tests {
             expected_caught: true,
             niki: caught(true, true, true),
             baseline: caught(false, false, false),
+            cost_usd: 0.0,
         };
         let c2 = CaseResult {
             case_id: "b".into(),
@@ -759,12 +964,13 @@ mod tests {
             expected_caught: true,
             niki: caught(true, false, true),
             baseline: caught(true, false, true),
+            cost_usd: 0.0,
         };
         let ds = EvalDataset {
             name: Some("t".into()),
             cases: vec![],
         };
-        let rep = build_report(&ds, &[c1, c2]);
+        let rep = build_report(&ds, &[c1, c2], false, &std::collections::HashMap::new());
         assert_eq!(rep.niki_catch_rate, 1.0);
         assert_eq!(rep.baseline_catch_rate, 0.5);
         assert_eq!(rep.baseline_false_approvals, 1);
@@ -784,7 +990,7 @@ mod tests {
                 cases.push(cr);
             }
         }
-        let rep = build_report(&ds, &cases);
+        let rep = build_report(&ds, &cases, false, &std::collections::HashMap::new());
         // All 23 fixture cases should be loaded
         assert_eq!(rep.n_cases, 23, "expected all 23 fixture cases");
         // NIKI catches every defect (reviewer or red surfaces the seeded defect)
@@ -801,5 +1007,75 @@ mod tests {
         let sql = cases.iter().find(|c| c.case_id == "defect-sql").unwrap();
         assert!(!sql.baseline.caught);
         assert!(sql.niki.caught_by_red);
+    }
+
+    #[test]
+    fn grader_agreement_counts_only_graded_expected() {
+        use std::collections::HashMap;
+        let mk = |id: &str, hit: bool| CaseResult {
+            case_id: id.into(),
+            defect_category: IssueCategory::Security,
+            difficulty: Difficulty::Medium,
+            expected_caught: true,
+            niki: caught(true, hit, true),
+            baseline: caught(false, false, false),
+            cost_usd: 0.0,
+        };
+        let grade = |id: &str, merge: bool| MaintainerGrade {
+            case_id: id.into(),
+            reviewer: "r".into(),
+            merge_worthy: merge,
+            note: String::new(),
+            date: "2026-09-07".into(),
+        };
+        let cases = vec![mk("a", true), mk("b", true), mk("c", true)];
+        // Nothing graded: no claim.
+        assert_eq!(grader_agreement(&cases, &HashMap::new()), None);
+        let mut grades = HashMap::new();
+        grades.insert("a".into(), grade("a", true)); // agree
+        grades.insert("b".into(), grade("b", false)); // disagree
+        assert_eq!(grader_agreement(&cases, &grades), Some(0.5));
+        let rep = build_report(
+            &EvalDataset {
+                name: Some("t".into()),
+                cases: vec![],
+            },
+            &cases,
+            false,
+            &grades,
+        );
+        assert_eq!(rep.graded_cases, 2);
+        assert_eq!(rep.grader_agreement, Some(0.5));
+    }
+
+    #[test]
+    fn report_carries_provenance_and_cost_discipline() {
+        let c1 = CaseResult {
+            case_id: "a".into(),
+            defect_category: IssueCategory::Security,
+            difficulty: Difficulty::Medium,
+            expected_caught: true,
+            niki: caught(true, true, true),
+            baseline: caught(false, false, false),
+            cost_usd: 0.5,
+        };
+        let ds = EvalDataset {
+            name: Some("t".into()),
+            cases: vec![],
+        };
+        let rep = build_report(&ds, &[c1], true, &std::collections::HashMap::new());
+        assert!(rep.live);
+        assert_eq!(rep.niki_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(rep.run_date.len(), 10);
+        assert_eq!(rep.total_cost_usd, 0.5);
+        assert_eq!(rep.cost_per_niki_caught, Some(0.5));
+        // Replay semantics: unmeasured spend means no per-caught figure.
+        let rep_replay = build_report(&ds, &[], false, &std::collections::HashMap::new());
+        assert!(!rep_replay.live);
+        assert_eq!(rep_replay.total_cost_usd, 0.0);
+        assert_eq!(rep_replay.cost_per_niki_caught, None);
+        let md = render_report_md(&rep);
+        assert!(md.contains("Disclosure manifest"));
+        assert!(md.contains("Cost per NIKI-caught defect"));
     }
 }

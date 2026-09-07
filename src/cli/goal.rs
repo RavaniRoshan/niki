@@ -133,7 +133,7 @@ async fn handle_new(objective: &str, scope: Option<&str>, max: u32) -> Result<()
 fn handle_list() -> Result<()> {
     let states = GoalState::load_all()?;
     if states.is_empty() {
-        println!("No goals found.");
+        println!("No goals found. Create one with `niki goal new \"<objective>\"`.");
         return Ok(());
     }
 

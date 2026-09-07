@@ -33,6 +33,7 @@ pub enum McpServerType {
     /// Remote server communicating via HTTP/SSE.
     Remote {
         url: String,
+        #[serde(default)]
         headers: HashMap<String, String>,
     },
 }

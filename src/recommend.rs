@@ -7,6 +7,7 @@
 
 use crate::artifacts::types::AgentRole;
 use crate::cost::lookup_price;
+use serde::Deserialize;
 
 /// A curated recommendation for one pipeline role.
 pub struct RoleRec {
@@ -105,6 +106,93 @@ pub fn estimate_tokens(task: Option<&str>) -> (u32, u32) {
         }
         None => (4000, 2500),
     }
+}
+
+/// One stage metric as persisted in `.niki/tasks/*/task.json`. A minimal view
+/// (not the full `TaskRecord`) so history reads tolerate schema drift.
+#[derive(Debug, Deserialize)]
+struct HistoryMetric {
+    role: AgentRole,
+    provider: String,
+    model: String,
+    #[serde(default)]
+    cost_usd: f64,
+    #[serde(default)]
+    input_tokens: u32,
+    #[serde(default)]
+    output_tokens: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoryRecord {
+    #[serde(default)]
+    agent_metrics: Vec<HistoryMetric>,
+}
+
+/// Observed per-(role, provider, model) spend aggregated from past runs.
+#[derive(Debug, Clone)]
+pub struct ObservedSpend {
+    pub role: AgentRole,
+    pub provider: String,
+    pub model: String,
+    pub runs: usize,
+    pub avg_cost_usd: f64,
+    pub avg_input_tokens: f64,
+    pub avg_output_tokens: f64,
+}
+
+/// Aggregate `agent_metrics` from every `.niki/tasks/*/task.json` under
+/// `tasks_dir`. Unreadable files are skipped — history is advisory, never fatal.
+pub fn observed_spend(tasks_dir: &std::path::Path) -> Vec<ObservedSpend> {
+    use std::collections::HashMap;
+
+    type SpendKey = (AgentRole, String, String);
+    type SpendAcc = (usize, f64, u64, u64); // runs, cost sum, in-tok sum, out-tok sum
+    let mut acc: HashMap<SpendKey, SpendAcc> = HashMap::new();
+    let entries = std::fs::read_dir(tasks_dir).map(|rd| {
+        rd.filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .collect::<Vec<_>>()
+    });
+    for entry in entries.into_iter().flatten() {
+        let record_path = entry.path().join("task.json");
+        let Ok(content) = std::fs::read_to_string(&record_path) else {
+            continue;
+        };
+        let Ok(record) = serde_json::from_str::<HistoryRecord>(&content) else {
+            continue;
+        };
+        for m in &record.agent_metrics {
+            let e = acc
+                .entry((m.role, m.provider.clone(), m.model.clone()))
+                .or_insert((0, 0.0, 0, 0));
+            e.0 += 1;
+            e.1 += m.cost_usd;
+            e.2 += m.input_tokens as u64;
+            e.3 += m.output_tokens as u64;
+        }
+    }
+
+    let mut out: Vec<ObservedSpend> = acc
+        .into_iter()
+        .map(
+            |((role, provider, model), (runs, cost, inp, outp))| ObservedSpend {
+                role,
+                provider,
+                model,
+                runs,
+                avg_cost_usd: cost / runs as f64,
+                avg_input_tokens: inp as f64 / runs as f64,
+                avg_output_tokens: outp as f64 / runs as f64,
+            },
+        )
+        .collect();
+    out.sort_by(|a, b| {
+        (a.role as u8)
+            .cmp(&(b.role as u8))
+            .then(b.runs.cmp(&a.runs))
+    });
+    out
 }
 
 #[cfg(test)]

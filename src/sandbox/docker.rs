@@ -532,7 +532,21 @@ impl Sandbox for DockerSandbox {
                         response_tx,
                     };
                     if self.event_tx.send(request).is_err() {
+                        if self.permission_checker.fail_closed_headless() {
+                            return Err(anyhow::anyhow!(
+                                "Command denied by policy (headless Ask with fail_closed_headless): '{}'",
+                                full
+                            ));
+                        }
                         // No TUI listening — fall back to Allow (headless mode).
+                        // Loud by design: silent auto-approval is how agents end
+                        // up running `curl | sh` in CI. Use --permission-mode to
+                        // make the posture explicit, or run attached to review.
+                        tracing::warn!(
+                            target: "niki::permissions",
+                            command = full.as_str(),
+                            "no TUI listening — Ask fell back to Allow (headless). Pass --permission-mode explicitly to silence this per-run posture."
+                        );
                     } else {
                         let action = tokio::task::block_in_place(|| {
                             response_rx.recv_timeout(std::time::Duration::from_secs(5))

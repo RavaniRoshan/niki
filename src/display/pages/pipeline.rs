@@ -161,21 +161,17 @@ impl Page for PipelinePage {
             let is_selected = i == selected;
             let stage = state.stages.iter().find(|s| s.role == *role);
             let status_glyph = match stage {
-                Some(s) => match s.status {
-                    super::StageStatus::Running => "▶",
-                    super::StageStatus::Done => "✓",
-                    super::StageStatus::Failed => "✗",
-                    super::StageStatus::Queued => "·",
-                },
-                None => "·",
+                Some(s) => crate::display::components::status::glyph(
+                    crate::display::components::status::UnifiedStatus::from(s.status.clone()),
+                ),
+                None => crate::display::components::status::glyph(
+                    crate::display::components::status::UnifiedStatus::Pending,
+                ),
             };
             let status_color = match stage {
-                Some(s) => match s.status {
-                    super::StageStatus::Running => theme::warning(),
-                    super::StageStatus::Done => theme::success(),
-                    super::StageStatus::Failed => theme::error(),
-                    super::StageStatus::Queued => theme::fg_dim(),
-                },
+                Some(s) => crate::display::components::status::color(
+                    crate::display::components::status::UnifiedStatus::from(s.status.clone()),
+                ),
                 None => theme::fg_dim(),
             };
 

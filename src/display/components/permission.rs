@@ -91,10 +91,23 @@ pub fn render_permission_modal(
 
     frame.render_widget(Clear, modal_area);
 
+    // Attention pulse on the border while the modal demands a decision:
+    // alternates every ~300ms at 60fps ticks, static when reduced-motion.
+    // No per-modal clock needed — pulsing *is* the steady state here.
+    let pulse = crate::display::motion::pulse_phase(
+        state.tick,
+        18,
+        crate::display::motion::reduced(state.config.ui.reduced_motion),
+    );
+    let border = if pulse {
+        theme::warning()
+    } else {
+        theme::border()
+    };
     let block = Block::default()
         .title(" Permission Required ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::border()))
+        .border_style(Style::default().fg(border))
         .style(Style::default().bg(theme::bg_elevated()));
 
     frame.render_widget(block, modal_area);
@@ -107,8 +120,8 @@ pub fn render_permission_modal(
     };
 
     let selected = cursor(state).selected;
-    let blue = Style::default().fg(ratatui::style::Color::Rgb(177, 185, 249));
-    let dotted = Style::default().fg(ratatui::style::Color::Rgb(80, 80, 80));
+    let blue = Style::default().fg(theme::accent());
+    let dotted = Style::default().fg(theme::fg_dim());
 
     let mut lines = vec![
         Line::from(Span::styled("The agent wants to run:", theme::text_dim())),
