@@ -58,6 +58,9 @@ pub struct NikiConfig {
     /// Permission system configuration.
     #[serde(default)]
     pub permissions: PermissionsConfig,
+    /// Shell-hook policy ([hooks] event -> commands).
+    #[serde(default)]
+    pub hooks: HooksConfig,
     /// AGENTS.md / project instructions configuration.
     #[serde(default)]
     pub instructions: InstructionsConfig,
@@ -653,6 +656,18 @@ impl Default for PermissionsConfig {
     }
 }
 
+/// Shell-hook policy: event name -> commands run on that lifecycle event.
+/// Wired subset in the pipeline: PreTaskStart, PostTaskStop, PreAgentStart,
+/// PostAgentStop (plus PreToolUse/PostToolUse inside the runtime tool loop).
+/// Unknown event names warn and are skipped. Contract per command is the
+/// HookBus one: exit 2 (or JSON `{"deny": true}` on stdout) blocks.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HooksConfig {
+    /// Event name (PascalCase or snake_case) to shell commands.
+    #[serde(default)]
+    pub commands: std::collections::HashMap<String, Vec<String>>,
+}
+
 /// A single permission rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionRuleConfig {
@@ -1033,6 +1048,7 @@ impl NikiConfig {
         "session",
         "compaction",
         "mcp",
+        "hooks",
         "permissions",
         "instructions",
     ];
@@ -1246,6 +1262,10 @@ impl NikiConfig {
         }
         if !other.permissions.rules.is_empty() {
             self.permissions.rules = other.permissions.rules;
+        }
+        // Hooks: adopt explicitly configured event commands.
+        if !other.hooks.commands.is_empty() {
+            self.hooks.commands = other.hooks.commands;
         }
     }
 
