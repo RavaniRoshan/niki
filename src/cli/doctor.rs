@@ -42,6 +42,12 @@ pub fn handle(args: &DoctorArgs) -> Result<()> {
     checks.extend(check_providers());
     checks.extend(check_sandbox());
     checks.extend(check_security());
+    // Image existence needs the configured base image, so it lives outside
+    // check_sandbox() (which is config-free). A missing image is the most
+    // common first-run failure after the runtime itself.
+    if let Ok(cfg) = NikiConfig::load(&std::env::current_dir().unwrap_or_default()) {
+        checks.push(check_sandbox_image(&cfg.docker.base_image));
+    }
 
     let filtered: Vec<&Check> = match &args.category {
         Some(cat) => checks
@@ -273,6 +279,38 @@ fn check_security_for(cfg: &NikiConfig) -> Vec<Check> {
     });
 
     checks
+}
+
+/// Verify the configured sandbox image exists locally. A missing image is the
+/// most common first-run failure after the runtime itself, and previously
+/// surfaced only as a mid-run tool-check failure.
+fn check_sandbox_image(base_image: &str) -> Check {
+    fn present(runtime: &str, image: &str) -> bool {
+        let probe = if runtime == "docker" {
+            Command::new("docker")
+                .args(["image", "inspect", image])
+                .output()
+        } else {
+            Command::new("podman")
+                .args(["image", "exists", image])
+                .output()
+        };
+        probe.map(|o| o.status.success()).unwrap_or(false)
+    }
+    let result = if base_image.is_empty() {
+        CheckResult::Warn("no base_image configured (worktree backend?)".to_string())
+    } else if present("docker", base_image) || present("podman", base_image) {
+        CheckResult::Pass(format!("{} present locally", base_image))
+    } else {
+        CheckResult::Fail(format!(
+            "{} not found locally — build it: `podman build -t {} -f docker/Dockerfile .` (or `docker build ...`)",
+            base_image, base_image
+        ))
+    };
+    Check {
+        name: "sandbox image present".to_string(),
+        result,
+    }
 }
 
 fn check_sandbox() -> Vec<Check> {

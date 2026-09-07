@@ -154,3 +154,11 @@ network_disabled = true
 # args = ["-y", "@modelcontextprotocol/server-filesystem"]
 # enabled = true
 # timeout_ms = 5000
+#
+# Remote servers use Streamable HTTP (plain JSON or SSE replies):
+# [[mcp.servers]]
+# name = "docs"
+# type = "remote"
+# url = "https://mcp.example.com/mcp"
+# enabled = false
+# timeout_ms = 5000
