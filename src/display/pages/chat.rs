@@ -561,7 +561,7 @@ impl Page for ChatPage {
                         state.chat_log.push((
                             "system".to_string(),
                             format!(
-                                "Session Economics:\n  • Total Spend:       ${:.4} USD\n  • Input Tokens:      {}\n  • Output Tokens:     {}\n  • Cache Read Tokens: {}\n  • Cache Write Tokens:{}\n  • Model:             {}\n  • Context Limit:     {} tokens",
+                                "Session Economics:\n  • Total Spend:       ${:.4} USD\n  • Input Tokens:      {}\n  • Output Tokens:     {}\n  • Cache Read Tokens: {}\n  • Cache Write Tokens: {}\n  • Model:             {}\n  • Context Limit:     {} tokens",
                                 state.cost,
                                 state.input_tokens,
                                 state.output_tokens,
