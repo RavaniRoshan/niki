@@ -617,7 +617,12 @@ pub fn render_guardrail_section(result: &PipelineResult) -> String {
     }
 }
 
-pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult) -> Result<()> {
+pub fn generate_report(
+    task: &Task,
+    config: &NikiConfig,
+    result: &PipelineResult,
+    branch: Option<&str>,
+) -> Result<()> {
     let mut env = Environment::new();
 
     let template = r#"
@@ -680,6 +685,11 @@ pub fn generate_report(task: &Task, config: &NikiConfig, result: &PipelineResult
 
     let diff_path = output_dir.join("changes.patch");
     crate::util::write_restricted(&diff_path, &result.final_diff)?;
+
+    // Machine-readable run trace (spans per stage + task/test/verdict markers).
+    // Timelines are derived from recorded latencies, labeled as such inside.
+    let trace = super::trace::render_trace(&task.id.to_string(), &task.description, branch, result);
+    crate::util::write_restricted(&output_dir.join("trace.jsonl"), trace)?;
 
     Ok(())
 }
@@ -815,7 +825,7 @@ mod tests {
             project_path: dir.clone(),
         };
         let cfg = crate::config::NikiConfig::default();
-        generate_report(&task, &cfg, &result).expect("report should render");
+        generate_report(&task, &cfg, &result, None).expect("report should render");
 
         let report = std::fs::read_to_string(
             dir.join(".niki")
@@ -1018,7 +1028,7 @@ mod tests {
             project_path: dir.clone(),
         };
         let cfg = crate::config::NikiConfig::default();
-        generate_report(&task, &cfg, result).expect("report should render");
+        generate_report(&task, &cfg, result, None).expect("report should render");
         let report = std::fs::read_to_string(
             dir.join(".niki")
                 .join("tasks")

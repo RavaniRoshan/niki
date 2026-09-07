@@ -845,7 +845,16 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     }
 
     // Generate the markdown report (now includes the hermetic safety proof).
-    if let Err(e) = crate::output::report::generate_report(&task, &config, &result) {
+    if let Err(e) = crate::output::report::generate_report(
+        &task,
+        &config,
+        &result,
+        if branch_block_note.is_some() {
+            None
+        } else {
+            Some(branch_name.as_str())
+        },
+    ) {
         eprintln!("Warning: could not generate report: {}", e);
     }
     // Record a red-suite block / force override directly in the report so the
