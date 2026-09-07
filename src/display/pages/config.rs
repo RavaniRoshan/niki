@@ -96,7 +96,7 @@ impl Page for ConfigPage {
             ),
             Span::styled(
                 format!("[ {} ]", state.config.general.max_revision_rounds),
-                Style::default().fg(theme::AMBER()),
+                Style::default().fg(theme::warning()),
             ),
         ]));
         form_lines.push(Line::from(vec![
@@ -106,7 +106,7 @@ impl Page for ConfigPage {
             ),
             Span::styled(
                 format!("[ {} ]", state.config.general.output_dir),
-                Style::default().fg(theme::AMBER()),
+                Style::default().fg(theme::warning()),
             ),
         ]));
         form_lines.push(Line::from(""));
@@ -160,7 +160,7 @@ impl Page for ConfigPage {
             ),
             Span::styled(
                 format!("[ {} ]", state.config.docker.base_image),
-                Style::default().fg(theme::AMBER()),
+                Style::default().fg(theme::warning()),
             ),
         ]));
         form_lines.push(Line::from(vec![
@@ -170,12 +170,12 @@ impl Page for ConfigPage {
             ),
             Span::styled(
                 format!("[ {} ]", state.config.docker.memory_limit),
-                Style::default().fg(theme::AMBER()),
+                Style::default().fg(theme::warning()),
             ),
             Span::styled("   cpu_limit ", Style::default().fg(theme::fg_color())),
             Span::styled(
                 format!("[ {} ]", state.config.docker.cpu_limit),
-                Style::default().fg(theme::AMBER()),
+                Style::default().fg(theme::warning()),
             ),
         ]));
         form_lines.push(Line::from(""));
@@ -194,7 +194,7 @@ impl Page for ConfigPage {
             ),
             Span::styled(
                 format!("[ {:?} ]", state.config.pipeline.topology),
-                Style::default().fg(theme::AMBER()),
+                Style::default().fg(theme::warning()),
             ),
         ]));
         form_lines.push(Line::from(""));
@@ -221,7 +221,7 @@ impl Page for ConfigPage {
                     }
                 ),
                 Style::default().fg(if state.config.security.enabled {
-                    theme::GREEN()
+                    theme::success()
                 } else {
                     theme::fg_dim()
                 }),
@@ -251,7 +251,7 @@ impl Page for ConfigPage {
                     }
                 ),
                 Style::default().fg(if state.config.parallel.enabled {
-                    theme::GREEN()
+                    theme::success()
                 } else {
                     theme::fg_dim()
                 }),
@@ -259,7 +259,7 @@ impl Page for ConfigPage {
             Span::styled("   coder_count ", Style::default().fg(theme::fg_color())),
             Span::styled(
                 format!("[ {} ]", state.config.parallel.coder_count),
-                Style::default().fg(theme::AMBER()),
+                Style::default().fg(theme::warning()),
             ),
         ]));
 
@@ -300,7 +300,7 @@ impl Page for ConfigPage {
                     }
                 ),
                 Style::default().fg(if state.config.ui.tips.enabled {
-                    theme::GREEN()
+                    theme::success()
                 } else {
                     theme::fg_dim()
                 }),

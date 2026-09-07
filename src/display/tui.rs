@@ -578,13 +578,24 @@ fn run_tui(
                                 engine.mark_dirty();
                             } else if router.handle_key(key, &mut state) {
                                 engine.mark_dirty();
+                            } else if let Some(page) = global_page_jump(key) {
+                                state.current_page = page;
+                                engine.mark_dirty();
                             }
                         } else if state.current_page == PageId::Fleet {
-                            handle_fleet_nav(key, &mut state);
-                            engine.mark_dirty();
+                            if handle_fleet_nav(key, &mut state) {
+                                engine.mark_dirty();
+                            } else if let Some(page) = global_page_jump(key) {
+                                state.current_page = page;
+                                engine.mark_dirty();
+                            }
                         } else if state.current_page == PageId::Session {
-                            handle_session_nav(key, &mut state);
-                            engine.mark_dirty();
+                            if handle_session_nav(key, &mut state) {
+                                engine.mark_dirty();
+                            } else if let Some(page) = global_page_jump(key) {
+                                state.current_page = page;
+                                engine.mark_dirty();
+                            }
                         } else if let KeyCode::Char('g') = key.code {
                             // 'g' jumps to the Fleet grid from any page.
                             state.current_page = PageId::Fleet;
@@ -1261,6 +1272,27 @@ pub fn run_chat(
                     continue;
                 }
 
+                // Fleet/Session own their navigation (tabs, selection); other
+                // keys fall back to global page jumps, same as run_tui.
+                if state.current_page == PageId::Fleet {
+                    if handle_fleet_nav(key, &mut state) {
+                        needs_render = true;
+                    } else if let Some(page) = global_page_jump(key) {
+                        state.current_page = page;
+                        needs_render = true;
+                    }
+                    continue;
+                }
+                if state.current_page == PageId::Session {
+                    if handle_session_nav(key, &mut state) {
+                        needs_render = true;
+                    } else if let Some(page) = global_page_jump(key) {
+                        state.current_page = page;
+                        needs_render = true;
+                    }
+                    continue;
+                }
+
                 match key.code {
                     KeyCode::Char('t') if key.modifiers.is_empty() => {
                         let new_pref = match state.config.ui.theme {
@@ -1292,6 +1324,11 @@ pub fn run_chat(
                     }
                     _ => {
                         if router.handle_key(key, &mut state) {
+                            needs_render = true;
+                        } else if let Some(page) = global_page_jump(key) {
+                            // Page bindings win; bare letters fall back to
+                            // global jumps so every page is reachable.
+                            state.current_page = page;
                             needs_render = true;
                         }
                     }
@@ -1444,7 +1481,19 @@ fn render(
             if let Some(ref sv) = state.session_view {
                 crate::display::pages::session::render_session(sv, chunks[1], frame.buffer_mut());
             } else {
-                router.render_current(frame, chunks[1], state);
+                // No session open: explicit empty state, never a blank screen.
+                use ratatui::widgets::Paragraph;
+                frame.render_widget(
+                    Paragraph::new(vec![
+                        ratatui::text::Line::from(" session"),
+                        ratatui::text::Line::from(""),
+                        ratatui::text::Line::from(ratatui::text::Span::styled(
+                            "  No session open — run a task or pick a mission from Fleet (g).",
+                            ratatui::style::Style::default().fg(crate::display::theme::fg_dim()),
+                        )),
+                    ]),
+                    chunks[1],
+                );
             }
         }
         PageId::Chat => {
@@ -1513,7 +1562,7 @@ fn global_page_jump(key: KeyEvent) -> Option<PageId> {
 }
 
 /// Key navigation for the Fleet grid (`g` page).
-fn handle_fleet_nav(key: KeyEvent, state: &mut AppState) {
+fn handle_fleet_nav(key: KeyEvent, state: &mut AppState) -> bool {
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => state.fleet.select_prev(),
         KeyCode::Down | KeyCode::Char('j') => state.fleet.select_next(),
@@ -1525,12 +1574,13 @@ fn handle_fleet_nav(key: KeyEvent, state: &mut AppState) {
         }
         KeyCode::Enter => state.open_selected_mission(),
         KeyCode::Esc => state.current_page = PageId::Chat,
-        _ => {}
+        _ => return false,
     }
+    true
 }
 
 /// Key navigation for the Session view (`s` page).
-fn handle_session_nav(key: KeyEvent, state: &mut AppState) {
+fn handle_session_nav(key: KeyEvent, state: &mut AppState) -> bool {
     match key.code {
         KeyCode::Tab => {
             if let Some(ref mut sv) = state.session_view {
@@ -1548,8 +1598,9 @@ fn handle_session_nav(key: KeyEvent, state: &mut AppState) {
             }
         }
         KeyCode::Esc => state.close_session_to_fleet(),
-        _ => {}
+        _ => return false,
     }
+    true
 }
 
 #[cfg(test)]

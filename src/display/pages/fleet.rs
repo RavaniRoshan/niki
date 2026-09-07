@@ -81,6 +81,8 @@ pub fn render_fleet(fleet: &FleetState, area: ratatui::layout::Rect, buf: &mut B
         .count();
     let total = fleet.missions.len();
     let total_cost: f64 = fleet.missions.iter().map(|m| m.cost_usd).sum();
+    // Normalize -0.00 (empty sum over floats) so the header never reads $-0.00.
+    let total_cost = if total_cost == 0.0 { 0.0 } else { total_cost };
 
     let header_text = format!(
         " fleet · {} missions · {} active · ${:.2}",
