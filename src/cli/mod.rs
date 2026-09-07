@@ -1,4 +1,5 @@
 pub mod acp;
+pub mod audit;
 pub mod auth;
 pub mod chat;
 pub mod commands;

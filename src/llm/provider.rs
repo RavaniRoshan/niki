@@ -226,6 +226,45 @@ pub fn missing_key_error(provider_name: &str) -> anyhow::Error {
     anyhow::anyhow!("{label} API key not configured. {fix}")
 }
 
+/// Well-known model shorthands, resolved per provider at config load.
+/// Aliases match the WHOLE model string (case-insensitive) — substrings never
+/// rewrite, so pinned versions like `claude-sonnet-4-20250514` pass through
+/// untouched, as do unknown providers and models.
+pub fn resolve_model_alias(provider: &str, model: &str) -> String {
+    let m = model.trim().to_lowercase();
+    let hit: Option<&str> = match provider.to_lowercase().as_str() {
+        "anthropic" => match m.as_str() {
+            "opus" => Some("claude-opus-4"),
+            "sonnet" => Some("claude-sonnet-4"),
+            "haiku" => Some("claude-haiku"),
+            _ => None,
+        },
+        "openai" => match m.as_str() {
+            "4o" => Some("gpt-4o"),
+            "4o-mini" | "mini" => Some("gpt-4o-mini"),
+            "o1" => Some("o1"),
+            "o3-mini" | "o3" => Some("o3-mini"),
+            _ => None,
+        },
+        "google" => match m.as_str() {
+            "flash" => Some("gemini-2.0-flash"),
+            "pro" => Some("gemini-2.5-pro"),
+            _ => None,
+        },
+        _ => None,
+    };
+    match hit {
+        Some(canonical) => {
+            tracing::info!(
+                target: "niki::model",
+                "model alias '{model}' resolved to '{canonical}' for provider '{provider}'"
+            );
+            canonical.to_string()
+        }
+        None => model.to_string(),
+    }
+}
+
 pub fn redact_secrets(text: &str) -> String {
     let mut result = text.to_string();
     result = redact_bearer_tokens(&result);

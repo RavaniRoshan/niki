@@ -60,6 +60,10 @@ default_model = "llama3.1"
 # Per-agent model assignment (BYOK mixing)
 # Each agent can use a different provider and model. This lets you optimize
 # for cost, speed, and quality across the pipeline.
+# Shorthands welcome: opus/sonnet/haiku (anthropic), 4o/4o-mini (openai),
+# flash/pro (google) resolve to canonical ids at load. Pinned versions pass
+# through untouched. Per-agent `effort = "low"|"medium"|"high"` tunes
+# temperature/tokens only when max_tokens/temperature are unset.
 [agents.planner]
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"         # Best reasoning for planning

@@ -35,10 +35,7 @@ pub fn otlp_payload(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
             // Marker spans (task/verdict/test) carry no duration.
-            let duration_ms = s
-                .get("duration_ms")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            let duration_ms = s.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0);
             let start = base_nano + offset_ms * 1_000_000;
             let mut attributes: Vec<Value> = vec![
                 attr("niki.timeline", "derived"),
