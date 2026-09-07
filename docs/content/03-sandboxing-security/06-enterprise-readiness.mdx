@@ -1,0 +1,79 @@
+---
+title: Enterprise Readiness
+description: What regulated teams get today (policy controls, audit trail, observability) and what is explicitly missing (SSO, SCIM, VPC).
+sidebar:
+  order: 6
+  label: Enterprise Readiness
+---
+
+# Enterprise Readiness
+
+Honest accounting first: NIKI has **no SSO/SAML, no SCIM provisioning, no
+VPC/on-prem control plane, and no role-based seats**. Those are major builds
+with external infrastructure, not configuration flags, and this page will say
+so until they exist. What follows is what regulated teams *can* rely on today.
+
+## What exists
+
+### Policy controls (`[permissions]`)
+
+- **Modes** (`manual` default, `auto`, `dontask`, `bypass`) plus per-run
+  override: `niki run --permission-mode`. Unknown mode strings fail closed
+  to `manual`.
+- **`disable_worktree = true`** refuses the unisolated worktree backend
+  outright — the governance kill-switch for fleets where local-process
+  execution is unacceptable.
+- **`fail_closed_headless = true`** turns headless Ask into Deny instead of
+  Allow-with-warning, for unattended runs where silent auto-approval is
+  unacceptable. Default `false` (behavior-preserving); enable it in CI.
+- **Command deny-lists** (force-push, root `rm`, `mkfs`, `curl|sh` patterns)
+  plus per-role policies and protected paths/commands. Deny always wins,
+  in every mode including bypass.
+
+### Audit trail (per run, no extra setup)
+
+Every run leaves `.niki/tasks/<id>/` with `report.md`, `changes.patch`,
+per-agent `artifacts/*.json`, `safety_proof.json` (git invariants),
+`test_execution.json` (real exit codes), `trace.jsonl` (spans), and
+`eval-manifest.json` on eval runs.
+
+- **`niki audit <task-id>`** consolidates all of the above into one JSON
+  bundle with a `complete` flag (partial trails stay inspectable, never
+  hidden). Pipe it to your SIEM, artifact store, or compliance export.
+- **`niki run --output-format json`** gives scripts the verdict/branch/cost
+  contract; **`--bare`** strips ambient inputs (memory, MCP, knowledge URLs)
+  for reproducible runs.
+
+### Observability
+
+- **`--otel-endpoint`** (or `OTEL_EXPORTER_OTLP_ENDPOINT`) exports run spans
+  as OTLP/HTTP to any collector (Jaeger, Grafana Tempo, Honeycomb).
+  Every span carries `niki.timeline = "derived"` — offsets come from recorded
+  latencies, never fabricated wall-clock.
+- **Nightly eval gate** (`.github/workflows/nightly-eval.yml`): keyless
+  replay + disclosure manifest on every schedule, so regressions page you
+  instead of your customers.
+
+### Supply chain
+
+Tight `deny.toml` license allow-list, `cargo audit` in CI, checksum-verified
+installers, signed release channels via cargo-dist. No telemetry leaves the
+machine except your own LLM API calls (or your own OTEL endpoint).
+
+## What is missing (roadmap, not features)
+
+| Need | Status | Workaround today |
+|---|---|---|
+| SSO/SAML login | Not built | BYOK keys via env/keyring; short-lived tokens rotated externally |
+| SCIM provisioning | Not built | niki.toml is a file — manage it with your existing config management |
+| VPC / private runners | Not built | `DOCKER_HOST=ssh://…` runs containers on your own hosts (see Remote Daemon) |
+| RBAC seats | Not built | OS users + file permissions on niki.toml and `.niki/` |
+| Data residency | Provider-dependent | Use region-pinned `base_url`s; Ollama for fully local runs |
+
+## Recommended enterprise posture today
+
+1. Ship a managed `niki.toml` with `disable_worktree = true`,
+   `fail_closed_headless = true`, a spend cap, and pinned models.
+2. Collect `niki audit` bundles per release branch into your artifact store.
+3. Point `--otel-endpoint` at your collector; alert on `complete: false`.
+4. Run the nightly eval workflow; treat red as a release blocker.
