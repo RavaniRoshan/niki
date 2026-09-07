@@ -292,6 +292,34 @@ fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
     }
 }
 
+/// Fire one lifecycle hook, failing the run closed on Block.
+/// No-ops (including unknown results) allow — hooks observe by default and
+/// only an explicit block stops the pipeline.
+fn fire_hook(
+    bus: &crate::audit::HookBus,
+    event: crate::audit::HookEvent,
+    payload: serde_json::Value,
+) -> Result<()> {
+    if !bus.has_hooks(event) {
+        return Ok(());
+    }
+    match bus.run(event, &payload.to_string()) {
+        crate::audit::HookOutcome::Allow | crate::audit::HookOutcome::Noop => Ok(()),
+        crate::audit::HookOutcome::Block(reason) => {
+            anyhow::bail!("hook blocked {}: {}", event.as_str(), reason)
+        }
+    }
+}
+
+/// Payload for per-agent hook events.
+fn agent_hook_payload(role: AgentRole, task_id: &Uuid, round: u32) -> serde_json::Value {
+    serde_json::json!({
+        "role": format!("{:?}", role),
+        "task_id": task_id.to_string(),
+        "round": round,
+    })
+}
+
 /// Pick the agent topology for this run (BUILD_PLAN 3.2, P2.2).
 ///
 /// `Auto` (the default) decides by task shape: a bounded/sequential task — one
@@ -491,6 +519,9 @@ async fn run_parallel_coders(
     mcp_tools: &str,
     // Bare mode: skip project-memory injection in spawned coders.
     bare_memory: bool,
+    // Lifecycle hooks bus (cloned per spawned coder: shell-outs are brief).
+    hook_bus: crate::audit::HookBus,
+    hook_task_id: Uuid,
 ) -> Result<Vec<CodeDiff>> {
     let event_tx = base_display
         .tui_tx()
@@ -509,6 +540,8 @@ async fn run_parallel_coders(
         let mut disp = base_display.fork();
         let mcp_tools = mcp_tools.to_string();
         let event_tx = event_tx.clone();
+        let hook_bus = hook_bus.clone();
+        let hook_task_id = hook_task_id;
 
         tasks.push(tokio::spawn(async move {
             // Own worktree sandbox per coder → isolated changes.
@@ -548,6 +581,8 @@ async fn run_parallel_coders(
                 &mcp_tools,
                 config_max_diff_lines(&config),
                 bare_memory,
+                &hook_bus,
+                &hook_task_id,
                 None,
             )
             .await?;
@@ -670,6 +705,10 @@ async fn run_role(
     max_diff_lines: Option<usize>,
     // Bare mode: skip project-memory injection (ambient history off).
     bare_memory: bool,
+    // Lifecycle hooks + owning task (PreAgentStart/PostAgentStop fire here,
+    // so every body stage — including parallel coders — is covered).
+    hooks: &crate::audit::HookBus,
+    hook_task_id: &Uuid,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<(String, Vec<String>, RoleOutput)> {
     let task_spec_json = serde_json::to_string_pretty(task_spec)?;
@@ -764,6 +803,12 @@ async fn run_role(
         }
     };
 
+    fire_hook(
+        hooks,
+        crate::audit::HookEvent::PreAgentStart,
+        agent_hook_payload(role, hook_task_id, round),
+    )?;
+
     let json = run_stage(
         role,
         llm,
@@ -780,7 +825,6 @@ async fn run_role(
         steer_rx,
     )
     .await?;
-
     let output = parse_role(role, &json)?;
     let summary = match &output {
         RoleOutput::Planner(s) => crate::display::artifact_render::render_task_spec_summary(s),
@@ -795,6 +839,11 @@ async fn run_role(
         }
         RoleOutput::Red(v) => crate::display::artifact_render::render_red_challenge_summary(v),
     };
+    fire_hook(
+        hooks,
+        crate::audit::HookEvent::PostAgentStop,
+        agent_hook_payload(role, hook_task_id, round),
+    )?;
     Ok((json, summary, output))
 }
 
@@ -941,6 +990,17 @@ pub async fn execute_pipeline(
         }
     };
 
+    // Shell-hook bus from `[hooks]` config. Wired subset: PreTaskStart,
+    // PostTaskStop, PreAgentStart, PostAgentStop. A Block outcome aborts the
+    // run fail-closed — hooks are policy, and policy violations must not be
+    // advisory. (PreToolUse/PostToolUse fire inside the runtime tool loop.)
+    let hook_bus = crate::audit::HookBus::from_map(&config.hooks.commands);
+    fire_hook(
+        &hook_bus,
+        crate::audit::HookEvent::PreTaskStart,
+        serde_json::json!({"task_id": task.id.to_string(), "description": task.description}),
+    )?;
+
     let mut state = super::state::PipelineState::new(task.id);
     let mut metrics: Vec<StageMetric> = Vec::new();
 
@@ -993,13 +1053,18 @@ pub async fn execute_pipeline(
     // the user-reviewed spec drives the run directly. The JSON is re-validated
     // here so stale or hand-edited plans fail fast instead of confusing stages.
     // Metrics stay empty for the skipped stage so reported costs remain honest.
-    let planner_json: String = if let Some(approved) = plan_override_json {
-        let _: TaskSpec = serde_json::from_str(&approved).map_err(|e| {
+    let planner_json: String = if let Some(approved) = plan_override_json.as_ref() {
+        let _: TaskSpec = serde_json::from_str(approved).map_err(|e| {
             crate::NikiError::Config(format!("--plan artifact is not a valid TaskSpec: {e}"))
         })?;
         tracing::info!(target: "niki::pipeline", "using approved plan, Planner LLM call skipped");
-        approved
+        approved.clone()
     } else {
+        fire_hook(
+            &hook_bus,
+            crate::audit::HookEvent::PreAgentStart,
+            agent_hook_payload(AgentRole::Planner, &task.id, 0),
+        )?;
         let planner_stage = stages
             .iter()
             .find(|s| s.role == AgentRole::Planner && !s.skip)
@@ -1057,6 +1122,14 @@ pub async fn execute_pipeline(
         pm.usage(),
         pm.cost_usd,
     );
+    // No PostAgentStop when the Planner was skipped by --plan (no agent ran).
+    if plan_override_json.is_none() {
+        fire_hook(
+            &hook_bus,
+            crate::audit::HookEvent::PostAgentStop,
+            agent_hook_payload(AgentRole::Planner, &task.id, 0),
+        )?;
+    }
     display.update_pipeline_status();
 
     // T7+T8: Update context budget and save incremental task record after Planner.
@@ -1071,6 +1144,11 @@ pub async fn execute_pipeline(
 
     // Dry-run: stop after the Planner and surface the spec without executing.
     if dry_run {
+        fire_hook(
+            &hook_bus,
+            crate::audit::HookEvent::PostTaskStop,
+            serde_json::json!({"task_id": task.id.to_string(), "dry_run": true}),
+        )?;
         return Ok(PipelineResult {
             task_id: task.id,
             context_budget: state.context_budget.clone(),
@@ -1202,6 +1280,8 @@ pub async fn execute_pipeline(
                     &mut metrics,
                     &mcp_tools,
                     bare,
+                    hook_bus.clone(),
+                    task.id,
                 )
                 .await?;
 
@@ -1254,6 +1334,8 @@ pub async fn execute_pipeline(
                     &mcp_tools,
                     config_max_diff_lines(config),
                     bare,
+                    &hook_bus,
+                    &task.id,
                     steer_rx,
                 )
                 .await?;
@@ -1325,6 +1407,8 @@ pub async fn execute_pipeline(
                         &mcp_tools,
                         config_max_diff_lines(config),
                         bare,
+                        &hook_bus,
+                        &task.id,
                         steer_rx,
                     )
                     .await?;
@@ -1400,6 +1484,8 @@ pub async fn execute_pipeline(
                             &mcp_tools,
                             config_max_diff_lines(config),
                             bare,
+                            &hook_bus,
+                            &task.id,
                             steer_rx,
                         )
                         .await?;
@@ -1515,6 +1601,11 @@ pub async fn execute_pipeline(
                 anyhow::anyhow!("Provider '{}' not found in cache", coder_stage.provider)
             })?;
             let current_files = build_current_files(&task_spec, &task.project_path);
+            fire_hook(
+                &hook_bus,
+                crate::audit::HookEvent::PreAgentStart,
+                agent_hook_payload(AgentRole::Coder, &task.id, 0),
+            )?;
             let solo_json = run_stage(
                 AgentRole::Coder,
                 &**coder_llm,
@@ -1537,6 +1628,11 @@ pub async fn execute_pipeline(
             )
             .await?;
             artifacts.push((AgentRole::Coder, solo_json.clone()));
+            fire_hook(
+                &hook_bus,
+                crate::audit::HookEvent::PostAgentStop,
+                agent_hook_payload(AgentRole::Coder, &task.id, 0),
+            )?;
             isolation.push(IsolationRecord {
                 role: AgentRole::Coder,
                 backend: config.docker.backend,
@@ -1628,6 +1724,12 @@ pub async fn execute_pipeline(
         &verdict,
         &state,
     );
+
+    fire_hook(
+        &hook_bus,
+        crate::audit::HookEvent::PostTaskStop,
+        serde_json::json!({"task_id": task.id.to_string(), "verdict": format!("{:?}", verdict)}),
+    )?;
 
     Ok(PipelineResult {
         task_id: task.id,

@@ -167,3 +167,13 @@ network_disabled = true
 # [permissions]
 # mode = "manual"  # manual (default) | auto | dontask | bypass. Overridable per run: niki run --permission-mode auto
 # disable_worktree = false  # Governance kill-switch: true refuses the unisolated worktree backend outright
+
+# Shell hooks on pipeline lifecycle events ([hooks.commands] event -> commands).
+# Wired events: PreTaskStart, PostTaskStop, PreAgentStart, PostAgentStop
+# (plus PreToolUse/PostToolUse inside the runtime tool loop).
+# Contract per command: exit 2 (or stdout JSON {"deny": true}) BLOCKS and aborts
+# the run fail-closed; anything else allows. Payload arrives via
+# NIKI_HOOK_EVENT / NIKI_HOOK_PAYLOAD env vars. Unknown events warn + skip.
+# [hooks.commands]
+# PreTaskStart = ["echo \"starting $NIKI_HOOK_PAYLOAD\" >> .niki/hooks.log"]
+# PostTaskStop = ["echo \"finished $NIKI_HOOK_PAYLOAD\" >> .niki/hooks.log"]
