@@ -1,2 +1,4 @@
 .work/
 frames/
+!reference/
+!reference/*.png
