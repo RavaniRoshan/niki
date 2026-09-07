@@ -37,6 +37,9 @@ enum Commands {
         /// Run interactively (prompt for settings, check env vars)
         #[arg(short, long)]
         interactive: bool,
+        /// Scan the project and draft AGENTS.md
+        #[arg(long)]
+        scan: bool,
     },
     /// Recommend per-agent models (cost/quality tradeoffs)
     Recommend(niki::cli::recommend::RecommendArgs),
@@ -100,9 +103,10 @@ async fn main() -> Result<()> {
         Commands::Status(args) => niki::cli::status::handle(args).await?,
         Commands::Report(args) => niki::cli::report::handle(args).await?,
         Commands::Config { command } => niki::cli::config::handle(command).await?,
-        Commands::Init { interactive } => {
+        Commands::Init { interactive, scan } => {
             niki::cli::config::handle(&niki::cli::config::ConfigCommands::Init {
                 interactive: *interactive,
+                scan: *scan,
             })
             .await?
         }

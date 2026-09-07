@@ -11,6 +11,10 @@ pub enum ConfigCommands {
         /// Run interactively (prompt for settings, check env vars)
         #[arg(short, long)]
         interactive: bool,
+        /// Scan the project and draft AGENTS.md from detected languages,
+        /// dependencies, and test commands
+        #[arg(long)]
+        scan: bool,
     },
     /// Export the JSON schema for niki.toml (for editor autocomplete)
     Schema,
@@ -18,21 +22,19 @@ pub enum ConfigCommands {
 
 pub async fn handle(command: &ConfigCommands) -> Result<()> {
     match command {
-        ConfigCommands::Init { interactive } => cmd_init(*interactive).await,
+        ConfigCommands::Init { interactive, scan } => cmd_init(*interactive, *scan).await,
         ConfigCommands::Schema => cmd_schema(),
     }
 }
 
-async fn cmd_init(interactive: bool) -> Result<()> {
+async fn cmd_init(interactive: bool, scan: bool) -> Result<()> {
     let target_path = std::env::current_dir()?.join("niki.toml");
+    let project_dir = std::env::current_dir()?;
 
     if target_path.exists() {
         println!("niki.toml already exists in the current directory.");
         println!("Run `niki auth login` to configure credentials via keyring.");
-        return Ok(());
-    }
-
-    if interactive {
+    } else if interactive {
         cmd_init_interactive(&target_path).await?;
     } else {
         let example_content = include_str!("../../niki.example.toml");
@@ -40,9 +42,71 @@ async fn cmd_init(interactive: bool) -> Result<()> {
         println!("Created niki.toml from template.");
     }
 
+    if scan {
+        cmd_scan(&project_dir).await?;
+    }
+
     println!(
         "Edit it to add your API keys, or run `niki auth login` to store them securely in your OS keyring."
     );
+    Ok(())
+}
+
+/// Scan the project layout and draft `AGENTS.md` (the instruction file NIKI's
+/// agents actually read) from detected languages, dependencies, and the test
+/// command. Never overwrites an existing AGENTS.md — prints a diff-style
+/// suggestion instead, so human-curated instructions are never clobbered.
+async fn cmd_scan(project_dir: &std::path::Path) -> Result<()> {
+    let config = crate::config::NikiConfig::load(project_dir).unwrap_or_default();
+    let knowledge = crate::knowledge::index_project(project_dir, &config).await?;
+    let test_command = crate::agents::tester::autodetect_test_command(project_dir);
+
+    let mut draft = String::from(
+        "# AGENTS.md (drafted by `niki init --scan` — edit freely; agents read this file)\n\n",
+    );
+    draft.push_str("## Stack\n\n");
+    if knowledge.detected_languages.is_empty() {
+        draft.push_str("- (no languages detected)\n");
+    } else {
+        draft.push_str(&format!(
+            "- Languages: {}\n",
+            knowledge.detected_languages.join(", ")
+        ));
+    }
+    for pkg in &knowledge.package_info {
+        draft.push_str(&format!(
+            "- {} (`{}`): {}\n",
+            pkg.manager,
+            pkg.file_path,
+            if pkg.dependencies.is_empty() {
+                "(no dependencies listed)".to_string()
+            } else {
+                pkg.dependencies.join(", ")
+            }
+        ));
+    }
+    draft.push_str("\n## Verification\n\n");
+    match &test_command {
+        Some(cmd) => draft.push_str(&format!(
+            "- Test command (auto-detected): `{}` — keep it green; a red suite blocks the branch.\n",
+            cmd
+        )),
+        None => draft.push_str(
+            "- No test command detected — set `[agents.tester] test_command` so runs are verifiable.\n",
+        ),
+    }
+    draft.push_str(
+        "\n## Conventions\n\n- (add yours: code style, architecture rules, things agents must never do)\n",
+    );
+
+    let agents_path = project_dir.join("AGENTS.md");
+    if agents_path.exists() {
+        println!("\nAGENTS.md already exists — leaving it untouched. Suggested additions:\n");
+        println!("{draft}");
+    } else {
+        fs::write(&agents_path, &draft)?;
+        println!("\nWrote {} (review and extend it).", agents_path.display());
+    }
     Ok(())
 }
 

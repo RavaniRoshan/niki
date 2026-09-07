@@ -39,7 +39,7 @@ pub struct TestExecution {
 
 /// Auto-detect a test command from the project layout when the user has not
 /// configured one explicitly.
-fn autodetect_test_command(project_path: &Path) -> Option<String> {
+pub(crate) fn autodetect_test_command(project_path: &Path) -> Option<String> {
     let has = |name: &str| project_path.join(name).exists();
     if has("Cargo.toml") {
         Some("cargo test --locked 2>&1".to_string())
