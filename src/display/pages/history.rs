@@ -205,6 +205,10 @@ impl Page for HistoryPage {
                     Style::default().fg(theme::fg_color()),
                 ),
             ]));
+            table_lines.push(Line::from(vec![Span::styled(
+                "  Run `niki run \"<task>\" to create the first entry.",
+                Style::default().fg(theme::fg_dim()),
+            )]));
         } else {
             for (i, entry) in entries.iter().enumerate() {
                 let is_selected = i == self.selected;

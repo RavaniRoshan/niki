@@ -76,12 +76,9 @@ fn role_icon(role: AgentRole) -> &'static str {
 }
 
 fn status_glyph(status: &StageStatus) -> &'static str {
-    match status {
-        StageStatus::Running => "⠋",
-        StageStatus::Done => "✓",
-        StageStatus::Failed => "✗",
-        StageStatus::Queued => "·",
-    }
+    crate::display::components::status::glyph(
+        crate::display::components::status::UnifiedStatus::from(status.clone()),
+    )
 }
 
 pub struct ChatPage;
@@ -1257,12 +1254,9 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
                 s.cost_usd
             ));
         }
-        let status_color = match s.status {
-            StageStatus::Running => theme::thinking_green(),
-            StageStatus::Done => theme::success(),
-            StageStatus::Failed => theme::error(),
-            StageStatus::Queued => theme::fg_subtle(),
-        };
+        let status_color = crate::display::components::status::color(
+            crate::display::components::status::UnifiedStatus::from(s.status.clone()),
+        );
         let mut header_spans = vec![
             Span::styled(
                 format!(" {} ", disclosure),

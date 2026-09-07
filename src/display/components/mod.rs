@@ -17,6 +17,7 @@ pub mod list_cursor;
 pub mod permission;
 pub mod progress;
 pub mod spinner;
+pub mod status;
 pub mod status_bar;
 pub mod tool_card;
 pub mod tool_detail;

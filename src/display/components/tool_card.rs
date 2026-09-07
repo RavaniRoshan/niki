@@ -2,7 +2,7 @@
 //! as a collapsible card with status, timing, and output preview.
 //!
 //! Matches Claude Code / Kimi Code visual treatment:
-//! - Status glyph (● pending / ✔ success / ✖ failed) + tool name + summary
+//! - Status glyph (unified grammar: ○ pending / ⠋ running / ✓ done / ✗ failed) + tool name + summary
 //! - Expanded body shows first N lines of output with "N more lines" disclosure
 //! - Footer shows elapsed/total duration and token count
 
@@ -76,24 +76,14 @@ impl ToolCard {
         self.expanded = !self.expanded;
     }
 
-    /// Status glyph for the current state.
+    /// Status glyph for the current state (unified grammar — see `super::status`).
     pub fn status_glyph(&self) -> &'static str {
-        match self.status {
-            ToolStatus::Pending => "·",
-            ToolStatus::Running { .. } => "●",
-            ToolStatus::Success { .. } => "✔",
-            ToolStatus::Failed { .. } => "✖",
-        }
+        super::status::glyph(super::status::UnifiedStatus::from(&self.status))
     }
 
-    /// Color for the status glyph.
+    /// Color for the status glyph (unified grammar — see `super::status`).
     pub fn status_color(&self) -> Color {
-        match self.status {
-            ToolStatus::Pending => theme::fg_dim(),
-            ToolStatus::Running { .. } => theme::clay(),
-            ToolStatus::Success { .. } => theme::success(),
-            ToolStatus::Failed { .. } => theme::error(),
-        }
+        super::status::color(super::status::UnifiedStatus::from(&self.status))
     }
 
     /// Short timing string for the footer.
@@ -118,7 +108,7 @@ pub fn render_tool_card(card: &ToolCard, area_width: u16) -> Vec<Line<'static>> 
 
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    // ── Header row: "● Bash cargo test --verbose" ──────────────────────
+    // ── Header row: "<glyph> Bash cargo test --verbose" ───────────────
     let glyph = card.status_glyph();
     let glyph_color = card.status_color();
 
@@ -229,7 +219,7 @@ mod tests {
     fn new_card_is_pending() {
         let card = ToolCard::new("Bash", "cargo test");
         assert_eq!(card.status, ToolStatus::Pending);
-        assert_eq!(card.status_glyph(), "·");
+        assert_eq!(card.status_glyph(), "○");
         assert!(!card.expanded);
     }
 
@@ -238,7 +228,7 @@ mod tests {
         let mut card = ToolCard::new("Bash", "cargo build");
         card.set_running();
         assert!(matches!(card.status, ToolStatus::Running { elapsed_ms: 0 }));
-        assert_eq!(card.status_glyph(), "●");
+        assert_eq!(card.status_glyph(), "⠋");
     }
 
     #[test]
@@ -249,7 +239,7 @@ mod tests {
             card.status,
             ToolStatus::Success { duration_ms: 150 }
         ));
-        assert_eq!(card.status_glyph(), "✔");
+        assert_eq!(card.status_glyph(), "✓");
         assert!(card.expanded); // auto-expanded on success
         assert_eq!(card.timing(), Some("150ms".to_string()));
     }
@@ -259,7 +249,7 @@ mod tests {
         let mut card = ToolCard::new("Bash", "rm -rf /");
         card.set_failed("Permission denied");
         assert!(matches!(card.status, ToolStatus::Failed { error: _ }));
-        assert_eq!(card.status_glyph(), "✖");
+        assert_eq!(card.status_glyph(), "✗");
         assert!(card.expanded); // auto-expanded on failure
     }
 

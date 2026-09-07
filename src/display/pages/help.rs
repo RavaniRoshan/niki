@@ -49,8 +49,11 @@ impl HelpPage {
                             "Close current modal or return to previous page",
                         ),
                         ("[?] this help", "Toggle this help page"),
+                        ("[Tab] chat", "Toggle between chat and page view"),
                         ("[Ctrl+P] commands", "Open command palette"),
-                        ("[Ctrl+T] theme", "Cycle light/dark/auto themes"),
+                        ("[t] theme", "Cycle light/dark/auto themes"),
+                        ("[g] fleet", "Jump to the Fleet grid from any page"),
+                        ("[s] session", "Open the Session view"),
                     ],
                 ),
                 HelpSection::new(

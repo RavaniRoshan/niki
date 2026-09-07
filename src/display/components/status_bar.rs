@@ -2,7 +2,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -184,7 +184,7 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     let badge_style = if badge_hovered {
         Style::default()
             .fg(badge_color)
-            .bg(Color::Rgb(40, 44, 52))
+            .bg(crate::display::theme::bg_elevated())
             .add_modifier(ratatui::style::Modifier::BOLD)
     } else {
         Style::default()

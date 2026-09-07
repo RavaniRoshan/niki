@@ -2,7 +2,7 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -83,12 +83,12 @@ pub fn render_fleet(fleet: &FleetState, area: ratatui::layout::Rect, buf: &mut B
     let total_cost: f64 = fleet.missions.iter().map(|m| m.cost_usd).sum();
 
     let header_text = format!(
-        " NIKI / FLEET  {} missions · {} active · ${:.2}",
+        " fleet · {} missions · {} active · ${:.2}",
         total, running, total_cost
     );
     let header = Paragraph::new(header_text).style(
         Style::default()
-            .fg(Color::White)
+            .fg(crate::display::theme::fg_color())
             .add_modifier(Modifier::BOLD),
     );
     header.render(
@@ -103,8 +103,10 @@ pub fn render_fleet(fleet: &FleetState, area: ratatui::layout::Rect, buf: &mut B
 
     // Mission grid (2 columns)
     if fleet.missions.is_empty() {
-        let empty = Paragraph::new("No missions. Start one from Chat (press Tab).")
-            .style(Style::default().fg(Color::DarkGray));
+        let empty = Paragraph::new(
+            "No missions yet — nothing is running.\nStart one from Chat (press Tab).",
+        )
+        .style(Style::default().fg(crate::display::theme::fg_dim()));
         empty.render(
             ratatui::layout::Rect {
                 x: area.x + 2,
@@ -144,7 +146,7 @@ pub fn render_fleet(fleet: &FleetState, area: ratatui::layout::Rect, buf: &mut B
     let footer = Paragraph::new(
         " ↑↓ Navigate · Enter Open · P Pause · R Resume · K Kill · V Diff · Esc Back",
     )
-    .style(Style::default().fg(Color::DarkGray));
+    .style(Style::default().fg(crate::display::theme::fg_dim()));
     footer.render(
         ratatui::layout::Rect {
             x: area.x,
@@ -163,26 +165,15 @@ fn render_mission_card(
     selected: bool,
 ) {
     let border_style = if selected {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(crate::display::theme::border_active())
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(crate::display::theme::border_dim())
     };
 
-    let status_color = match mission.status {
-        MissionStatus::Running => Color::Green,
-        MissionStatus::Paused => Color::Yellow,
-        MissionStatus::Completed => Color::DarkGray,
-        MissionStatus::Failed => Color::Red,
-        _ => Color::DarkGray,
-    };
+    let unified = crate::display::components::status::UnifiedStatus::from(mission.status.clone());
+    let status_color = crate::display::components::status::color(unified);
 
-    let status_icon = match mission.status {
-        MissionStatus::Running => "●",
-        MissionStatus::Paused => "●",
-        MissionStatus::Completed => "✓",
-        MissionStatus::Failed => "✗",
-        _ => "○",
-    };
+    let status_icon = crate::display::components::status::glyph(unified);
 
     let attention = match mission.attention {
         AttentionPriority::Normal => "",
@@ -202,7 +193,10 @@ fn render_mission_card(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
-        .title(Span::styled(&name, Style::default().fg(Color::White)));
+        .title(Span::styled(
+            &name,
+            Style::default().fg(crate::display::theme::fg_bright()),
+        ));
 
     let lines = vec![
         Line::from(vec![
@@ -219,7 +213,7 @@ fn render_mission_card(
         Line::from(""),
         Line::from(vec![Span::styled(
             format!("{} agents", mission.sessions.len()),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(crate::display::theme::fg_dim()),
         )]),
         Line::from(vec![Span::styled(
             format!(
@@ -228,7 +222,7 @@ fn render_mission_card(
                 mission.cost_usd,
                 elapsed
             ),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(crate::display::theme::fg_dim()),
         )]),
     ];
 
