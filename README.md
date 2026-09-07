@@ -126,11 +126,15 @@ curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/niki/master/scripts/in
 # 2 · Build the sandbox image
 podman build -t niki-sandbox:24.04 -f docker/Dockerfile .   # or: docker build ...
 
-# 3 · Configure
-cp niki.example.toml niki.toml
-export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / GOOGLE_API_KEY
+# 3 · Configure (guided)
+niki init --scan          # writes niki.toml + drafts AGENTS.md from your project
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / GOOGLE_API_KEY / OPENROUTER_API_KEY
 
-# 4 · Run your first task
+# 4 · Plan first (recommended), then execute
+niki plan "Add a /health endpoint" --project /path/to/your/project
+niki run --plan <id> --project /path/to/your/project   # or run directly:
+
+# 4alt · Run your first task directly
 niki run "Add a /health endpoint" --project /path/to/your/project
 
 # 5 · Review the result
@@ -203,26 +207,37 @@ niki run "..." --backend worktree   # no container runtime
 - **Sandboxed by default.** Rootless container with CapDrop ALL, read-only rootfs.
 - **Your keys, never bundled.** BYOK only; keys redacted from logs and reports.
 - **Spend cap enforced.** Aborts before branch creation if cost exceeds limit.
-- **Audit trail.** Per-agent artifacts, metrics, and `safety_proof.json` for every run.
+- **Audit trail.** Per-agent artifacts, metrics, `safety_proof.json`, `trace.jsonl`, and `niki audit` bundles for every run.
+- **Permission posture.** Modes (`manual/auto/dontask/bypass`), project trust, worktree kill-switch, fail-closed headless option.
+- **Observable.** `--output-format json` contract plus OTLP trace export.
 
 ## CLI Reference
 
 | Command | Description |
 |---|---|
-| `niki run <description>` | Run the pipeline. Flags: `--project`, `--branch`, `--max-rounds`, `--backend`, `--tui`. |
+| `niki run <description>` | Run the pipeline. Flags: `--project`, `--branch`, `--max-rounds`, `--backend`, `--tui`, `--dry-run`, `--plan <id>`, `--force`, `--bare`, `--output-format text\|json`, `--permission-mode`, `--otel-endpoint`, per-agent `--*-model`. |
+| `niki plan <description>` | Plan mode: research without executing; writes reviewable `plan.md`. Approve with `niki run --plan <id>`. |
+| `niki session` | `list/show/checkpoints/undo/rewind [--mode both\|code\|conversation]` chat & pipeline sessions. |
+| `niki commands` | `list/show/expand` user slash commands (`.niki/commands/*.md` + `[commands] extra_dirs`). |
+| `niki audit [id]` | Consolidated JSON compliance bundle for one task (record, proofs, costs, trace). |
+| `niki init [--scan]` | Initialize `niki.toml` (alias for `config init`); `--scan` drafts `AGENTS.md` from the project index. |
 | `niki status` | Current/most recent task status. |
 | `niki report [id]` | Print a task's report (UUID or short prefix). |
-| `niki doctor` | Diagnostics: install, config, providers, sandbox, security. |
+| `niki doctor` | Diagnostics: install, config, providers, sandbox, image presence, security. |
 | `niki smoke` | Quick pipeline verification. |
 | `niki chat` | Interactive TUI session. |
-| `niki config` | Manage configuration. |
-| `niki recommend` | Per-agent model recommendations. |
+| `niki config` | Manage configuration (`init`, `schema`). |
+| `niki recommend` | Per-agent model recommendations + observed spend from past runs. |
 | `niki dashboard [id]` | Static HTML diff viewer. |
-| `niki eval` | Evaluation harness on seeded-defect dataset. |
+| `niki eval [grade]` | Seeded-defect harness (replay/live) with cost accounting, disclosure manifest, maintainer grading. |
 | `niki auth` | Manage API credentials. |
 | `niki providers` | Check LLM provider configurations. |
 | `niki memory` | View agent memory. |
 | `niki goal` | Manage persistent goals. |
+| `niki research <query>` | Web research with cited summary. |
+| `niki voice` | Record and transcribe a voice message. |
+| `niki verify` | Screenshot-based visual verification. |
+| `niki acp` | Agent Client Protocol server (drives Zed/Claude Code IDE clients). |
 
 Run `niki <command> --help` for full flags.
 
