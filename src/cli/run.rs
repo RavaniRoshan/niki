@@ -1,6 +1,6 @@
 use crate::config::NikiConfig;
 use crate::display::agent_stream::AgenticDisplay;
-use crate::orchestrator::pipeline::{Task, execute_pipeline};
+use crate::orchestrator::pipeline::{PipelineResult, Task, execute_pipeline};
 use crate::orchestrator::state::{TaskRecord, TaskStatus};
 use crate::sandbox::SandboxBackend;
 use crate::sandbox::docker::ActiveContainers;
@@ -108,9 +108,46 @@ pub struct RunArgs {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Execute from a user-approved plan: full UUID or short prefix of a task
+    /// whose `niki plan` (or `--dry-run`) output you reviewed. Skips the
+    /// Planner LLM call and drives the run from that spec.
+    #[arg(long)]
+    pub plan: Option<String>,
+
+    /// Machine-readable output contract for CI/scripts: `text` (default,
+    /// human streaming) or `json` (one JSON envelope on stdout at the end).
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub output_format: OutputFormat,
+
+    /// Deterministic-inputs mode for CI: skip project memory, MCP discovery,
+    /// and external knowledge-URL fetching. Model sampling nondeterminism and
+    /// failover retries still apply — bare means "no ambient inputs".
+    #[arg(long)]
+    pub bare: bool,
+
+    /// Permission posture for this run: `manual` (default — Ask prompts in
+    /// TUI, allows headless with a warning), `auto` (sandbox-safe allowed,
+    /// host-reaching still Ask), `dontask` (Ask becomes Allow; explicit CI
+    /// mode), `bypass` (all checks Allow; isolated containers only).
+    /// Overrides `[permissions] mode` in config.
+    #[arg(long)]
+    pub permission_mode: Option<String>,
+
+    /// OTLP/HTTP endpoint for trace export (e.g. http://localhost:4318).
+    /// Also reads `OTEL_EXPORTER_OTLP_ENDPOINT`. Export is best-effort and
+    /// warn-only: telemetry never fails a run.
+    #[arg(long)]
+    pub otel_endpoint: Option<String>,
+
     /// Minimal output — no streaming, just final report
     #[arg(long)]
     pub quiet: bool,
+
+    /// Create the branch even when the executed test suite (or mutation gate)
+    /// failed. The override is recorded in the report and task record — a
+    /// forced branch is explicitly NOT a verified branch.
+    #[arg(long)]
+    pub force: bool,
 
     /// Show full agent reasoning (not just summaries)
     #[arg(long)]
@@ -129,6 +166,13 @@ pub enum BackendArg {
     Worktree,
 }
 
+/// Machine-readable output contract for scripts and CI.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputFormat {
+    Text,
+    Json,
+}
+
 impl From<BackendArg> for crate::sandbox::SandboxBackend {
     fn from(b: BackendArg) -> Self {
         match b {
@@ -136,6 +180,125 @@ impl From<BackendArg> for crate::sandbox::SandboxBackend {
             BackendArg::Worktree => crate::sandbox::SandboxBackend::Worktree,
         }
     }
+}
+
+/// Render the Planner's spec as a human-readable `plan.md` for the plan mode
+/// (`niki plan` / `--dry-run`). Machine-readable truth stays in
+/// `artifacts/planner.json`; this file is the approval surface.
+fn write_plan_md(task_dir: &std::path::Path, task: &Task, result: &PipelineResult) {
+    let Some(planner_json) = result
+        .artifacts
+        .iter()
+        .find(|(r, _)| *r == AgentRole::Planner)
+        .map(|(_, j)| j.as_str())
+    else {
+        return;
+    };
+    let spec: crate::artifacts::types::TaskSpec = match serde_json::from_str(planner_json) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "Warning: could not parse planner artifact for plan.md: {}",
+                e
+            );
+            return;
+        }
+    };
+    let mut out = format!(
+        "# Plan — {}\n\n> Produced by `niki plan` (task `{}`). Review, edit the approach if needed, then execute with `niki run --plan {}`.\n\n## Summary\n\n{}\n\n## Approach\n\n{}\n\n",
+        task.description,
+        task.id,
+        &task.id.to_string()[..8],
+        spec.summary,
+        spec.approach,
+    );
+    out.push_str("## Files to touch\n\n");
+    for f in &spec.files_to_modify {
+        out.push_str(&format!(
+            "- `{}` ({:?}): {}\n",
+            f.path, f.action, f.description
+        ));
+    }
+    out.push_str("\n## Acceptance criteria\n\n");
+    for c in &spec.acceptance_criteria {
+        out.push_str(&format!("- [ ] {}\n", c));
+    }
+    if !spec.constraints.is_empty() {
+        out.push_str("\n## Constraints\n\n");
+        for c in &spec.constraints {
+            out.push_str(&format!("- {}\n", c));
+        }
+    }
+    if let Some(u) = &spec.uncertainties {
+        if !u.is_empty() {
+            out.push_str("\n## Open questions (planner uncertainties)\n\n");
+            for q in u {
+                out.push_str(&format!("- {}\n", q));
+            }
+        }
+    }
+    out.push_str(&format!(
+        "\n## Topology\n\n{}\n\n## Cost of planning\n\n",
+        result.topology_reason
+    ));
+    for m in &result.metrics {
+        out.push_str(&format!(
+            "- {:?} {} ({}): {} in / {} out tok, ${:.4}\n",
+            m.role, m.model, m.provider, m.input_tokens, m.output_tokens, m.cost_usd
+        ));
+    }
+    if let Err(e) = crate::util::write_restricted(&task_dir.join("plan.md"), out) {
+        eprintln!("Warning: could not write plan.md: {}", e);
+    }
+}
+
+/// Machine-readable result envelope for `--output-format json` (CI/scripts).
+/// Stable contract: `status` is `completed`, `failed`, or `error`.
+/// `tests_passed`/`mutation_passed` are null when no suite ran.
+fn result_envelope(
+    task: &Task,
+    record: &TaskRecord,
+    result: Option<&crate::orchestrator::pipeline::PipelineResult>,
+    branch: Option<&str>,
+    branch_block: Option<&str>,
+    forced_branch: bool,
+    bare: bool,
+    task_dir: &std::path::Path,
+) -> serde_json::Value {
+    let (verdict, revisions, tests_passed, mutation_passed) = match result {
+        Some(r) => (
+            format!("{:?}", r.verdict),
+            r.revision_rounds,
+            r.test_execution.as_ref().map(|te| te.passed),
+            r.test_execution
+                .as_ref()
+                .and_then(|te| te.mutation.as_ref().map(|m| m.passed)),
+        ),
+        None => ("unknown".to_string(), 0, None, None),
+    };
+    serde_json::json!({
+        "task_id": task.id.to_string(),
+        "description": task.description,
+        "status": match &record.status {
+            TaskStatus::Completed => "completed",
+            TaskStatus::Failed { .. } => "failed",
+            TaskStatus::Running => "running",
+            TaskStatus::Cancelled => "cancelled",
+        },
+        "branch": branch,
+        "branch_blocked": branch_block,
+        "forced_branch": forced_branch,
+        "bare": bare,
+        "verdict": verdict,
+        "revision_rounds": revisions,
+        "tests_passed": tests_passed,
+        "mutation_passed": mutation_passed,
+        "cost_usd": record.total_cost_usd,
+        "input_tokens": record.total_input_tokens,
+        "output_tokens": record.total_output_tokens,
+        "report": task_dir.join("report.md").display().to_string(),
+        "task_dir": task_dir.display().to_string(),
+    })
 }
 
 fn role_filename(role: AgentRole) -> &'static str {
@@ -157,6 +320,20 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     };
 
     let mut config = NikiConfig::load(&project_dir)?;
+
+    // Zero-config discoverability: no config file anywhere (project or
+    // global) means defaults + env keys. Say so once, instead of letting a
+    // bare default run look identical to a configured one.
+    {
+        let global = dirs::home_dir().map(|h| h.join(".config/niki/niki.toml"));
+        let has_file = project_dir.join("niki.toml").exists() || global.is_some_and(|p| p.exists());
+        if !has_file {
+            eprintln!(
+                "note: no niki.toml found — running with defaults + environment keys. \
+                 Run `niki init` to persist configuration."
+            );
+        }
+    }
 
     if let Some(r) = args.max_rounds {
         config.general.max_revision_rounds = r;
@@ -185,6 +362,20 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
 
     let uses_docker = matches!(backend, SandboxBackend::Docker);
 
+    // Per-run permission posture override (explicit beats config).
+    if let Some(mode) = &args.permission_mode {
+        config.permissions.mode = mode.clone();
+    }
+
+    // Governance kill-switch: [permissions] disable_worktree refuses the
+    // unisolated backend outright instead of warning past it.
+    if !uses_docker && config.permissions.disable_worktree {
+        anyhow::bail!(
+            "worktree backend is disabled by [permissions] disable_worktree — \
+             use the default container backend or relax the policy."
+        );
+    }
+
     // Trust & cost notices (launch-plan B3 / S6 / G9).
     if matches!(backend, SandboxBackend::Worktree) {
         eprintln!(
@@ -208,6 +399,14 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
 
     let mut display = AgenticDisplay::new();
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    // JSON output mode mutes every terminal write so stdout carries only the
+    // final envelope (pipe-purity for scripts/CI). Progress still flows to
+    // stderr-free event buffers, never to stdout.
+    let json_mode = args.output_format == OutputFormat::Json;
+    if json_mode {
+        display.set_muted(true);
+    }
 
     // Opt-in rich TUI. Must be enabled before any display call so the banner
     // and subsequent events are routed to the render thread.
@@ -375,6 +574,34 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         }
     };
 
+    // --plan: load a user-approved planner artifact from a previous `niki plan`
+    // (or dry-run) task. Accepts a full UUID or unique short prefix, resolved
+    // exactly like `niki report`. The JSON is validated as a TaskSpec here so
+    // a stale or hand-broken plan fails with a clear error before the run.
+    let plan_override_json: Option<String> = match &args.plan {
+        None => None,
+        Some(id) => {
+            let tasks_dir = project_dir.join(&config.general.output_dir).join("tasks");
+            let resolved = crate::cli::report::resolve_task_id(&tasks_dir, id)?;
+            let path = tasks_dir.join(&resolved).join("artifacts/planner.json");
+            let json = std::fs::read_to_string(&path).map_err(|_| {
+                anyhow!(
+                    "no approved plan found: {} (run `niki plan` first)",
+                    path.display()
+                )
+            })?;
+            let _: crate::artifacts::types::TaskSpec = serde_json::from_str(&json)
+                .map_err(|e| anyhow!("approved plan is not a valid TaskSpec: {e}"))?;
+            // Progress goes to stderr in JSON mode so stdout stays parseable.
+            if json_mode {
+                eprintln!("Using approved plan from task {resolved} (Planner LLM call skipped).");
+            } else {
+                println!("Using approved plan from task {resolved} (Planner LLM call skipped).");
+            }
+            Some(json)
+        }
+    };
+
     let mut result = match execute_pipeline(
         &task,
         &config,
@@ -384,6 +611,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         args.dry_run,
         cancel.clone(),
         &task_dir,
+        plan_override_json,
+        args.bare,
     )
     .await
     {
@@ -415,6 +644,18 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 crate::display::notify::pipeline_complete(false, "");
             }
             display.finish_tui();
+            if args.output_format == OutputFormat::Json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "task_id": task.id.to_string(),
+                        "description": task.description,
+                        "status": "error",
+                        "error": e.to_string(),
+                        "task_dir": task_dir.display().to_string(),
+                    })
+                );
+            }
             return Err(e);
         }
     };
@@ -444,6 +685,29 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
             {
                 eprintln!("Warning: could not save test_execution artifact: {}", e);
             }
+        }
+    }
+
+    // Plan mode (`niki plan` / `--dry-run`): persist a human-readable plan and
+    // point at the approval command. The machine-readable spec already lives at
+    // `artifacts/planner.json`; `plan.md` is the review surface.
+    if args.dry_run {
+        write_plan_md(&task_dir, &task, &result);
+        // Progress goes to stderr in JSON mode so stdout stays parseable.
+        if json_mode {
+            eprintln!(
+                "Plan written to {}/plan.md — review it, then execute with: niki run --plan {} --project {}",
+                task_dir.display(),
+                &task.id.to_string()[..8],
+                project_dir.display(),
+            );
+        } else {
+            println!(
+                "\nPlan written to {}/plan.md — review it, then execute with:\n  niki run --plan {} --project {}",
+                task_dir.display(),
+                &task.id.to_string()[..8],
+                project_dir.display(),
+            );
         }
     }
 
@@ -510,11 +774,45 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         eprintln!("Failed to generate patch: {}", e);
     }
 
+    // Red-suite gate (goal-a3f9c2, Phase 2): a failing executed suite — or a
+    // failing mutation gate — blocks the branch. The evidence (patch, report,
+    // test output) is still written so the failure is inspectable, but no
+    // `niki/<id>` branch is created and the task is recorded as Failed.
+    // `--force` overrides with the override itself recorded; a forced branch
+    // is explicitly not a verified branch.
+    let suite_failed = result
+        .test_execution
+        .as_ref()
+        .is_some_and(|te| !te.passed || te.mutation.as_ref().is_some_and(|m| !m.passed));
+    let mut branch_block_note: Option<String> = None;
+    if suite_failed && !args.force {
+        let what = match result.test_execution.as_ref() {
+            Some(te) if !te.passed => {
+                format!("test suite `{}` failed (exit {})", te.command, te.exit_code)
+            }
+            Some(te) => format!(
+                "mutation gate `{}` failed (exit {})",
+                te.mutation
+                    .as_ref()
+                    .map(|m| m.command.as_str())
+                    .unwrap_or("?"),
+                te.mutation.as_ref().map(|m| m.exit_code).unwrap_or(-1),
+            ),
+            None => "verification failed".to_string(),
+        };
+        branch_block_note = Some(format!(
+            "Branch blocked: {}. Re-run with `--force` to create the branch anyway (recorded as forced, not verified).",
+            what
+        ));
+    }
+    let forced_branch = suite_failed && args.force;
+
     // For the worktree backend the change still lives inside the sandbox copy (a
     // separate git worktree), so `working_tree_diff` on the host would be empty.
     // Apply the sandbox's diff to the host working tree first; the Docker backend
     // already wrote through the bind mount and skips this step.
-    if !uses_docker
+    if branch_block_note.is_none()
+        && !uses_docker
         && !result.final_diff.trim().is_empty()
         && let Err(e) =
             crate::output::git::apply_diff_to_working_tree(&project_dir, &result.final_diff)
@@ -522,22 +820,30 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         eprintln!("Warning: could not apply sandbox diff to host: {}", e);
     }
 
-    // Create the git branch + commit (no-op when there is no diff).
-    if let Err(e) = crate::output::git::create_branch_and_commit(
-        &project_dir,
-        &branch_name,
-        &result.final_diff,
-        &task.id.to_string(),
-    ) {
-        eprintln!("Warning: git branch/commit failed: {}", e);
+    // Create the git branch + commit (no-op when there is no diff; skipped
+    // entirely when the red-suite gate blocked the branch, and in dry-run /
+    // plan mode where a branch — even an empty ref — would misrepresent a
+    // proposal as a result).
+    if branch_block_note.is_none() && !args.dry_run {
+        if let Err(e) = crate::output::git::create_branch_and_commit(
+            &project_dir,
+            &branch_name,
+            &result.final_diff,
+            &task.id.to_string(),
+        ) {
+            eprintln!("Warning: git branch/commit failed: {}", e);
+        }
     }
 
     // Hermetic safety proof (BUILD_PLAN 1.1): with the branch now committed,
     // verify the committed repo state is unchanged except for that one branch.
     // Emit `safety_proof.json` next to the report and attach it to the result.
     // Skip when there was no diff (no branch was created), so a no-op run isn't
-    // misreported as NON-HERMETIC.
-    if !result.final_diff.trim().is_empty()
+    // misreported as NON-HERMETIC — and skip when the red-suite gate blocked
+    // the branch, since `prove()` in strict mode would abort a correctly
+    // blocked run for the missing branch.
+    if branch_block_note.is_none()
+        && !result.final_diff.trim().is_empty()
         && let Some(pre) = &pre_snapshot
     {
         // Enforce the hermetic guarantee (research report S9). Previously this used
@@ -559,13 +865,49 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     }
 
     // Generate the markdown report (now includes the hermetic safety proof).
-    if let Err(e) = crate::output::report::generate_report(&task, &config, &result) {
+    if let Err(e) = crate::output::report::generate_report(
+        &task,
+        &config,
+        &result,
+        if branch_block_note.is_some() {
+            None
+        } else {
+            Some(branch_name.as_str())
+        },
+    ) {
         eprintln!("Warning: could not generate report: {}", e);
+    }
+    // Record a red-suite block / force override directly in the report so the
+    // audit trail states the branch decision in plain language.
+    if branch_block_note.is_some() || forced_branch {
+        let notice = match (&branch_block_note, forced_branch) {
+            (Some(note), _) => format!("\n## Branch decision\n\n{}\n", note),
+            (None, true) => "## Branch decision\n\nBranch created with `--force` over a failing suite/mutation gate. This branch is explicitly NOT verified.\n".to_string(),
+            _ => String::new(),
+        };
+        if !notice.is_empty() {
+            use std::fmt::Write as _;
+            let path = task_dir.join("report.md");
+            let mut existing = std::fs::read_to_string(&path).unwrap_or_default();
+            let _ = write!(existing, "{notice}");
+            if let Err(e) = crate::util::write_restricted(&path, existing) {
+                eprintln!("Warning: could not append branch decision to report: {}", e);
+            }
+        }
     }
 
     // Persist final task record.
-    record.status = TaskStatus::Completed;
-    record.branch = Some(branch_name.clone());
+    record.topology = Some(result.topology);
+    record.topology_reason = Some(result.topology_reason.clone());
+    if let Some(note) = &branch_block_note {
+        record.status = TaskStatus::Failed {
+            error: note.clone(),
+        };
+        record.branch = None;
+    } else {
+        record.status = TaskStatus::Completed;
+        record.branch = Some(branch_name.clone());
+    }
     record.verdict = Some(format!("{:?}", result.verdict));
     record.revision_rounds = result.revision_rounds;
     record.add_metrics(&result.metrics);
@@ -574,7 +916,75 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     }
 
     if !args.quiet {
-        display.show_completion(&result, &branch_name, &task_dir);
+        match &branch_block_note {
+            Some(note) => {
+                eprintln!("\n{note}");
+                eprintln!(
+                    "Evidence preserved in {} (report.md, changes.patch, artifacts/).",
+                    task_dir.display()
+                );
+            }
+            None => {
+                // Human completion summary is stdout noise in JSON mode — the
+                // envelope below is the contract.
+                if !json_mode {
+                    display.show_completion(&result, &branch_name, &task_dir);
+                }
+            }
+        }
+    }
+
+    if args.output_format == OutputFormat::Json {
+        let branch = if branch_block_note.is_some() {
+            None
+        } else {
+            Some(branch_name.as_str())
+        };
+        println!(
+            "{}",
+            result_envelope(
+                &task,
+                &record,
+                Some(&result),
+                branch,
+                branch_block_note.as_deref(),
+                forced_branch,
+                args.bare,
+                &task_dir,
+            )
+        );
+    }
+
+    // Best-effort OTLP trace export. Telemetry failures warn and never fail
+    // the run — observability is subordinate to the user's task.
+    let otel_endpoint = args
+        .otel_endpoint
+        .clone()
+        .or_else(|| env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok());
+    if let Some(endpoint) = otel_endpoint {
+        let trace_path = task_dir.join("trace.jsonl");
+        match std::fs::read_to_string(&trace_path) {
+            Ok(text) => {
+                let spans: Vec<serde_json::Value> = text
+                    .lines()
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect();
+                let payload = crate::output::otel::otlp_payload(
+                    "niki",
+                    env!("CARGO_PKG_VERSION"),
+                    &crate::output::otel::trace_id_hex(&task.id.to_string()),
+                    &spans,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(0),
+                );
+                if let Err(e) = crate::output::otel::export_trace(&endpoint, &payload).await {
+                    eprintln!("Warning: OTLP trace export failed: {e}");
+                }
+            }
+            Err(e) => eprintln!("Warning: cannot read trace for OTLP export: {e}"),
+        }
     }
 
     // Tear down the TUI (if active): this joins the render thread, which

@@ -58,7 +58,17 @@ fn build_provider(config: &NikiConfig) -> Option<(Box<dyn LlmProvider>, String)>
         }
     }
 
-    if let Ok(key) = std::env::var("GEMINI_API_KEY") {
+    // Canonical env var is GOOGLE_API_KEY (config + auth use it); GEMINI_API_KEY
+    // is honored as a deprecated fallback so existing setups keep working.
+    let google_key = std::env::var("GOOGLE_API_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
+        .or_else(|| {
+            std::env::var("GEMINI_API_KEY")
+                .ok()
+                .filter(|k| !k.is_empty())
+        });
+    if let Some(key) = google_key {
         if !key.is_empty() {
             let pc = crate::config::types::ProviderConfig {
                 api_key: Some(key),

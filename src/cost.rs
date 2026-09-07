@@ -2,11 +2,26 @@
 //!
 //! Token counts come from the LLM providers' own usage reports (see
 //! [`crate::llm::provider::StreamChunk::Usage`]); this module turns those into a
-//! USD cost using a best-effort price table. Unknown models (e.g. a local Ollama
-//! model or a brand-new model id) price as `0.0` so a run still completes and the
-//! report shows the token counts even when we can't attach a dollar figure.
+//! USD cost using a best-effort price table.
+//!
+//! Honesty rules (Phase 1, goal-a3f9c2):
+//! - Unknown models price as `0.0` **with a loud warning** (see [`compute_cost`])
+//!   so a run still completes but nobody mistakes the total for complete.
+//! - Cached input tokens price at 10% of the input rate; reasoning tokens price
+//!   at the output rate. These ratios are documented approximations, not vendor
+//!   quotes — update them alongside the table.
+//! - [`PRICE_TABLE_AS_OF`] stamps the table's freshness; a unit test fails when
+//!   the table goes stale so refreshes can't be silently skipped.
 
 use crate::llm::provider::TokenUsage;
+
+/// ISO-8601 date the price table below was last verified against vendor pages.
+/// Bump this whenever rates are refreshed. `price_table_is_fresh` fails the
+/// build when the table is older than [`PRICE_TABLE_MAX_AGE_DAYS`].
+pub const PRICE_TABLE_AS_OF: &str = "2026-09-06";
+
+/// Maximum age of the price table before `price_table_is_fresh` fails.
+pub const PRICE_TABLE_MAX_AGE_DAYS: i64 = 180;
 
 /// USD price per 1,000,000 tokens.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,6 +34,11 @@ impl ModelPrice {
     fn cost(&self, usage: &TokenUsage) -> f64 {
         (usage.input_tokens as f64 / 1_000_000.0) * self.input_per_million
             + (usage.output_tokens as f64 / 1_000_000.0) * self.output_per_million
+            // Cache hits bill well below list input rates across vendors; 10%
+            // is the documented approximation (see module docs).
+            + (usage.cached_input_tokens as f64 / 1_000_000.0) * self.input_per_million * 0.1
+            // Reasoning/thinking tokens bill at output rates.
+            + (usage.reasoning_tokens as f64 / 1_000_000.0) * self.output_per_million
     }
 }
 
@@ -128,11 +148,39 @@ pub fn lookup_price(provider: &str, model: &str) -> Option<ModelPrice> {
 }
 
 /// Total USD cost for a completion, or `0.0` when the model is unknown.
+///
+/// Unknown models warn loudly (log + caller-facing `is_unpriced` checks) so a
+/// `$0.00` total is never mistaken for a free run. Local providers
+/// (`ollama`, `mock`) are legitimately free and do not warn.
 pub fn compute_cost(provider: &str, model: &str, usage: &TokenUsage) -> f64 {
     match lookup_price(provider, model) {
         Some(price) => price.cost(usage),
-        None => 0.0,
+        None => {
+            let p = provider.to_lowercase();
+            if !p.contains("ollama") && !p.contains("mock") {
+                tracing::warn!(
+                    target: "niki::cost",
+                    provider,
+                    model,
+                    input_tokens = usage.input_tokens,
+                    output_tokens = usage.output_tokens,
+                    "Model not in price table (as of {}) — cost reported as $0.00 UNDERSTATES real spend",
+                    PRICE_TABLE_AS_OF,
+                );
+            }
+            0.0
+        }
     }
+}
+
+/// True when `(provider, model)` has no table entry and is not a known-free
+/// local provider — i.e. a `$0.00` cost means "unmeasured", not "free".
+pub fn is_unpriced(provider: &str, model: &str) -> bool {
+    let p = provider.to_lowercase();
+    if p.contains("ollama") || p.contains("mock") {
+        return false;
+    }
+    lookup_price(provider, model).is_none()
 }
 
 #[cfg(test)]
@@ -156,7 +204,8 @@ mod tests {
                 "llama3",
                 &TokenUsage {
                     input_tokens: 1_000_000,
-                    output_tokens: 1_000_000
+                    output_tokens: 1_000_000,
+                    ..Default::default()
                 }
             ),
             0.0
@@ -171,7 +220,8 @@ mod tests {
                 "some-future-model",
                 &TokenUsage {
                     input_tokens: 100,
-                    output_tokens: 100
+                    output_tokens: 100,
+                    ..Default::default()
                 }
             ),
             0.0
@@ -185,6 +235,7 @@ mod tests {
         let usage = TokenUsage {
             input_tokens: 1_000_000,
             output_tokens: 1_000_000,
+            ..Default::default()
         };
         assert_eq!(price.cost(&usage), 3.0 + 15.0);
     }
@@ -194,5 +245,43 @@ mod tests {
         // "claude-haiku-4-5" must resolve to haiku-4-5, not the generic "claude-haiku".
         let price = lookup_price("anthropic", "claude-haiku-4-5-20251001").unwrap();
         assert_eq!(price.input_per_million, 1.0);
+    }
+
+    #[test]
+    fn price_table_is_fresh() {
+        // The table is a frozen snapshot of vendor pricing. Failing here means
+        // rates must be re-verified and PRICE_TABLE_AS_OF bumped — not that
+        // the test should be weakened.
+        let as_of =
+            chrono::NaiveDate::parse_from_str(PRICE_TABLE_AS_OF, "%Y-%m-%d").expect("valid date");
+        let age = chrono::Local::now()
+            .date_naive()
+            .signed_duration_since(as_of);
+        assert!(
+            age.num_days() <= PRICE_TABLE_MAX_AGE_DAYS,
+            "price table is {} days old (as of {}); re-verify vendor rates",
+            age.num_days(),
+            PRICE_TABLE_AS_OF
+        );
+    }
+
+    #[test]
+    fn cached_and_reasoning_tokens_are_priced() {
+        let price = lookup_price("anthropic", "claude-sonnet-4-20250514").unwrap();
+        let usage = TokenUsage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cached_input_tokens: 1_000_000,
+            reasoning_tokens: 1_000_000,
+        };
+        // 10% of $3 input + 100% of $15 output.
+        assert_eq!(price.cost(&usage), 0.3 + 15.0);
+    }
+
+    #[test]
+    fn unpriced_detector() {
+        assert!(is_unpriced("groq", "llama-3.1-70b-versatile"));
+        assert!(!is_unpriced("anthropic", "claude-sonnet-4-20250514"));
+        assert!(!is_unpriced("ollama", "llama3"));
     }
 }

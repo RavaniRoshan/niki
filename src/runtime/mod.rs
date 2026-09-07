@@ -502,8 +502,30 @@ impl Tool for ReadTool {
         let start_line = input.int("start_line").unwrap_or(1) as usize;
         let end_line = input.int("end_line").map(|n| n as usize);
 
+        // Binary media need parsing deps this binary deliberately does not
+        // vendors (supply-chain gate): refuse with guidance instead of dumping
+        // bytes (or a bare UTF-8 error) into agent context.
+        if let Some(ext) = full_path.extension().and_then(|e| e.to_str()) {
+            let ext = ext.to_lowercase();
+            if ["png", "jpg", "jpeg", "gif", "webp", "pdf"].contains(&ext.as_str()) {
+                return make_error_result(&format!(
+                    "cannot read {} as text ({} files need binary parsing, not yet supported); \
+                     describe what you need from it instead",
+                    full_path.display(),
+                    ext
+                ));
+            }
+        }
+
         match tokio::fs::read_to_string(&full_path).await {
             Ok(content) => {
+                // Jupyter notebooks are JSON, not line-oriented text: render
+                // cells structurally so agents see code/outputs per cell.
+                // Images (PNG/JPG) and PDFs need binary parsing deps and are
+                // refused honestly instead of dumping bytes into context.
+                if full_path.extension().and_then(|e| e.to_str()) == Some("ipynb") {
+                    return render_notebook(&full_path, &content, start_line, end_line);
+                }
                 let lines: Vec<(usize, String)> = content
                     .lines()
                     .enumerate()
@@ -546,9 +568,148 @@ impl Tool for ReadTool {
     }
 }
 
+/// Render a `.ipynb` notebook as structured per-cell text (cell index, type,
+/// source, truncated outputs). Falls back to an error result on invalid JSON
+/// so a corrupt notebook never silently becomes empty context.
+fn render_notebook(
+    full_path: &std::path::PathBuf,
+    content: &str,
+    start_line: usize,
+    end_line: Option<usize>,
+) -> ToolResult {
+    let make_lines = |text: String| -> (Vec<(usize, String)>, usize) {
+        let lines: Vec<(usize, String)> = text
+            .lines()
+            .enumerate()
+            .map(|(i, l)| (i + 1, l.to_string()))
+            .collect();
+        let total = lines.len();
+        let filtered: Vec<(usize, String)> = lines
+            .into_iter()
+            .filter(|(i, _)| *i >= start_line)
+            .filter(|(i, _)| end_line.is_none_or(|e| *i <= e))
+            .collect();
+        (filtered, total)
+    };
+    let result_of = |text: String| -> ToolResult {
+        let (filtered, total) = make_lines(text);
+        let shown = filtered.len();
+        ToolResult {
+            tool_id: ToolId::generate(),
+            tool_name: "read".into(),
+            status: ToolStatus::Success,
+            summary: format!("{} (notebook, {}/{})", full_path.display(), shown, total),
+            data: ToolData::FileContent {
+                path: full_path.display().to_string(),
+                lines: filtered,
+                total_lines: total,
+            },
+            duration: Duration::ZERO,
+            artifacts: vec![ArtifactRef {
+                path: full_path.clone(),
+                artifact_type: ArtifactType::FileRead,
+            }],
+            diagnostics: Vec::new(),
+            metadata: HashMap::new(),
+        }
+    };
+    let nb: serde_json::Value = match serde_json::from_str(content) {
+        Ok(v) => v,
+        Err(e) => {
+            return make_error_result(&format!(
+                "invalid notebook JSON {}: {}",
+                full_path.display(),
+                e
+            ));
+        }
+    };
+    let cells = nb
+        .get("cells")
+        .and_then(|c| c.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if cells.is_empty() {
+        return result_of("(notebook has no cells)".to_string());
+    }
+    let mut out = String::new();
+    for (i, cell) in cells.iter().enumerate() {
+        let kind = cell
+            .get("cell_type")
+            .and_then(|k| k.as_str())
+            .unwrap_or("unknown");
+        out.push_str(&format!("--- cell {} [{}] ---\n", i, kind));
+        let source = cell
+            .get("source")
+            .map(|s| match s {
+                serde_json::Value::String(t) => t.clone(),
+                serde_json::Value::Array(lines) => lines
+                    .iter()
+                    .filter_map(|l| l.as_str())
+                    .collect::<Vec<_>>()
+                    .join(""),
+                _ => String::new(),
+            })
+            .unwrap_or_default();
+        out.push_str(&source);
+        if !source.ends_with('\n') {
+            out.push('\n');
+        }
+        if kind == "code" {
+            if let Some(outputs) = cell.get("outputs").and_then(|o| o.as_array()) {
+                for output in outputs.iter().take(5) {
+                    let text = output
+                        .get("text")
+                        .map(|t| match t {
+                            serde_json::Value::String(s) => s.clone(),
+                            serde_json::Value::Array(lines) => lines
+                                .iter()
+                                .filter_map(|l| l.as_str())
+                                .collect::<Vec<_>>()
+                                .join(""),
+                            _ => String::new(),
+                        })
+                        .unwrap_or_default();
+                    let text: String = text.chars().take(2000).collect();
+                    if !text.trim().is_empty() {
+                        out.push_str("[output]\n");
+                        out.push_str(&text);
+                        if !text.ends_with('\n') {
+                            out.push('\n');
+                        }
+                    }
+                    if let Some(trace) =
+                        output
+                            .get("traceback")
+                            .and_then(|t| t.as_array())
+                            .map(|lines| {
+                                lines
+                                    .iter()
+                                    .filter_map(|l| l.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join("")
+                            })
+                    {
+                        let trace: String = trace.chars().take(2000).collect();
+                        if !trace.trim().is_empty() {
+                            out.push_str("[traceback]\n");
+                            out.push_str(&trace);
+                            if !trace.ends_with('\n') {
+                                out.push('\n');
+                            }
+                        }
+                    }
+                }
+                if outputs.len() > 5 {
+                    out.push_str(&format!("[{} more outputs omitted]\n", outputs.len() - 5));
+                }
+            }
+        }
+    }
+    result_of(out)
+}
+
 /// Glob tool — find files by pattern.
 pub struct GlobTool;
-
 #[async_trait::async_trait]
 impl Tool for GlobTool {
     fn def(&self) -> &ToolDef {
@@ -1568,6 +1729,11 @@ impl Tool for TaskListTool {
 }
 
 /// Ask user tool — prompt user for input.
+///
+/// Honesty contract (goal-a3f9c2): this tool REALLY asks. On a TTY it prints
+/// the question (plus `options`/`default` when provided) and blocks on stdin.
+/// When stdin is not interactive it FAILS instead of inventing an answer —
+/// a fabricated user response is worse than no response.
 pub struct AskUserTool;
 
 #[async_trait::async_trait]
@@ -1575,7 +1741,7 @@ impl Tool for AskUserTool {
     fn def(&self) -> &ToolDef {
         static DEF: ToolDef = ToolDef {
             name: "ask_user",
-            description: "Ask the user a question and wait for response",
+            description: "Ask the user a question and wait for response. Fails when stdin is not interactive.",
             category: ToolCategory::Human,
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
@@ -1585,16 +1751,51 @@ impl Tool for AskUserTool {
     }
 
     async fn execute(&self, input: ToolInput, _ctx: &ToolContext) -> ToolResult {
-        let question = input.str("question").unwrap_or("?");
-        // In real execution, this blocks for user input via TUI
+        use std::io::IsTerminal;
+        let question = input.str("question").unwrap_or("?").to_string();
+        let options = input.str("options").unwrap_or("").to_string();
+        let default = input.str("default").unwrap_or("").to_string();
+        if !std::io::stdin().is_terminal() {
+            return ToolResult {
+                tool_id: ToolId::generate(),
+                tool_name: "ask_user".into(),
+                status: ToolStatus::Failed,
+                summary: format!("cannot ask (non-interactive stdin): {}", question),
+                data: ToolData::UserResponse {
+                    question: question.to_string(),
+                    response: String::new(),
+                },
+                duration: Duration::ZERO,
+                artifacts: Vec::new(),
+                diagnostics: Vec::new(),
+                metadata: HashMap::new(),
+            };
+        }
+        if options.is_empty() {
+            println!("{}:", question);
+        } else if default.is_empty() {
+            println!("{} [{}]:", question, options);
+        } else {
+            println!("{} [{}] (default: {}):", question, options, default);
+        }
+        let mut answer = String::new();
+        if std::io::stdin().read_line(&mut answer).is_err() {
+            answer = String::new();
+        }
+        let answer = answer.trim().to_string();
+        let answer = if answer.is_empty() && !default.is_empty() {
+            default
+        } else {
+            answer
+        };
         ToolResult {
             tool_id: ToolId::generate(),
             tool_name: "ask_user".into(),
             status: ToolStatus::Success,
-            summary: format!("asked: {}", question),
+            summary: format!("asked: {} → answered", question),
             data: ToolData::UserResponse {
                 question: question.to_string(),
-                response: "(awaiting TUI integration)".into(),
+                response: answer,
             },
             duration: Duration::ZERO,
             artifacts: Vec::new(),
@@ -1605,6 +1806,11 @@ impl Tool for AskUserTool {
 }
 
 /// Approval tool — request approval for a dangerous operation.
+///
+/// Honesty contract (goal-a3f9c2): this tool REALLY gates. On a TTY it prompts
+/// `y/N` (default: deny). When stdin is not interactive it DENIES with
+/// `PermissionDenied` — the previous behavior auto-approved everything, which
+/// made every downstream "approval" meaningless.
 pub struct ApprovalTool;
 
 #[async_trait::async_trait]
@@ -1612,7 +1818,7 @@ impl Tool for ApprovalTool {
     fn def(&self) -> &ToolDef {
         static DEF: ToolDef = ToolDef {
             name: "approval",
-            description: "Request approval before executing a dangerous operation",
+            description: "Request approval before executing a dangerous operation. Denies by default; denies always when non-interactive.",
             category: ToolCategory::Human,
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
@@ -1622,15 +1828,53 @@ impl Tool for ApprovalTool {
     }
 
     async fn execute(&self, input: ToolInput, _ctx: &ToolContext) -> ToolResult {
-        let command = input.str("command").unwrap_or("unknown");
+        use std::io::IsTerminal;
+        let command = input.str("command").unwrap_or("unknown").to_string();
+        if !std::io::stdin().is_terminal() {
+            return ToolResult {
+                tool_id: ToolId::generate(),
+                tool_name: "approval".into(),
+                status: ToolStatus::PermissionDenied,
+                summary: format!("denied (non-interactive stdin): {}", command),
+                data: ToolData::ApprovalResult {
+                    approved: false,
+                    reason: Some(
+                        "non-interactive stdin: approvals require a human at a TTY".into(),
+                    ),
+                },
+                duration: Duration::ZERO,
+                artifacts: Vec::new(),
+                diagnostics: Vec::new(),
+                metadata: HashMap::new(),
+            };
+        }
+        println!(
+            "Agent requests approval to run:\n  {}\nApprove? [y/N]:",
+            command
+        );
+        let mut answer = String::new();
+        let approved = std::io::stdin().read_line(&mut answer).is_ok()
+            && matches!(answer.trim().to_lowercase().as_str(), "y" | "yes");
         ToolResult {
             tool_id: ToolId::generate(),
             tool_name: "approval".into(),
-            status: ToolStatus::Success,
-            summary: format!("approval for: {}", command),
+            status: if approved {
+                ToolStatus::Success
+            } else {
+                ToolStatus::PermissionDenied
+            },
+            summary: format!(
+                "{}: {}",
+                if approved { "approved" } else { "denied" },
+                command
+            ),
             data: ToolData::ApprovalResult {
-                approved: true,
-                reason: Some("auto-approved for testing".into()),
+                approved,
+                reason: Some(if approved {
+                    "human approved at TTY".into()
+                } else {
+                    "human denied (or empty answer, default deny)".into()
+                }),
             },
             duration: Duration::ZERO,
             artifacts: Vec::new(),
@@ -2223,6 +2467,79 @@ mod tests {
         }
     }
 
+    fn read_ctx(dir: &std::path::Path) -> ToolContext {
+        ToolContext {
+            agent_id: crate::mission::AgentId("a1".into()),
+            mission_id: crate::mission::MissionId("m1".into()),
+            role: "coder".into(),
+            project_path: dir.to_path_buf(),
+            permissions: HashMap::new(),
+            task_store: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn read_renders_notebook_cells() {
+        let dir = std::env::temp_dir().join(format!("niki-nb-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("analysis.ipynb"),
+            serde_json::json!({
+                "cells": [
+                    {"cell_type": "markdown", "source": ["# Title\n", "words"]},
+                    {"cell_type": "code", "source": ["print(1)\n"],
+                     "outputs": [{"text": ["1\n"]}]},
+                    {"cell_type": "code", "source": ["bad("],
+                     "outputs": [{"traceback": ["E1\n", "E2"]}]}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let registry = build_baseline_registry();
+        let out = registry
+            .execute(
+                "read",
+                ToolInput::new(serde_json::json!({"path": "analysis.ipynb"})),
+                &read_ctx(&dir),
+            )
+            .await;
+        assert_eq!(out.status, ToolStatus::Success);
+        let text = match out.data {
+            ToolData::FileContent { lines, .. } => lines
+                .into_iter()
+                .map(|(_, l)| l)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            other => panic!("expected FileContent, got {:?}", other),
+        };
+        assert!(text.contains("cell 0 [markdown]"), "{text}");
+        assert!(text.contains("cell 1 [code]"), "{text}");
+        assert!(text.contains("[output]"), "{text}");
+        assert!(text.contains("[traceback]"), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn read_refuses_binary_media_honestly() {
+        let dir = std::env::temp_dir().join(format!("niki-media-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("shot.png"), [0u8, 1, 2, 3]).unwrap();
+        let registry = build_baseline_registry();
+        let out = registry
+            .execute(
+                "read",
+                ToolInput::new(serde_json::json!({"path": "shot.png"})),
+                &read_ctx(&dir),
+            )
+            .await;
+        assert_ne!(out.status, ToolStatus::Success);
+        assert!(out.summary.contains("binary parsing"), "{}", out.summary);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[tokio::test]
     async fn task_spawn_status_cancel_round_trip() {
         let registry = build_baseline_registry();
@@ -2289,5 +2606,50 @@ mod tests {
         assert_eq!(cancel.status, ToolStatus::Success);
         assert!(matches!(cancel.data, ToolData::None));
         assert_eq!(store.status(&task_id).unwrap().status, "cancelled");
+    }
+
+    fn human_ctx() -> ToolContext {
+        ToolContext {
+            agent_id: crate::mission::AgentId("a1".into()),
+            mission_id: crate::mission::MissionId("m1".into()),
+            role: "coder".into(),
+            project_path: std::env::temp_dir(),
+            permissions: HashMap::new(),
+            task_store: None,
+        }
+    }
+
+    /// `cargo test` stdin is never a TTY, so these assert the non-interactive
+    /// contract deterministically: ask FAILS (never invents an answer) and
+    /// approval DENIES (never auto-approves).
+    #[tokio::test]
+    async fn ask_user_fails_when_non_interactive() {
+        let registry = build_baseline_registry();
+        let out = registry
+            .execute(
+                "ask_user",
+                ToolInput::new(serde_json::json!({"question": "proceed?"})),
+                &human_ctx(),
+            )
+            .await;
+        assert_eq!(out.status, ToolStatus::Failed);
+        assert!(out.summary.contains("non-interactive"));
+    }
+
+    #[tokio::test]
+    async fn approval_denies_when_non_interactive() {
+        let registry = build_baseline_registry();
+        let out = registry
+            .execute(
+                "approval",
+                ToolInput::new(serde_json::json!({"command": "rm -rf /"})),
+                &human_ctx(),
+            )
+            .await;
+        assert_eq!(out.status, ToolStatus::PermissionDenied);
+        match out.data {
+            ToolData::ApprovalResult { approved, .. } => assert!(!approved),
+            other => panic!("expected ApprovalResult, got {:?}", other),
+        }
     }
 }

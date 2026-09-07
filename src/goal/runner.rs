@@ -74,6 +74,8 @@ impl GoalRunner {
                 false,
                 goal_cancel.clone(),
                 &task_dir,
+                None,
+                false,
             )
             .await
             {

@@ -35,7 +35,10 @@ pub async fn handle(args: &ReportArgs) -> Result<()> {
         None => match latest_task_id(&tasks_dir) {
             Some(id) => id,
             None => {
-                eprintln!("No tasks found in {}", tasks_dir.display());
+                eprintln!(
+                    "No tasks found in {}. Run `niki run \"<task>\"` to create one (or `niki plan \"<task>\"` to review a plan first).",
+                    tasks_dir.display()
+                );
                 return Ok(());
             }
         },
@@ -52,7 +55,7 @@ pub async fn handle(args: &ReportArgs) -> Result<()> {
 
 /// Resolve a user-supplied task id (full UUID or a short prefix) to a concrete
 /// task directory name. Errors if nothing matches or the prefix is ambiguous.
-fn resolve_task_id(tasks_dir: &Path, input: &str) -> Result<String> {
+pub(crate) fn resolve_task_id(tasks_dir: &Path, input: &str) -> Result<String> {
     // Exact directory match (full UUID) wins immediately.
     if tasks_dir.join(input).join("task.json").is_file() {
         return Ok(input.to_string());
@@ -92,7 +95,7 @@ fn resolve_task_id(tasks_dir: &Path, input: &str) -> Result<String> {
 }
 
 /// Find the most recently created task's directory name.
-fn latest_task_id(tasks_dir: &Path) -> Option<String> {
+pub(crate) fn latest_task_id(tasks_dir: &Path) -> Option<String> {
     let mut latest: Option<(String, chrono::DateTime<chrono::Utc>)> = None;
     if let Ok(entries) = std::fs::read_dir(tasks_dir) {
         for entry in entries.flatten() {

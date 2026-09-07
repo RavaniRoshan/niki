@@ -82,5 +82,10 @@ case ":$PATH:" in
   *) echo "NOTE: $DEST is not on your PATH — add it to your shell profile." ;;
 esac
 echo
-echo "Next: set an API key (e.g. ANTHROPIC_API_KEY) and run:"
-echo "  niki run \"Add a health endpoint to src/api.rs\""
+echo "Next:"
+echo "  1. Create config + keys:  niki init  (or: niki init --scan to also draft AGENTS.md)"
+echo "  2. Sandbox image (container backend): from a niki source checkout, run"
+echo "       podman build -t niki-sandbox:24.04 -f docker/Dockerfile .   # or: docker build ..."
+echo "     No container runtime? Use the worktree backend instead: niki run --backend worktree ..."
+echo "  3. Verify everything:      niki doctor"
+echo "  4. First task:             niki run \"Add a health endpoint to src/api.rs\""

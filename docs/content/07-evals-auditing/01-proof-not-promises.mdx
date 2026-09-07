@@ -20,7 +20,7 @@ Every time NIKI runs, it produces a cryptographic and auditable record in `.niki
 
 1. **`report.md`**: Human-readable executive summary of the decisions, scores, and revisions.
 2. **`changes.patch`**: Exact unified diff applied to the working tree.
-3. **`safety_proof.json`**: Manifest certifying which deny-list checks, capability drops, and spend caps were validated.
-4. **`test_execution.json`**: In-container execution transcripts containing real exit codes and test runner outputs.
+3. **`safety_proof.json`**: Manifest certifying post-run git invariants — the new branch was added, existing branches/history are preserved, and no rebase or force-push occurred. It does not certify sandbox flags or spend caps (those are enforced at runtime and reported in `report.md`). Skipped on empty diffs (no branch, nothing to prove).
+4. **`test_execution.json`**: In-container execution transcripts containing real exit codes and test runner outputs. Written only when a test command resolves; advisory evidence for the Reviewer verdict, not a hard gate (see `docs/benchmarks.md`).
 
-No task is considered complete until all four artifacts are generated.
+A task's audit trail is complete when `report.md` and `changes.patch` exist; `safety_proof.json` and `test_execution.json` are written whenever their preconditions hold (non-empty diff, resolvable test command).

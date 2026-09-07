@@ -14,7 +14,16 @@
             "type": "string",
             "enum": ["passed", "failed", "skipped", "error"]
           },
-          "error_message": { "type": ["string", "null"] }
+          "error_message": { "type": ["string", "null"] },
+          "oracle_source": {
+            "description": "Where the test's expected values come from. 'spec' = traced to the task spec/plan (independent oracle). 'derived' = read off the implementation under test (circular — cannot validate intent). 'property' = invariant over generated inputs (property-based).",
+            "type": "string",
+            "enum": ["spec", "derived", "property"]
+          },
+          "spec_reference": {
+            "description": "Which spec/plan statement this test's expectations trace to. Required when oracle_source is 'spec'.",
+            "type": ["string", "null"]
+          }
         },
         "required": ["name", "file_path", "description", "status"]
       }

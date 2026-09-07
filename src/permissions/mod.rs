@@ -109,6 +109,12 @@ pub struct PermissionConfig {
     /// `.claude`, `~/.ssh`, `~/.aws`). These are host-reaching or security-
     /// sensitive surfaces that Niki refuses to touch silently.
     pub protected_paths: Vec<String>,
+    /// Fail closed when headless: an Ask with no TUI listening denies instead
+    /// of allowing with a warning. Default false (behavior-preserving); set
+    /// via `[permissions] fail_closed_headless = true` for unattended runs
+    /// where silent auto-approval is unacceptable.
+    #[serde(default)]
+    pub fail_closed_headless: bool,
 }
 
 /// Permission checker — evaluates whether an action is allowed.
@@ -191,6 +197,11 @@ impl PermissionChecker {
     /// Check if auto-approve is enabled.
     pub fn auto_approve(&self) -> bool {
         self.config.auto_approve
+    }
+
+    /// Whether headless Ask falls back to Deny instead of Allow-with-warning.
+    pub fn fail_closed_headless(&self) -> bool {
+        self.config.fail_closed_headless
     }
 
     /// Default set of paths that are always prompted for — host-reaching and
@@ -279,6 +290,15 @@ mod tests {
         assert_eq!(checker.check_tool("read"), Permission::Allow);
         assert_eq!(checker.check_tool("edit"), Permission::Ask);
         assert_eq!(checker.check_tool("unknown"), Permission::Ask);
+    }
+
+    #[test]
+    fn fail_closed_headless_defaults_off() {
+        let checker = PermissionChecker::new(PermissionConfig {
+            tools: ToolPermissions::default(),
+            ..Default::default()
+        });
+        assert!(!checker.fail_closed_headless());
     }
 
     #[test]

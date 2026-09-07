@@ -32,6 +32,15 @@ enum Commands {
         #[command(subcommand)]
         command: niki::cli::config::ConfigCommands,
     },
+    /// Initialize a new niki.toml configuration file (alias for `config init`)
+    Init {
+        /// Run interactively (prompt for settings, check env vars)
+        #[arg(short, long)]
+        interactive: bool,
+        /// Scan the project and draft AGENTS.md
+        #[arg(long)]
+        scan: bool,
+    },
     /// Recommend per-agent models (cost/quality tradeoffs)
     Recommend(niki::cli::recommend::RecommendArgs),
     /// Generate/locate the static HTML dashboard for a task
@@ -42,6 +51,10 @@ enum Commands {
     Memory(niki::cli::memory::MemoryArgs),
     /// Manage persistent goals (autonomous goal runner)
     Goal(niki::cli::goal::GoalArgs),
+    /// Research and propose a change without making it (plan mode)
+    Plan(niki::cli::plan::PlanArgs),
+    /// Inspect and rewind chat/pipeline sessions
+    Session(niki::cli::session::SessionArgs),
     /// Manage API credentials (login, logout, status)
     Auth {
         #[command(subcommand)]
@@ -53,8 +66,13 @@ enum Commands {
     Doctor(niki::cli::doctor::DoctorArgs),
     /// Interactive chat session (TUI)
     Chat(niki::cli::chat::ChatArgs),
+    /// Inspect custom slash commands
+    #[allow(clippy::enum_variant_names)]
+    Commands(niki::cli::commands::CommandsArgs),
     /// Run NIKI as an Agent Client Protocol (ACP) server over stdio
     Acp(niki::cli::acp::AcpArgs),
+    /// Emit a consolidated compliance bundle for one task as JSON
+    Audit(niki::cli::audit::AuditArgs),
     /// Run a smoke test: quick pipeline check to verify your setup works end-to-end
     Smoke(niki::cli::smoke::SmokeArgs),
     /// Search the web and return a cited summary
@@ -84,18 +102,29 @@ async fn main() -> Result<()> {
     match &command {
         Commands::Run(args) => niki::cli::run::handle(args).await?,
         Commands::Acp(args) => niki::cli::acp::handle(args).await?,
+        Commands::Audit(args) => niki::cli::audit::handle(args)?,
         Commands::Status(args) => niki::cli::status::handle(args).await?,
         Commands::Report(args) => niki::cli::report::handle(args).await?,
         Commands::Config { command } => niki::cli::config::handle(command).await?,
+        Commands::Init { interactive, scan } => {
+            niki::cli::config::handle(&niki::cli::config::ConfigCommands::Init {
+                interactive: *interactive,
+                scan: *scan,
+            })
+            .await?
+        }
         Commands::Recommend(args) => niki::cli::recommend::handle(args)?,
         Commands::Dashboard(args) => niki::cli::dashboard::handle(args)?,
         Commands::Eval(args) => niki::cli::eval::handle(args).await?,
         Commands::Memory(args) => niki::cli::memory::handle(args)?,
         Commands::Goal(args) => niki::cli::goal::handle(args).await?,
+        Commands::Plan(args) => niki::cli::plan::handle(args).await?,
+        Commands::Session(args) => niki::cli::session::handle(args)?,
         Commands::Auth { command } => niki::cli::auth::handle(command).await?,
         Commands::Providers(args) => niki::cli::providers::handle(args)?,
         Commands::Doctor(args) => niki::cli::doctor::handle(args)?,
         Commands::Chat(args) => niki::cli::chat::handle(args).await?,
+        Commands::Commands(args) => niki::cli::commands::handle(args)?,
         Commands::Smoke(args) => niki::cli::smoke::handle(args).await?,
         Commands::Research(args) => niki::cli::research::handle(args).await?,
         Commands::Verify(args) => niki::cli::verify::handle(args)?,

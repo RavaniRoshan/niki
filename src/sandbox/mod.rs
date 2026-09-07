@@ -62,8 +62,30 @@ pub(crate) fn build_permission_checker(
         auto_approve: config.permissions.auto_approve,
         external_directory: Permission::Ask,
         doom_loop: Permission::Ask,
+        mode: parse_permission_mode(&config.permissions.mode),
+        fail_closed_headless: config.permissions.fail_closed_headless,
         ..Default::default()
     })
+}
+
+/// Map the `[permissions] mode` string (or `--permission-mode` override) onto
+/// [`PermissionMode`]. Unknown values fail closed to `Manual` with a warning —
+/// a typo must never silently escalate to a permissive mode.
+fn parse_permission_mode(s: &str) -> crate::permissions::PermissionMode {
+    use crate::permissions::PermissionMode;
+    match s.to_lowercase().as_str() {
+        "auto" => PermissionMode::Auto,
+        "dontask" | "dont_ask" | "dont-ask" => PermissionMode::DontAsk,
+        "bypass" | "bypasspermissions" | "bypass_permissions" => PermissionMode::BypassPermissions,
+        "manual" => PermissionMode::Manual,
+        other => {
+            tracing::warn!(
+                target: "niki::permissions",
+                "unknown permission mode '{other}' — falling back to manual (fail closed)"
+            );
+            PermissionMode::Manual
+        }
+    }
 }
 
 pub mod docker;
@@ -353,6 +375,32 @@ mod tests {
     fn reviewer_policy_blocks_git_commit() {
         let policy = crate::config::types::default_reviewer_policy();
         assert!(check_command_policy(&["git", "commit", "-m", "fix"], &policy).is_err());
+    }
+
+    #[test]
+    fn permission_mode_mapping_fails_closed() {
+        use crate::permissions::PermissionMode;
+        assert_eq!(parse_permission_mode("auto"), PermissionMode::Auto);
+        assert_eq!(parse_permission_mode("dontask"), PermissionMode::DontAsk);
+        assert_eq!(
+            parse_permission_mode("bypass"),
+            PermissionMode::BypassPermissions
+        );
+        assert_eq!(parse_permission_mode("manual"), PermissionMode::Manual);
+        // Unknown values (typos) must never escalate: fail closed to Manual.
+        assert_eq!(
+            parse_permission_mode(" permissive "),
+            PermissionMode::Manual
+        );
+        assert_eq!(parse_permission_mode(""), PermissionMode::Manual);
+    }
+
+    #[test]
+    fn disable_worktree_defaults_off() {
+        // Governance kill-switch is opt-in; default runs keep today's behavior.
+        let config = NikiConfig::default();
+        assert!(!config.permissions.disable_worktree);
+        assert_eq!(config.permissions.mode, "manual");
     }
 
     #[test]

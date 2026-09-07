@@ -113,7 +113,7 @@ impl TipsBanner {
             Span::styled(
                 " 💡 ",
                 Style::default()
-                    .fg(super::theme::AMBER())
+                    .fg(super::theme::warning())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(tip, Style::default().fg(super::theme::fg_dim())),

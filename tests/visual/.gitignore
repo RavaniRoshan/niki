@@ -1,0 +1,6 @@
+.work/
+frames/
+!reference/
+!reference/*.png
+!tapes/
+!tapes/*.tape

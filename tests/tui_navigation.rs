@@ -31,6 +31,7 @@ fn make_state_with_stages(n: usize) -> AppState {
             latency_ms: 1000 * (i as u64 + 1),
             summary: vec![format!("summary {}", i)],
             start: Some(std::time::Instant::now()),
+            completed_at: None,
             prompt_file: None,
             retry_count: 0,
             error_message: None,

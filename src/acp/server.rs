@@ -83,6 +83,8 @@ async fn run_prompt(
         false, // dry_run
         cancel,
         &task_dir,
+        None,
+        false,
     )
     .await;
 

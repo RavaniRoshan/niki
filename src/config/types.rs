@@ -58,6 +58,14 @@ pub struct NikiConfig {
     /// Permission system configuration.
     #[serde(default)]
     pub permissions: PermissionsConfig,
+    /// Shell-hook policy ([hooks] event -> commands).
+    #[serde(default)]
+    pub hooks: HooksConfig,
+    /// Slash-command sources: extra directories of `*.md` command files
+    /// loaded alongside `<project>/.niki/commands/` (which always wins).
+    /// Share packs by committing a dir and listing it here.
+    #[serde(default)]
+    pub commands: CommandsConfig,
     /// AGENTS.md / project instructions configuration.
     #[serde(default)]
     pub instructions: InstructionsConfig,
@@ -617,12 +625,65 @@ fn default_mcp_server_enabled() -> bool {
 }
 
 /// Permission system configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionsConfig {
     #[serde(default)]
     pub auto_approve: bool,
     #[serde(default)]
     pub rules: Vec<PermissionRuleConfig>,
+    /// Permission mode for agent tool/command gates: `manual` (default —
+    /// Ask prompts in TUI, allows headless with a warning), `auto`
+    /// (sandbox-safe actions allowed, host-reaching still Ask),
+    /// `dontask` (Ask becomes Allow; explicit CI mode, logged), `bypass`
+    /// (all checks Allow; isolated containers only). Overridable per run
+    /// with `niki run --permission-mode`.
+    #[serde(default = "default_permission_mode")]
+    pub mode: String,
+    /// Governance kill-switch for the unisolated backend: when true, any run
+    /// resolving to `--backend worktree` aborts with an error instead of a
+    /// warning. Enterprise/policy use; default false.
+    #[serde(default)]
+    pub disable_worktree: bool,
+    /// Fail closed when headless: an Ask with no TUI listening denies instead
+    /// of allowing with a warning. Default false (behavior-preserving).
+    #[serde(default)]
+    pub fail_closed_headless: bool,
+}
+
+fn default_permission_mode() -> String {
+    "manual".to_string()
+}
+
+impl Default for PermissionsConfig {
+    fn default() -> Self {
+        Self {
+            auto_approve: false,
+            rules: Vec::new(),
+            mode: default_permission_mode(),
+            disable_worktree: false,
+            fail_closed_headless: false,
+        }
+    }
+}
+
+/// Shell-hook policy: event name -> commands run on that lifecycle event.
+/// Wired subset in the pipeline: PreTaskStart, PostTaskStop, PreAgentStart,
+/// PostAgentStop (plus PreToolUse/PostToolUse inside the runtime tool loop).
+/// Unknown event names warn and are skipped. Contract per command is the
+/// HookBus one: exit 2 (or JSON `{"deny": true}` on stdout) blocks.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HooksConfig {
+    /// Event name (PascalCase or snake_case) to shell commands.
+    #[serde(default)]
+    pub commands: std::collections::HashMap<String, Vec<String>>,
+}
+
+/// Slash-command source directories.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandsConfig {
+    /// Extra dirs of `*.md` command files (project-relative or absolute).
+    #[serde(default)]
+    pub extra_dirs: Vec<String>,
 }
 
 /// A single permission rule.
@@ -834,6 +895,8 @@ fn default_red_agent() -> AgentConfig {
         temperature: 0.0,
         fallbacks: Vec::new(),
         test_command: None,
+        mutation_command: None,
+        effort: None,
     }
 }
 
@@ -845,6 +908,8 @@ fn default_anthropic_agent() -> AgentConfig {
         temperature: 0.0,
         fallbacks: Vec::new(),
         test_command: None,
+        mutation_command: None,
+        effort: None,
     }
 }
 
@@ -856,6 +921,8 @@ fn default_openai_agent() -> AgentConfig {
         temperature: 0.0,
         fallbacks: Vec::new(),
         test_command: None,
+        mutation_command: None,
+        effort: None,
     }
 }
 
@@ -879,6 +946,20 @@ pub struct AgentConfig {
     /// go.mod). The real exit code + output are recorded in every run's audit trail.
     #[serde(default)]
     pub test_command: Option<String>,
+    /// Optional mutation-testing command the Tester runs after the suite passes
+    /// (e.g. `cargo mutants`, `mutmut run`, `stryker run`). Unlike `test_command`
+    /// there is no auto-detection — runner semantics differ per ecosystem, so
+    /// this only runs when explicitly configured. A non-zero exit (surviving
+    /// mutants) is recorded in the audit trail and blocks the branch unless
+    /// `--force` is passed, exactly like a failing suite.
+    #[serde(default)]
+    pub mutation_command: Option<String>,
+    /// Effort preset for this agent: `low` (focused, deterministic),
+    /// `medium` (default balance), or `high` (expansive). Applies ONLY when
+    /// `max_tokens`/`temperature` are unset (0) — explicit values always win.
+    /// Unknown values warn and behave as `medium`.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -890,26 +971,46 @@ impl Default for AgentConfig {
             temperature: 0.0,
             fallbacks: Vec::new(),
             test_command: None,
+            mutation_command: None,
+            effort: None,
         }
     }
 }
 
 impl AgentConfig {
-    /// Effective max_tokens: per-agent override or global default.
+    /// Effort preset as `(max_tokens, temperature)`. `low` is tight and
+    /// deterministic; `high` allows longer, more exploratory completions.
+    /// These are documented defaults, not vendor semantics.
+    fn effort_preset(&self) -> (u32, f32) {
+        match self.effort.as_deref().map(str::to_lowercase).as_deref() {
+            Some("low") => (4096, 0.0),
+            Some("high") => (16384, 0.4),
+            Some(other) if other != "medium" => {
+                tracing::warn!(
+                    target: "niki::config",
+                    "unknown effort '{other}' — using medium preset"
+                );
+                (8192, 0.2)
+            }
+            _ => (8192, 0.2),
+        }
+    }
+
+    /// Effective max_tokens: per-agent override, else effort preset.
     pub fn effective_max_tokens(&self) -> u32 {
         if self.max_tokens > 0 {
             self.max_tokens
         } else {
-            8192
+            self.effort_preset().0
         }
     }
 
-    /// Effective temperature: per-agent override or global default.
+    /// Effective temperature: per-agent override, else effort preset.
     pub fn effective_temperature(&self) -> f32 {
         if self.temperature > 0.0 {
             self.temperature
         } else {
-            0.2
+            self.effort_preset().1
         }
     }
 }
@@ -993,6 +1094,8 @@ impl NikiConfig {
         "session",
         "compaction",
         "mcp",
+        "hooks",
+        "commands",
         "permissions",
         "instructions",
     ];
@@ -1013,7 +1116,7 @@ impl NikiConfig {
                     if !table.contains_key(*known) {
                         continue;
                     }
-                    if matches!(*known, "session" | "compaction" | "mcp" | "permissions") {
+                    if matches!(*known, "session" | "compaction" | "mcp") {
                         eprintln!(
                             "note: `[{}]` in {} is parsed but not yet wired to any runtime behavior — settings will be ignored for now",
                             known,
@@ -1049,8 +1152,31 @@ impl NikiConfig {
         }
 
         config.apply_env_vars();
+        config.resolve_aliases();
 
         Ok(config)
+    }
+
+    /// Resolve well-known model shorthands (`sonnet`, `4o`, `flash`, …) to
+    /// canonical ids for every agent and pipeline stage. Runs last so aliases
+    /// work identically from file and env vars. Unknown values pass through
+    /// untouched (see `resolve_model_alias`).
+    fn resolve_aliases(&mut self) {
+        use crate::llm::provider::resolve_model_alias;
+        for agent in [
+            &mut self.agents.planner,
+            &mut self.agents.coder,
+            &mut self.agents.tester,
+            &mut self.agents.reviewer,
+            &mut self.agents.synthesizer,
+            &mut self.agents.security_auditor,
+            &mut self.agents.red,
+        ] {
+            agent.model = resolve_model_alias(&agent.provider, &agent.model);
+        }
+        for stage in &mut self.pipeline.stages {
+            stage.model = resolve_model_alias(&stage.provider, &stage.model);
+        }
     }
 
     /// Save theme preference to global config using toml::Value mutation.
@@ -1189,6 +1315,46 @@ impl NikiConfig {
         // UI theme preference: only override if not default (Auto).
         if other.ui.theme != ThemePreference::default() {
             self.ui.theme = other.ui.theme;
+        }
+
+        // Permissions: explicit values win. mode/disable_worktree differ from
+        // defaults only when the user set them, so adopt on difference (this
+        // also keeps global+local layering working through merge).
+        let default_permissions = PermissionsConfig::default();
+        if other.permissions.mode != default_permissions.mode {
+            self.permissions.mode = other.permissions.mode;
+        }
+        if other.permissions.disable_worktree != default_permissions.disable_worktree {
+            self.permissions.disable_worktree = other.permissions.disable_worktree;
+        }
+        if other.permissions.fail_closed_headless != default_permissions.fail_closed_headless {
+            self.permissions.fail_closed_headless = other.permissions.fail_closed_headless;
+        }
+        if other.permissions.auto_approve != default_permissions.auto_approve {
+            self.permissions.auto_approve = other.permissions.auto_approve;
+        }
+        if !other.permissions.rules.is_empty() {
+            self.permissions.rules = other.permissions.rules;
+        }
+        // Hooks: adopt explicitly configured event commands.
+        if !other.hooks.commands.is_empty() {
+            self.hooks.commands = other.hooks.commands;
+        }
+        // Command sources are additive across global + local configs,
+        // de-duplicated, order-preserving.
+        {
+            let mut merged: Vec<String> = Vec::new();
+            for d in self
+                .commands
+                .extra_dirs
+                .iter()
+                .chain(other.commands.extra_dirs.iter())
+            {
+                if !merged.contains(d) {
+                    merged.push(d.clone());
+                }
+            }
+            self.commands.extra_dirs = merged;
         }
     }
 
@@ -1379,7 +1545,7 @@ impl NikiConfig {
                 "session": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
                 "compaction": {"type": "object", "properties": {"strategy": {"type": "string"}}},
                 "mcp": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
-                "permissions": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
+                "permissions": {"type": "object", "properties": {"mode": {"type": "string"}, "disable_worktree": {"type": "boolean"}, "fail_closed_headless": {"type": "boolean"}, "auto_approve": {"type": "boolean"}}},
                 "instructions": {"type": "object"}
             },
             "$defs": {
@@ -1545,5 +1711,74 @@ max_exec_seconds = 600
         assert_eq!(tester.max_exec_seconds, 600);
         assert_eq!(tester.allowed_commands.len(), 2);
         assert_eq!(tester.denied_commands.len(), 2);
+    }
+
+    #[test]
+    fn effort_presets_apply_only_when_unset() {
+        let mut a = AgentConfig::default();
+        a.effort = Some("low".to_string());
+        assert_eq!(a.effective_max_tokens(), 4096);
+        assert_eq!(a.effective_temperature(), 0.0);
+
+        a.effort = Some("HIGH".to_string());
+        assert_eq!(a.effective_max_tokens(), 16384);
+        assert_eq!(a.effective_temperature(), 0.4);
+
+        // Explicit values always win over effort.
+        a.max_tokens = 1234;
+        a.temperature = 0.9;
+        assert_eq!(a.effective_max_tokens(), 1234);
+        assert_eq!(a.effective_temperature(), 0.9);
+
+        // Unknown effort warns and behaves as medium.
+        let mut b = AgentConfig::default();
+        b.effort = Some("turbo".to_string());
+        assert_eq!(b.effective_max_tokens(), 8192);
+        assert_eq!(b.effective_temperature(), 0.2);
+    }
+
+    #[test]
+    fn commands_extra_dirs_merge_additively() {
+        let mut base = NikiConfig::default();
+        base.commands.extra_dirs = vec!["a".to_string()];
+        let mut other = NikiConfig::default();
+        other.commands.extra_dirs = vec!["b".to_string(), "a".to_string()];
+        base.merge(other);
+        assert_eq!(
+            base.commands.extra_dirs,
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
+    fn model_aliases_resolve_per_provider() {
+        use crate::llm::provider::resolve_model_alias;
+        assert_eq!(
+            resolve_model_alias("anthropic", "sonnet"),
+            "claude-sonnet-4"
+        );
+        assert_eq!(resolve_model_alias("ANTHROPIC", "Opus"), "claude-opus-4");
+        assert_eq!(resolve_model_alias("openai", "4o-mini"), "gpt-4o-mini");
+        assert_eq!(resolve_model_alias("google", "flash"), "gemini-2.0-flash");
+        // Pinned versions, unknown models/providers pass through untouched.
+        assert_eq!(
+            resolve_model_alias("anthropic", "claude-sonnet-4-20250514"),
+            "claude-sonnet-4-20250514"
+        );
+        assert_eq!(
+            resolve_model_alias("groq", "llama-3.1-70b-versatile"),
+            "llama-3.1-70b-versatile"
+        );
+        assert_eq!(resolve_model_alias("mystery", "sonnet"), "sonnet");
+    }
+
+    #[test]
+    fn permissions_security_defaults_are_permissive() {
+        // fail_closed_headless and disable_worktree are opt-in: defaults must
+        // preserve today's behavior.
+        let c = NikiConfig::default();
+        assert!(!c.permissions.fail_closed_headless);
+        assert!(!c.permissions.disable_worktree);
+        assert_eq!(c.permissions.mode, "manual");
     }
 }
