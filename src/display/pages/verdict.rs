@@ -72,9 +72,24 @@ impl Page for VerdictPage {
             _ => ("N O   V E R D I C T", theme::fg_dim()),
         };
 
+        // AwaitingApproval pulses the tile border: a pending decision is the
+        // one moment that must catch the eye. Settled verdicts stay static.
+        // Reduced-motion renders the final (warning) border immediately.
+        let awaiting = matches!(state.run_state, RunState::AwaitingApproval);
+        let border_color = if awaiting
+            && crate::display::motion::pulse_phase(
+                state.tick,
+                18,
+                crate::display::motion::reduced(state.config.ui.reduced_motion),
+            ) {
+            theme::warning()
+        } else {
+            verdict_color
+        };
+
         let verdict_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(verdict_color))
+            .border_style(Style::default().fg(border_color))
             .title(" VERDICT ");
 
         let mut verdict_lines = vec![
