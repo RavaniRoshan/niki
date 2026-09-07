@@ -162,3 +162,8 @@ network_disabled = true
 # url = "https://mcp.example.com/mcp"
 # enabled = false
 # timeout_ms = 5000
+
+# Permissions & trust posture for agent tool/command gates.
+# [permissions]
+# mode = "manual"  # manual (default) | auto | dontask | bypass. Overridable per run: niki run --permission-mode auto
+# disable_worktree = false  # Governance kill-switch: true refuses the unisolated worktree backend outright

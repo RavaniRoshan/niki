@@ -125,6 +125,14 @@ pub struct RunArgs {
     #[arg(long)]
     pub bare: bool,
 
+    /// Permission posture for this run: `manual` (default — Ask prompts in
+    /// TUI, allows headless with a warning), `auto` (sandbox-safe allowed,
+    /// host-reaching still Ask), `dontask` (Ask becomes Allow; explicit CI
+    /// mode), `bypass` (all checks Allow; isolated containers only).
+    /// Overrides `[permissions] mode` in config.
+    #[arg(long)]
+    pub permission_mode: Option<String>,
+
     /// Minimal output — no streaming, just final report
     #[arg(long)]
     pub quiet: bool,
@@ -333,6 +341,20 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     config.docker.backend = backend;
 
     let uses_docker = matches!(backend, SandboxBackend::Docker);
+
+    // Per-run permission posture override (explicit beats config).
+    if let Some(mode) = &args.permission_mode {
+        config.permissions.mode = mode.clone();
+    }
+
+    // Governance kill-switch: [permissions] disable_worktree refuses the
+    // unisolated backend outright instead of warning past it.
+    if !uses_docker && config.permissions.disable_worktree {
+        anyhow::bail!(
+            "worktree backend is disabled by [permissions] disable_worktree — \
+             use the default container backend or relax the policy."
+        );
+    }
 
     // Trust & cost notices (launch-plan B3 / S6 / G9).
     if matches!(backend, SandboxBackend::Worktree) {

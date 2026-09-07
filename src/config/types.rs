@@ -617,12 +617,40 @@ fn default_mcp_server_enabled() -> bool {
 }
 
 /// Permission system configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionsConfig {
     #[serde(default)]
     pub auto_approve: bool,
     #[serde(default)]
     pub rules: Vec<PermissionRuleConfig>,
+    /// Permission mode for agent tool/command gates: `manual` (default —
+    /// Ask prompts in TUI, allows headless with a warning), `auto`
+    /// (sandbox-safe actions allowed, host-reaching still Ask),
+    /// `dontask` (Ask becomes Allow; explicit CI mode, logged), `bypass`
+    /// (all checks Allow; isolated containers only). Overridable per run
+    /// with `niki run --permission-mode`.
+    #[serde(default = "default_permission_mode")]
+    pub mode: String,
+    /// Governance kill-switch for the unisolated backend: when true, any run
+    /// resolving to `--backend worktree` aborts with an error instead of a
+    /// warning. Enterprise/policy use; default false.
+    #[serde(default)]
+    pub disable_worktree: bool,
+}
+
+fn default_permission_mode() -> String {
+    "manual".to_string()
+}
+
+impl Default for PermissionsConfig {
+    fn default() -> Self {
+        Self {
+            auto_approve: false,
+            rules: Vec::new(),
+            mode: default_permission_mode(),
+            disable_worktree: false,
+        }
+    }
 }
 
 /// A single permission rule.
@@ -1025,7 +1053,7 @@ impl NikiConfig {
                     if !table.contains_key(*known) {
                         continue;
                     }
-                    if matches!(*known, "session" | "compaction" | "mcp" | "permissions") {
+                    if matches!(*known, "session" | "compaction" | "mcp") {
                         eprintln!(
                             "note: `[{}]` in {} is parsed but not yet wired to any runtime behavior — settings will be ignored for now",
                             known,
@@ -1201,6 +1229,23 @@ impl NikiConfig {
         // UI theme preference: only override if not default (Auto).
         if other.ui.theme != ThemePreference::default() {
             self.ui.theme = other.ui.theme;
+        }
+
+        // Permissions: explicit values win. mode/disable_worktree differ from
+        // defaults only when the user set them, so adopt on difference (this
+        // also keeps global+local layering working through merge).
+        let default_permissions = PermissionsConfig::default();
+        if other.permissions.mode != default_permissions.mode {
+            self.permissions.mode = other.permissions.mode;
+        }
+        if other.permissions.disable_worktree != default_permissions.disable_worktree {
+            self.permissions.disable_worktree = other.permissions.disable_worktree;
+        }
+        if other.permissions.auto_approve != default_permissions.auto_approve {
+            self.permissions.auto_approve = other.permissions.auto_approve;
+        }
+        if !other.permissions.rules.is_empty() {
+            self.permissions.rules = other.permissions.rules;
         }
     }
 
@@ -1391,7 +1436,7 @@ impl NikiConfig {
                 "session": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
                 "compaction": {"type": "object", "properties": {"strategy": {"type": "string"}}},
                 "mcp": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
-                "permissions": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
+                "permissions": {"type": "object", "properties": {"mode": {"type": "string"}, "disable_worktree": {"type": "boolean"}, "auto_approve": {"type": "boolean"}}},
                 "instructions": {"type": "object"}
             },
             "$defs": {

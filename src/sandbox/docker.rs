@@ -533,6 +533,14 @@ impl Sandbox for DockerSandbox {
                     };
                     if self.event_tx.send(request).is_err() {
                         // No TUI listening — fall back to Allow (headless mode).
+                        // Loud by design: silent auto-approval is how agents end
+                        // up running `curl | sh` in CI. Use --permission-mode to
+                        // make the posture explicit, or run attached to review.
+                        tracing::warn!(
+                            target: "niki::permissions",
+                            command = full.as_str(),
+                            "no TUI listening — Ask fell back to Allow (headless). Pass --permission-mode explicitly to silence this per-run posture."
+                        );
                     } else {
                         let action = tokio::task::block_in_place(|| {
                             response_rx.recv_timeout(std::time::Duration::from_secs(5))
