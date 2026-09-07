@@ -107,8 +107,8 @@ pub fn render_permission_modal(
     };
 
     let selected = cursor(state).selected;
-    let blue = Style::default().fg(ratatui::style::Color::Rgb(177, 185, 249));
-    let dotted = Style::default().fg(ratatui::style::Color::Rgb(80, 80, 80));
+    let blue = Style::default().fg(theme::accent());
+    let dotted = Style::default().fg(theme::fg_dim());
 
     let mut lines = vec![
         Line::from(Span::styled("The agent wants to run:", theme::text_dim())),

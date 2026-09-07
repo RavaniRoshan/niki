@@ -599,8 +599,12 @@ fn run_tui(
                             }
                             engine.mark_dirty();
                         } else {
-                            // On sub-pages: page-specific key handling
+                            // On sub-pages: page-specific key handling first —
+                            // page bindings always win over global jumps.
                             if router.handle_key(key, &mut state) {
+                                engine.mark_dirty();
+                            } else if let Some(page) = global_page_jump(key) {
+                                state.current_page = page;
                                 engine.mark_dirty();
                             }
                         }
@@ -1495,6 +1499,19 @@ fn render(
     }
 }
 
+/// Global page jump for a key event: plain (unmodified) letters map via
+/// [`PageId::from_key`], so every page is reachable from anywhere. Modified
+/// keys (Ctrl/Alt/Shift) never jump — they belong to input and shortcuts.
+/// Page-specific handlers run first; this is the fallback.
+fn global_page_jump(key: KeyEvent) -> Option<PageId> {
+    if key.modifiers.is_empty()
+        && let KeyCode::Char(c) = key.code
+    {
+        return PageId::from_key(c);
+    }
+    None
+}
+
 /// Key navigation for the Fleet grid (`g` page).
 fn handle_fleet_nav(key: KeyEvent, state: &mut AppState) {
     match key.code {
@@ -1572,6 +1589,24 @@ mod tests {
         assert_eq!(PageId::from_key(','), Some(PageId::Config));
         assert_eq!(PageId::from_key('?'), Some(PageId::Help));
         assert_eq!(PageId::from_key('x'), None);
+    }
+
+    #[test]
+    fn global_page_jump_only_plain_letters() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let plain = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty());
+        assert_eq!(global_page_jump(plain('p')), Some(PageId::Pipeline));
+        assert_eq!(global_page_jump(plain('l')), Some(PageId::TestLog));
+        assert_eq!(global_page_jump(plain('x')), None);
+        // Modified keys never navigate (input and shortcuts own them).
+        assert_eq!(
+            global_page_jump(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL)),
+            None
+        );
+        assert_eq!(
+            global_page_jump(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())),
+            None
+        );
     }
 
     #[test]

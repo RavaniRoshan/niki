@@ -1,7 +1,7 @@
 //! Session view — investigate and control one mission.
 
 use ratatui::buffer::Buffer;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
@@ -84,20 +84,15 @@ impl SessionState {
 }
 
 pub fn render_session(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Buffer) {
-    // Header
-    let _status_color = match state.mission.status {
-        crate::mission::MissionStatus::Running => Color::Green,
-        crate::mission::MissionStatus::Failed => Color::Red,
-        _ => Color::DarkGray,
-    };
+    // Header (standard shape: bold title + dim meta; status word included).
     let header_text = format!(
-        " SESSION / {} · {}",
+        " session · {} · {}",
         state.mission.description,
         state.mission.status.status_str()
     );
     let header = Paragraph::new(header_text).style(
         Style::default()
-            .fg(Color::White)
+            .fg(crate::display::theme::fg_color())
             .add_modifier(Modifier::BOLD),
     );
     header.render(
@@ -116,10 +111,10 @@ pub fn render_session(state: &SessionState, area: ratatui::layout::Rect, buf: &m
         .map(|t| {
             let style = if *t == state.active_tab {
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(crate::display::theme::border_active())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(crate::display::theme::fg_dim())
             };
             Span::styled(format!(" {} ", t.title()), style)
         })
@@ -149,14 +144,14 @@ pub fn render_session(state: &SessionState, area: ratatui::layout::Rect, buf: &m
         SessionTab::Tools => render_tools(state, content_area, buf),
         _ => {
             let p = Paragraph::new(format!("{} — placeholder", state.active_tab.title()))
-                .style(Style::default().fg(Color::DarkGray));
+                .style(Style::default().fg(crate::display::theme::fg_dim()));
             p.render(content_area, buf);
         }
     }
 
     // Footer
     let footer = Paragraph::new(" Tab Cycle · ←→ Switch · Esc Back to Fleet · P Pause · R Resume")
-        .style(Style::default().fg(Color::DarkGray));
+        .style(Style::default().fg(crate::display::theme::fg_dim()));
     footer.render(
         ratatui::layout::Rect {
             x: area.x,
@@ -171,7 +166,8 @@ pub fn render_session(state: &SessionState, area: ratatui::layout::Rect, buf: &m
 #[allow(clippy::explicit_counter_loop)]
 fn render_conversation(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Buffer) {
     if state.messages.is_empty() {
-        let p = Paragraph::new("No messages yet.").style(Style::default().fg(Color::DarkGray));
+        let p = Paragraph::new("No messages yet — start from Chat (press Tab).")
+            .style(Style::default().fg(crate::display::theme::fg_dim()));
         p.render(area, buf);
         return;
     }
@@ -181,9 +177,9 @@ fn render_conversation(state: &SessionState, area: ratatui::layout::Rect, buf: &
             break;
         }
         let (role, color) = match msg.role {
-            ChatRole::User => ("User", Color::Cyan),
-            ChatRole::Assistant => ("NIKI", Color::Green),
-            ChatRole::System => ("System", Color::Yellow),
+            ChatRole::User => ("User", crate::display::theme::accent()),
+            ChatRole::Assistant => ("NIKI", crate::display::theme::accent()),
+            ChatRole::System => ("System", crate::display::theme::warning()),
         };
         let role_w = role.len() as u16;
         let max_content = area.width.saturating_sub(role_w + 2);
@@ -197,7 +193,10 @@ fn render_conversation(state: &SessionState, area: ratatui::layout::Rect, buf: &
                 format!("{} ", role),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(content, Style::default().fg(Color::White)),
+            Span::styled(
+                content,
+                Style::default().fg(crate::display::theme::fg_bright()),
+            ),
         ]);
         let p = Paragraph::new(line);
         p.render(
@@ -216,7 +215,8 @@ fn render_conversation(state: &SessionState, area: ratatui::layout::Rect, buf: &
 #[allow(clippy::explicit_counter_loop)]
 fn render_agents(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Buffer) {
     if state.agents.is_empty() {
-        let p = Paragraph::new("No agents active.").style(Style::default().fg(Color::DarkGray));
+        let p = Paragraph::new("No agents active — agents appear here once a run starts.")
+            .style(Style::default().fg(crate::display::theme::fg_dim()));
         p.render(area, buf);
         return;
     }
@@ -226,18 +226,18 @@ fn render_agents(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Bu
             break;
         }
         let sc = if agent.state.needs_attention() {
-            Color::Yellow
+            crate::display::theme::warning()
         } else if agent.state.is_active() {
-            Color::Green
+            crate::display::theme::success()
         } else {
-            Color::DarkGray
+            crate::display::theme::fg_dim()
         };
         let line = Line::from(vec![
             Span::styled(format!("{} ", agent.state.icon()), Style::default().fg(sc)),
             Span::styled(
                 &agent.role,
                 Style::default()
-                    .fg(Color::White)
+                    .fg(crate::display::theme::fg_bright())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -246,7 +246,7 @@ fn render_agents(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Bu
             ),
             Span::styled(
                 format!(" · {} tool calls", agent.tool_calls.len()),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(crate::display::theme::fg_dim()),
             ),
         ]);
         let p = Paragraph::new(line);
@@ -271,19 +271,24 @@ fn render_tools(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Buf
             if y >= area.y + area.height {
                 break;
             }
-            let icon = if tc.success { "✓" } else { "✗" };
-            let ic = if tc.success { Color::Green } else { Color::Red };
+            let tool_status = if tc.success {
+                crate::display::components::status::UnifiedStatus::Done
+            } else {
+                crate::display::components::status::UnifiedStatus::Failed
+            };
+            let icon = crate::display::components::status::glyph(tool_status);
+            let ic = crate::display::components::status::color(tool_status);
             let line = Line::from(vec![
                 Span::styled(format!("{} ", icon), Style::default().fg(ic)),
                 Span::styled(
                     &tc.tool_name,
                     Style::default()
-                        .fg(Color::White)
+                        .fg(crate::display::theme::fg_bright())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!(" · {}", tc.input_summary),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(crate::display::theme::fg_dim()),
                 ),
             ]);
             let p = Paragraph::new(line);
@@ -301,7 +306,8 @@ fn render_tools(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Buf
         }
     }
     if !any {
-        let p = Paragraph::new("No tool calls yet.").style(Style::default().fg(Color::DarkGray));
+        let p = Paragraph::new("No tool calls yet — calls stream here as agents work.")
+            .style(Style::default().fg(crate::display::theme::fg_dim()));
         p.render(area, buf);
     }
 }

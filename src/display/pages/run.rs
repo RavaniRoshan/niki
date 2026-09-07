@@ -140,7 +140,7 @@ impl Page for RunPage {
                 }
                 StageStatus::Done => {
                     let summary = stage.summary.first().map(|s| s.as_str()).unwrap_or("done");
-                    (summary.to_string(), theme::GREEN())
+                    (summary.to_string(), theme::success())
                 }
                 StageStatus::Failed => {
                     let summary = stage
@@ -205,7 +205,7 @@ impl Page for RunPage {
             pipeline_lines.push(Line::from(vec![Span::styled(
                 "✓",
                 Style::default()
-                    .fg(theme::GREEN())
+                    .fg(theme::success())
                     .add_modifier(Modifier::BOLD),
             )]));
         }
@@ -323,7 +323,7 @@ impl Page for RunPage {
         // Working tree line
         let working_tree = Line::from(vec![
             Span::styled("working tree: ", Style::default().fg(theme::fg_dim())),
-            Span::styled("untouched", Style::default().fg(theme::GREEN())),
+            Span::styled("untouched", Style::default().fg(theme::success())),
         ]);
         let wt_area = Rect {
             x: chunks[4].x,
