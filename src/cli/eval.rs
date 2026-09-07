@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::Args;
+use clap::{Args, Subcommand};
 use std::path::PathBuf;
 
 use crate::artifacts::types::IssueCategory;
@@ -7,6 +7,8 @@ use crate::eval::{Difficulty, render_report_md, run_eval};
 
 #[derive(Args)]
 pub struct EvalArgs {
+    #[command(subcommand)]
+    pub command: Option<EvalCommands>,
     /// Path to the eval dataset TOML (default: evals/dataset.toml).
     #[arg(short, long)]
     pub dataset: Option<PathBuf>,
@@ -41,7 +43,40 @@ pub struct EvalArgs {
     pub limit: Option<usize>,
 }
 
+#[derive(Subcommand)]
+pub enum EvalCommands {
+    /// Record a maintainer merge-worthiness judgment on one case
+    /// (METR-style human layer over the automated grader).
+    Grade {
+        /// Case id as in the dataset TOML
+        #[arg(long)]
+        case: String,
+        /// Verdict: `merge` (would merge to main) or `no-merge`
+        #[arg(long)]
+        verdict: String,
+        /// Reviewer name recorded with the grade
+        #[arg(long)]
+        reviewer: String,
+        /// Optional note (what would block the merge, or why it passes)
+        #[arg(long, default_value = "")]
+        note: String,
+        /// Path to the eval dataset TOML (default: evals/dataset.toml)
+        #[arg(short, long)]
+        dataset: Option<PathBuf>,
+    },
+}
+
 pub async fn handle(args: &EvalArgs) -> Result<()> {
+    if let Some(EvalCommands::Grade {
+        case,
+        verdict,
+        reviewer,
+        note,
+        dataset,
+    }) = &args.command
+    {
+        return handle_grade(case, verdict, reviewer, note, dataset.as_ref());
+    }
     let dataset = args
         .dataset
         .clone()
@@ -129,6 +164,8 @@ pub async fn handle(args: &EvalArgs) -> Result<()> {
         "false_approval_reduction_pct": report.false_approval_reduction_pct,
         "total_cost_usd": report.total_cost_usd,
         "cost_per_niki_caught": report.cost_per_niki_caught,
+        "graded_cases": report.graded_cases,
+        "grader_agreement": report.grader_agreement,
         "success_definition": "seeded defect surfaced by reviewer issues or upheld Red challenge (test-passing only, not maintainer-merge grading)",
     });
     std::fs::write(
@@ -151,6 +188,73 @@ pub async fn handle(args: &EvalArgs) -> Result<()> {
         std::process::exit(1);
     }
 
+    Ok(())
+}
+
+/// Record a maintainer grade for one eval case. The grade lives next to the
+/// dataset (`<dataset-dir>/grades/<case-id>.json`) so it travels with the
+/// fixtures and shows up in every future report's agreement metric.
+fn handle_grade(
+    case: &str,
+    verdict: &str,
+    reviewer: &str,
+    note: &str,
+    dataset: Option<&PathBuf>,
+) -> Result<()> {
+    use crate::eval::MaintainerGrade;
+
+    let merge_worthy = match verdict.to_lowercase().as_str() {
+        "merge" | "merge-worthy" | "yes" | "true" => true,
+        "no-merge" | "no_merge" | "not-merge-worthy" | "no" | "false" => false,
+        other => anyhow::bail!("unknown verdict '{other}': expected `merge` or `no-merge`"),
+    };
+    let dataset_path = dataset
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("evals/dataset.toml"));
+    let dataset_dir = dataset_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    // Validate the case id against the dataset so typos don't create orphans.
+    let raw = std::fs::read_to_string(&dataset_path)
+        .map_err(|e| anyhow::anyhow!("cannot read dataset {}: {e}", dataset_path.display()))?;
+    #[derive(serde::Deserialize)]
+    struct MinimalCase {
+        id: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct MinimalDataset {
+        #[serde(default)]
+        cases: Vec<MinimalCase>,
+    }
+    let ds: MinimalDataset = toml::from_str(&raw)
+        .map_err(|e| anyhow::anyhow!("cannot parse dataset {}: {e}", dataset_path.display()))?;
+    if !ds.cases.iter().any(|c| c.id == case) {
+        anyhow::bail!(
+            "unknown case '{case}': no such id in {}",
+            dataset_path.display()
+        );
+    }
+    let grades_dir = dataset_dir.join("grades");
+    std::fs::create_dir_all(&grades_dir)?;
+    let grade = MaintainerGrade {
+        case_id: case.to_string(),
+        reviewer: reviewer.to_string(),
+        merge_worthy,
+        note: note.to_string(),
+        date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+    };
+    let path = grades_dir.join(format!("{case}.json"));
+    std::fs::write(&path, serde_json::to_string_pretty(&grade)?)?;
+    println!(
+        "Recorded grade for '{case}': {} (reviewer: {reviewer}) → {}",
+        if merge_worthy {
+            "merge-worthy"
+        } else {
+            "not merge-worthy"
+        },
+        path.display()
+    );
     Ok(())
 }
 
@@ -250,6 +354,14 @@ fn recalculate_report(mut report: crate::eval::EvalReport) -> crate::eval::EvalR
     } else {
         None
     };
+    // Recompute the human layer over the filtered set from the grades the
+    // report already carries (no re-read: filters must not drop judgments).
+    report.graded_cases = report
+        .cases
+        .iter()
+        .filter(|c| c.expected_caught && report.grades.contains_key(&c.case_id))
+        .count() as u32;
+    report.grader_agreement = crate::eval::grader_agreement(&report.cases, &report.grades);
 
     report
 }

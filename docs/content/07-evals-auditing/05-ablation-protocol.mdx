@@ -1,0 +1,66 @@
+---
+title: Ablation Protocol
+description: Isolating what makes the pipeline work — reviewer-only, topology, and Red ablations.
+sidebar:
+  order: 5
+  label: Ablation Protocol
+---
+
+# Ablation Protocol
+
+Catch-rate deltas mean nothing until you know *which part* of the pipeline
+earned them. These three ablations isolate the three structural claims —
+independent review, multi-agent topology, and adversarial Red — using only
+`niki eval --live` with config variants. No code changes, no new harness:
+each ablation is a config file plus the standard manifest comparison.
+
+All runs require API keys and a sandbox. Record every run's
+`eval-manifest.json` alongside the claim; an ablation without manifests on
+both arms is an anecdote, not a result. Budget rule: identical economic
+budgets per cell (same models, same `max_revision_rounds`, same dataset
+slice) — the only thing that varies is the ablated dimension.
+
+## A1. Reviewer-only vs full chain (does the second agent earn its tokens?)
+
+Hypothesis: most of the catch-rate gain comes from having *any* second
+reviewing pass, not from the full four-role chain.
+
+- **Arm A (full):** default config (`Planner → Coder → Tester → Reviewer`).
+- **Arm B (reviewer-only):** `[pipeline]` with exactly two stages —
+  `{ role = "coder", ... }` then `{ role = "reviewer", ... }` — Tester
+  skipped, no Red, no SecurityAuditor.
+- Compare: `niki_catch_rate` delta vs `total_cost_usd` ratio from the two
+  manifests. If Arm B keeps ≥90% of the catch rate at ≤50% of the cost,
+  the default topology is overbuilt for that defect class.
+
+## A2. Single-agent vs multi-agent (does isolation earn its tokens?)
+
+Hypothesis: `SingleAgent` (Planner + solo Coder) matches the full chain on
+low-complexity tasks and loses on cross-file ones.
+
+- **Arm A:** `[pipeline] topology = "multiagent"` (forced).
+- **Arm B:** `[pipeline] topology = "singleagent"` (forced).
+- Stratify by difficulty (`--difficulty easy|medium|hard`) and compare per
+  stratum. Expect: parity on easy, divergence on medium/hard. A divergence
+  that does *not* appear is evidence the task set is too easy, not that
+  topology is free.
+
+## A3. Red on vs off (does adversarial review catch what review misses?)
+
+Hypothesis: Red challenges catch a distinct defect population (shared
+misreadings), visible as `caught_by_red` cases the baseline misses.
+
+- **Arm A:** `[red_blue] enabled = true`.
+- **Arm B:** `[red_blue] enabled = false` (this is also what the stock
+  `niki eval` baseline approximates).
+- Compare: count of `caught_by_red` cases in Arm A, and the
+  `false_approval_reduction_pct` delta. Then grade both arms' catches with
+  `niki eval grade` — Red catches that maintainers rule *not* merge-worthy
+  are noise, not signal.
+
+## Reporting
+
+Each ablation publishes, per arm: the manifest fields (date, version,
+harness commit + dirty flag, dataset slice, models), both catch rates, both
+costs with cost-per-caught, and the graded agreement rate. Three runs minimum
+per arm (n ≥ 3, report mean + min–max); a single-run ablation is a demo.
