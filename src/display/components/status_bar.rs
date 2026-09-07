@@ -193,9 +193,17 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     };
     right_spans.push(Span::styled(format!(" {} ", badge_text), badge_style));
 
-    if let Some((msg, _)) = &state.notice {
+    if let Some(notice) = &state.notice {
+        // Slide in over the first 150ms of life; static when reduced.
+        let age_ms = notice.since.elapsed().as_millis() as u64;
+        let slide = crate::display::motion::slide_prefix(
+            age_ms,
+            150,
+            3,
+            crate::display::motion::reduced(state.config.ui.reduced_motion),
+        );
         right_spans.push(Span::styled(
-            format!("· {} ", msg),
+            format!("· {}{} ", slide, notice.msg),
             Style::default().fg(theme::clay()),
         ));
     }

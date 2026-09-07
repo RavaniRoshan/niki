@@ -52,7 +52,10 @@ impl HelpPage {
                         ("[Tab] chat", "Toggle between chat and page view"),
                         ("[Ctrl+P] commands", "Open command palette"),
                         ("[t] theme", "Cycle light/dark/auto themes"),
-                        ("[g] fleet", "Jump to Fleet (Run page uses g for scroll-top)"),
+                        (
+                            "[g] fleet",
+                            "Jump to Fleet (Run page uses g for scroll-top)",
+                        ),
                         ("[s] session", "Open the Session view"),
                     ],
                 ),

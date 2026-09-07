@@ -30,6 +30,7 @@ pub use input_box::render_input_box_multiline;
 pub use list_cursor::{FocusState, ListCursor};
 pub use permission::render_permission_modal;
 pub use progress::render_progress_bar;
+pub use progress::render_progress_bar_shimmer;
 pub use spinner::{Spinner, SpinnerState, SpinnerStyle};
 pub use status_bar::render_status_bar;
 pub use tool_card::{ToolCard, ToolStatus, render_tool_card};

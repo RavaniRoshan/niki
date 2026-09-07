@@ -122,9 +122,22 @@ pub fn render_input_box(frame: &mut Frame, state: &AppState, area: Rect) {
             before_cursor,
             Style::default().fg(theme::fg_bright()),
         ));
+        // Caret blink: block cursor visible ~60% of a ~1s cycle at 60fps
+        // ticks; static block when reduced-motion is on.
+        let caret_on = crate::display::motion::blink_on(
+            state.tick,
+            36,
+            24,
+            crate::display::motion::reduced(state.config.ui.reduced_motion),
+        );
+        let caret_style = if caret_on {
+            theme::prompt_cursor()
+        } else {
+            Style::default().fg(theme::fg_bright())
+        };
         spans.push(Span::styled(
             cursor_char.map_or(" ".to_string(), |c| c.to_string()),
-            theme::prompt_cursor(),
+            caret_style,
         ));
         if !after_cursor.is_empty() {
             spans.push(Span::styled(

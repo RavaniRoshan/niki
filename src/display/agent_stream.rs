@@ -30,6 +30,8 @@ pub struct StageState {
     /// Estimated USD cost for this stage (0.0 when the model is unknown).
     pub cost_usd: Option<f64>,
     pub summary_lines: Vec<String>,
+    /// When the stage reached Done (for completion slide-in motion).
+    pub completed_at: Option<Instant>,
 }
 
 use std::sync::Arc;
@@ -257,6 +259,7 @@ impl AgenticDisplay {
             usage: None,
             cost_usd: None,
             summary_lines: vec![],
+            completed_at: None,
         });
 
         if self.muted {
@@ -344,6 +347,7 @@ impl AgenticDisplay {
                 stage.usage = Some(usage);
                 stage.cost_usd = Some(cost_usd);
                 stage.summary_lines = summary.clone();
+                stage.completed_at = Some(Instant::now());
                 stage.elapsed
             } else {
                 None

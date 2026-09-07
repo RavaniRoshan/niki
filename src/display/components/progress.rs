@@ -9,12 +9,52 @@ use ratatui::widgets::{Gauge, Paragraph};
 use crate::display::theme;
 
 /// Render a progress bar with percentage.
+/// Plain progress bar (existing contract, kept for all current callers).
 pub fn render_progress_bar(
     _frame: &mut Frame,
     _area: Rect,
     progress: f64,
     width: usize,
 ) -> Line<'static> {
+    render_progress_bar_inner(progress, width)
+}
+
+/// Progress bar with a travelling bright window while work is ongoing.
+/// Pure function of `(progress, width, tick)` — no state. Static plain bar
+/// when reduced. At 100% the shimmer stops (work is done; nothing to imply).
+pub fn render_progress_bar_shimmer(
+    progress: f64,
+    width: usize,
+    tick: usize,
+    reduced: bool,
+) -> Line<'static> {
+    use crate::display::motion;
+    let pct = (progress.clamp(0.0, 1.0) * 100.0) as u16;
+    let filled = (progress.clamp(0.0, 1.0) * width as f64) as usize;
+    let empty = width.saturating_sub(filled);
+    if reduced || filled == 0 || progress >= 1.0 {
+        return render_progress_bar_inner(progress, width);
+    }
+    let pos = motion::shimmer_pos(tick, filled).unwrap_or(0);
+    let mut spans = vec![Span::styled("[", theme::primary())];
+    for i in 0..filled {
+        let style = if i == pos {
+            Style::default()
+                .fg(theme::fg_bright())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::primary())
+        };
+        spans.push(Span::styled("█", style));
+    }
+    spans.push(Span::styled(
+        format!("{}] {}%", "░".repeat(empty), pct),
+        Style::default().fg(theme::primary()),
+    ));
+    Line::from(spans)
+}
+
+fn render_progress_bar_inner(progress: f64, width: usize) -> Line<'static> {
     let pct = (progress.clamp(0.0, 1.0) * 100.0) as u16;
     let filled = ((progress.clamp(0.0, 1.0)) * width as f64) as usize;
     let empty = width.saturating_sub(filled);
