@@ -315,6 +315,20 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
 
     let mut config = NikiConfig::load(&project_dir)?;
 
+    // Zero-config discoverability: no config file anywhere (project or
+    // global) means defaults + env keys. Say so once, instead of letting a
+    // bare default run look identical to a configured one.
+    {
+        let global = dirs::home_dir().map(|h| h.join(".config/niki/niki.toml"));
+        let has_file = project_dir.join("niki.toml").exists() || global.is_some_and(|p| p.exists());
+        if !has_file {
+            eprintln!(
+                "note: no niki.toml found — running with defaults + environment keys. \
+                 Run `niki init` to persist configuration."
+            );
+        }
+    }
+
     if let Some(r) = args.max_rounds {
         config.general.max_revision_rounds = r;
     }

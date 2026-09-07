@@ -63,6 +63,7 @@ pub(crate) fn build_permission_checker(
         external_directory: Permission::Ask,
         doom_loop: Permission::Ask,
         mode: parse_permission_mode(&config.permissions.mode),
+        fail_closed_headless: config.permissions.fail_closed_headless,
         ..Default::default()
     })
 }

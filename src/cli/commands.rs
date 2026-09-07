@@ -43,7 +43,18 @@ pub fn handle(args: &CommandsArgs) -> Result<()> {
         Some(p) => p.clone(),
         None => env::current_dir()?,
     };
-    let registry = CommandRegistry::with_project(&project_dir);
+    let registry = {
+        let extra: Vec<std::path::PathBuf> = crate::config::NikiConfig::load(&project_dir)
+            .map(|c| {
+                c.commands
+                    .extra_dirs
+                    .iter()
+                    .map(std::path::PathBuf::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        CommandRegistry::with_project(&project_dir, &extra)
+    };
     match &args.command {
         CommandsCommands::List => {
             println!("  COMMAND              GROUP     DESCRIPTION");

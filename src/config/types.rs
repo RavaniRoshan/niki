@@ -61,6 +61,11 @@ pub struct NikiConfig {
     /// Shell-hook policy ([hooks] event -> commands).
     #[serde(default)]
     pub hooks: HooksConfig,
+    /// Slash-command sources: extra directories of `*.md` command files
+    /// loaded alongside `<project>/.niki/commands/` (which always wins).
+    /// Share packs by committing a dir and listing it here.
+    #[serde(default)]
+    pub commands: CommandsConfig,
     /// AGENTS.md / project instructions configuration.
     #[serde(default)]
     pub instructions: InstructionsConfig,
@@ -639,6 +644,10 @@ pub struct PermissionsConfig {
     /// warning. Enterprise/policy use; default false.
     #[serde(default)]
     pub disable_worktree: bool,
+    /// Fail closed when headless: an Ask with no TUI listening denies instead
+    /// of allowing with a warning. Default false (behavior-preserving).
+    #[serde(default)]
+    pub fail_closed_headless: bool,
 }
 
 fn default_permission_mode() -> String {
@@ -652,6 +661,7 @@ impl Default for PermissionsConfig {
             rules: Vec::new(),
             mode: default_permission_mode(),
             disable_worktree: false,
+            fail_closed_headless: false,
         }
     }
 }
@@ -666,6 +676,14 @@ pub struct HooksConfig {
     /// Event name (PascalCase or snake_case) to shell commands.
     #[serde(default)]
     pub commands: std::collections::HashMap<String, Vec<String>>,
+}
+
+/// Slash-command source directories.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandsConfig {
+    /// Extra dirs of `*.md` command files (project-relative or absolute).
+    #[serde(default)]
+    pub extra_dirs: Vec<String>,
 }
 
 /// A single permission rule.
@@ -878,6 +896,7 @@ fn default_red_agent() -> AgentConfig {
         fallbacks: Vec::new(),
         test_command: None,
         mutation_command: None,
+        effort: None,
     }
 }
 
@@ -890,6 +909,7 @@ fn default_anthropic_agent() -> AgentConfig {
         fallbacks: Vec::new(),
         test_command: None,
         mutation_command: None,
+        effort: None,
     }
 }
 
@@ -902,6 +922,7 @@ fn default_openai_agent() -> AgentConfig {
         fallbacks: Vec::new(),
         test_command: None,
         mutation_command: None,
+        effort: None,
     }
 }
 
@@ -933,6 +954,12 @@ pub struct AgentConfig {
     /// `--force` is passed, exactly like a failing suite.
     #[serde(default)]
     pub mutation_command: Option<String>,
+    /// Effort preset for this agent: `low` (focused, deterministic),
+    /// `medium` (default balance), or `high` (expansive). Applies ONLY when
+    /// `max_tokens`/`temperature` are unset (0) — explicit values always win.
+    /// Unknown values warn and behave as `medium`.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -945,26 +972,45 @@ impl Default for AgentConfig {
             fallbacks: Vec::new(),
             test_command: None,
             mutation_command: None,
+            effort: None,
         }
     }
 }
 
 impl AgentConfig {
-    /// Effective max_tokens: per-agent override or global default.
+    /// Effort preset as `(max_tokens, temperature)`. `low` is tight and
+    /// deterministic; `high` allows longer, more exploratory completions.
+    /// These are documented defaults, not vendor semantics.
+    fn effort_preset(&self) -> (u32, f32) {
+        match self.effort.as_deref().map(str::to_lowercase).as_deref() {
+            Some("low") => (4096, 0.0),
+            Some("high") => (16384, 0.4),
+            Some(other) if other != "medium" => {
+                tracing::warn!(
+                    target: "niki::config",
+                    "unknown effort '{other}' — using medium preset"
+                );
+                (8192, 0.2)
+            }
+            _ => (8192, 0.2),
+        }
+    }
+
+    /// Effective max_tokens: per-agent override, else effort preset.
     pub fn effective_max_tokens(&self) -> u32 {
         if self.max_tokens > 0 {
             self.max_tokens
         } else {
-            8192
+            self.effort_preset().0
         }
     }
 
-    /// Effective temperature: per-agent override or global default.
+    /// Effective temperature: per-agent override, else effort preset.
     pub fn effective_temperature(&self) -> f32 {
         if self.temperature > 0.0 {
             self.temperature
         } else {
-            0.2
+            self.effort_preset().1
         }
     }
 }
@@ -1049,6 +1095,7 @@ impl NikiConfig {
         "compaction",
         "mcp",
         "hooks",
+        "commands",
         "permissions",
         "instructions",
     ];
@@ -1257,6 +1304,9 @@ impl NikiConfig {
         if other.permissions.disable_worktree != default_permissions.disable_worktree {
             self.permissions.disable_worktree = other.permissions.disable_worktree;
         }
+        if other.permissions.fail_closed_headless != default_permissions.fail_closed_headless {
+            self.permissions.fail_closed_headless = other.permissions.fail_closed_headless;
+        }
         if other.permissions.auto_approve != default_permissions.auto_approve {
             self.permissions.auto_approve = other.permissions.auto_approve;
         }
@@ -1266,6 +1316,22 @@ impl NikiConfig {
         // Hooks: adopt explicitly configured event commands.
         if !other.hooks.commands.is_empty() {
             self.hooks.commands = other.hooks.commands;
+        }
+        // Command sources are additive across global + local configs,
+        // de-duplicated, order-preserving.
+        {
+            let mut merged: Vec<String> = Vec::new();
+            for d in self
+                .commands
+                .extra_dirs
+                .iter()
+                .chain(other.commands.extra_dirs.iter())
+            {
+                if !merged.contains(d) {
+                    merged.push(d.clone());
+                }
+            }
+            self.commands.extra_dirs = merged;
         }
     }
 
@@ -1456,7 +1522,7 @@ impl NikiConfig {
                 "session": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
                 "compaction": {"type": "object", "properties": {"strategy": {"type": "string"}}},
                 "mcp": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
-                "permissions": {"type": "object", "properties": {"mode": {"type": "string"}, "disable_worktree": {"type": "boolean"}, "auto_approve": {"type": "boolean"}}},
+                "permissions": {"type": "object", "properties": {"mode": {"type": "string"}, "disable_worktree": {"type": "boolean"}, "fail_closed_headless": {"type": "boolean"}, "auto_approve": {"type": "boolean"}}},
                 "instructions": {"type": "object"}
             },
             "$defs": {
@@ -1622,5 +1688,52 @@ max_exec_seconds = 600
         assert_eq!(tester.max_exec_seconds, 600);
         assert_eq!(tester.allowed_commands.len(), 2);
         assert_eq!(tester.denied_commands.len(), 2);
+    }
+
+    #[test]
+    fn effort_presets_apply_only_when_unset() {
+        let mut a = AgentConfig::default();
+        a.effort = Some("low".to_string());
+        assert_eq!(a.effective_max_tokens(), 4096);
+        assert_eq!(a.effective_temperature(), 0.0);
+
+        a.effort = Some("HIGH".to_string());
+        assert_eq!(a.effective_max_tokens(), 16384);
+        assert_eq!(a.effective_temperature(), 0.4);
+
+        // Explicit values always win over effort.
+        a.max_tokens = 1234;
+        a.temperature = 0.9;
+        assert_eq!(a.effective_max_tokens(), 1234);
+        assert_eq!(a.effective_temperature(), 0.9);
+
+        // Unknown effort warns and behaves as medium.
+        let mut b = AgentConfig::default();
+        b.effort = Some("turbo".to_string());
+        assert_eq!(b.effective_max_tokens(), 8192);
+        assert_eq!(b.effective_temperature(), 0.2);
+    }
+
+    #[test]
+    fn commands_extra_dirs_merge_additively() {
+        let mut base = NikiConfig::default();
+        base.commands.extra_dirs = vec!["a".to_string()];
+        let mut other = NikiConfig::default();
+        other.commands.extra_dirs = vec!["b".to_string(), "a".to_string()];
+        base.merge(other);
+        assert_eq!(
+            base.commands.extra_dirs,
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
+    fn permissions_security_defaults_are_permissive() {
+        // fail_closed_headless and disable_worktree are opt-in: defaults must
+        // preserve today's behavior.
+        let c = NikiConfig::default();
+        assert!(!c.permissions.fail_closed_headless);
+        assert!(!c.permissions.disable_worktree);
+        assert_eq!(c.permissions.mode, "manual");
     }
 }

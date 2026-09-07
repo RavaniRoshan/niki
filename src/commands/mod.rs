@@ -145,11 +145,21 @@ impl CommandRegistry {
     }
 
     /// Create a registry with built-ins plus the project's local user commands
-    /// from `<project>/.niki/commands/*.md` (filename → `/name`). Local files
-    /// override same-named built-ins. A shared/committed tier is a follow-up;
-    /// `.niki/` is git-ignored by design, so this tier is personal.
-    pub fn with_project(project_path: &Path) -> Self {
+    /// from `<project>/.niki/commands/*.md` (filename → `/name`), plus any
+    /// `[commands] extra_dirs` (committed packs welcome). Later sources win:
+    /// extra dirs override each other in order, and `.niki/commands/` always
+    /// wins. A shared/committed tier is just an extra dir in version control.
+    pub fn with_project(project_path: &Path, extra_dirs: &[std::path::PathBuf]) -> Self {
         let mut registry = Self::new();
+        for dir in extra_dirs {
+            let full = if dir.is_absolute() {
+                dir.clone()
+            } else {
+                project_path.join(dir)
+            };
+            // Best-effort: a missing dir simply means no commands there.
+            let _ = registry.load_from_dir(&full);
+        }
         // Best-effort: a missing dir simply means no custom commands.
         let _ = registry.load_from_dir(&project_path.join(".niki").join("commands"));
         registry
@@ -527,7 +537,7 @@ mod user_command_tests {
         std::fs::create_dir_all(&dir).unwrap();
         write_cmd(&dir, "deploy.md", "Deploy $ARGUMENTS to prod.");
 
-        let registry = CommandRegistry::with_project(&proj);
+        let registry = CommandRegistry::with_project(&proj, &[]);
         assert_eq!(
             registry.expand("deploy", "v1.2").unwrap(),
             "Deploy v1.2 to prod."
@@ -540,7 +550,7 @@ mod user_command_tests {
         let proj = std::env::temp_dir().join(format!("niki-empty-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&proj);
         std::fs::create_dir_all(&proj).unwrap();
-        let registry = CommandRegistry::with_project(&proj);
+        let registry = CommandRegistry::with_project(&proj, &[]);
         assert!(registry.get("help").is_some());
         let _ = std::fs::remove_dir_all(&proj);
     }
