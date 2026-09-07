@@ -242,6 +242,12 @@ impl Sandbox for WorktreeSandbox {
                         response_tx,
                     };
                     if self.event_tx.send(request).is_err() {
+                        if self.permission_checker.fail_closed_headless() {
+                            return Err(anyhow::anyhow!(
+                                "Command denied by policy (headless Ask with fail_closed_headless): '{}'",
+                                full
+                            ));
+                        }
                         // No TUI listening — fall back to Allow (headless mode).
                         // Loud by design: silent auto-approval is how agents end
                         // up running `curl | sh` in CI. Use --permission-mode to

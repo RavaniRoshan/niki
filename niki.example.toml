@@ -167,6 +167,17 @@ network_disabled = true
 # [permissions]
 # mode = "manual"  # manual (default) | auto | dontask | bypass. Overridable per run: niki run --permission-mode auto
 # disable_worktree = false  # Governance kill-switch: true refuses the unisolated worktree backend outright
+# fail_closed_headless = false  # true: headless Ask denies instead of allowing with a warning
+
+# Per-agent effort presets (low | medium | high) — apply only when max_tokens/
+# temperature are unset; explicit values always win. Example:
+# [agents.tester]
+# effort = "low"
+
+# Slash-command sources: extra dirs of *.md files (project-relative or
+# absolute), e.g. a committed command pack. .niki/commands/ always wins.
+# [commands]
+# extra_dirs = ["docs/commands"]
 
 # Shell hooks on pipeline lifecycle events ([hooks.commands] event -> commands).
 # Wired events: PreTaskStart, PostTaskStop, PreAgentStart, PostAgentStop

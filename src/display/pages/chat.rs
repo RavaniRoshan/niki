@@ -536,7 +536,7 @@ impl Page for ChatPage {
                     if trimmed == "/help" {
                         state.chat_log.push((
                             "system".to_string(),
-                            "Available slash commands:\n  /doctor          Check providers, keys, sandbox health\n  /review          Trigger code review audit on workspace\n  /diff            View full-screen unified diff\n  /cost            Show token spend and cost metrics\n  /context         Show context window utilization\n  /compact         Compact session history into memory\n  /clear           Clear conversation log\n  /model <name>    Switch active LLM model\n  /theme           Cycle color theme (dark/light/auto)\n  /config          Open configuration editor\n  /terminal-setup  Guide truecolor & OSC 52 clipboard setup\n  /undo · /redo    Undo or redo workspace checkpoints\n  /steer <msg>     Send a live steering hint to running agent".to_string(),
+                            "Available slash commands:\n  /doctor          Check providers, keys, sandbox health\n  /review          Trigger code review audit on workspace\n  /diff            View full-screen unified diff\n  /cost            Show token spend and cost metrics\n  /context         Show context window utilization\n  /compact         Compact session history into memory\n  /clear           Clear conversation log\n  /init            Scan project and draft AGENTS.md\n  /model <name>    Switch active LLM model\n  /theme           Cycle color theme (dark/light/auto)\n  /config          Open configuration editor\n  /terminal-setup  Guide truecolor & OSC 52 clipboard setup\n  /undo · /redo    Undo or redo workspace checkpoints\n  /steer <msg>     Send a live steering hint to running agent".to_string(),
                         ));
                     } else if trimmed == "/clear" || trimmed == "/reset" {
                         state.chat_log.clear();
@@ -822,6 +822,33 @@ impl Page for ChatPage {
                             "system".to_string(),
                             "Recurring tasks: not yet wired (post-MVP).".to_string(),
                         ));
+                    } else if trimmed == "/init" {
+                        // Run the real `niki init --scan` in the project dir and
+                        // stream its output back into the chat log (same pattern
+                        // as `niki smoke`, which shells out to current_exe).
+                        let msg = match std::env::current_exe() {
+                            Ok(exe) => match std::process::Command::new(exe)
+                                .args(["init", "--scan"])
+                                .current_dir(&state.project_path)
+                                .output()
+                            {
+                                Ok(out) => {
+                                    let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+                                    let err = String::from_utf8_lossy(&out.stderr);
+                                    if !err.trim().is_empty() {
+                                        text.push_str(&err);
+                                    }
+                                    if text.trim().is_empty() {
+                                        "init --scan produced no output.".to_string()
+                                    } else {
+                                        text.chars().take(2000).collect()
+                                    }
+                                }
+                                Err(e) => format!("Could not run init: {e}"),
+                            },
+                            Err(e) => format!("Could not locate niki binary: {e}"),
+                        };
+                        state.chat_log.push(("system".to_string(), msg));
                     } else if trimmed == "/voice" {
                         state.chat_log.push((
                             "system".to_string(),
