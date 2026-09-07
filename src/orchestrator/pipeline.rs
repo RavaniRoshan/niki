@@ -541,7 +541,6 @@ async fn run_parallel_coders(
         let mcp_tools = mcp_tools.to_string();
         let event_tx = event_tx.clone();
         let hook_bus = hook_bus.clone();
-        let hook_task_id = hook_task_id;
 
         tasks.push(tokio::spawn(async move {
             // Own worktree sandbox per coder → isolated changes.
