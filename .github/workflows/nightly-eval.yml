@@ -1,0 +1,38 @@
+# Nightly eval regression gate — keyless, deterministic, always on.
+#
+# Runs NIKI's seeded-defect eval harness in replay mode (no API keys, no cost)
+# and uploads the report + disclosure manifest. `niki eval` already exits
+# non-zero on expected-caught regressions, so a red run here means the
+# pipeline regressed — not that a model had a bad day.
+name: Nightly eval
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  eval-replay:
+    name: Eval replay + manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build debug binary
+        run: cargo build
+      - name: Run eval harness (replay, no keys)
+        run: ./target/debug/niki eval --out .niki/eval-nightly
+      - name: Verify disclosure manifest exists
+        run: |
+          test -f .niki/eval-nightly/eval-manifest.json || { echo "eval-manifest.json missing"; exit 1; }
+          python3 -c "import json; m=json.load(open('.niki/eval-nightly/eval-manifest.json')); assert m['mode']=='replay', m; print('manifest ok:', m['n_cases'], 'cases,', m['niki_version'])"
+      - name: Upload eval artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: eval-nightly
+          path: .niki/eval-nightly/
+          retention-days: 30

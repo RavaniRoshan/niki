@@ -1,0 +1,134 @@
+# On-demand NIKI review — human-gated, needs-keys, off unless asked.
+#
+# Triggers:
+#   1. Manual: Actions -> NIKI review -> Run workflow (inputs below).
+#   2. Mention: comment `@niki <task>` on an issue or PR (owners/members/
+#      collaborators only; bots ignored). A `[skip niki]` marker anywhere in
+#      the comment disables the run — the loop guard.
+#
+# Requirements: repository secrets for at least one provider, e.g.
+# ANTHROPIC_API_KEY. When no key secret exists the job skips gracefully
+# instead of failing.
+#
+# What it does: checks out the target ref, runs one tasked pipeline with
+# `--bare --output-format json` (deterministic inputs, machine-readable
+# result), uploads the full `.niki/tasks/<id>` audit trail, and posts the
+# JSON verdict back as a comment. It never pushes, merges, or force-pushes.
+name: NIKI review
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Task for NIKI (plain English)"
+        required: true
+        default: "Review the working tree for correctness, security, and test gaps; implement only safe fixes"
+      ref:
+        description: "Ref to check out (default: default branch)"
+        required: false
+        default: ""
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: niki-review-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Trigger guard
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      task: ${{ steps.decide.outputs.task }}
+      ref: ${{ steps.decide.outputs.ref }}
+    steps:
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BODY: ${{ github.event.comment.body || '' }}
+          ASSOC: ${{ github.event.comment.author_association || '' }}
+          ACTOR_TYPE: ${{ github.event.comment.user.type || '' }}
+          INPUT_TASK: ${{ inputs.task || '' }}
+          INPUT_REF: ${{ inputs.ref || '' }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "task<<NIKI_TASK_EOF" >> "$GITHUB_OUTPUT"
+            echo "$INPUT_TASK" >> "$GITHUB_OUTPUT"
+            echo "NIKI_TASK_EOF" >> "$GITHUB_OUTPUT"
+            echo "ref=$INPUT_REF" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Mention flow: must start with @niki, human with standing, no skip marker.
+          case "$BODY" in
+            "@niki "*|"@niki") ;;
+            *) echo "run=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          case "$ASSOC" in
+            OWNER|MEMBER|COLLABORATOR) ;;
+            *) echo "run=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          if [ "$ACTOR_TYPE" = "Bot" ]; then echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          case "$BODY" in
+            *"[skip niki]"*) echo "run=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          task="${BODY#@niki}"
+          task="$(echo "$task" | sed 's/^[[:space:]]*//')"
+          {
+            echo "run=true"
+            echo "task<<NIKI_TASK_EOF"
+            echo "$task"
+            echo "NIKI_TASK_EOF"
+            echo "ref="
+          } >> "$GITHUB_OUTPUT"
+
+  review:
+    name: NIKI tasked run
+    needs: guard
+    # Needs-keys gate: skip gracefully when no provider key is configured.
+    if: needs.guard.outputs.run == 'true' && (secrets.ANTHROPIC_API_KEY != '' || secrets.OPENAI_API_KEY != '' || secrets.GOOGLE_API_KEY != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.guard.outputs.ref || github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build release binary
+        run: cargo build --release
+      - name: Run NIKI task (bare, JSON contract)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          NIKI_TASK: ${{ needs.guard.outputs.task }}
+        run: |
+          set -euo pipefail
+          # Task travels via env (never interpolated into the command line), so
+          # comment text cannot inject shell.
+          ./target/release/niki run "$NIKI_TASK" \
+            --backend worktree --bare --output-format json --project . \
+            | tee /tmp/niki-result.jsonl | tail -1 > /tmp/niki-result.json
+          python3 -c "import json; d=json.load(open('/tmp/niki-result.json')); print('status:', d['status'], '| branch:', d.get('branch'), '| cost: \$', d.get('cost_usd'))"
+      - name: Upload audit trail
+        uses: actions/upload-artifact@v7
+        with:
+          name: niki-task
+          path: .niki/tasks/
+          retention-days: 14
+      - name: Comment result
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          status=$(python3 -c "import json; print(json.load(open('/tmp/niki-result.json'))['status'])")
+          branch=$(python3 -c "import json; print(json.load(open('/tmp/niki-result.json')).get('branch') or 'none (blocked or empty diff)')")
+          gh issue comment "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --body \
+            "NIKI run finished with status **${status}** (branch: \`${branch}\`). Full audit trail (report.md, patch, per-agent artifacts) is attached to the workflow run as niki-task."
