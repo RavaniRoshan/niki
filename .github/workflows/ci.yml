@@ -123,7 +123,7 @@ jobs:
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: niki-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/niki
