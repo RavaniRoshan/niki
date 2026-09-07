@@ -96,7 +96,7 @@ async fn cmd_scan(project_dir: &std::path::Path) -> Result<()> {
         ),
     }
     draft.push_str(
-        "\n## Conventions\n\n- (add yours: code style, architecture rules, things agents must never do)\n",
+        "\n## Conventions\n\n- (add yours: code style, architecture rules, things agents must never do)\n- Recurring rules also live in `.niki/rules/<topic>.md` (one concern per file) and are injected into every run as binding Standing Rules.\n",
     );
 
     let agents_path = project_dir.join("AGENTS.md");
