@@ -95,7 +95,7 @@ pub(crate) fn resolve_task_id(tasks_dir: &Path, input: &str) -> Result<String> {
 }
 
 /// Find the most recently created task's directory name.
-fn latest_task_id(tasks_dir: &Path) -> Option<String> {
+pub(crate) fn latest_task_id(tasks_dir: &Path) -> Option<String> {
     let mut latest: Option<(String, chrono::DateTime<chrono::Utc>)> = None;
     if let Ok(entries) = std::fs::read_dir(tasks_dir) {
         for entry in entries.flatten() {

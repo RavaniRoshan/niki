@@ -1152,8 +1152,31 @@ impl NikiConfig {
         }
 
         config.apply_env_vars();
+        config.resolve_aliases();
 
         Ok(config)
+    }
+
+    /// Resolve well-known model shorthands (`sonnet`, `4o`, `flash`, …) to
+    /// canonical ids for every agent and pipeline stage. Runs last so aliases
+    /// work identically from file and env vars. Unknown values pass through
+    /// untouched (see `resolve_model_alias`).
+    fn resolve_aliases(&mut self) {
+        use crate::llm::provider::resolve_model_alias;
+        for agent in [
+            &mut self.agents.planner,
+            &mut self.agents.coder,
+            &mut self.agents.tester,
+            &mut self.agents.reviewer,
+            &mut self.agents.synthesizer,
+            &mut self.agents.security_auditor,
+            &mut self.agents.red,
+        ] {
+            agent.model = resolve_model_alias(&agent.provider, &agent.model);
+        }
+        for stage in &mut self.pipeline.stages {
+            stage.model = resolve_model_alias(&stage.provider, &stage.model);
+        }
     }
 
     /// Save theme preference to global config using toml::Value mutation.
@@ -1725,6 +1748,28 @@ max_exec_seconds = 600
             base.commands.extra_dirs,
             vec!["a".to_string(), "b".to_string()]
         );
+    }
+
+    #[test]
+    fn model_aliases_resolve_per_provider() {
+        use crate::llm::provider::resolve_model_alias;
+        assert_eq!(
+            resolve_model_alias("anthropic", "sonnet"),
+            "claude-sonnet-4"
+        );
+        assert_eq!(resolve_model_alias("ANTHROPIC", "Opus"), "claude-opus-4");
+        assert_eq!(resolve_model_alias("openai", "4o-mini"), "gpt-4o-mini");
+        assert_eq!(resolve_model_alias("google", "flash"), "gemini-2.0-flash");
+        // Pinned versions, unknown models/providers pass through untouched.
+        assert_eq!(
+            resolve_model_alias("anthropic", "claude-sonnet-4-20250514"),
+            "claude-sonnet-4-20250514"
+        );
+        assert_eq!(
+            resolve_model_alias("groq", "llama-3.1-70b-versatile"),
+            "llama-3.1-70b-versatile"
+        );
+        assert_eq!(resolve_model_alias("mystery", "sonnet"), "sonnet");
     }
 
     #[test]

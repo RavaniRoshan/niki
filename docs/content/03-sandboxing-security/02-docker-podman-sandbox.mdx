@@ -42,3 +42,32 @@ If your tests require downloading dependencies or reaching specific staging serv
 network_disabled  = false
 network_allowlist = ["registry.npmjs.org", "crates.io", "pypi.org"]
 ```
+
+---
+
+## Remote Daemon (Cloud-Adjacent Execution)
+
+NIKI honors the standard `DOCKER_HOST` environment variable when connecting
+to the container runtime. Point it at a remote daemon to execute agent
+containers on another machine (a cloud VM, a beefy workstation) instead of
+locally — no NIKI-side changes needed:
+
+```bash
+export DOCKER_HOST="ssh://user@build-host"
+niki run "Migrate the test suite to vitest" --project ./my-app
+```
+
+Requirements and honest limits:
+
+- The remote daemon must already have the sandbox image (`niki-sandbox:24.04`
+  or your configured `base_image`); NIKI pulls it on demand where the daemon
+  allows, but a private registry needs its own auth setup.
+- The project source is sent to the remote daemon as build/run context —
+  treat the remote host with the same trust you give your own machine.
+- Prefer SSH with key auth; unencrypted `tcp://` daemons expose root-equivalent
+  API access to anyone on the path. NIKI never downgrades this for you.
+- `niki doctor` checks the *local* toolchain; remote image presence surfaces
+  as a mid-run error, not a doctor failure (yet).
+
+A managed NIKI cloud (hosted runners, no daemon of your own) remains roadmap,
+not a feature: this page documents what works today.
