@@ -502,8 +502,30 @@ impl Tool for ReadTool {
         let start_line = input.int("start_line").unwrap_or(1) as usize;
         let end_line = input.int("end_line").map(|n| n as usize);
 
+        // Binary media need parsing deps this binary deliberately does not
+        // vendors (supply-chain gate): refuse with guidance instead of dumping
+        // bytes (or a bare UTF-8 error) into agent context.
+        if let Some(ext) = full_path.extension().and_then(|e| e.to_str()) {
+            let ext = ext.to_lowercase();
+            if ["png", "jpg", "jpeg", "gif", "webp", "pdf"].contains(&ext.as_str()) {
+                return make_error_result(&format!(
+                    "cannot read {} as text ({} files need binary parsing, not yet supported); \
+                     describe what you need from it instead",
+                    full_path.display(),
+                    ext
+                ));
+            }
+        }
+
         match tokio::fs::read_to_string(&full_path).await {
             Ok(content) => {
+                // Jupyter notebooks are JSON, not line-oriented text: render
+                // cells structurally so agents see code/outputs per cell.
+                // Images (PNG/JPG) and PDFs need binary parsing deps and are
+                // refused honestly instead of dumping bytes into context.
+                if full_path.extension().and_then(|e| e.to_str()) == Some("ipynb") {
+                    return render_notebook(&full_path, &content, start_line, end_line);
+                }
                 let lines: Vec<(usize, String)> = content
                     .lines()
                     .enumerate()
@@ -546,9 +568,148 @@ impl Tool for ReadTool {
     }
 }
 
+/// Render a `.ipynb` notebook as structured per-cell text (cell index, type,
+/// source, truncated outputs). Falls back to an error result on invalid JSON
+/// so a corrupt notebook never silently becomes empty context.
+fn render_notebook(
+    full_path: &std::path::PathBuf,
+    content: &str,
+    start_line: usize,
+    end_line: Option<usize>,
+) -> ToolResult {
+    let make_lines = |text: String| -> (Vec<(usize, String)>, usize) {
+        let lines: Vec<(usize, String)> = text
+            .lines()
+            .enumerate()
+            .map(|(i, l)| (i + 1, l.to_string()))
+            .collect();
+        let total = lines.len();
+        let filtered: Vec<(usize, String)> = lines
+            .into_iter()
+            .filter(|(i, _)| *i >= start_line)
+            .filter(|(i, _)| end_line.is_none_or(|e| *i <= e))
+            .collect();
+        (filtered, total)
+    };
+    let result_of = |text: String| -> ToolResult {
+        let (filtered, total) = make_lines(text);
+        let shown = filtered.len();
+        ToolResult {
+            tool_id: ToolId::generate(),
+            tool_name: "read".into(),
+            status: ToolStatus::Success,
+            summary: format!("{} (notebook, {}/{})", full_path.display(), shown, total),
+            data: ToolData::FileContent {
+                path: full_path.display().to_string(),
+                lines: filtered,
+                total_lines: total,
+            },
+            duration: Duration::ZERO,
+            artifacts: vec![ArtifactRef {
+                path: full_path.clone(),
+                artifact_type: ArtifactType::FileRead,
+            }],
+            diagnostics: Vec::new(),
+            metadata: HashMap::new(),
+        }
+    };
+    let nb: serde_json::Value = match serde_json::from_str(content) {
+        Ok(v) => v,
+        Err(e) => {
+            return make_error_result(&format!(
+                "invalid notebook JSON {}: {}",
+                full_path.display(),
+                e
+            ));
+        }
+    };
+    let cells = nb
+        .get("cells")
+        .and_then(|c| c.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if cells.is_empty() {
+        return result_of("(notebook has no cells)".to_string());
+    }
+    let mut out = String::new();
+    for (i, cell) in cells.iter().enumerate() {
+        let kind = cell
+            .get("cell_type")
+            .and_then(|k| k.as_str())
+            .unwrap_or("unknown");
+        out.push_str(&format!("--- cell {} [{}] ---\n", i, kind));
+        let source = cell
+            .get("source")
+            .map(|s| match s {
+                serde_json::Value::String(t) => t.clone(),
+                serde_json::Value::Array(lines) => lines
+                    .iter()
+                    .filter_map(|l| l.as_str())
+                    .collect::<Vec<_>>()
+                    .join(""),
+                _ => String::new(),
+            })
+            .unwrap_or_default();
+        out.push_str(&source);
+        if !source.ends_with('\n') {
+            out.push('\n');
+        }
+        if kind == "code" {
+            if let Some(outputs) = cell.get("outputs").and_then(|o| o.as_array()) {
+                for output in outputs.iter().take(5) {
+                    let text = output
+                        .get("text")
+                        .map(|t| match t {
+                            serde_json::Value::String(s) => s.clone(),
+                            serde_json::Value::Array(lines) => lines
+                                .iter()
+                                .filter_map(|l| l.as_str())
+                                .collect::<Vec<_>>()
+                                .join(""),
+                            _ => String::new(),
+                        })
+                        .unwrap_or_default();
+                    let text: String = text.chars().take(2000).collect();
+                    if !text.trim().is_empty() {
+                        out.push_str("[output]\n");
+                        out.push_str(&text);
+                        if !text.ends_with('\n') {
+                            out.push('\n');
+                        }
+                    }
+                    if let Some(trace) =
+                        output
+                            .get("traceback")
+                            .and_then(|t| t.as_array())
+                            .map(|lines| {
+                                lines
+                                    .iter()
+                                    .filter_map(|l| l.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join("")
+                            })
+                    {
+                        let trace: String = trace.chars().take(2000).collect();
+                        if !trace.trim().is_empty() {
+                            out.push_str("[traceback]\n");
+                            out.push_str(&trace);
+                            if !trace.ends_with('\n') {
+                                out.push('\n');
+                            }
+                        }
+                    }
+                }
+                if outputs.len() > 5 {
+                    out.push_str(&format!("[{} more outputs omitted]\n", outputs.len() - 5));
+                }
+            }
+        }
+    }
+    result_of(out)
+}
+
 /// Glob tool — find files by pattern.
 pub struct GlobTool;
-
 #[async_trait::async_trait]
 impl Tool for GlobTool {
     fn def(&self) -> &ToolDef {
@@ -2304,6 +2465,79 @@ mod tests {
             permissions: HashMap::new(),
             task_store: Some(std::sync::Arc::new(TaskStore::new())),
         }
+    }
+
+    fn read_ctx(dir: &std::path::Path) -> ToolContext {
+        ToolContext {
+            agent_id: crate::mission::AgentId("a1".into()),
+            mission_id: crate::mission::MissionId("m1".into()),
+            role: "coder".into(),
+            project_path: dir.to_path_buf(),
+            permissions: HashMap::new(),
+            task_store: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn read_renders_notebook_cells() {
+        let dir = std::env::temp_dir().join(format!("niki-nb-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("analysis.ipynb"),
+            serde_json::json!({
+                "cells": [
+                    {"cell_type": "markdown", "source": ["# Title\n", "words"]},
+                    {"cell_type": "code", "source": ["print(1)\n"],
+                     "outputs": [{"text": ["1\n"]}]},
+                    {"cell_type": "code", "source": ["bad("],
+                     "outputs": [{"traceback": ["E1\n", "E2"]}]}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let registry = build_baseline_registry();
+        let out = registry
+            .execute(
+                "read",
+                ToolInput::new(serde_json::json!({"path": "analysis.ipynb"})),
+                &read_ctx(&dir),
+            )
+            .await;
+        assert_eq!(out.status, ToolStatus::Success);
+        let text = match out.data {
+            ToolData::FileContent { lines, .. } => lines
+                .into_iter()
+                .map(|(_, l)| l)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            other => panic!("expected FileContent, got {:?}", other),
+        };
+        assert!(text.contains("cell 0 [markdown]"), "{text}");
+        assert!(text.contains("cell 1 [code]"), "{text}");
+        assert!(text.contains("[output]"), "{text}");
+        assert!(text.contains("[traceback]"), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn read_refuses_binary_media_honestly() {
+        let dir = std::env::temp_dir().join(format!("niki-media-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("shot.png"), [0u8, 1, 2, 3]).unwrap();
+        let registry = build_baseline_registry();
+        let out = registry
+            .execute(
+                "read",
+                ToolInput::new(serde_json::json!({"path": "shot.png"})),
+                &read_ctx(&dir),
+            )
+            .await;
+        assert_ne!(out.status, ToolStatus::Success);
+        assert!(out.summary.contains("binary parsing"), "{}", out.summary);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
