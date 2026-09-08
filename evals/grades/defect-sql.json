@@ -1,0 +1,7 @@
+{
+  "case_id": "defect-sql",
+  "reviewer": "shiva",
+  "merge_worthy": true,
+  "note": "Specific, file-located SQL injection with correct fix; would block merge",
+  "date": "2026-09-08"
+}

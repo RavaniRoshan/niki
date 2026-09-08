@@ -1,0 +1,7 @@
+{
+  "case_id": "defect-command-injection",
+  "reviewer": "shiva",
+  "merge_worthy": true,
+  "note": "Specific unsanitized shell input; would block merge",
+  "date": "2026-09-08"
+}
