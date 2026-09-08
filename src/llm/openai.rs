@@ -45,6 +45,12 @@ impl OpenAiProvider {
                     Some("groq")
                 } else if url.contains("deepseek") {
                     Some("deepseek")
+                } else if url.contains("opencode.ai/zen") {
+                    Some("zen")
+                } else if url.contains("api.kimi.com") {
+                    Some("kimi")
+                } else if url.contains("api.kilo.ai") {
+                    Some("kilo")
                 } else {
                     None
                 }
@@ -57,16 +63,20 @@ impl OpenAiProvider {
         // Derive provider name first so the missing-key error names the exact
         // env var (OPENAI_API_KEY vs GROQ_API_KEY paint very different fixes).
         let provider_name = Self::name_from_base_url(config.base_url.as_deref());
+        Self::new_named(config, &provider_name)
+    }
+
+    /// Construct with an explicit provider slug (used for named gateways whose
+    /// base_url may be user-overridden, e.g. `zen`, `kimi`, `kilo`).
+    pub fn new_named(config: &ProviderConfig, provider_name: &str) -> Result<Self> {
         let _api_key = config
             .api_key
             .clone()
-            .ok_or_else(|| super::provider::missing_key_error(&provider_name))?;
-        // Derive provider name from base_url or config for logging
-        let provider_name = Self::name_from_base_url(config.base_url.as_deref());
+            .ok_or_else(|| super::provider::missing_key_error(provider_name))?;
         Ok(Self {
             config: config.clone(),
             client: super::provider::http_client()?,
-            provider_name,
+            provider_name: provider_name.to_string(),
         })
     }
 

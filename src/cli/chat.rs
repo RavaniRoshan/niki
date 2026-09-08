@@ -19,7 +19,23 @@ pub struct ChatArgs {
 }
 
 /// Build a provider from the configured providers map or environment variables.
+/// Chat is a single-agent surface: it honors the `[agents.coder]` provider
+/// first (the coder does the hands-on work), then any configured provider
+/// entry, then environment auto-detection.
 fn build_provider(config: &NikiConfig) -> Option<(Box<dyn LlmProvider>, String)> {
+    // 1. The coder agent's configured provider, when its entry exists.
+    let coder = &config.agents.coder;
+    if let Some(pc) = config.providers.get(&coder.provider)
+        && let Ok(provider) = create_provider(&coder.provider, pc)
+    {
+        let model = if coder.model.is_empty() {
+            pc.default_model.clone()
+        } else {
+            coder.model.clone()
+        };
+        return Some((provider, model));
+    }
+
     if let Some((name, pc)) = config.providers.iter().next() {
         if let Ok(provider) = create_provider(name, pc) {
             let model = if pc.default_model.is_empty() {
@@ -81,50 +97,93 @@ fn build_provider(config: &NikiConfig) -> Option<(Box<dyn LlmProvider>, String)>
         }
     }
 
+    // Single-key AI gateways, in order of generality. Each needs an explicit
+    // base_url: unlike anthropic/openai/google, the shared OpenAI-compatible
+    // implementation cannot guess the endpoint.
+    for (env_var, provider, model) in [
+        (
+            "OPENROUTER_API_KEY",
+            "openrouter",
+            "anthropic/claude-sonnet-4",
+        ),
+        ("OPENCODE_API_KEY", "zen", "kimi-k2.5"),
+        ("KIMI_API_KEY", "kimi", "k3-256k"),
+        ("KILO_API_KEY", "kilo", "anthropic/claude-sonnet-4.5"),
+        ("NVIDIA_API_KEY", "nvidia", "meta/llama-3.1-405b-instruct"),
+        ("GROQ_API_KEY", "groq", "llama-3.1-70b-versatile"),
+    ] {
+        if let Ok(key) = std::env::var(env_var) {
+            if key.is_empty() {
+                continue;
+            }
+            let pc = crate::config::types::ProviderConfig {
+                api_key: Some(key),
+                base_url: crate::llm::provider::default_base_url(provider).map(str::to_string),
+                default_model: model.to_string(),
+            };
+            if let Ok(p) = create_provider(provider, &pc) {
+                return Some((p, model.to_string()));
+            }
+        }
+    }
+
+    // Local-first fallback: a running Ollama needs no key and no config.
+    if crate::cli::auth::ollama_running() {
+        let pc = crate::config::types::ProviderConfig {
+            default_model: "qwen2.5-coder".to_string(),
+            ..Default::default()
+        };
+        if let Ok(p) = create_provider("ollama", &pc) {
+            return Some((p, "qwen2.5-coder".to_string()));
+        }
+    }
+
     None
 }
 
 /// Process a submitted user message: ask the LLM and stream the reply back into
 /// the chat session as an assistant turn (Phase 6 — user messages mid-session).
 fn process_message(tx: &mpsc::Sender<DisplayEvent>, config: &NikiConfig, user_text: &str) {
-    let reply = match build_provider(config) {
+    // TUI mode runs on a plain thread: bridge into async with a fresh
+    // runtime. (The headless `--message` path awaits `reply_text` directly
+    // on the caller's runtime instead — never nest runtimes here.)
+    let text = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt.block_on(reply_text(config, user_text)),
+        Err(_) => "(offline) could not start async runtime".to_string(),
+    };
+    send_assistant(tx, text);
+}
+
+/// Core single-turn completion. Async so both the TUI bridge above and the
+/// headless `--message` path share one implementation.
+async fn reply_text(config: &NikiConfig, user_text: &str) -> String {
+    match build_provider(config) {
         Some((provider, model)) => {
-            let rt = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt,
-                Err(_) => {
-                    return send_assistant(
-                        tx,
-                        "(offline) could not start async runtime".to_string(),
-                    );
-                }
+            let req = crate::llm::provider::CompletionRequest {
+                model,
+                system_prompt: concat!(
+                    "You are NIKI, a concise and high-precision coding assistant embedded in a terminal chat.\n",
+                    "Rule: Never run shell shims (cat, grep, sed, head, tail) when dedicated native tools are available.\n",
+                    "Rule: Always read files before modifying them.\n",
+                    "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__\n"
+                )
+                .to_string(),
+                user_message: user_text.to_string(),
+                max_tokens: 1024,
+                temperature: 0.7,
+                json_schema: None,
+                tools: None,
             };
-            rt.block_on(async {
-                let req = crate::llm::provider::CompletionRequest {
-                    model,
-                    system_prompt: concat!(
-                        "You are NIKI, a concise and high-precision coding assistant embedded in a terminal chat.\n",
-                        "Rule: Never run shell shims (cat, grep, sed, head, tail) when dedicated native tools are available.\n",
-                        "Rule: Always read files before modifying them.\n",
-                        "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__\n"
-                    ).to_string(),
-                    user_message: user_text.to_string(),
-                    max_tokens: 1024,
-                    temperature: 0.7,
-                    json_schema: None,
-                    tools: None,
-                };
-                match provider.complete(req).await {
-                    Ok(resp) => resp.content,
-                    Err(e) => format!("(offline) LLM error: {}", e),
-                }
-            })
+            match provider.complete(req).await {
+                Ok(resp) => resp.content,
+                Err(e) => format!("(offline) LLM error: {}", e),
+            }
         }
         None => {
-            "Hello! I am NIKI, your autonomous coding assistant. No LLM provider is configured yet. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or run /help to explore commands."
+            "Hello! I am NIKI, your autonomous coding assistant. No LLM provider is configured yet. Run `niki init` (or `niki auth login`) to set one up — Ollama works fully offline."
                 .to_string()
         }
-    };
-    send_assistant(tx, reply);
+    }
 }
 
 fn send_assistant(tx: &mpsc::Sender<DisplayEvent>, text: String) {
@@ -142,6 +201,16 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
     };
 
     let config = NikiConfig::load(&project_path).unwrap_or_default();
+
+    // Headless contract: `--message` with piped stdout prints the reply as
+    // plain text and exits, instead of launching the TUI (which would render
+    // alternate-screen codes to the pipe and drop the reply on teardown).
+    if let Some(msg) = &args.message
+        && !std::io::IsTerminal::is_terminal(&std::io::stdout())
+    {
+        println!("{}", reply_text(&config, msg).await);
+        return Ok(());
+    }
 
     // Create a long-lived channel so the TUI doesn't see Disconnect.
     let (tx, rx) = mpsc::channel::<DisplayEvent>();

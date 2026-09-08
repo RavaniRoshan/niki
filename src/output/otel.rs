@@ -173,7 +173,7 @@ mod tests {
         ];
         let p = otlp_payload(
             "niki",
-            "0.6.0",
+            env!("CARGO_PKG_VERSION"),
             &trace_id_hex("t"),
             &spans,
             1_000_000_000_000,

@@ -1369,6 +1369,11 @@ impl NikiConfig {
         self.providers.entry("together".to_string()).or_default();
         self.providers.entry("groq".to_string()).or_default();
         self.providers.entry("deepseek".to_string()).or_default();
+        self.providers.entry("ollama".to_string()).or_default();
+        self.providers.entry("ollama".to_string()).or_default();
+        self.providers.entry("zen".to_string()).or_default();
+        self.providers.entry("kimi".to_string()).or_default();
+        self.providers.entry("kilo".to_string()).or_default();
 
         // Standard provider keys take precedence, so a vanilla `ANTHROPIC_API_KEY`
         // (or `OPENAI_API_KEY`) always wins. Gateway-style tokens
@@ -1443,6 +1448,27 @@ impl NikiConfig {
         if let Ok(key) = std::env::var("DEEPSEEK_API_KEY")
             && !key.is_empty()
             && let Some(p) = self.providers.get_mut("deepseek")
+            && p.api_key.is_none()
+        {
+            p.api_key = Some(key);
+        }
+        if let Ok(key) = std::env::var("OPENCODE_API_KEY")
+            && !key.is_empty()
+            && let Some(p) = self.providers.get_mut("zen")
+            && p.api_key.is_none()
+        {
+            p.api_key = Some(key);
+        }
+        if let Ok(key) = std::env::var("KIMI_API_KEY")
+            && !key.is_empty()
+            && let Some(p) = self.providers.get_mut("kimi")
+            && p.api_key.is_none()
+        {
+            p.api_key = Some(key);
+        }
+        if let Ok(key) = std::env::var("KILO_API_KEY")
+            && !key.is_empty()
+            && let Some(p) = self.providers.get_mut("kilo")
             && p.api_key.is_none()
         {
             p.api_key = Some(key);
@@ -1588,6 +1614,51 @@ fn apply_env_model_to_agents(agents: &mut AgentsConfig, provider: &str, model: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_provider_stanzas_parse() {
+        let toml = r#"
+[providers.zen]
+api_key = "test"
+default_model = "kimi-k2.5"
+
+[providers.kimi]
+base_url = "https://api.kimi.com/coding/v1"
+default_model = "k3-256k"
+
+[providers.kilo]
+default_model = "anthropic/claude-sonnet-4.5"
+
+[agents.coder]
+provider = "zen"
+model = "kimi-k2.5"
+"#;
+        let c: NikiConfig = crate::config::types::toml::from_str(toml).unwrap();
+        assert_eq!(c.providers["zen"].api_key.as_deref(), Some("test"));
+        // Explicit base_url respected; defaults fill in when absent.
+        assert_eq!(
+            c.providers["kimi"].base_url.as_deref(),
+            Some("https://api.kimi.com/coding/v1")
+        );
+        assert_eq!(c.agents.coder.provider, "zen");
+        assert_eq!(c.agents.coder.model, "kimi-k2.5");
+    }
+
+    #[test]
+    fn example_toml_parses_with_gateway_stanzas() {
+        let example = include_str!("../../niki.example.toml");
+        let c: NikiConfig = crate::config::types::toml::from_str(example).unwrap();
+        for name in ["zen", "kimi", "kilo"] {
+            assert!(
+                c.providers.contains_key(name),
+                "example toml missing [providers.{name}]"
+            );
+        }
+        assert_eq!(
+            c.providers["zen"].base_url.as_deref(),
+            Some("https://opencode.ai/zen/v1")
+        );
+    }
 
     #[test]
     fn default_config_has_new_agents_and_sections() {

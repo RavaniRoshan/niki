@@ -115,40 +115,116 @@ async fn cmd_init_interactive(target_path: &std::path::Path) -> Result<()> {
 
     let example_content = include_str!("../../niki.example.toml");
 
-    for (name, label, env_var) in PROVIDERS {
-        println!("--- {} ---", label);
+    // Local-first: Ollama needs no key. Probe the default endpoint once with
+    // a short timeout; a reachable instance becomes menu option 0.
+    let ollama_up = crate::cli::auth::ollama_running();
+    if ollama_up {
+        println!("  Ollama is running locally (127.0.0.1:11434) — no API key needed.");
+    } else {
+        println!(
+            "  Ollama not detected locally (optional — fully offline models via http://localhost:11434)."
+        );
+    }
+    println!();
 
-        if let Ok(_key) = std::env::var(env_var) {
-            println!("  Found {} in your environment", env_var);
-            if prompt_yes_no("  Store in OS keyring?") {
-                crate::cli::auth::handle(&crate::cli::auth::AuthCommands::Login {
-                    provider: Some((*name).to_string()),
-                    stdin: false,
-                })
-                .await?;
-                println!(
-                    "  Stored in keyring. You can also manually set {} or edit niki.toml.",
-                    env_var
-                );
-            }
-        } else if resolve_api_key(name).is_some() {
-            println!("  Key already stored in keyring for {}", name);
-        } else {
-            println!("  {} not found in environment.", env_var);
-            if prompt_yes_no("  Enter API key now (will be stored in keyring)?") {
-                crate::cli::auth::handle(&crate::cli::auth::AuthCommands::Login {
-                    provider: Some((*name).to_string()),
-                    stdin: false,
-                })
-                .await?;
-            } else {
-                println!(
-                    "  Skipping {} — you can add it later with `niki auth login`",
-                    name
-                );
-            }
+    // Harness-style setup: one numbered menu over all providers, annotated
+    // with where a key was already found. Pick ONE to configure now instead
+    // of answering eleven prompts in a row.
+    #[derive(Clone, Copy)]
+    enum KeyState {
+        Env,
+        Keyring,
+        Missing,
+    }
+    let mut menu: Vec<(&str, &str, &str, KeyState)> = Vec::new();
+    if ollama_up {
+        // Marker entry: no key material involved.
+        menu.push(("ollama", "Ollama (local, no key)", "", KeyState::Missing));
+    }
+    for (name, label, env_var) in PROVIDERS {
+        if *name == "ollama" {
+            continue; // offered as menu option 0 above when reachable
         }
-        println!();
+        let state = if std::env::var(env_var)
+            .map(|k| !k.is_empty())
+            .unwrap_or(false)
+        {
+            KeyState::Env
+        } else if resolve_api_key(name).is_some() {
+            KeyState::Keyring
+        } else {
+            KeyState::Missing
+        };
+        menu.push((name, label, env_var, state));
+    }
+    for (i, (_, label, env_var, state)) in menu.iter().enumerate() {
+        let marker = match state {
+            KeyState::Env => format!("(via {})", env_var),
+            KeyState::Keyring => "(in keyring)".to_string(),
+            KeyState::Missing => String::new(),
+        };
+        println!("  {}) {} {}", i, label, marker);
+    }
+    println!();
+    print!("Pick a provider to set up [0-{}]: ", menu.len() - 1);
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+    let mut choice = String::new();
+    std::io::stdin().read_line(&mut choice).ok();
+    let picked = choice
+        .trim()
+        .parse::<usize>()
+        .ok()
+        .and_then(|i| menu.get(i).copied());
+
+    match picked {
+        None => {
+            println!("No provider selected — writing niki.toml with provider entries only.");
+            println!("Add a key later with `niki auth login` (or set its env var).");
+        }
+        Some(("ollama", _, _, _)) => {
+            println!("\nOllama selected — nothing to store. Point agents at it with:");
+            println!("  [agents.coder]\n  provider = \"ollama\"\n  model = \"llama3.1\"");
+            println!("(run `ollama pull llama3.1` first if the model is missing)\n");
+        }
+        Some((name, label, env_var, _)) => {
+            println!("--- {} ---", label);
+
+            if std::env::var(env_var)
+                .map(|k| !k.is_empty())
+                .unwrap_or(false)
+            {
+                println!("  Found {} in your environment", env_var);
+                if prompt_yes_no("  Store in OS keyring?") {
+                    crate::cli::auth::handle(&crate::cli::auth::AuthCommands::Login {
+                        provider: Some(name.to_string()),
+                        stdin: false,
+                    })
+                    .await?;
+                    println!(
+                        "  Stored in keyring. You can also manually set {} or edit niki.toml.",
+                        env_var
+                    );
+                }
+            } else if resolve_api_key(name).is_some() {
+                println!("  Key already stored in keyring for {}", name);
+            } else {
+                println!("  {} not found in environment.", env_var);
+                if prompt_yes_no("  Enter API key now (will be stored in keyring)?") {
+                    crate::cli::auth::handle(&crate::cli::auth::AuthCommands::Login {
+                        provider: Some(name.to_string()),
+                        stdin: false,
+                    })
+                    .await?;
+                } else {
+                    println!(
+                        "  Skipping {} — you can add it later with `niki auth login`",
+                        name
+                    );
+                }
+            }
+            println!();
+            println!("Set up more any time with `niki auth login --provider <name>`.");
+        }
     }
 
     fs::write(target_path, example_content)?;
