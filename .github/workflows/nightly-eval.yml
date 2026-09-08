@@ -31,7 +31,7 @@ jobs:
           test -f .niki/eval-nightly/eval-manifest.json || { echo "eval-manifest.json missing"; exit 1; }
           python3 -c "import json; m=json.load(open('.niki/eval-nightly/eval-manifest.json')); assert m['mode']=='replay', m; print('manifest ok:', m['n_cases'], 'cases,', m['niki_version'])"
       - name: Upload eval artifacts
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: eval-nightly
           path: .niki/eval-nightly/
