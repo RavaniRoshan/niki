@@ -121,7 +121,7 @@ async fn main() -> Result<()> {
         Commands::Plan(args) => niki::cli::plan::handle(args).await?,
         Commands::Session(args) => niki::cli::session::handle(args)?,
         Commands::Auth { command } => niki::cli::auth::handle(command).await?,
-        Commands::Providers(args) => niki::cli::providers::handle(args)?,
+        Commands::Providers(args) => niki::cli::providers::handle(args).await?,
         Commands::Doctor(args) => niki::cli::doctor::handle(args)?,
         Commands::Chat(args) => niki::cli::chat::handle(args).await?,
         Commands::Commands(args) => niki::cli::commands::handle(args)?,
