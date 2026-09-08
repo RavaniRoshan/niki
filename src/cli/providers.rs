@@ -14,13 +14,13 @@ pub struct ProvidersArgs {
     pub command: ProviderCommands,
 }
 
-pub fn handle(args: &ProvidersArgs) -> Result<()> {
+pub async fn handle(args: &ProvidersArgs) -> Result<()> {
     match &args.command {
-        ProviderCommands::Check => handle_check(),
+        ProviderCommands::Check => handle_check().await,
     }
 }
 
-fn handle_check() -> Result<()> {
+async fn handle_check() -> Result<()> {
     let config = NikiConfig::load(std::path::Path::new("."))?;
 
     if config.providers.is_empty() {
@@ -30,10 +30,10 @@ fn handle_check() -> Result<()> {
 
     println!("Checking provider health...\n");
 
-    let runtime = tokio::runtime::Runtime::new()?;
-    let results = runtime.block_on(crate::llm::failover::check_provider_health(
-        &config.providers,
-    ));
+    // Await directly: this runs inside the Tokio runtime, so spawning a
+    // nested runtime here panics ("Cannot start a runtime from within a
+    // runtime" — found by live-provider verification).
+    let results = crate::llm::failover::check_provider_health(&config.providers).await;
 
     let mut all_ok = true;
     for r in &results {
