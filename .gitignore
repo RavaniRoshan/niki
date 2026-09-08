@@ -8,9 +8,11 @@ skills-lock.json
 .claude/
 .opencode/
 
-# Untracked directories
+# Untracked directories (evals/grades/ is the exception: human judgments travel with fixtures)
 examples/
-evals/
+evals/*
+!evals/grades/
+!evals/grades/*.json
 .kilo/
 research/
 
