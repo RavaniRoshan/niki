@@ -4,7 +4,7 @@ All notable changes to NIKI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — 0.7.0: vision-complete pipeline
+## [0.7.0] - 2026-09-08
 
 Mega-plan execution (30 commits): plan-mode approval gates, oracle
 integrity, honest cost metering, independence hardening, session control
