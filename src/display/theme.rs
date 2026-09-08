@@ -431,6 +431,15 @@ pub fn clay() -> Color {
 }
 #[inline]
 pub fn sand() -> Color {
+    // token.md Tier-1 SAND_500 (#d4a373) / SAND_600 (#b58352). NOTE: the
+    // `Palette::agent_blue` field carries this warm sand tone (its name is
+    // historical) — do NOT point this at `cyan`; that rendered Planner,
+    // spinner verbs, and the assistant icon blue.
+    fg(palette().agent_blue)
+}
+#[inline]
+pub fn cyan() -> Color {
+    // token.md INFO_BLUE (#6a9bcc): external links / git branch badge.
     fg(palette().cyan)
 }
 #[inline]
@@ -989,6 +998,26 @@ mod tests {
         assert_eq!(bg_from_colorfgbg("5;8"), Some(true));
         assert_eq!(bg_from_colorfgbg("nope"), None);
         assert_eq!(bg_from_colorfgbg(""), None);
+    }
+
+    #[test]
+    fn sand_is_warm_not_cyan() {
+        // Regression: sand() once returned cyan, painting Planner, spinner
+        // verbs, and the assistant icon blue. token.md Tier-1 fixes sand at
+        // SAND_500 (#d4a373); INFO_BLUE (#6a9bcc) is a separate token.
+        let original = current_mode();
+        set_mode(ThemeMode::Dark);
+        assert_eq!(
+            format!("{:?}", sand()),
+            format!("{:?}", Color::Rgb(0xd4, 0xa3, 0x73)),
+            "sand() must be warm sand, not cyan"
+        );
+        assert_ne!(
+            format!("{:?}", sand()),
+            format!("{:?}", cyan()),
+            "sand() and cyan() must differ"
+        );
+        set_mode(original);
     }
 
     #[test]

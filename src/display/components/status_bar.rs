@@ -130,7 +130,7 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     if !state.branch_name.is_empty() && width >= 65 {
         right_spans.push(Span::styled(
             format!("branch {}   ", state.branch_name),
-            Style::default().fg(theme::sand()),
+            Style::default().fg(theme::cyan()),
         ));
     }
 
