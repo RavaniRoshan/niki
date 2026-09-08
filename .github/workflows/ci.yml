@@ -123,7 +123,7 @@ jobs:
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: niki-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/niki
@@ -202,7 +202,7 @@ jobs:
         run: ./tests/visual/run.sh
       - name: Upload frames on failure
         if: failure()
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: visual-frames
           path: tests/visual/frames/
@@ -217,7 +217,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Download prebuilt x86_64-apple-darwin binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           name: niki-x86_64-apple-darwin
           path: intel-bin

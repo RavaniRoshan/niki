@@ -44,7 +44,7 @@ jobs:
         run: ./tests/tui_smoke/run.sh
       - name: Upload failure captures
         if: failure()
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v7
         with:
           name: tui-smoke-logs
           path: tui-smoke-logs/**
