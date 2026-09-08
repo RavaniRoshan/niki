@@ -4,6 +4,77 @@ All notable changes to NIKI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — 0.7.0: vision-complete pipeline
+
+Mega-plan execution (30 commits): plan-mode approval gates, oracle
+integrity, honest cost metering, independence hardening, session control
+plane, headless CI contract, trust posture, automation, and TUI unification.
+All user-facing claims below are covered by tests, mock-LLM end-to-end runs,
+or the VHS visual gate (`tests/visual/`, 12 reference frames at 0.00%
+self-diff).
+
+### Added
+- Plan mode: `niki plan` researches without executing and writes reviewable
+  `plan.md`; `niki run --plan <id>` executes the approved spec, skipping the
+  Planner LLM call. Dry runs no longer create empty branch refs.
+- Session CLI: `niki session list/show/checkpoints/undo/rewind` with
+  code+conversation/both restore modes and a dirty-tree guard.
+- User slash commands: `.niki/commands/*.md` (filename → `/name`) with
+  `description:`/`aliases:` frontmatter, `[commands] extra_dirs` sharing,
+  and `niki commands list/show/expand`.
+- Headless contract: `niki run --bare` (no memory/MCP/knowledge-URLs),
+  `--output-format json` stable envelope (incl. error path), stdout
+  pipe-purity (display mute + captured git stdio), OTLP trace export
+  (`--otel-endpoint`, no new dependencies).
+- Oracle integrity: `oracle_source` (spec/derived/property) on every test
+  case, reviewer oracle-check rule, no-healing rule, opt-in
+  `[agents.tester] mutation_command` gate; red-suite/mutation failures block
+  the branch unless `--force` (recorded as NOT verified).
+- Independence hardening: Red receives evidence-only diffs, isolation records
+  match wiring, topology selection reason recorded and reported, shared-model
+  review warnings.
+- Honest meter: cached-input/reasoning token splits, unpriced-model warnings
+  (`unpriced*` in reports), price-table freshness test, failover
+  cache-bust warnings, history-driven `niki recommend --project`.
+- Trust posture: `[permissions] mode` + `--permission-mode`, `disable_worktree`
+  kill-switch, `fail_closed_headless` flag, loud headless Ask fallback.
+- Lifecycle hooks: `[hooks.commands]` wired to PreTaskStart/PreAgentStart/
+  PostAgentStop/PostTaskStop, fail-closed block semantics.
+- GitHub automation: keyless nightly eval gate, human-gated `@niki` review
+  workflow (injection-safe, loop-guarded).
+- Eval credibility: per-case costs, disclosure manifest on every run,
+  `niki eval grade` maintainer judgments with agreement metric, ablation
+  protocol doc.
+- Observability: `trace.jsonl` spans per run (honestly derived timeline),
+  `niki audit` compliance bundles.
+- MCP Streamable-HTTP remote transport (JSON + SSE, session affinity).
+- Onboarding: `niki init` alias, `init --scan` AGENTS.md drafter,
+  `.niki/rules/` binding conventions, per-provider model aliases,
+  per-agent `effort` presets, actionable key errors, guided empty states.
+- TUI unification: one status grammar, 100% theme-token production code,
+  normalized headers, global page jumps in both event loops, palette
+  fleet/session rows, empty-state triads.
+- TUI motion system: primitives + caret blink, Done slide-in, notice
+  slide-in, progress shimmer, modal pulse, verdict pulse — all reduced-motion
+  gated (frames pixel-identical with the flag on).
+
+### Fixed
+- `GEMINI_API_KEY` vs `GOOGLE_API_KEY` chat fallback miss.
+- `smoke`/`doctor` pointed at nonexistent `niki init` (now a real alias).
+- Unwired `schemas/review_feedback.schema.json` removed.
+- `backend = "podman"` doc strings corrected (docker|worktree only).
+- `safety_proof.json` scope documented as git-only (was overclaimed).
+- Approval tool auto-approved everything; ask tool invented answers.
+- `[permissions]` table silently dropped by config merge.
+- MCP `JsonRpcResponse` never parsed (`jsonrpc` field rename bug).
+- Dry-run empty branch refs; planner-skip metrics crash.
+- Global key `h`/`s`/`l` dead-ends; blank session screen; `$-0.00`.
+
+### Changed
+- `safety_proof.json`, spend-cap, and deny-list copy narrowed to match code.
+- `niki recommend` static-pairings truth in docs (history-driven per-project
+  observed spend added to the command itself).
+
 ## [0.6.0] - 2026-08-21
 
 Claude Code parity — interaction, trust, and ecosystem surface.
