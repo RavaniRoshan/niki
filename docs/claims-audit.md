@@ -1,8 +1,8 @@
 # NIKI Claims Audit
 
 Every public marketing claim must be reproducible from the repository (funnel-plan rule).
-This document maps each headline claim to the code that backs it. **Last verified: 2026-08-15
-(commit `master` pre-v0.4.0).**
+This document maps each headline claim to the code that backs it. **Last verified: 2026-09-07
+(goal/readiness-b7d1e4, post-0.7.0-merge; prior verification 2026-08-15 pre-v0.4.0).**
 
 ## Claims that hold
 
@@ -17,6 +17,20 @@ This document maps each headline claim to the code that backs it. **Last verifie
 | Spend cap is **hard-enforced** (aborts before a branch is created) in v0.4.0+ | ✅ | `src/orchestrator/pipeline.rs` `enforce_spend_cap` checks cumulative stage cost after every stage; `general.spend_cap_usd` in `README.md:175-177` |
 | BYOK, no telemetry | ✅ | README security posture `README.md:166-179`; no analytics calls by design |
 | Secret redaction (incl. `?key=` / Google keys) | ✅ | `CHANGELOG.md` 0.3.0 Security; redaction in report/artifact rendering |
+
+## New claims since v0.4.0 (verified 2026-09-07)
+
+| Claim | Status | Evidence |
+|-------|--------|----------|
+| `niki plan` researches without executing; `niki run --plan` executes the reviewed spec | ✅ | `src/cli/plan.rs` delegates dry-run; `plan_override_json` skips Planner (`pipeline.rs`); E2E-verified with mock LLM (plan→no branch, approve→branch) |
+| Failing test suites block the branch unless `--force` | ✅ | Red-suite gate in `src/cli/run.rs`; E2E-verified block/force/green paths; `tests/` assert gate semantics |
+| Tests carry oracle provenance (`spec`/`derived`/`property`) | ✅ | `schemas/test_report.schema.json` + `OracleSource` in `artifacts/types.rs`; tester/reviewer prompt rules |
+| Unpriced models warn instead of silently costing $0.00 | ✅ | `is_unpriced()` + `unpriced*` report marker + `PRICE_TABLE_AS_OF` freshness test (`src/cost.rs`) |
+| Approval tool denies by default; ask tool never invents answers | ✅ | `AskUserTool`/`ApprovalTool` in `src/runtime/mod.rs`; non-TTY deny/fail covered by tests |
+| Lifecycle hooks (`[hooks.commands]`) can block runs fail-closed | ✅ | `HookBus::from_map` + pipeline wiring (`PreTaskStart/PreAgentStart/PostAgentStop`); `tests/hooks_lifecycle.rs` (4 integration tests) |
+| `--output-format json` emits a stable, pipe-pure envelope | ✅ | Display mute + captured git stdio; verified single-line JSON parse against mock runs |
+| `niki eval` writes a disclosure manifest with every run | ✅ | `eval-manifest.json` (date/version/commit/dirty/mode/costs); live-verified on 23-case replay |
+| TUI status grammar is unified; motion is reduced-gated | ✅ | `display/components/status.rs` (Running≠Paused test); `display/motion.rs` unit tests; `tests/visual/` 12 reference frames at 0.00% self-diff |
 
 ## Claims that were OVERSTATED — fixed in copy
 
@@ -35,8 +49,12 @@ built — see `release.yml`, which produces 3 Unix targets only).
 
 ## Claims to re-verify before each launch
 
-- [ ] Agent artifact isolation still holds after any `pipeline.rs` refactor.
-- [ ] Deny-list contents match the copy (re-run `default_global_deny_list`).
-- [ ] `network_disabled` default unchanged.
+- [x] (2026-09-07) Agent artifact isolation still holds — re-verified:
+  `isolation_sources_for()` now mirrors wiring exactly (Synthesizer sees
+  Planner+Coder, SecurityAuditor sees Planner+Coder; Red sees evidence-only
+  projections via `red_evidence_json`). Record ≠ aspiration anymore.
+- [x] (2026-09-07) Deny-list contents match the copy.
+- [x] (2026-09-07) `network_disabled` default unchanged (`true`).
 - [ ] Release assets = 3 `.tar.gz` + `checksums.txt`; `sha256sum -c` passes.
+  **OPEN — see Phase 1c: v0.6.0 tag shipped zero assets.**
 - [ ] `niki --version` prints the launch version on every target.

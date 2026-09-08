@@ -118,7 +118,7 @@ jobs:
             | tee /tmp/niki-result.jsonl | tail -1 > /tmp/niki-result.json
           python3 -c "import json; d=json.load(open('/tmp/niki-result.json')); print('status:', d['status'], '| branch:', d.get('branch'), '| cost: \$', d.get('cost_usd'))"
       - name: Upload audit trail
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: niki-task
           path: .niki/tasks/
