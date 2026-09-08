@@ -7,7 +7,7 @@
 
 <div align="center">
 
-<img width="1311" height="605" alt="Screenshot 2026-08-17 212129" src="https://github.com/user-attachments/assets/1234e802-b5e8-4033-8ce7-c8015a4d5080" />
+<img width="1311" height="605" alt="NIKI terminal UI showing the four-agent pipeline running a task" src="https://github.com/user-attachments/assets/1234e802-b5e8-4033-8ce7-c8015a4d5080" />
 
 
 <br>
@@ -115,13 +115,33 @@ flowchart LR
 
 ## Quick Start
 
-**Prerequisites:** [Rust](https://www.rust-lang.org/tools/install) (1.85+) · [Podman](https://podman.io/getting-started/installation) (recommended) or [Docker](https://docs.docker.com/get-docker/) · an API key for one LLM provider.
+**Path A · Zero-setup (try it in ~2 minutes):** no container runtime, no API key.
+All you need is [Ollama](https://ollama.com) running locally — `niki init` detects it.
 
 ```bash
 # 1 · Install (pick one)
 brew install niki                                                              # macOS
 curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/niki/master/scripts/install.sh | bash  # Linux/macOS
 # Or download a binary: https://github.com/RavaniRoshan/niki/releases/latest
+
+# 2 · Configure (guided — picks up local Ollama automatically)
+niki init
+
+# 3 · Run your first task: worktree backend needs no container, Ollama needs no key
+niki run "Add a /health endpoint" --project ./my-app --backend worktree
+
+# 4 · Review the result
+niki report <id>    # full report, or a unique short prefix
+```
+
+**Path B · Full sandbox (hermetic containers + hosted models):** for real work
+with API providers, add a container runtime and a key.
+
+```bash
+# 1 · Prerequisites
+# [Rust](https://www.rust-lang.org/tools/install) (1.85+) ·
+# [Podman](https://podman.io/getting-started/installation) (recommended) or
+# [Docker](https://docs.docker.com/get-docker/) · an API key for one LLM provider.
 
 # 2 · Build the sandbox image
 podman build -t niki-sandbox:24.04 -f docker/Dockerfile .   # or: docker build ...
@@ -141,13 +161,23 @@ niki run "Add a /health endpoint" --project /path/to/your/project
 niki report <id>    # full report, or a unique short prefix
 ```
 
-**First verified branch in under five minutes** once Rust, Podman/Docker, and an API key are in place.
+**First verified branch in under five minutes** once prerequisites are in place —
+about two of those on Path A (install + `ollama pull qwen2.5-coder`), since there
+is no image to build and no key to provision.
+
+> **What does a task cost?** NIKI is free software; you pay only your provider
+> (or nothing — local Ollama runs are **$0.00**). Measured on a real small task
+> (~2.9k input / ~0.25k output tokens across the pipeline, priced at NIKI's own
+> meter rates): **~$0.01 on Claude Sonnet 4, <$0.005 on Haiku or GPT-4o-mini**.
+> Every run reports exact tokens and cost, `general.spend_cap_usd` aborts past
+> your ceiling, and unpriced models warn instead of silently costing $0.00.
 
 ### Verify your setup
 
 ```bash
 niki doctor               # check install, config, providers, sandbox, security
 niki smoke                # run a trivial task to verify end-to-end
+niki smoke --backend worktree   # same, with no container runtime
 ```
 
 ## Configuration
@@ -273,7 +303,7 @@ docker/            # sandbox image (Dockerfile)
 
 ## Roadmap
 
-### v0.4.0 (shipped)
+### v0.7.0 (shipped)
 - [x] Cost & performance analytics
 - [x] User-defined pipeline topologies
 - [x] Parallel coders + synthesis
@@ -283,6 +313,11 @@ docker/            # sandbox image (Dockerfile)
 - [x] Dashboard (diff viewer)
 - [x] Git worktree backend
 - [x] Per-agent model recommendations
+- [x] Plan mode (`niki plan` → review → `niki run --plan`)
+- [x] Honest cost metering + spend-cap enforcement + OTLP trace export
+- [x] Headless CI contract (`--bare`, `--output-format json`, pipe-pure stdout)
+- [x] Permissions model + lifecycle hooks + fail-closed headless
+- [x] 12 providers incl. local-first Ollama + single-key gateways (OpenRouter, Zen, Kimi, Kilo)
 
 ### Later
 - [ ] Cloud execution (beta)

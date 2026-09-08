@@ -7,6 +7,11 @@ pub struct SmokeArgs {
     /// Path to the project directory to smoke-test in
     #[arg(short, long, default_value = ".")]
     project_path: String,
+    /// Sandbox backend: docker (container) or worktree (no container runtime).
+    /// The worktree backend is the zero-setup path (Ollama + worktree = no
+    /// container, no API key).
+    #[arg(short, long)]
+    backend: Option<super::run::BackendArg>,
 }
 
 pub async fn handle(args: &SmokeArgs) -> Result<()> {
@@ -27,16 +32,23 @@ pub async fn handle(args: &SmokeArgs) -> Result<()> {
 
     let start = Instant::now();
 
-    let status = std::process::Command::new(std::env::current_exe()?)
-        .args([
-            "run",
-            "--project",
-            &args.project_path,
-            "--max-rounds",
-            "1",
-            "Add a comment to the first source file you find (or create hello.txt with 'smoke test passed' if none exist).",
-        ])
-        .status()?;
+    let mut cmd = std::process::Command::new(std::env::current_exe()?);
+    cmd.args([
+        "run",
+        "--project",
+        &args.project_path,
+        "--max-rounds",
+        "1",
+        "Add a comment to the first source file you find (or create hello.txt with 'smoke test passed' if none exist).",
+    ]);
+    if let Some(backend) = &args.backend {
+        let name = match backend {
+            super::run::BackendArg::Docker => "docker",
+            super::run::BackendArg::Worktree => "worktree",
+        };
+        cmd.args(["--backend", name]);
+    }
+    let status = cmd.status()?;
 
     let elapsed = start.elapsed();
 
