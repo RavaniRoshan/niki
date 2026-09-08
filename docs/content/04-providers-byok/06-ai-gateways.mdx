@@ -1,0 +1,63 @@
+---
+title: AI Gateways (Zen, Kimi, Kilo)
+description: One-key multi-model gateways as first-class NIKI providers.
+sidebar:
+  order: 6
+  label: AI Gateways
+---
+
+# AI Gateways: Zen, Kimi & Kilo
+
+Three single-key gateways work out of the box — one key unlocks many models
+behind an OpenAI-compatible endpoint. Any other OpenAI-compatible endpoint
+works too: point a named provider's `base_url` at it (unknown provider names
+still error, so typos can't silently route to the wrong endpoint).
+
+## OpenCode Zen (`zen`)
+
+Models from MiniMax, Zhipu (GLM), Moonshot (Kimi) and others, including free
+tiers, behind one key from [opencode.ai](https://opencode.ai/docs/zen/):
+
+```toml
+[providers.zen]
+base_url      = "https://opencode.ai/zen/v1"
+api_key       = "..."                    # Or set OPENCODE_API_KEY env var
+default_model = "kimi-k2.5"
+```
+
+## Kimi Code (`kimi`)
+
+Moonshot's coding gateway ([docs](https://www.kimi.com/code/docs/en/)).
+Speaks both OpenAI-compatible chat completions and the Anthropic Messages
+API; NIKI uses the OpenAI-compatible surface:
+
+```toml
+[providers.kimi]
+base_url      = "https://api.kimi.com/coding/v1"
+api_key       = "sk-..."                 # Or set KIMI_API_KEY env var
+default_model = "k3-256k"
+```
+
+## KiloCode Gateway (`kilo`)
+
+Kilo's unified inference API ([docs](https://kilo.ai/docs/gateway)):
+hundreds of models behind one key, addressed as `vendor/model`:
+
+```toml
+[providers.kilo]
+base_url      = "https://api.kilo.ai/api/gateway"
+api_key       = "..."                    # Or set KILO_API_KEY env var
+default_model = "anthropic/claude-sonnet-4.5"
+```
+
+## Setup
+
+```bash
+niki init --interactive   # pick one provider, guided, with key validation hints
+niki auth login --provider zen
+niki providers check
+niki doctor               # per-provider status (env var vs keyring)
+```
+
+All three also work with zero config: set the env var and `niki chat`
+picks the provider up automatically.

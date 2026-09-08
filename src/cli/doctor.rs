@@ -153,6 +153,21 @@ fn check_providers() -> Vec<Check> {
     PROVIDERS
         .iter()
         .map(|(name, label, _)| {
+            // Keyless local providers report reachability, not key presence.
+            if name == &"ollama" {
+                let running = crate::cli::auth::ollama_running();
+                return Check {
+                    name: format!("{} provider", label),
+                    result: if running {
+                        CheckResult::Pass("running locally (no key needed)".to_string())
+                    } else {
+                        CheckResult::Warn(
+                            "not detected (install https://ollama.com, run `ollama serve`)"
+                                .to_string(),
+                        )
+                    },
+                };
+            }
             let configured = existing.contains_key(*name) || env_keys.contains_key(*name);
             Check {
                 name: format!("{} provider", label),

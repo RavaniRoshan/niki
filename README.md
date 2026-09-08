@@ -179,7 +179,7 @@ provider = "anthropic"
 model    = "claude-sonnet-4-20250514"
 ```
 
-Supported providers: **Anthropic · OpenAI · Google · Ollama** — plus any OpenAI/Anthropic-compatible gateway via `base_url`.
+Supported providers: **Anthropic · OpenAI · Google · Ollama · OpenRouter · OpenCode Zen · Kimi Code · KiloCode · NVIDIA · Groq · Together · DeepSeek** — plus any OpenAI/Anthropic-compatible gateway via `base_url`.
 
 ### Advanced
 

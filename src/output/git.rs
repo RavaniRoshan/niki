@@ -137,6 +137,13 @@ pub fn create_branch_and_commit(
         .ok_or_else(|| anyhow::anyhow!("HEAD is not a direct reference (detached HEAD)"))?;
     let commit = repo.find_commit(target)?;
 
+    // No-op fast path: an empty diff means nothing to commit. Return BEFORE
+    // creating the branch — otherwise the user's HEAD is moved onto a stray
+    // empty `niki/<id>` branch for a run that produced nothing.
+    if diff_files(diff).is_empty() {
+        return Ok(());
+    }
+
     // Create a fresh branch for this task pointing at the current HEAD commit, then
     // move HEAD onto it. The new branch and the old HEAD reference the SAME commit,
     // so the working tree — which already holds the sandbox-applied patch — stays
@@ -207,5 +214,40 @@ mod tests {
     #[test]
     fn diff_files_empty_for_non_diff() {
         assert!(diff_files("hello world").is_empty());
+    }
+
+    #[test]
+    fn empty_diff_creates_no_branch_and_leaves_head() {
+        let dir = std::env::temp_dir().join(format!("niki-empty-branch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+        };
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "t@t"]);
+        run(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("f.txt"), "x\n").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "init"]);
+        let head_before =
+            String::from_utf8_lossy(&run(&["rev-parse", "--abbrev-ref", "HEAD"]).stdout)
+                .trim()
+                .to_string();
+
+        create_branch_and_commit(&dir, "niki/empty", "", "task-id").unwrap();
+
+        // No branch created, HEAD unmoved: an empty run leaves no trace.
+        let out = run(&["branch", "--list", "niki/*"]);
+        let branches = String::from_utf8_lossy(&out.stdout);
+        assert!(!branches.contains("niki/empty"), "{branches}");
+        let out = run(&["rev-parse", "--abbrev-ref", "HEAD"]);
+        let head_after = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert_eq!(head_before, head_after);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

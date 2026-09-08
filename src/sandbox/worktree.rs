@@ -308,13 +308,16 @@ impl Sandbox for WorktreeSandbox {
             // `git worktree remove` deletes the worktree dir; `--force` allows
             // removal even with uncommitted changes (the merged diff is already
             // captured via get_diff before destroy is called).
+            // Output is captured, not inherited: a half-removed worktree
+            // prints `fatal: ... is not a working tree`, which is expected
+            // noise during teardown, not a user-facing error.
             let _ = Command::new("git")
                 .arg("worktree")
                 .arg("remove")
                 .arg("--force")
                 .arg(&wt)
-                .status();
-            let _ = Command::new("git").arg("worktree").arg("prune").status();
+                .output();
+            let _ = Command::new("git").arg("worktree").arg("prune").output();
             let _ = std::fs::remove_dir_all(&wt);
             let _ = task_id;
             Ok(())

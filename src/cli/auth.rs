@@ -6,9 +6,18 @@ use std::collections::HashMap;
 const SERVICE_NAME: &str = "niki";
 
 pub const PROVIDERS: &[(&str, &str, &str)] = &[
+    ("ollama", "Ollama (local)", ""),
     ("anthropic", "Anthropic", "ANTHROPIC_API_KEY"),
     ("openai", "OpenAI", "OPENAI_API_KEY"),
     ("google", "Google", "GOOGLE_API_KEY"),
+    ("openrouter", "OpenRouter", "OPENROUTER_API_KEY"),
+    ("zen", "OpenCode Zen", "OPENCODE_API_KEY"),
+    ("kimi", "Kimi Code", "KIMI_API_KEY"),
+    ("kilo", "KiloCode Gateway", "KILO_API_KEY"),
+    ("nvidia", "NVIDIA NIM", "NVIDIA_API_KEY"),
+    ("groq", "Groq", "GROQ_API_KEY"),
+    ("deepseek", "DeepSeek", "DEEPSEEK_API_KEY"),
+    ("together", "Together", "TOGETHER_API_KEY"),
 ];
 
 #[derive(Subcommand)]
@@ -64,6 +73,18 @@ fn cmd_login(provider: &Option<String>, from_stdin: bool) -> Result<()> {
     for (name, label, env_var) in &providers_to_setup {
         println!("--- {} ---", label);
 
+        // Keyless providers (Ollama): no key to store — just report whether
+        // the local server is reachable.
+        if env_var.is_empty() {
+            if ollama_running() {
+                println!("  Running locally (127.0.0.1:11434) — no API key needed.");
+            } else {
+                println!("  Not detected. Install from https://ollama.com and run");
+                println!("  `ollama serve`, then pull a model (e.g. `ollama pull qwen2.5-coder`).");
+            }
+            continue;
+        }
+
         if existing.contains_key(*name) {
             println!("  Already configured (key stored in OS keyring)");
             if !prompt_yes_no("Replace?") {
@@ -96,7 +117,13 @@ fn cmd_login(provider: &Option<String>, from_stdin: bool) -> Result<()> {
         println!("  Stored {} API key in OS keyring", label);
     }
 
-    println!("\nDone. Credentials are stored securely in your OS keyring.");
+    println!("\nDone.");
+    if providers_to_setup
+        .iter()
+        .any(|(_, _, env_var)| !env_var.is_empty())
+    {
+        println!("Credentials are stored securely in your OS keyring.");
+    }
     println!("Run `niki doctor` to verify your setup.");
     Ok(())
 }
@@ -133,6 +160,17 @@ fn cmd_status() -> Result<()> {
     for (name, label, env_var) in PROVIDERS {
         let mut parts = Vec::new();
 
+        if env_var.is_empty() {
+            // Keyless local provider: reachability is the status.
+            let status = if ollama_running() {
+                "running locally (no key needed)".to_string()
+            } else {
+                "not detected (run `ollama serve`)".to_string()
+            };
+            println!("{}: {}", label, status);
+            continue;
+        }
+
         if env_keys.contains_key(*name) {
             parts.push("via env var");
         }
@@ -158,6 +196,16 @@ fn available_providers() -> String {
         .map(|(name, _, _)| *name)
         .collect::<Vec<&str>>()
         .join(", ")
+}
+
+/// Reachability probe for the local Ollama server. Shared by the setup
+/// wizard, `auth login`, `auth status`, and `doctor` so all four agree.
+pub fn ollama_running() -> bool {
+    std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:11434".parse().expect("loopback addr"),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok()
 }
 
 fn store_key(provider: &str, api_key: &str) -> Result<()> {
@@ -205,13 +253,12 @@ fn prompt_yes_no(message: &str) -> bool {
 }
 
 /// Resolve an API key for a provider: check env vars first, then keyring.
+/// Driven by the PROVIDERS registry so every supported provider resolves.
 pub fn resolve_api_key(provider: &str) -> Option<String> {
-    let env_var = match provider {
-        "anthropic" => "ANTHROPIC_API_KEY",
-        "openai" => "OPENAI_API_KEY",
-        "google" => "GOOGLE_API_KEY",
-        _ => return None,
-    };
+    let env_var = PROVIDERS
+        .iter()
+        .find(|(name, _, _)| *name == provider)
+        .map(|(_, _, env)| *env)?;
 
     if let Ok(key) = std::env::var(env_var) {
         return Some(key);

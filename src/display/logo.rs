@@ -93,7 +93,10 @@ pub fn render_adaptive_header(
                     .fg(theme::fg_bright())
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("v0.4.0", Style::default().fg(theme::fg_subtle())),
+            Span::styled(
+                format!("v{}", env!("CARGO_PKG_VERSION")),
+                Style::default().fg(theme::fg_subtle()),
+            ),
         ];
 
         let project_name = state

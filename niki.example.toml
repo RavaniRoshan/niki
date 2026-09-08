@@ -49,6 +49,21 @@ api_key = "..."                       # Or set DEEPSEEK_API_KEY env var
 base_url = "https://api.deepseek.com/v1"
 default_model = "deepseek-chat"
 
+[providers.zen]
+api_key = "..."                       # Or set OPENCODE_API_KEY env var (OpenCode Zen gateway)
+base_url = "https://opencode.ai/zen/v1"
+default_model = "kimi-k2.5"
+
+[providers.kimi]
+api_key = "sk-..."                    # Or set KIMI_API_KEY env var (Kimi Code gateway)
+base_url = "https://api.kimi.com/coding/v1"
+default_model = "k3-256k"
+
+[providers.kilo]
+api_key = "..."                       # Or set KILO_API_KEY env var (KiloCode AI gateway)
+base_url = "https://api.kilo.ai/api/gateway"
+default_model = "anthropic/claude-sonnet-4.5"
+
 [providers.google]
 api_key = "AIza..."                   # Or set GOOGLE_API_KEY env var
 default_model = "gemini-2.5-pro"

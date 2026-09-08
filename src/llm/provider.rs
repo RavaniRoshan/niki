@@ -175,6 +175,12 @@ pub fn create_provider(name: &str, config: &ProviderConfig) -> Result<Box<dyn Ll
         "openai" | "openrouter" | "nvidia" | "together" | "groq" | "deepseek" => {
             Ok(Box::new(super::openai::OpenAiProvider::new(config)?))
         }
+        // Single-key AI gateways (OpenAI-compatible). The slug is passed
+        // explicitly so key errors and logs name the right provider even when
+        // a custom base_url is configured.
+        "zen" | "kimi" | "kilo" => Ok(Box::new(super::openai::OpenAiProvider::new_named(
+            config, name,
+        )?)),
         "google" => Ok(Box::new(super::google::GoogleProvider::new(config)?)),
         "ollama" => Ok(Box::new(super::ollama::OllamaProvider::new(config)?)),
         "mock" => Ok(Box::new(super::mock::MockProvider::new(
@@ -193,6 +199,9 @@ pub fn default_base_url(name: &str) -> Option<&'static str> {
         "together" => Some("https://api.together.xyz/v1"),
         "groq" => Some("https://api.groq.com/openai/v1"),
         "deepseek" => Some("https://api.deepseek.com/v1"),
+        "zen" => Some("https://opencode.ai/zen/v1"),
+        "kimi" => Some("https://api.kimi.com/coding/v1"),
+        "kilo" => Some("https://api.kilo.ai/api/gateway"),
         _ => None,
     }
 }
@@ -206,11 +215,14 @@ pub fn missing_key_error(provider_name: &str) -> anyhow::Error {
         "anthropic" => ("Anthropic", "ANTHROPIC_API_KEY", Some("anthropic")),
         "openai" => ("OpenAI", "OPENAI_API_KEY", Some("openai")),
         "google" => ("Google", "GOOGLE_API_KEY", Some("google")),
-        "openrouter" => ("OpenRouter", "OPENROUTER_API_KEY", None),
-        "groq" => ("Groq", "GROQ_API_KEY", None),
-        "deepseek" => ("DeepSeek", "DEEPSEEK_API_KEY", None),
-        "together" => ("Together", "TOGETHER_API_KEY", None),
-        "nvidia" => ("NVIDIA", "NVIDIA_API_KEY", None),
+        "openrouter" => ("OpenRouter", "OPENROUTER_API_KEY", Some("openrouter")),
+        "groq" => ("Groq", "GROQ_API_KEY", Some("groq")),
+        "deepseek" => ("DeepSeek", "DEEPSEEK_API_KEY", Some("deepseek")),
+        "together" => ("Together", "TOGETHER_API_KEY", Some("together")),
+        "nvidia" => ("NVIDIA", "NVIDIA_API_KEY", Some("nvidia")),
+        "zen" => ("OpenCode Zen", "OPENCODE_API_KEY", Some("zen")),
+        "kimi" => ("Kimi Code", "KIMI_API_KEY", Some("kimi")),
+        "kilo" => ("KiloCode Gateway", "KILO_API_KEY", Some("kilo")),
         _ => ("Provider", "PROVIDER_API_KEY", None),
     };
     let fix = match slug {
@@ -218,10 +230,7 @@ pub fn missing_key_error(provider_name: &str) -> anyhow::Error {
             "Set {env}, add api_key under [providers.{provider_name}] in niki.toml, \
              or run `niki auth login --provider {s}`."
         ),
-        None => format!(
-            "Set {env} or add api_key under [providers.{provider_name}] in niki.toml \
-             (`niki auth login` supports anthropic/openai/google only)."
-        ),
+        None => format!("Set {env} or add api_key under [providers.{provider_name}] in niki.toml."),
     };
     anyhow::anyhow!("{label} API key not configured. {fix}")
 }
@@ -320,6 +329,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gateway_providers_construct_and_name_correctly() {
+        for (slug, base_substr) in [
+            ("zen", "opencode.ai/zen"),
+            ("kimi", "api.kimi.com"),
+            ("kilo", "api.kilo.ai"),
+        ] {
+            let config = ProviderConfig {
+                api_key: Some("test-key".into()),
+                base_url: None,
+                default_model: "m".into(),
+            };
+            let p = create_provider(slug, &config).unwrap();
+            assert_eq!(p.provider_name(), slug);
+            // Default endpoint resolves without explicit base_url.
+            assert!(default_base_url(slug).unwrap().contains(base_substr));
+        }
+    }
+
+    #[test]
+    fn gateway_missing_keys_name_exact_env() {
+        let e = missing_key_error("zen").to_string();
+        assert!(e.contains("OPENCODE_API_KEY"), "{e}");
+        assert!(e.contains("niki auth login --provider zen"), "{e}");
+        let e = missing_key_error("kimi").to_string();
+        assert!(e.contains("KIMI_API_KEY"), "{e}");
+        let e = missing_key_error("kilo").to_string();
+        assert!(e.contains("KILO_API_KEY"), "{e}");
+    }
+
+    #[test]
     fn missing_key_error_names_exact_fix() {
         // Legacy prefix preserved for existing assertions and muscle memory.
         let e = missing_key_error("anthropic").to_string();
@@ -327,10 +366,11 @@ mod tests {
         assert!(e.contains("ANTHROPIC_API_KEY"), "{e}");
         assert!(e.contains("niki auth login --provider anthropic"), "{e}");
 
-        // Providers without keyring login get env/file guidance instead of a
-        // login command that would fail.
+        // Gateway without keyring login configured: env/file guidance only.
+        // (All built-in providers support `niki auth login`; this arm is for
+        // custom names that reach the generic OpenAI-compatible path.)
         let e = missing_key_error("groq").to_string();
         assert!(e.contains("GROQ_API_KEY"), "{e}");
-        assert!(!e.contains("auth login --provider"), "{e}");
+        assert!(e.contains("niki auth login --provider groq"), "{e}");
     }
 }
