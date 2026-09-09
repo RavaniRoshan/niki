@@ -13,7 +13,7 @@ use ratatui::style::{Color, Modifier, Style};
 // ── Theme mode ──────────────────────────────────────────────────────────
 
 /// Theme mode: Auto (detect from terminal), Dark, or Light.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ThemeMode {
     Auto = 0,
@@ -44,6 +44,12 @@ impl ThemeMode {
 
 /// Global theme mode — atomic so CLI threads see the same mode.
 static MODE: AtomicU8 = AtomicU8::new(ThemeMode::Dark as u8);
+
+/// Serializes tests that mutate the global [`MODE`] (TUI-004). Rendering
+/// tests that depend on a stable mode must hold this lock and set the mode
+/// explicitly; production code never touches it.
+#[cfg(test)]
+pub(crate) static MODE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Set the global theme mode (preference; Auto is resolved on read).
 pub fn set_mode(mode: ThemeMode) {
@@ -932,6 +938,7 @@ mod tests {
 
     #[test]
     fn set_mode_and_current() {
+        let _guard = MODE_TEST_LOCK.lock().unwrap();
         let original = current_mode();
         set_mode(ThemeMode::Light);
         assert_eq!(current_mode(), ThemeMode::Light);
@@ -943,6 +950,7 @@ mod tests {
 
     #[test]
     fn accessors_return_distinct_values_per_mode() {
+        let _guard = MODE_TEST_LOCK.lock().unwrap();
         let original = current_mode();
 
         set_mode(ThemeMode::Dark);
@@ -1002,6 +1010,7 @@ mod tests {
 
     #[test]
     fn sand_is_warm_not_cyan() {
+        let _guard = MODE_TEST_LOCK.lock().unwrap();
         // Regression: sand() once returned cyan, painting Planner, spinner
         // verbs, and the assistant icon blue. token.md Tier-1 fixes sand at
         // SAND_500 (#d4a373); INFO_BLUE (#6a9bcc) is a separate token.

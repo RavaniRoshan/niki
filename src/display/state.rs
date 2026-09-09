@@ -254,6 +254,26 @@ fn snap_to_boundary(s: &str, pos: usize) -> usize {
     p
 }
 
+/// Hash a markdown body for [`MarkdownCacheKey`].
+pub fn markdown_body_hash(body: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    body.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Cache key for memoized stage-body markdown (TUI-004). Everything that can
+/// change the rendered rows must be in the key: body content, wrap width,
+/// thinking visibility, and theme (colors are baked into the spans).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MarkdownCacheKey {
+    pub body_hash: u64,
+    pub width: usize,
+    pub show_thinking: bool,
+    pub theme: crate::display::theme::ThemeMode,
+}
+
 /// Autocomplete state for @ file completion.
 #[derive(Debug, Clone, Default)]
 pub struct AutocompleteState {
@@ -965,6 +985,10 @@ pub struct AppState {
     pub keybinding_conflicts: Vec<crate::display::keybindings::Conflict>,
     /// Action ids the user rebound (for the help overlay `*` marker).
     pub keybinding_overrides: Vec<String>,
+    /// Memoized stage-body markdown rows (TUI-004). `RefCell` so the
+    /// `&AppState` render path can populate it; bounded (see `MAX` below).
+    pub markdown_cache:
+        std::cell::RefCell<std::collections::HashMap<MarkdownCacheKey, Vec<ChatLine>>>,
 }
 
 /// Stage information (mirrors existing StageInfo).
@@ -1134,6 +1158,7 @@ impl AppState {
             keybindings,
             keybinding_conflicts,
             keybinding_overrides,
+            markdown_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
 
