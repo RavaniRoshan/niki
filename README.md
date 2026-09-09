@@ -116,7 +116,8 @@ flowchart LR
 ## Quick Start
 
 **Path A · Zero-setup (try it in ~2 minutes):** no container runtime, no API key.
-All you need is [Ollama](https://ollama.com) running locally — `niki init` detects it.
+All you need is [Ollama](https://ollama.com) running locally with a coding model
+(`ollama pull qwen2.5-coder:3b`) — the wizard detects both and points every agent at them.
 
 ```bash
 # 1 · Install (pick one)
@@ -124,11 +125,11 @@ brew install niki                                                              #
 curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/niki/master/scripts/install.sh | bash  # Linux/macOS
 # Or download a binary: https://github.com/RavaniRoshan/niki/releases/latest
 
-# 2 · Configure (guided — picks up local Ollama automatically)
-niki init
+# 2 · Configure (guided — run it inside your project; pick Ollama when offered)
+cd ./my-app && niki init --interactive
 
 # 3 · Run your first task: worktree backend needs no container, Ollama needs no key
-niki run "Add a /health endpoint" --project ./my-app --backend worktree
+niki run "Add a /health endpoint" --backend worktree
 
 # 4 · Review the result
 niki report <id>    # full report, or a unique short prefix

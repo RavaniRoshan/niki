@@ -176,15 +176,22 @@ async fn cmd_init_interactive(target_path: &std::path::Path) -> Result<()> {
         .ok()
         .and_then(|i| menu.get(i).copied());
 
-    match picked {
+    let picked_name: Option<(&str, Option<String>)> = match picked {
         None => {
             println!("No provider selected — writing niki.toml with provider entries only.");
             println!("Add a key later with `niki auth login` (or set its env var).");
+            None
         }
         Some(("ollama", _, _, _)) => {
-            println!("\nOllama selected — nothing to store. Point agents at it with:");
-            println!("  [agents.coder]\n  provider = \"ollama\"\n  model = \"llama3.1\"");
-            println!("(run `ollama pull llama3.1` first if the model is missing)\n");
+            let (model, installed) = crate::cli::auth::preferred_ollama_model();
+            if installed {
+                println!("\nOllama selected — agents will use installed model `{model}`.");
+            } else {
+                println!("\nOllama selected but no models are installed.");
+                println!("Pull one first: `ollama pull {model}`, then re-run the wizard.");
+                println!("Writing the config anyway with `{model}` pre-selected.\n");
+            }
+            Some(("ollama", Some(model)))
         }
         Some((name, label, env_var, _)) => {
             println!("--- {} ---", label);
@@ -224,14 +231,60 @@ async fn cmd_init_interactive(target_path: &std::path::Path) -> Result<()> {
             }
             println!();
             println!("Set up more any time with `niki auth login --provider <name>`.");
+            Some((name, None))
         }
-    }
+    };
 
-    fs::write(target_path, example_content)?;
+    // Point all four agents at the picked provider so the written config runs
+    // as-is. Without this the template's Anthropic defaults survive and the
+    // first `niki run` fails with a missing-key error on a fresh machine.
+    let mut out = example_content.to_string();
+    if let Some((name, model)) = picked_name {
+        out = point_agents_at(&out, name, model.as_deref());
+        println!("Agents (planner/coder/tester/reviewer) set to `{name}` in niki.toml.");
+    }
+    fs::write(target_path, out)?;
     println!("Created niki.toml with provider entries.");
     println!("API keys have been stored in your OS keyring where provided.");
     println!("Run `niki doctor` to verify your setup.");
     Ok(())
+}
+
+/// Rewrite the four `[agents.*]` sections of a niki.toml template so they use
+/// `provider` instead of the template defaults. Commented lines are untouched
+/// (they start with `#`, never with `provider`/`model` after trimming).
+/// `model` overrides the model lines too (used for Ollama, where
+/// provider-specific defaults like `claude-sonnet-4-20250514` would 404);
+/// other providers keep the template's models for the user to adjust.
+fn point_agents_at(toml_text: &str, provider: &str, model: Option<&str>) -> String {
+    const AGENTS: [&str; 4] = [
+        "[agents.planner]",
+        "[agents.coder]",
+        "[agents.tester]",
+        "[agents.reviewer]",
+    ];
+    let mut section = String::new();
+    toml_text
+        .lines()
+        .map(|line| {
+            let t = line.trim();
+            if t.starts_with('[') && t.ends_with(']') {
+                section = t.to_string();
+            }
+            if AGENTS.contains(&section.as_str()) {
+                if t.starts_with("provider ") || t.starts_with("provider=") {
+                    return format!("provider = \"{provider}\"");
+                }
+                if let Some(m) = model
+                    && (t.starts_with("model ") || t.starts_with("model="))
+                {
+                    return format!("model = \"{m}\"");
+                }
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn cmd_schema() -> Result<()> {
@@ -248,4 +301,57 @@ fn prompt_yes_no(message: &str) -> bool {
     let mut input = String::new();
     std::io::stdin().read_line(&mut input).ok();
     matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MINI: &str = r#"[general]
+max_revision_rounds = 1
+
+[agents.planner]
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+
+[agents.coder]
+provider="anthropic"
+model="claude-sonnet-4-20250514"
+
+[providers.anthropic]
+# provider = "commented-out example line stays"
+
+[agents.tester]
+provider = "groq"
+model = "llama-3.1-70b-versatile"
+"#;
+
+    #[test]
+    fn wizard_rewrites_agent_providers_and_keeps_rest() {
+        let out = point_agents_at(MINI, "zen", None);
+        // All agent sections rewritten (both `=` spacing styles).
+        assert_eq!(out.matches("provider = \"zen\"").count(), 3);
+        assert!(!out.contains("anthropic\""));
+        assert!(!out.contains("groq\""));
+        // Commented example and non-agent sections untouched.
+        assert!(out.contains("# provider = \"commented-out example line stays\""));
+        assert!(out.contains("[providers.anthropic]"));
+        // Models untouched when no override given.
+        assert!(out.contains("model = \"claude-sonnet-4-20250514\""));
+    }
+
+    #[test]
+    fn wizard_ollama_override_rewrites_models() {
+        let out = point_agents_at(MINI, "ollama", Some("qwen2.5-coder:3b"));
+        assert_eq!(out.matches("model = \"qwen2.5-coder:3b\"").count(), 3);
+        assert_eq!(out.matches("provider = \"ollama\"").count(), 3);
+    }
+
+    #[test]
+    fn ollama_model_probe_never_panics_and_names_something() {
+        // Hits localhost:11434 when present, returns the default otherwise.
+        // Either way it must not panic and must name a non-empty model.
+        let (model, _) = crate::cli::auth::preferred_ollama_model();
+        assert!(!model.is_empty());
+    }
 }

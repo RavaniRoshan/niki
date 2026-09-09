@@ -208,6 +208,65 @@ pub fn ollama_running() -> bool {
     .is_ok()
 }
 
+/// Names of models installed in the local Ollama (`/api/tags`), best-effort.
+/// Empty when Ollama is down or the response doesn't parse. Plain
+/// `TcpStream` HTTP keeps this usable from sync contexts without a client.
+pub fn ollama_models() -> Vec<String> {
+    let mut stream = match std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:11434".parse().expect("loopback addr"),
+        std::time::Duration::from_millis(300),
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_millis(800)))
+        .ok();
+    use std::io::{Read, Write};
+    if stream
+        .write_all(b"GET /api/tags HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+        .is_err()
+    {
+        return Vec::new();
+    }
+    let mut raw = String::new();
+    if stream.read_to_string(&mut raw).is_err() {
+        return Vec::new();
+    }
+    let body = match raw.split_once("\r\n\r\n") {
+        Some((_, b)) => b,
+        None => return Vec::new(),
+    };
+    let v: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    v.get("models")
+        .and_then(|m| m.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("name")?.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Pick the installed Ollama model most likely to write code: first name
+/// containing `coder`/`code`, else the first installed model, else the
+/// well-known small coding default (with a pull hint from the caller).
+pub fn preferred_ollama_model() -> (String, bool) {
+    let models = ollama_models();
+    if let Some(m) = models
+        .iter()
+        .find(|m| m.contains("coder") || m.contains("code"))
+        .or_else(|| models.first())
+    {
+        (m.clone(), true)
+    } else {
+        ("qwen2.5-coder:3b".to_string(), false)
+    }
+}
+
 fn store_key(provider: &str, api_key: &str) -> Result<()> {
     let entry = keyring::Entry::new(SERVICE_NAME, provider)?;
     entry.set_password(api_key)?;
