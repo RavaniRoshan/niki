@@ -172,13 +172,12 @@ pub fn create_provider(name: &str, config: &ProviderConfig) -> Result<Box<dyn Ll
         "anthropic" => Ok(Box::new(super::anthropic::AnthropicProvider::new(config)?)),
         // All OpenAI-compatible providers share the same implementation.
         // The only difference is base_url configured in niki.toml.
-        "openai" | "openrouter" | "nvidia" | "together" | "groq" | "deepseek" => {
-            Ok(Box::new(super::openai::OpenAiProvider::new(config)?))
-        }
-        // Single-key AI gateways (OpenAI-compatible). The slug is passed
-        // explicitly so key errors and logs name the right provider even when
-        // a custom base_url is configured.
-        "zen" | "kimi" | "kilo" => Ok(Box::new(super::openai::OpenAiProvider::new_named(
+        // All OpenAI-compatible providers go through the named constructor so
+        // missing-key errors and logs name the configured slug (GROQ_API_KEY,
+        // not OPENAI_API_KEY) even when no base_url is set and the URL-based
+        // guess would fall back to "openai".
+        "openai" | "openrouter" | "nvidia" | "together" | "groq" | "deepseek" | "zen" | "kimi"
+        | "kilo" => Ok(Box::new(super::openai::OpenAiProvider::new_named(
             config, name,
         )?)),
         "google" => Ok(Box::new(super::google::GoogleProvider::new(config)?)),

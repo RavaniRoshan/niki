@@ -7,8 +7,14 @@
       "items": {
         "type": "object",
         "properties": {
-          "search": { "type": "string" },
-          "replace": { "type": "string" }
+          "search": {
+            "type": "string",
+            "description": "Verbatim text copied EXACTLY from the Current File Contents (whitespace and indentation included, 3-5+ lines so the match is unique). Never regex, anchors (^ $), ellipsis, line numbers, or paraphrase. To insert at the top of a file, use its first 3-5 actual lines here and put the new lines before them in 'replace'."
+          },
+          "replace": {
+            "type": "string",
+            "description": "Replacement text that takes the place of 'search' verbatim."
+          }
         },
         "required": ["search", "replace"]
       }
