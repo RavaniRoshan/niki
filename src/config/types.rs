@@ -464,6 +464,11 @@ pub struct UiConfig {
     #[serde(default)]
     /// Disable spinner/animation motion (honors `NIKI_REDUCED_MOTION` env too).
     pub reduced_motion: bool,
+    #[serde(default)]
+    /// Per-action keybinding overrides (`action id → [key specs]`).
+    /// See `display::keybindings` for ids and the `"ctrl+p"` spec format.
+    /// Unknown ids and unparseable specs are reported, never fatal.
+    pub keybindings: std::collections::HashMap<String, Vec<String>>,
 }
 
 /// Transcript view configuration.

@@ -34,6 +34,7 @@ use super::command_palette::CommandPalette;
 use super::components::command_menu;
 use super::components::list_cursor::FocusState;
 use super::components::permission;
+use super::keybindings::GlobalAction;
 use super::modal::{self, ModalAction};
 use super::onboarding::{self, OnboardingAction};
 use super::pages::chat;
@@ -347,16 +348,15 @@ fn run_tui(
                     // Tag the frame reason up front; inner handlers use plain
                     // mark_dirty(), which preserves this explicit reason.
                     engine.mark_dirty_reason("key");
-                    // Global keys that work even inside chat input.
-                    if key.code == KeyCode::Char('?') {
+                    // Global keys that work even inside chat input (TUI-003:
+                    // resolved through the central keybinding table).
+                    if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleHelp) {
                         // `?` toggles the which-key style keybinding overlay.
                         state.show_help = !state.show_help;
                         engine.mark_dirty();
                         continue;
                     }
-                    if key.modifiers.contains(KeyModifiers::CONTROL)
-                        && key.code == KeyCode::Char('e')
-                    {
+                    if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleMouseCapture) {
                         // Ctrl+E toggles mouse capture so the terminal's native
                         // drag-to-select works. Keyboard scrolling stays the
                         // default; this reconciles scroll vs text-selection.
@@ -480,9 +480,7 @@ fn run_tui(
                         } else {
                             engine.mark_dirty();
                         }
-                    } else if key.modifiers.contains(KeyModifiers::CONTROL)
-                        && key.code == KeyCode::Char('c')
-                    {
+                    } else if state.keybindings.resolve(&key) == Some(GlobalAction::CancelOrExit) {
                         // Ctrl+C: first press cancels a running stage / clears input;
                         // a second press within 2s exits the TUI.
                         if state.has_running_stage() {
@@ -554,8 +552,7 @@ fn run_tui(
                                 }
                             }
                         }
-                    } else if key.code == KeyCode::Tab
-                        && !key.modifiers.contains(KeyModifiers::CONTROL)
+                    } else if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleChatPage)
                     {
                         // Toggle between the conversational chat view and the page view.
                         state.current_page = if state.current_page == PageId::Chat {
@@ -572,14 +569,11 @@ fn run_tui(
                         }
                     } else {
                         // Ctrl-P opens command palette (global, from any page)
-                        if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && key.code == KeyCode::Char('p')
-                        {
+                        if state.keybindings.resolve(&key) == Some(GlobalAction::CommandPalette) {
                             state.show_command_palette = true;
                             command_palette = CommandPalette::new();
                             engine.mark_dirty();
-                        } else if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && key.code == KeyCode::Char('t')
+                        } else if state.keybindings.resolve(&key) == Some(GlobalAction::CycleTheme)
                         {
                             // Ctrl+T cycles theme: dark → light → auto → dark
                             use crate::config::types::ThemePreference;
@@ -628,11 +622,12 @@ fn run_tui(
                                 state.current_page = page;
                                 engine.mark_dirty();
                             }
-                        } else if let KeyCode::Char('g') = key.code {
+                        } else if state.keybindings.resolve(&key) == Some(GlobalAction::GotoFleet) {
                             // 'g' jumps to the Fleet grid from any page.
                             state.current_page = PageId::Fleet;
                             engine.mark_dirty();
-                        } else if let KeyCode::Char('s') = key.code {
+                        } else if state.keybindings.resolve(&key) == Some(GlobalAction::GotoSession)
+                        {
                             // 's' opens the Session view (falls back to the Fleet
                             // selection when nothing is open yet).
                             if state.session_view.is_none() {
@@ -1213,13 +1208,16 @@ pub fn run_chat(
                     continue;
                 }
 
-                // Global keys that work even inside chat input.
-                if key.code == KeyCode::Char('?') {
+                // Global keys that work even inside chat input (TUI-003: the two
+                // keys run_chat shares with run_tui resolve through the table;
+                // run_chat's other literals (bare-t theme, q quit, Tab) stay
+                // as-is until dispatch unification.
+                if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleHelp) {
                     state.show_help = !state.show_help;
                     needs_render = true;
                     continue;
                 }
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('e') {
+                if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleMouseCapture) {
                     state.mouse_capture = !state.mouse_capture;
                     if state.mouse_capture {
                         let _ = ratatui::crossterm::execute!(std::io::stdout(), EnableMouseCapture);
@@ -1554,7 +1552,13 @@ fn render(
 
     // Render which-key style help overlay if present
     if state.show_help {
-        super::help_overlay::render_help_overlay(frame, size);
+        super::help_overlay::render_help_overlay(
+            frame,
+            size,
+            &state.keybindings,
+            &state.keybinding_overrides,
+            state.keybinding_conflicts.len(),
+        );
     }
 
     // Render slash command menu overlay if present (was dead component — now live)

@@ -135,6 +135,15 @@ model = "meta/llama-3.1-405b-instruct"
 # urls = ["https://example.com/architecture.md"]
 # max_source_chars = 8000
 
+# Optional: rebind global TUI keys (action id → key specs like "ctrl+p", "?", "f5").
+# Ids: toggle_help, toggle_mouse, cancel_exit, command_palette, cycle_theme,
+# toggle_chat, goto_fleet, goto_session. Unknown ids and bad specs are
+# reported in the help overlay (?), never fatal. Clashes resolve by table
+# order (first wins).
+#
+# [ui.keybindings]
+# command_palette = ["ctrl+p", "ctrl+k"]
+
 [docker]
 # Base image for agent containers. This must be the pre-baked image built from
 # docker/Dockerfile (Wolfi/Chainguard base with git/node/npm/python3 bundled):
