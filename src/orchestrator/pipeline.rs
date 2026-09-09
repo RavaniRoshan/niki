@@ -1657,11 +1657,88 @@ pub async fn execute_pipeline(
             // read picks up the change.
             coder_json = solo_json;
             if let Ok(parsed) = serde_json::from_str::<CodeDiff>(&coder_json)
-                && let Err(e) = sandbox
+                && let Err(apply_err) = sandbox
                     .apply_patch(&code_diff_to_edit_text(&parsed), &task.project_path)
                     .await
             {
-                eprintln!("Warning: Failed to apply solo coder patch: {}", e);
+                // One bounded repair attempt: show the coder its exact apply
+                // error and ask for corrected SEARCH blocks. Weak/local models
+                // often fix themselves when shown the failure (e.g. regex
+                // anchors instead of verbatim text). Same spend-cap and audit
+                // accounting as the first attempt — never silent, never unbounded.
+                display.agent_done(
+                    AgentRole::Coder,
+                    vec![format!("patch did not apply ({apply_err}) — repairing")],
+                    m.usage(),
+                    m.cost_usd,
+                );
+                fire_hook(
+                    &hook_bus,
+                    crate::audit::HookEvent::PreAgentStart,
+                    agent_hook_payload(AgentRole::Coder, &task.id, 1),
+                )?;
+                let repair_json = run_stage(
+                    AgentRole::Coder,
+                    &**coder_llm,
+                    &coder_stage.model,
+                    &coder_stage.provider,
+                    "solo.md",
+                    context! {
+                        task_description => format!(
+                            "{}\n\n---\nYour previous output FAILED to apply. Error: {apply_err}\nFix rules: SEARCH blocks must be copied VERBATIM from \"Current File Contents\" — no regex, no `^`/`$` anchors, no line numbers, no paraphrasing. To insert at the top of a file, include its first 3-5 actual lines in SEARCH and put your new lines before them in REPLACE. Output ONLY the corrected JSON artifact.",
+                            task.description,
+                        ),
+                        project_knowledge => knowledge_str.clone(),
+                        project_memory => memory_for(AgentRole::Coder),
+                        current_files => current_files.clone(),
+                    },
+                    "schemas/code_diff.schema.json",
+                    display,
+                    &mut metrics,
+                    false,
+                    coder_stage.max_tokens,
+                    coder_stage.temperature,
+                    steer_rx,
+                )
+                .await?;
+                artifacts.push((AgentRole::Coder, repair_json.clone()));
+                fire_hook(
+                    &hook_bus,
+                    crate::audit::HookEvent::PostAgentStop,
+                    agent_hook_payload(AgentRole::Coder, &task.id, 1),
+                )?;
+                isolation.push(IsolationRecord {
+                    role: AgentRole::Coder,
+                    backend: config.docker.backend,
+                    context_sources: isolation_sources_for(
+                        AgentRole::Coder,
+                        config.red_blue.enabled,
+                    ),
+                    saw_other_reasoning: false,
+                });
+                let rm = metrics.last().unwrap_or_else(|| {
+                    unreachable!("metrics always has at least one entry after push")
+                });
+                display.agent_done(
+                    AgentRole::Coder,
+                    vec!["repaired code diff produced".to_string()],
+                    rm.usage(),
+                    rm.cost_usd,
+                );
+                display.update_pipeline_status();
+                enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
+
+                update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
+                save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+
+                coder_json = repair_json;
+                if let Ok(repaired) = serde_json::from_str::<CodeDiff>(&coder_json)
+                    && let Err(e) = sandbox
+                        .apply_patch(&code_diff_to_edit_text(&repaired), &task.project_path)
+                        .await
+                {
+                    eprintln!("Warning: Failed to apply repaired solo coder patch: {}", e);
+                }
             }
             verdict = Verdict::Approved;
             round = 0;

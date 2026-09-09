@@ -349,6 +349,9 @@ pub struct HealthCheckResult {
     pub ok: bool,
     pub latency_ms: u64,
     pub error: Option<String>,
+    /// Model the check actually ran against (may differ from config when a
+    /// default was resolved, e.g. installed Ollama model).
+    pub model: Option<String>,
 }
 
 /// Check the health of all configured providers by sending a minimal request.
@@ -368,12 +371,14 @@ pub async fn check_provider_health(
         let latency = start.elapsed().as_millis() as u64;
 
         match result {
-            Ok(_usage) => {
+            Ok((usage, model)) => {
+                let _ = usage;
                 results.push(HealthCheckResult {
                     provider: name.clone(),
                     ok: true,
                     latency_ms: latency,
                     error: None,
+                    model: Some(model),
                 });
             }
             Err(e) => {
@@ -382,6 +387,7 @@ pub async fn check_provider_health(
                     ok: false,
                     latency_ms: latency,
                     error: Some(e.to_string()),
+                    model: None,
                 });
             }
         }
@@ -390,10 +396,24 @@ pub async fn check_provider_health(
     results
 }
 
-async fn check_single_provider(name: &str, cfg: &ProviderConfig) -> Result<TokenUsage> {
+async fn check_single_provider(name: &str, cfg: &ProviderConfig) -> Result<(TokenUsage, String)> {
     let provider = create_provider(name, cfg)?;
+    // Ollama needs a model name; the config entry often has none (keyless
+    // provider). Prefer an actually-installed model so a running server with
+    // models reports healthy instead of `400 model is required`.
+    let model = if name == "ollama" && cfg.default_model.is_empty() {
+        let (installed, present) = crate::cli::auth::preferred_ollama_model();
+        if !present {
+            anyhow::bail!(
+                "Ollama is reachable but no models are installed. Run `ollama pull qwen2.5-coder:3b` first."
+            );
+        }
+        installed
+    } else {
+        cfg.default_model.clone()
+    };
     let request = CompletionRequest {
-        model: cfg.default_model.clone(),
+        model: model.clone(),
         system_prompt: "You are a health check. Reply with exactly: ok".to_string(),
         user_message: "Reply with exactly: ok".to_string(),
         max_tokens: 10,
@@ -403,7 +423,7 @@ async fn check_single_provider(name: &str, cfg: &ProviderConfig) -> Result<Token
     };
 
     let response = provider.complete(request).await?;
-    Ok(response.usage)
+    Ok((response.usage, model))
 }
 
 #[cfg(test)]

@@ -59,6 +59,7 @@ replacement text
 2. Include enough context lines in SEARCH to make the match unique (at least 3-5 lines).
 3. Each SEARCH block should be a complete, contiguous section of the file.
 4. Do NOT include line numbers in SEARCH/REPLACE blocks.
+5. NEVER use regex, anchors (`^`, `$`), ellipsis (`...`), or paraphrase in SEARCH — it must be paste-identical source text. To insert at the top of a file, include its first 3-5 actual lines in SEARCH and put your new lines before them in REPLACE.
 5. Follow project conventions from the project context.
 6. Write clean, well-documented code.
 7. Include error handling.

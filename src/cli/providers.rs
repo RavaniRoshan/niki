@@ -39,11 +39,15 @@ async fn handle_check() -> Result<()> {
     for r in &results {
         let status = if r.ok { "✓" } else { "✗" };
         let latency = format!("{}ms", r.latency_ms);
-        let model = config
-            .providers
-            .get(&r.provider)
-            .map(|p| p.default_model.as_str())
-            .unwrap_or("unknown");
+        // Prefer the model the check actually used over the config default
+        // (they differ when a default was resolved, e.g. Ollama).
+        let model = r.model.as_deref().unwrap_or_else(|| {
+            config
+                .providers
+                .get(&r.provider)
+                .map(|p| p.default_model.as_str())
+                .unwrap_or("unknown")
+        });
 
         if r.ok {
             println!(

@@ -673,8 +673,21 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     if let Err(e) = std::fs::create_dir_all(&artifacts_dir) {
         eprintln!("Warning: could not create artifacts dir: {}", e);
     } else {
+        // Repeated pushes for one role (revision rounds, coder patch-repair
+        // attempts) each get their own file — coder.json, coder-2.json, … —
+        // so the audit trail never silently drops the failed attempts.
+        use std::collections::HashMap;
+        let mut seen: HashMap<String, usize> = HashMap::new();
         for (role, json) in &result.artifacts {
-            let path = artifacts_dir.join(format!("{}.json", role_filename(*role)));
+            let base = role_filename(*role).to_string();
+            let n = seen.entry(base.clone()).or_insert(0);
+            *n += 1;
+            let name = if *n == 1 {
+                format!("{base}.json")
+            } else {
+                format!("{base}-{n}.json")
+            };
+            let path = artifacts_dir.join(name);
             if let Err(e) = crate::util::write_restricted(&path, json) {
                 eprintln!("Warning: could not save artifact {:?}: {}", role, e);
             }
