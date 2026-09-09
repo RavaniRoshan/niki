@@ -5,6 +5,7 @@ pub mod chat;
 pub mod command_palette;
 pub mod completion;
 pub mod components;
+pub mod debug;
 pub mod diff_display;
 pub mod engine;
 pub mod help_overlay;

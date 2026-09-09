@@ -956,6 +956,10 @@ pub struct AppState {
     pub expanded_tools: std::collections::HashSet<usize>,
     /// Index of the currently-running tool (for status bar indicator).
     pub current_tool_index: Option<usize>,
+    /// Rolling render-frame mean/p95 in milliseconds (TUI-00D). Updated by
+    /// the TUI loop after each draw; surfaced on the Cost page.
+    pub frame_mean_ms: f64,
+    pub frame_p95_ms: f64,
 }
 
 /// Stage information (mirrors existing StageInfo).
@@ -1117,6 +1121,8 @@ impl AppState {
             tool_detail_scroll: 0,
             expanded_tools: std::collections::HashSet::new(),
             current_tool_index: None,
+            frame_mean_ms: 0.0,
+            frame_p95_ms: 0.0,
         }
     }
 
