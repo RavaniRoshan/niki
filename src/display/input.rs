@@ -263,7 +263,7 @@ impl Default for InputHandler {
 
 /// Check if @ autocomplete should be triggered.
 fn should_trigger_autocomplete(buffer: &str, cursor_pos: usize) -> bool {
-    let before = &buffer[..cursor_pos];
+    let before = buffer.get(..cursor_pos).unwrap_or("");
     // Check if there's an @ that's not yet completed
     if let Some(at_pos) = before.rfind('@') {
         let after_at = &before[at_pos + 1..];
@@ -277,6 +277,7 @@ fn should_trigger_autocomplete(buffer: &str, cursor_pos: usize) -> bool {
 /// Delete a word backward (Ctrl+W behavior). The deleted text is saved to the
 /// kill ring and the prior state is pushed to the undo stack.
 fn delete_word_backward(state: &mut InputState) {
+    state.clamp_cursor();
     if state.cursor_pos == 0 {
         return;
     }
@@ -306,6 +307,7 @@ fn delete_word_backward(state: &mut InputState) {
 
 /// Delete from cursor to start of line (Ctrl+U behavior).
 fn delete_to_start(state: &mut InputState) {
+    state.clamp_cursor();
     if state.cursor_pos == 0 {
         return;
     }
@@ -318,6 +320,7 @@ fn delete_to_start(state: &mut InputState) {
 
 /// Delete from cursor to end of line (Ctrl+K behavior).
 fn delete_to_end(state: &mut InputState) {
+    state.clamp_cursor();
     if state.cursor_pos >= state.buffer.len() {
         return;
     }
@@ -480,6 +483,46 @@ mod tests {
         assert!(!should_trigger_autocomplete("@file.rs ", 9));
         // While typing after @, should trigger
         assert!(should_trigger_autocomplete("@file.rs", 8));
+    }
+
+    #[test]
+    fn should_trigger_autocomplete_mid_char_cursor_no_panic() {
+        // Byte 2 of "aé" is mid-character: must not panic, must not trigger.
+        assert!(!should_trigger_autocomplete("aé", 2));
+        assert!(!should_trigger_autocomplete("@é", 2));
+        assert!(should_trigger_autocomplete("@aé", 4));
+    }
+
+    #[test]
+    fn delete_word_backward_unicode() {
+        let mut state = InputState::new();
+        state.insert_str("héllo wörld");
+        super::delete_word_backward(&mut state);
+        assert_eq!(state.buffer, "héllo ");
+        assert_eq!(state.cursor_pos, "héllo ".len());
+        assert_eq!(state.kill_ring.last().unwrap(), "wörld");
+        // Whole-word kill at start clears the buffer without panicking.
+        state.move_to_start();
+        state.move_to_end();
+        super::delete_to_start(&mut state);
+        assert_eq!(state.buffer, "");
+    }
+
+    #[test]
+    fn input_handler_multibyte_editing() {
+        let handler = InputHandler::new();
+        let mut state = InputState::new();
+        for c in "aé日".chars() {
+            handler.handle_key(&mut state, key(KeyCode::Char(c)));
+        }
+        assert_eq!(state.buffer, "aé日");
+        assert_eq!(state.cursor_pos, 6);
+        handler.handle_key(&mut state, key(KeyCode::Left));
+        assert_eq!(state.cursor_pos, 3);
+        handler.handle_key(&mut state, key(KeyCode::Backspace));
+        assert_eq!(state.buffer, "a日");
+        handler.handle_key(&mut state, key(KeyCode::Delete));
+        assert_eq!(state.buffer, "a");
     }
 
     #[test]

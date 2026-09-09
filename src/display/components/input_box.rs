@@ -93,7 +93,8 @@ pub fn render_input_box(frame: &mut Frame, state: &AppState, area: Rect) {
     } else {
         let avail = inner_width.saturating_sub(mode_len + 1); // room for text + cursor
         let buffer_chars: Vec<char> = state.input_state.buffer.chars().collect();
-        let cursor = state.input_state.cursor_pos.min(buffer_chars.len());
+        // cursor_pos is a byte index; rendering counts characters.
+        let cursor = state.input_state.cursor_char_idx().min(buffer_chars.len());
 
         // Horizontal scroll window calculation
         let (start, end) = if buffer_chars.len() <= avail {
@@ -230,11 +231,11 @@ pub fn handle_click(state: &mut AppState, mouse_col: u16, area: Rect) -> bool {
     let col_in_inner = (mouse_col - inner.x) as usize;
     let inner_width = inner.width as usize;
 
-    // Calculate mode indicator length (same as render)
+    // Calculate mode indicator length (same as render: "▎ " + label + " ").
     let mode_len = match state.input_state.mode {
-        InputMode::Shell => 7,   // "▎ Shell "
-        InputMode::Command => 5, // "▎ Cmd "
-        InputMode::Insert => 7,  // "▎ Build "
+        InputMode::Shell => 8,   // "▎ Shell "
+        InputMode::Command => 6, // "▎ Cmd "
+        InputMode::Insert => 8,  // "▎ Build "
     };
 
     if col_in_inner < mode_len {
@@ -246,7 +247,8 @@ pub fn handle_click(state: &mut AppState, mouse_col: u16, area: Rect) -> bool {
     let avail = inner_width.saturating_sub(mode_len + 1);
 
     // Calculate the scroll window (same logic as render)
-    let cursor = state.input_state.cursor_pos.min(buffer_chars.len());
+    // cursor_pos is a byte index; hit-testing counts characters.
+    let cursor = state.input_state.cursor_char_idx().min(buffer_chars.len());
     let (start, _end) = if buffer_chars.len() <= avail {
         (0, buffer_chars.len())
     } else if cursor < avail {
@@ -271,9 +273,9 @@ pub fn handle_click(state: &mut AppState, mouse_col: u16, area: Rect) -> bool {
     if is_double_click {
         // Move cursor to start of word at click position
         let word_start = find_word_start(&buffer_chars, new_cursor);
-        state.input_state.cursor_pos = word_start;
+        state.input_state.set_cursor_char_idx(word_start);
     } else {
-        state.input_state.cursor_pos = new_cursor;
+        state.input_state.set_cursor_char_idx(new_cursor);
     }
 
     state.last_click_time = Some(now);
@@ -301,6 +303,12 @@ fn find_word_start(chars: &[char], pos: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::NikiConfig;
+    use ratatui::layout::Rect;
+
+    fn app_state() -> AppState {
+        AppState::new("test".to_string(), NikiConfig::default(), ".".into())
+    }
 
     #[test]
     fn input_state_cursor_at_end() {
@@ -308,6 +316,24 @@ mod tests {
         state.insert_char('a');
         state.insert_char('b');
         assert_eq!(state.cursor_pos, 2);
+    }
+
+    #[test]
+    fn handle_click_maps_char_column_to_byte_cursor() {
+        // "aé日x": char idx 0..4 ↔ byte offsets 0,1,3,6,7.
+        let mut state = app_state();
+        state.input_state.insert_str("aé日x");
+        let area = Rect::new(0, 0, 40, 5);
+        // inner.x = 1 (border), mode prefix = 8 ("▎ Build "): char idx 3
+        // ('x') sits at column 1 + 8 + 3.
+        assert!(handle_click(&mut state, 1 + 8 + 3, area));
+        assert_eq!(state.input_state.cursor_pos, 6);
+        assert_eq!(state.input_state.cursor_char_idx(), 3);
+        // Clicking char idx 1 ('é') must land on its byte start, not mid-char.
+        // (Reset click time: two rapid clicks would take the double-click path.)
+        state.last_click_time = None;
+        assert!(handle_click(&mut state, 1 + 8 + 1, area));
+        assert_eq!(state.input_state.cursor_pos, 1);
     }
 
     #[test]

@@ -288,7 +288,9 @@ fn run_tui(
 
             state.clear_stale_notice();
             state.clear_stale_click_flash();
-            state.refresh_fleet();
+            // Throttled: the mission-store round-trip is pure overhead at
+            // 30-60fps; the grid only needs ~2Hz freshness in the loop.
+            state.refresh_fleet_if_stale(Duration::from_millis(500));
             let s = &state;
             engine.begin_frame();
             if engine
@@ -1143,7 +1145,7 @@ pub fn run_chat(
     loop {
         if needs_render {
             state.tick();
-            state.refresh_fleet();
+            state.refresh_fleet_if_stale(std::time::Duration::from_millis(500));
             if sync_capable {
                 let _ = execute!(
                     io::stdout(),
