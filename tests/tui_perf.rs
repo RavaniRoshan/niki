@@ -67,9 +67,7 @@ fn render_once(state: &AppState, width: u16, height: u16) -> Duration {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
     let start = Instant::now();
-    terminal
-        .draw(|f| render_chat(f, f.area(), state))
-        .unwrap();
+    terminal.draw(|f| render_chat(f, f.area(), state)).unwrap();
     start.elapsed()
 }
 
@@ -109,7 +107,11 @@ fn perf_full_render_chat() {
         render_once(&state, 100, 40);
     }
     let mean = start.elapsed() / iters;
-    report("full_render_chat_mean_x20", mean, Duration::from_millis(100));
+    report(
+        "full_render_chat_mean_x20",
+        mean,
+        Duration::from_millis(100),
+    );
 }
 
 #[test]
@@ -156,5 +158,9 @@ fn perf_resize_widths() {
         assert!(!lines.is_empty());
         render_once(&state, width as u16, 40);
     }
-    report("resize_3_widths", start.elapsed(), Duration::from_millis(500));
+    report(
+        "resize_3_widths",
+        start.elapsed(),
+        Duration::from_millis(500),
+    );
 }
