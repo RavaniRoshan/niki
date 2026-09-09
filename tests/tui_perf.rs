@@ -150,6 +150,57 @@ fn perf_scroll_steps() {
 }
 
 #[test]
+fn perf_expanded_stages_rebuild() {
+    // TUI-004: 20 expanded stages re-rendered per frame (spinner tick defeats
+    // the coarse hash). First build populates the memo; the next 19 must be
+    // hash + row-clone only.
+    use niki::display::pages::StageInfo;
+    use niki::display::pages::StageStatus;
+    let mut state = make_state();
+    for i in 0..20 {
+        state.stages.push(StageInfo {
+            role: AgentRole::Coder,
+            status: StageStatus::Done,
+            stream: String::new(),
+            full_transcript: format!(
+                "transcript {i}\n```rust\nfn f{i}() {{}}\n```\nmore text here"
+            ),
+            input_tokens: 100,
+            output_tokens: 50,
+            cost_usd: 0.001,
+            latency_ms: 500,
+            summary: vec![format!("summary {i}")],
+            start: Some(Instant::now()),
+            completed_at: Some(Instant::now()),
+            prompt_file: None,
+            retry_count: 0,
+            error_message: None,
+        });
+        state.expanded_stages.insert(i);
+    }
+    let start = Instant::now();
+    let first = build_chat_lines(&state, 100, false);
+    let first_ms = start.elapsed();
+    let start = Instant::now();
+    for _ in 0..19 {
+        let _ = build_chat_lines(&state, 100, false);
+    }
+    let rest_mean = start.elapsed() / 19;
+    println!(
+        "[tui_perf] expanded first build {} lines in {}ms, memoized mean {}ms",
+        first.len(),
+        first_ms.as_millis(),
+        rest_mean.as_millis()
+    );
+    assert!(first.len() > 100);
+    report(
+        "expanded_rebuild_memoized_mean_x19",
+        rest_mean,
+        Duration::from_millis(100),
+    );
+}
+
+#[test]
 fn perf_resize_widths() {
     let state = transcript_state(300, 20);
     let start = Instant::now();

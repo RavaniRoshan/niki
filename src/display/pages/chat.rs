@@ -1234,6 +1234,9 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
         );
     }
 
+    // TUI-004: read once per build so every cached row shares one mode even
+    // if another thread flips the global mid-render.
+    let build_theme = crate::display::theme::current_mode();
     for (i, s) in state.stages.iter().enumerate().skip(skip_oldest) {
         let msg_index = base + i;
         let is_running = s.status == StageStatus::Running;
@@ -1342,9 +1345,43 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
                 parts.push(s.full_transcript.clone());
             }
             let body = parts.join("\n\n");
-            for mut row in markdown_rows(&body, width, is_running) {
-                row.msg_index = msg_index;
-                lines.push(row);
+            // TUI-004: completed stages re-render byte-identical markdown on
+            // every frame (the spinner tick defeats the coarse content hash).
+            // Memoize by body+width+thinking+theme; the running stage always
+            // re-renders (its stream changes) and never populates the cache.
+            if is_running {
+                for mut row in markdown_rows(&body, width, true) {
+                    row.msg_index = msg_index;
+                    lines.push(row);
+                }
+            } else {
+                let key = crate::display::state::MarkdownCacheKey {
+                    body_hash: crate::display::state::markdown_body_hash(&body),
+                    width,
+                    show_thinking: state.show_thinking,
+                    theme: build_theme,
+                };
+                let cached = state.markdown_cache.borrow().get(&key).cloned();
+                match cached {
+                    Some(rows) => {
+                        for mut row in rows {
+                            row.msg_index = msg_index;
+                            lines.push(row);
+                        }
+                    }
+                    None => {
+                        let rows = markdown_rows(&body, width, false);
+                        for mut row in rows.clone() {
+                            row.msg_index = msg_index;
+                            lines.push(row);
+                        }
+                        let mut cache = state.markdown_cache.borrow_mut();
+                        if cache.len() >= 256 {
+                            cache.clear();
+                        }
+                        cache.insert(key, rows);
+                    }
+                }
             }
         } else {
             // Progressive disclosure: multi-line preview with dimmed styling
@@ -1680,6 +1717,78 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("user: hello")));
         assert!(lines.iter().any(|l| l.contains("assistant: world")));
         assert!(lines.iter().any(|l| *l == "─".repeat(80).as_str()));
+    }
+
+    fn expanded_done_state() -> AppState {
+        let mut state = base_state();
+        state.stages = vec![crate::display::pages::StageInfo {
+            role: AgentRole::Coder,
+            status: StageStatus::Done,
+            stream: String::new(),
+            full_transcript: "did stuff\n```rust\nfn f() {}\n```".to_string(),
+            input_tokens: 10,
+            output_tokens: 20,
+            cost_usd: 0.001,
+            latency_ms: 100,
+            summary: vec!["did the thing".to_string()],
+            start: None,
+            completed_at: None,
+            prompt_file: None,
+            retry_count: 0,
+            error_message: None,
+        }];
+        state.expanded_stages.insert(0);
+        state
+    }
+
+    fn lock_theme(mode: crate::display::theme::ThemeMode) -> std::sync::MutexGuard<'static, ()> {
+        let guard = crate::display::theme::MODE_TEST_LOCK.lock().unwrap();
+        crate::display::theme::set_mode(mode);
+        guard
+    }
+
+    #[test]
+    fn stage_body_memoized_across_rebuilds() {
+        let _guard = lock_theme(crate::display::theme::ThemeMode::Dark);
+        let state = expanded_done_state();
+        let first = build_chat_lines(&state, 80, false);
+        assert_eq!(state.markdown_cache.borrow().len(), 1);
+        let second = build_chat_lines(&state, 80, false);
+        assert_eq!(state.markdown_cache.borrow().len(), 1);
+        let t1: Vec<&str> = first.iter().map(|l| l.text.as_str()).collect();
+        let t2: Vec<&str> = second.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(t1, t2);
+        assert!(t1.iter().any(|l| l.contains("did the thing")));
+    }
+
+    #[test]
+    fn stage_body_cache_misses_on_width_change() {
+        let _guard = lock_theme(crate::display::theme::ThemeMode::Dark);
+        let state = expanded_done_state();
+        let _ = build_chat_lines(&state, 80, false);
+        let _ = build_chat_lines(&state, 100, false);
+        assert_eq!(state.markdown_cache.borrow().len(), 2);
+    }
+
+    #[test]
+    fn running_stage_bypasses_cache() {
+        let _guard = lock_theme(crate::display::theme::ThemeMode::Dark);
+        let mut state = expanded_done_state();
+        state.stages[0].status = StageStatus::Running;
+        state.stages[0].stream = "partial output".to_string();
+        let _ = build_chat_lines(&state, 80, false);
+        assert!(state.markdown_cache.borrow().is_empty());
+    }
+
+    #[test]
+    fn stage_body_cache_misses_on_theme_change() {
+        let _guard = lock_theme(crate::display::theme::ThemeMode::Dark);
+        let state = expanded_done_state();
+        crate::display::theme::set_mode(crate::display::theme::ThemeMode::Dark);
+        let _ = build_chat_lines(&state, 80, false);
+        crate::display::theme::set_mode(crate::display::theme::ThemeMode::Light);
+        let _ = build_chat_lines(&state, 80, false);
+        assert_eq!(state.markdown_cache.borrow().len(), 2);
     }
 
     #[test]
