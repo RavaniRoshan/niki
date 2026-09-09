@@ -243,6 +243,17 @@ pub enum InputAction {
     ReverseSearch,
 }
 
+/// Snap a byte index down to the nearest `char` boundary (or `s.len()`).
+/// All cursor arithmetic in [`InputState`] funnels through this so a stale or
+/// hand-set `cursor_pos` can never cause a slicing panic on multi-byte input.
+fn snap_to_boundary(s: &str, pos: usize) -> usize {
+    let mut p = pos.min(s.len());
+    while p > 0 && !s.is_char_boundary(p) {
+        p -= 1;
+    }
+    p
+}
+
 /// Autocomplete state for @ file completion.
 #[derive(Debug, Clone, Default)]
 pub struct AutocompleteState {
@@ -255,6 +266,10 @@ pub struct AutocompleteState {
 #[derive(Debug, Clone, Default)]
 pub struct InputState {
     pub buffer: String,
+    /// Byte index into `buffer`. Invariant: always a `char` boundary
+    /// (`0..=buffer.len()`). All mutating methods uphold it via
+    /// [`InputState::clamp_cursor`]; external writers (mouse clicks) must go
+    /// through [`InputState::set_cursor_char_idx`].
     pub cursor_pos: usize,
     pub history: Vec<String>,
     pub history_index: Option<usize>,
@@ -317,15 +332,45 @@ impl InputState {
             .unwrap_or(false)
     }
 
+    /// Snap `cursor_pos` to a valid `char` boundary. Call at the top of any
+    /// method that reads the cursor — the value may be stale (buffer edited
+    /// elsewhere) or hand-set (tests, mouse) to a mid-character offset.
+    pub fn clamp_cursor(&mut self) {
+        self.cursor_pos = snap_to_boundary(&self.buffer, self.cursor_pos);
+    }
+
+    /// Cursor as a `char` index (for rendering and hit-testing, which count
+    /// characters, not bytes).
+    pub fn cursor_char_idx(&self) -> usize {
+        self.buffer[..snap_to_boundary(&self.buffer, self.cursor_pos)]
+            .chars()
+            .count()
+    }
+
+    /// Set the cursor from a `char` index (e.g. mouse click position).
+    /// Out-of-range values clamp to the end of the buffer.
+    pub fn set_cursor_char_idx(&mut self, idx: usize) {
+        let mut byte = self.buffer.len();
+        for (i, (b, _)) in self.buffer.char_indices().enumerate() {
+            if i == idx {
+                byte = b;
+                break;
+            }
+        }
+        self.cursor_pos = byte;
+    }
+
     /// Insert a character at the cursor position.
     pub fn insert_char(&mut self, c: char) {
+        self.clamp_cursor();
         self.buffer.insert(self.cursor_pos, c);
-        self.cursor_pos += 1;
+        self.cursor_pos += c.len_utf8();
         self.last_typed_at = Some(Instant::now());
     }
 
     /// Insert a sanitized string (normalizing CRLF and CR line endings) at the cursor position.
     pub fn insert_str(&mut self, s: &str) {
+        self.clamp_cursor();
         let normalized = s.replace("\r\n", "\n").replace('\r', "\n");
         self.buffer.insert_str(self.cursor_pos, &normalized);
         self.cursor_pos += normalized.len();
@@ -334,8 +379,9 @@ impl InputState {
 
     /// Delete the character before the cursor (backspace).
     pub fn delete_back(&mut self) -> bool {
+        self.clamp_cursor();
         if self.cursor_pos > 0 {
-            self.cursor_pos -= 1;
+            self.cursor_pos = snap_to_boundary(&self.buffer, self.cursor_pos - 1);
             self.buffer.remove(self.cursor_pos);
             self.last_typed_at = Some(Instant::now());
             true
@@ -346,6 +392,7 @@ impl InputState {
 
     /// Delete the character at the cursor (delete key).
     pub fn delete_forward(&mut self) -> bool {
+        self.clamp_cursor();
         if self.cursor_pos < self.buffer.len() {
             self.buffer.remove(self.cursor_pos);
             self.last_typed_at = Some(Instant::now());
@@ -355,17 +402,24 @@ impl InputState {
         }
     }
 
-    /// Move cursor left.
+    /// Move cursor left by one character (never lands mid-character).
     pub fn move_left(&mut self) {
+        self.clamp_cursor();
         if self.cursor_pos > 0 {
-            self.cursor_pos -= 1;
+            self.cursor_pos = snap_to_boundary(&self.buffer, self.cursor_pos - 1);
         }
     }
 
-    /// Move cursor right.
+    /// Move cursor right by one character (never lands mid-character).
     pub fn move_right(&mut self) {
+        self.clamp_cursor();
         if self.cursor_pos < self.buffer.len() {
-            self.cursor_pos += 1;
+            let adv = self.buffer[self.cursor_pos..]
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
+            self.cursor_pos += adv;
         }
     }
 
@@ -380,7 +434,10 @@ impl InputState {
     }
 
     /// Move cursor one word to the left (Ctrl+Left / Alt+Left).
+    /// Byte-stepping is safe (multi-byte UTF-8 bytes are never ASCII
+    /// whitespace); the final snap guarantees a `char` boundary.
     pub fn move_word_left(&mut self) {
+        self.clamp_cursor();
         if self.cursor_pos == 0 {
             return;
         }
@@ -394,11 +451,12 @@ impl InputState {
         while pos > 0 && !bytes[pos - 1].is_ascii_whitespace() {
             pos -= 1;
         }
-        self.cursor_pos = pos;
+        self.cursor_pos = snap_to_boundary(&self.buffer, pos);
     }
 
     /// Move cursor one word to the right (Ctrl+Right / Alt+Right).
     pub fn move_word_right(&mut self) {
+        self.clamp_cursor();
         let len = self.buffer.len();
         if self.cursor_pos >= len {
             return;
@@ -413,13 +471,14 @@ impl InputState {
         while pos < len && bytes[pos].is_ascii_whitespace() {
             pos += 1;
         }
-        self.cursor_pos = pos;
+        self.cursor_pos = pos.min(len);
     }
 
     /// Insert a newline at the cursor (multiline composer, Shift+Enter).
     pub fn insert_newline(&mut self) {
+        self.clamp_cursor();
         self.buffer.insert(self.cursor_pos, '\n');
-        self.cursor_pos += 1;
+        self.cursor_pos += '\n'.len_utf8();
         self.last_typed_at = Some(Instant::now());
     }
 
@@ -500,7 +559,8 @@ impl InputState {
 
     /// Current (1-based) line and (1-based) column of the caret.
     pub fn line_col(&self) -> (usize, usize) {
-        let before = &self.buffer[..self.cursor_pos.min(self.buffer.len())];
+        let end = snap_to_boundary(&self.buffer, self.cursor_pos);
+        let before = &self.buffer[..end];
         let line = before.matches('\n').count() + 1;
         let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
         (line, col)
@@ -530,6 +590,7 @@ impl InputState {
             self.redo_stack.push((self.buffer.clone(), self.cursor_pos));
             self.buffer = buf;
             self.cursor_pos = cur;
+            self.clamp_cursor();
             true
         } else {
             false
@@ -542,6 +603,7 @@ impl InputState {
             self.undo_stack.push((self.buffer.clone(), self.cursor_pos));
             self.buffer = buf;
             self.cursor_pos = cur;
+            self.clamp_cursor();
             true
         } else {
             false
@@ -561,6 +623,7 @@ impl InputState {
     /// Yank the most-recent kill at the caret. Returns true if text was inserted.
     pub fn yank(&mut self) -> bool {
         if let Some(text) = self.kill_ring.last().cloned() {
+            self.clamp_cursor();
             let start = self.cursor_pos;
             self.buffer.insert_str(self.cursor_pos, &text);
             self.cursor_pos += text.len();
@@ -572,11 +635,20 @@ impl InputState {
     }
 
     /// Replace the previous yank with the next-most-recent kill (yank-pop).
+    /// A stale range (buffer edited since the yank) is discarded safely.
     pub fn yank_pop(&mut self) -> bool {
         let (start, end) = match self.last_yank_range {
             Some(r) => r,
             None => return false,
         };
+        if start > end
+            || end > self.buffer.len()
+            || !self.buffer.is_char_boundary(start)
+            || !self.buffer.is_char_boundary(end)
+        {
+            self.last_yank_range = None;
+            return false;
+        }
         let idx = match self.kill_ring.len() {
             n if n >= 2 => n - 2,
             _ => return false,
@@ -849,6 +921,10 @@ pub struct AppState {
     pub stores: crate::mission::Stores,
     /// Live Fleet view state (mission grid). Refreshed from `stores` each render.
     pub fleet: crate::display::pages::fleet::FleetState,
+    /// Last time the Fleet grid was rebuilt from the mission store. Render
+    /// loops must use [`AppState::refresh_fleet_if_stale`] instead of
+    /// [`AppState::refresh_fleet`] to avoid a store round-trip every frame.
+    pub fleet_last_refresh: Option<Instant>,
     /// Session view state for the currently-open mission (`g`/`s` pages).
     pub session_view: Option<crate::display::pages::session::SessionState>,
     /// Id of the mission selected in the Fleet grid.
@@ -1025,6 +1101,7 @@ impl AppState {
             anchor_pending: false,
             stores: crate::mission::Stores::new(crate::event::EventBus::new()),
             fleet: crate::display::pages::fleet::FleetState::new(Vec::new()),
+            fleet_last_refresh: None,
             session_view: None,
             selected_mission: None,
             show_thinking: false,
@@ -1112,6 +1189,22 @@ impl AppState {
         let selected = self.fleet.selected.min(missions.len().saturating_sub(1));
         self.fleet = crate::display::pages::fleet::FleetState::new(missions);
         self.fleet.selected = selected;
+    }
+
+    /// Throttled [`AppState::refresh_fleet`] for render hot paths: refreshes at
+    /// most once per `max_age`. Returns true when a refresh actually happened.
+    /// Explicit navigation (opening a mission) keeps calling `refresh_fleet`
+    /// directly so it always sees fresh data.
+    pub fn refresh_fleet_if_stale(&mut self, max_age: Duration) -> bool {
+        let now = Instant::now();
+        if let Some(last) = self.fleet_last_refresh
+            && now.duration_since(last) < max_age
+        {
+            return false;
+        }
+        self.refresh_fleet();
+        self.fleet_last_refresh = Some(now);
+        true
     }
 
     /// Open the Session view for the mission at the Fleet cursor.
@@ -1712,5 +1805,121 @@ mod tests {
         assert!(input.undo());
         assert_eq!(input.buffer, "");
         assert!(!input.undo()); // stack exhausted
+    }
+
+    #[test]
+    fn input_state_multibyte_round_trip() {
+        let mut input = InputState::new();
+        input.insert_char('a'); // 1 byte
+        input.insert_char('é'); // 2 bytes
+        input.insert_char('日'); // 3 bytes
+        input.insert_char('🎉'); // 4 bytes
+        assert_eq!(input.buffer, "aé日🎉");
+        assert_eq!(input.cursor_pos, 10);
+        assert_eq!(input.cursor_char_idx(), 4);
+        input.move_left();
+        assert_eq!(input.cursor_pos, 6);
+        input.move_left();
+        assert_eq!(input.cursor_pos, 3);
+        input.move_left();
+        assert_eq!(input.cursor_pos, 1);
+        input.move_left();
+        assert_eq!(input.cursor_pos, 0);
+        input.move_right();
+        assert_eq!(input.cursor_pos, 1);
+        input.move_right();
+        assert_eq!(input.cursor_pos, 3);
+        assert!(input.delete_back()); // removes é (char before cursor)
+        assert_eq!(input.buffer, "a日🎉");
+        input.move_to_end();
+        assert!(input.delete_back()); // removes 🎉
+        assert_eq!(input.buffer, "a日");
+        assert!(!input.delete_forward()); // at end: no-op
+        input.move_to_start();
+        assert!(input.delete_forward()); // removes a
+        assert_eq!(input.buffer, "日");
+    }
+
+    #[test]
+    fn input_state_stale_cursor_never_panics() {
+        // Byte offsets 2,4,5 land mid-character in "aé日" (bounds 0,1,3,6).
+        for bad in [1, 2, 4, 5, 7, 100] {
+            let mut input = InputState::new();
+            input.buffer = "aé日".to_string();
+            input.cursor_pos = bad;
+            input.move_left();
+            assert!(input.buffer.is_char_boundary(input.cursor_pos));
+            input.cursor_pos = bad;
+            input.move_right();
+            assert!(input.buffer.is_char_boundary(input.cursor_pos));
+            input.cursor_pos = bad;
+            let _ = input.delete_back();
+            assert!(input.buffer.is_char_boundary(input.cursor_pos));
+            input.buffer = "aé日".to_string();
+            input.cursor_pos = bad;
+            let _ = input.delete_forward();
+            assert!(input.buffer.is_char_boundary(input.cursor_pos));
+            input.buffer = "aé日".to_string();
+            input.cursor_pos = bad;
+            let _ = input.line_col();
+            input.cursor_pos = bad;
+            input.insert_char('x'); // clamps, never panics
+            assert!(input.buffer.is_char_boundary(input.cursor_pos));
+            input.buffer = "aé日".to_string();
+            input.last_yank_range = Some((bad, bad + 1));
+            assert!(!input.yank_pop()); // stale range rejected, not drained
+        }
+    }
+
+    #[test]
+    fn input_state_word_nav_unicode() {
+        let mut input = InputState::new();
+        input.insert_str("héllo wörld");
+        input.move_to_start();
+        input.move_word_right();
+        assert_eq!(&input.buffer[..input.cursor_pos], "héllo ");
+        input.move_word_right();
+        assert_eq!(input.cursor_pos, input.buffer.len());
+        input.move_word_left();
+        assert_eq!(&input.buffer[..input.cursor_pos], "héllo ");
+        input.move_word_left();
+        assert_eq!(input.cursor_pos, 0);
+    }
+
+    #[test]
+    fn input_state_yank_unicode_accounting() {
+        let mut input = InputState::new();
+        input.insert_str("ab");
+        input.push_kill("🎉".to_string());
+        assert!(input.yank());
+        assert_eq!(input.buffer, "ab🎉");
+        assert_eq!(input.cursor_pos, 6);
+        assert_eq!(input.cursor_char_idx(), 3);
+    }
+
+    #[test]
+    fn input_state_char_idx_round_trip() {
+        let mut input = InputState::new();
+        input.insert_str("aé日🎉");
+        for (ch, byte) in [(0, 0), (1, 1), (2, 3), (3, 6), (4, 10)] {
+            input.set_cursor_char_idx(ch);
+            assert_eq!(input.cursor_pos, byte);
+            assert_eq!(input.cursor_char_idx(), ch);
+        }
+        input.set_cursor_char_idx(99); // clamps to end
+        assert_eq!(input.cursor_pos, 10);
+    }
+
+    #[test]
+    fn refresh_fleet_throttle() {
+        let config = NikiConfig::default();
+        let mut state = AppState::new("test".to_string(), config, ".".into());
+        // First call always refreshes and stamps.
+        assert!(state.refresh_fleet_if_stale(Duration::from_secs(60)));
+        assert!(state.fleet_last_refresh.is_some());
+        // Second call within the window is a no-op.
+        assert!(!state.refresh_fleet_if_stale(Duration::from_secs(60)));
+        // Zero budget always refreshes (deterministic, no sleeps).
+        assert!(state.refresh_fleet_if_stale(Duration::ZERO));
     }
 }
