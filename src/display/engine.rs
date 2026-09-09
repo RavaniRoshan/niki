@@ -114,6 +114,9 @@ pub struct RenderEngine {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     target: FrameTarget,
     dirty: bool,
+    /// Why the current frame was requested (`None` until first `mark_dirty`).
+    /// Consumed by the TUI-00D debug log; cleared on `mark_clean_for_render`.
+    dirty_reason: Option<&'static str>,
     frame_start: Option<Instant>,
     stats: FrameStats,
 }
@@ -125,6 +128,7 @@ impl RenderEngine {
             terminal,
             target: FrameTarget::Low,
             dirty: true,
+            dirty_reason: Some("init"),
             frame_start: None,
             stats: FrameStats::new(),
         }
@@ -138,11 +142,26 @@ impl RenderEngine {
     /// Mark the engine as needing a redraw.
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
+        if self.dirty_reason.is_none() {
+            self.dirty_reason = Some("unspecified");
+        }
+    }
+
+    /// Mark the engine as needing a redraw, recording why (TUI-00D).
+    pub fn mark_dirty_reason(&mut self, reason: &'static str) {
+        self.dirty = true;
+        self.dirty_reason = Some(reason);
+    }
+
+    /// Why the pending frame was requested, if any.
+    pub fn dirty_reason(&self) -> Option<&'static str> {
+        self.dirty_reason
     }
 
     /// Mark the engine as up to date after a successful render.
     pub fn mark_clean_for_render(&mut self) {
         self.dirty = false;
+        self.dirty_reason = None;
     }
 
     /// Set the frame target (high for streaming, low for idle).
@@ -202,10 +221,18 @@ mod tests {
         let terminal = Terminal::new(backend).expect("terminal");
         let mut engine = RenderEngine::new(terminal, false);
         assert!(engine.needs_render());
+        assert_eq!(engine.dirty_reason(), Some("init"));
         engine.mark_clean_for_render();
         assert!(!engine.needs_render());
+        assert_eq!(engine.dirty_reason(), None);
         engine.mark_dirty();
         assert!(engine.needs_render());
+        assert_eq!(engine.dirty_reason(), Some("unspecified"));
+        engine.mark_dirty_reason("key");
+        assert_eq!(engine.dirty_reason(), Some("key"));
+        // A plain mark_dirty never overwrites an explicit reason.
+        engine.mark_dirty();
+        assert_eq!(engine.dirty_reason(), Some("key"));
     }
 
     #[test]

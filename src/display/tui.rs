@@ -263,6 +263,8 @@ fn run_tui(
     let mut last_render = std::time::Instant::now();
     // Tracks the previous Ctrl+C press for the two-press-to-exit behaviour.
     let mut last_ctrl_c: Option<std::time::Instant> = None;
+    // Frame counter for the TUI-00D debug log.
+    let mut frame_no: u64 = 0;
 
     loop {
         // Adapt frame target: 60fps while a stage is streaming, else 30fps idle.
@@ -309,6 +311,31 @@ fn run_tui(
                 );
             }
 
+            // TUI-00D: publish rolling frame stats for the Cost page and the
+            // NIKI_TUI_DEBUG per-frame log. Read the dirty reason before the
+            // clean call below clears it.
+            let stats = engine.stats();
+            let frame_ms = stats.mean().as_secs_f64() * 1000.0;
+            state.frame_mean_ms = frame_ms;
+            state.frame_p95_ms = stats.p95().as_secs_f64() * 1000.0;
+            frame_no += 1;
+            if crate::display::debug::enabled() {
+                let target = match target {
+                    crate::display::engine::FrameTarget::High => "High",
+                    crate::display::engine::FrameTarget::Low => "Low",
+                };
+                crate::display::debug::log_frame(
+                    frame_no,
+                    target,
+                    now.elapsed().as_secs_f64() * 1000.0,
+                    engine.dirty_reason().unwrap_or("unknown"),
+                    state.stages.len(),
+                    state.token_count,
+                    state.frame_mean_ms,
+                    state.frame_p95_ms,
+                );
+            }
+
             engine.mark_clean_for_render();
             last_render = now;
         }
@@ -317,6 +344,9 @@ fn run_tui(
         if event::poll(Duration::from_millis(16)).unwrap_or(false) {
             match event::read() {
                 Ok(Event::Key(key)) => {
+                    // Tag the frame reason up front; inner handlers use plain
+                    // mark_dirty(), which preserves this explicit reason.
+                    engine.mark_dirty_reason("key");
                     // Global keys that work even inside chat input.
                     if key.code == KeyCode::Char('?') {
                         // `?` toggles the which-key style keybinding overlay.
@@ -1023,12 +1053,12 @@ fn run_tui(
                 Ok(Event::Paste(pasted)) => {
                     state.input_state.insert_str(&pasted);
                     state.input_state.start_paste_burst();
-                    engine.mark_dirty();
+                    engine.mark_dirty_reason("paste");
                 }
                 Ok(Event::Resize(_, _)) => {
                     // Terminal was resized — force a re-render so the layout
                     // reflows to the new dimensions (ratatui re-samples size on draw).
-                    engine.mark_dirty();
+                    engine.mark_dirty_reason("resize");
                 }
                 _ => {}
             }
@@ -1038,7 +1068,7 @@ fn run_tui(
         match rx.recv_timeout(Duration::from_millis(16)) {
             Ok(ev) => {
                 state.apply_event(ev);
-                engine.mark_dirty();
+                engine.mark_dirty_reason("pipeline-event");
                 // Drain any other queued events this tick
                 while let Ok(ev) = rx.try_recv() {
                     state.apply_event(ev);

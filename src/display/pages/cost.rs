@@ -260,9 +260,12 @@ impl Page for CostPage {
 
         frame.render_widget(Paragraph::new(bar_lines).block(bar_block), chunks[4]);
 
-        // Footer
+        // Footer (TUI-00D: rolling frame stats published by the TUI loop).
         let footer = Line::from(vec![Span::styled(
-            " [Esc] back",
+            format!(
+                " [Esc] back · frame {:.1}/{:.1}ms mean/p95",
+                state.frame_mean_ms, state.frame_p95_ms
+            ),
             Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[5]);
@@ -288,5 +291,34 @@ impl Page for CostPage {
             }
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::NikiConfig;
+
+    fn buffer_text(width: u16, height: u16, state: &AppState) -> String {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let page = CostPage::new();
+        terminal.draw(|f| page.render(f, f.area(), state)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn cost_footer_shows_frame_stats() {
+        let mut state = AppState::new("t".to_string(), NikiConfig::default(), ".".into());
+        state.frame_mean_ms = 3.25;
+        state.frame_p95_ms = 5.75;
+        let text = buffer_text(100, 30, &state);
+        assert!(text.contains("frame 3.2/5.8ms mean/p95"), "{text}");
     }
 }
