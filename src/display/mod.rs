@@ -11,6 +11,7 @@ pub mod engine;
 pub mod help_overlay;
 pub mod ime;
 pub mod input;
+pub mod keybindings;
 pub mod kitty;
 pub mod layout;
 pub mod logo;

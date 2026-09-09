@@ -1,4 +1,6 @@
-//! Which-key style keybinding overlay.
+//! Which-key style keybinding overlay (TUI-003: rows generated from the
+//! central [`KeyBindings`](super::keybindings::KeyBindings) table so help
+//! always matches behavior, including user overrides).
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -6,30 +8,23 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
+use super::keybindings::KeyBindings;
 use crate::display::theme;
 
-/// (Key, description) pairs shown in the overlay.
-const BINDINGS: &[(&str, &str)] = &[
-    ("Enter", "Submit input / run command"),
-    ("Esc", "Close menu, modal, or this overlay"),
-    ("Ctrl+C", "Cancel running stage / exit"),
-    ("Ctrl+L", "Clear the screen"),
-    ("Ctrl+P", "Open the command palette"),
-    ("Ctrl+T", "Cycle theme (dark → light → auto)"),
-    ("Ctrl+E", "Toggle mouse capture (text selection)"),
-    ("Tab", "Autocomplete / switch chat ↔ page"),
-    ("↑ / ↓", "History navigation / menu navigation"),
-    ("Ctrl+A / E", "Jump to line start / end"),
-    ("Ctrl+W", "Delete word backward"),
-    ("Ctrl+U / K", "Delete to line start / end"),
-    ("@ / / / !", "File / slash-command / shell autocomplete"),
-    ("? ", "Toggle this keybinding help"),
-];
-
 /// Render the centered keybinding overlay.
-pub fn render_help_overlay(frame: &mut Frame, area: Rect) {
+/// `overridden` marks user-rebound rows with `*`; `conflicts` appends a
+/// warning footer instead of failing.
+pub fn render_help_overlay(
+    frame: &mut Frame,
+    area: Rect,
+    bindings: &KeyBindings,
+    overridden: &[String],
+    conflicts: usize,
+) {
+    let rows = bindings.help_rows(overridden);
+    let height =
+        (rows.len() as u16 + 4 + u16::from(conflicts > 0)).min(area.height.saturating_sub(2));
     let width = (area.width.saturating_sub(4)).min(56);
-    let height = (BINDINGS.len() as u16 + 4).min(area.height.saturating_sub(2));
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let popup = Rect {
@@ -57,10 +52,15 @@ pub fn render_help_overlay(frame: &mut Frame, area: Rect) {
         .split(popup);
 
     let mut lines: Vec<Line> = Vec::new();
-    for (key, desc) in BINDINGS {
+    for (key, desc, is_overridden) in &rows {
+        let label = if *is_overridden {
+            format!("{key} *")
+        } else {
+            key.clone()
+        };
         lines.push(Line::from(vec![
             Span::styled(
-                format!("{:<12}", key),
+                format!("{label:<12}"),
                 Style::default()
                     .fg(theme::primary())
                     .add_modifier(Modifier::BOLD),
@@ -68,14 +68,78 @@ pub fn render_help_overlay(frame: &mut Frame, area: Rect) {
             Span::styled(desc.to_string(), Style::default().fg(theme::fg_color())),
         ]));
     }
+    if conflicts > 0 {
+        lines.push(Line::from(vec![Span::styled(
+            format!("⚠ {conflicts} keybinding conflict(s): table order wins"),
+            Style::default().fg(theme::warning()),
+        )]));
+    }
 
     frame.render_widget(Paragraph::new(lines).block(block), inner[0]);
 
+    let close_key = rows.first().map(|(l, _, _)| l.clone()).unwrap_or_default();
     frame.render_widget(
         Paragraph::new(Span::styled(
-            "press ? or Esc to close",
+            format!("press {close_key} or Esc to close"),
             Style::default().fg(theme::fg_dim()),
         )),
         inner[1],
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::NikiConfig;
+    use crate::display::state::AppState;
+
+    fn buffer_text(state: &AppState) -> String {
+        let backend = ratatui::backend::TestBackend::new(80, 30);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                render_help_overlay(
+                    f,
+                    f.area(),
+                    &state.keybindings,
+                    &state.keybinding_overrides,
+                    state.keybinding_conflicts.len(),
+                )
+            })
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn help_shows_defaults() {
+        let state = AppState::new("t".to_string(), NikiConfig::default(), ".".into());
+        let text = buffer_text(&state);
+        assert!(text.contains("Ctrl+P"), "{text}");
+        assert!(text.contains("command palette"), "{text}");
+        assert!(!text.contains('⚠'), "{text}");
+    }
+
+    #[test]
+    fn help_marks_overrides_and_conflicts() {
+        let mut config = NikiConfig::default();
+        config
+            .ui
+            .keybindings
+            .insert("command_palette".to_string(), vec!["ctrl+k".to_string()]);
+        config
+            .ui
+            .keybindings
+            .insert("cycle_theme".to_string(), vec!["ctrl+k".to_string()]);
+        let state = AppState::new("t".to_string(), config, ".".into());
+        assert_eq!(state.keybinding_conflicts.len(), 1);
+        let text = buffer_text(&state);
+        assert!(text.contains("Ctrl+K *"), "{text}");
+        assert!(text.contains("conflict(s)"), "{text}");
+    }
 }

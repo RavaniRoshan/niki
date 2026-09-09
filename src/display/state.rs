@@ -960,6 +960,11 @@ pub struct AppState {
     /// the TUI loop after each draw; surfaced on the Cost page.
     pub frame_mean_ms: f64,
     pub frame_p95_ms: f64,
+    /// Resolved global keybindings + user-layer conflicts (TUI-003).
+    pub keybindings: crate::display::keybindings::KeyBindings,
+    pub keybinding_conflicts: Vec<crate::display::keybindings::Conflict>,
+    /// Action ids the user rebound (for the help overlay `*` marker).
+    pub keybinding_overrides: Vec<String>,
 }
 
 /// Stage information (mirrors existing StageInfo).
@@ -1035,6 +1040,9 @@ impl AppState {
     pub fn new(description: String, config: NikiConfig, project_path: PathBuf) -> Self {
         let tips_enabled = config.ui.tips.enabled;
         let tips_rotation = config.ui.tips.rotation_seconds;
+        let (keybindings, keybinding_conflicts) =
+            crate::display::keybindings::KeyBindings::with_overrides(&config.ui.keybindings);
+        let keybinding_overrides = config.ui.keybindings.keys().cloned().collect();
         Self {
             view: ViewMode::Chat,
             current_page: PageId::Run,
@@ -1123,6 +1131,9 @@ impl AppState {
             current_tool_index: None,
             frame_mean_ms: 0.0,
             frame_p95_ms: 0.0,
+            keybindings,
+            keybinding_conflicts,
+            keybinding_overrides,
         }
     }
 
