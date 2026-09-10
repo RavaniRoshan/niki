@@ -6,6 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use super::{AppState, Page, PageId};
+use crate::display::state::{DiffCacheKey, DiffRender, text_hash};
 use crate::display::theme;
 use similar::{ChangeTag, TextDiff};
 
@@ -86,37 +87,18 @@ impl Page for DiffPage {
         ]);
         frame.render_widget(Paragraph::new(header), chunks[0]);
 
-        // File info
-        if let Some(diff) = &state.diff_content {
-            let files: Vec<&str> = diff
-                .lines()
-                .filter(|l| l.starts_with("diff --git"))
-                .map(|l| {
-                    l.strip_prefix("diff --git a/")
-                        .unwrap_or(l)
-                        .split(" b/")
-                        .next()
-                        .unwrap_or(l)
-                })
-                .collect();
-            let adds: usize = diff
-                .lines()
-                .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
-                .count();
-            let dels: usize = diff
-                .lines()
-                .filter(|l| l.starts_with('-') && !l.starts_with("---"))
-                .count();
-
+        // File info (TUI-022: stats come from the processed-diff cache —
+        // one pass on content change, not three scans per frame).
+        if let Some(rendered) = processed_diff(state, self.line_numbers, self.show_annotations) {
             let info = Line::from(vec![
                 Span::styled(
-                    format!("  {} files", files.len()),
+                    format!("  {} files", rendered.files),
                     Style::default()
                         .fg(theme::fg_color())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("   +{} -{}", adds, dels),
+                    format!("   +{} -{}", rendered.adds, rendered.dels),
                     Style::default().fg(theme::GREEN()),
                 ),
             ]);
@@ -134,9 +116,8 @@ impl Page for DiffPage {
             .border_style(Style::default().fg(theme::border_color()))
             .title(" CHANGES ");
 
-        if let Some(diff) = &state.diff_content {
-            let lines =
-                render_diff_with_line_numbers(diff, self.line_numbers, self.show_annotations);
+        if let Some(rendered) = processed_diff(state, self.line_numbers, self.show_annotations) {
+            let lines = rendered.lines;
 
             let total_lines = lines.len() as u16;
             let view_h = chunks[2].height.saturating_sub(2);
@@ -318,6 +299,46 @@ impl DiffPage {
 
 /// Render a unified diff with line numbers, word-level intra-line highlighting,
 /// and hunk clustering (groups nearby hunks with visual separators).
+/// Processed diff for one render: highlighted lines + file stats, computed
+/// once per content/toggle change and memoized in `AppState::diff_cache`
+/// (TUI-022). Previously every frame re-ran the word-level highlighter plus
+/// three full content scans.
+fn processed_diff(state: &AppState, line_numbers: bool, annotations: bool) -> Option<DiffRender> {
+    let diff = state.diff_content.as_ref()?;
+    let key = DiffCacheKey {
+        hash: text_hash(diff),
+        line_numbers,
+        annotations,
+    };
+    if let Some(hit) = state.diff_cache.borrow().get(&key) {
+        return Some(hit.clone());
+    }
+    let mut files = 0usize;
+    let mut adds = 0usize;
+    let mut dels = 0usize;
+    for line in diff.lines() {
+        if line.starts_with("diff --git") {
+            files += 1;
+        } else if line.starts_with('+') && !line.starts_with("+++") {
+            adds += 1;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            dels += 1;
+        }
+    }
+    let rendered = DiffRender {
+        lines: render_diff_with_line_numbers(diff, line_numbers, annotations),
+        files,
+        adds,
+        dels,
+    };
+    let mut cache = state.diff_cache.borrow_mut();
+    if cache.len() >= 4 {
+        cache.clear();
+    }
+    cache.insert(key, rendered.clone());
+    Some(rendered)
+}
+
 fn render_diff_with_line_numbers(
     diff: &str,
     show_line_numbers: bool,
@@ -519,5 +540,40 @@ index abc123..def456 100644
         assert!(!lines.is_empty());
         // Should have: 2 header lines, 2 file name lines, 1 hunk, 6 content lines = 11
         assert!(lines.len() >= 8);
+    }
+
+    fn diff_state(content: &str) -> AppState {
+        let mut state = AppState::new(
+            "t".to_string(),
+            crate::config::NikiConfig::default(),
+            ".".into(),
+        );
+        state.diff_content = Some(content.to_string());
+        state
+    }
+
+    #[test]
+    fn processed_diff_memoizes_stats_and_lines() {
+        let diff = "diff --git a/f.rs b/f.rs\n+++ b/f.rs\n+new line\n-old line\n";
+        let state = diff_state(diff);
+        let first = processed_diff(&state, true, true).expect("processed");
+        assert_eq!(first.files, 1);
+        assert_eq!(first.adds, 1);
+        assert_eq!(first.dels, 1);
+        assert!(!first.lines.is_empty());
+        assert_eq!(state.diff_cache.borrow().len(), 1);
+        // Second render hits the cache: identical content, no new entry.
+        let second = processed_diff(&state, true, true).expect("processed");
+        assert_eq!(state.diff_cache.borrow().len(), 1);
+        assert_eq!(first.lines.len(), second.lines.len());
+    }
+
+    #[test]
+    fn processed_diff_misses_on_toggle() {
+        let diff = "diff --git a/f.rs b/f.rs\n+x\n";
+        let state = diff_state(diff);
+        let _ = processed_diff(&state, true, true);
+        let _ = processed_diff(&state, false, true);
+        assert_eq!(state.diff_cache.borrow().len(), 2);
     }
 }

@@ -61,6 +61,7 @@ mod tests {
             error_color: Color::Red,
             claude_color: Color::Magenta,
             primary_color: Color::Cyan,
+            hyperlinks: false,
         }
     }
 

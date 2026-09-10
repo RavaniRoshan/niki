@@ -216,3 +216,50 @@ fn perf_resize_widths() {
         Duration::from_millis(500),
     );
 }
+
+#[test]
+fn perf_large_diff_render() {
+    // TUI-022: 2k-line diff through the real DiffPage. First render
+    // processes + highlights; repeats must hit the processed-diff cache.
+    use niki::display::pages::diff::DiffPage;
+    let mut body = String::from("diff --git a/big.rs b/big.rs\n");
+    for i in 0..1000 {
+        body.push_str(&format!("-old line number {i} with some content here\n"));
+        body.push_str(&format!("+new line number {i} with some content here\n"));
+    }
+    let mut state = make_state();
+    state.diff_content = Some(body);
+    state.current_page = niki::display::pages::PageId::Diff;
+    let backend = ratatui::backend::TestBackend::new(120, 40);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let page = DiffPage::new();
+    let start = Instant::now();
+    terminal
+        .draw(|f| {
+            use niki::display::pages::Page;
+            page.render(f, f.area(), &state);
+        })
+        .unwrap();
+    let first = start.elapsed();
+    let start = Instant::now();
+    for _ in 0..9 {
+        terminal
+            .draw(|f| {
+                use niki::display::pages::Page;
+                page.render(f, f.area(), &state);
+            })
+            .unwrap();
+    }
+    let rest_mean = start.elapsed() / 9;
+    println!(
+        "[tui_perf] diff first render {}ms, memoized mean {}ms",
+        first.as_millis(),
+        rest_mean.as_millis()
+    );
+    report("diff_first_render", first, Duration::from_millis(2000));
+    report(
+        "diff_memoized_mean_x9",
+        rest_mean,
+        Duration::from_millis(500),
+    );
+}

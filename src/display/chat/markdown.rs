@@ -39,6 +39,14 @@ pub fn render_markdown(
     renderer.finish()
 }
 
+/// Wrap link text in an OSC 8 hyperlink sequence (TUI-021). Terminals with
+/// support linkify it; width accounting treats the escapes as zero-width
+/// only if the terminal does — long linked lines may wrap early, which beats
+/// an unlinkable URL dump.
+fn osc8_link(text: &str, url: &str) -> String {
+    format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\")
+}
+
 /// Plain (un-highlighted) code block for two-phase streaming render.
 fn render_code_block_plain(
     code: &str,
@@ -67,6 +75,8 @@ struct MarkdownRenderer<'a> {
     code_content: String,
     in_list: bool,
     list_index: usize,
+    /// Active `[text](url)` destination, if any (TUI-021 hyperlink support).
+    link_url: Option<String>,
 }
 
 impl<'a> MarkdownRenderer<'a> {
@@ -82,6 +92,7 @@ impl<'a> MarkdownRenderer<'a> {
             code_content: String::new(),
             in_list: false,
             list_index: 0,
+            link_url: None,
         }
     }
 
@@ -171,12 +182,9 @@ impl<'a> MarkdownRenderer<'a> {
                 // Strikethrough
             }
             Tag::Link { dest_url, .. } => {
-                self.current_line.push_span(Span::styled(
-                    dest_url.to_string(),
-                    Style::default()
-                        .fg(self.config.primary_color)
-                        .add_modifier(Modifier::UNDERLINED),
-                ));
+                // Defer emission to the text/end handlers so the link text
+                // comes first (TUI-021).
+                self.link_url = Some(dest_url.to_string());
             }
             _ => {}
         }
@@ -207,6 +215,20 @@ impl<'a> MarkdownRenderer<'a> {
             TagEnd::Paragraph => {
                 self.push_current_line();
             }
+            TagEnd::Link => {
+                // Hyperlink terminals already linkified the text inline;
+                // otherwise fall back to an explicit URL suffix.
+                if let Some(url) = self.link_url.take() {
+                    if !self.config.hyperlinks {
+                        self.current_line.push_span(Span::styled(
+                            format!(" ({url})"),
+                            Style::default()
+                                .fg(self.config.primary_color)
+                                .add_modifier(Modifier::UNDERLINED),
+                        ));
+                    }
+                }
+            }
             TagEnd::BlockQuote(_) => {
                 self.push_current_line();
             }
@@ -223,6 +245,13 @@ impl<'a> MarkdownRenderer<'a> {
             return;
         }
 
+        // Inside a link on a hyperlink terminal, wrap each word in OSC 8.
+        let link_url = if self.config.hyperlinks {
+            self.link_url.clone()
+        } else {
+            None
+        };
+
         // Split text into words and add them with wrapping
         for word in text.split_whitespace() {
             let current_width: usize = self
@@ -234,8 +263,12 @@ impl<'a> MarkdownRenderer<'a> {
             if current_width + word.len() + 1 > self.width && current_width > 0 {
                 self.push_current_line();
             }
+            let shown = match &link_url {
+                Some(url) => osc8_link(word, url),
+                None => word.to_string(),
+            };
             self.current_line.push_span(Span::styled(
-                word.to_string(),
+                shown,
                 Style::default().fg(self.config.text_color),
             ));
             // Add space after word
@@ -338,6 +371,7 @@ mod tests {
             error_color: Color::Red,
             claude_color: Color::Magenta,
             primary_color: Color::Cyan,
+            hyperlinks: false,
         }
     }
 
@@ -414,5 +448,36 @@ mod tests {
                 .iter()
                 .any(|l| { l.spans.iter().any(|s| s.content.contains('─')) })
         );
+    }
+
+    fn flat_text(lines: &[ratatui::text::Line]) -> String {
+        lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    #[test]
+    fn render_link_without_hyperlinks_shows_url() {
+        let config = test_config();
+        assert!(!config.hyperlinks);
+        let lines = render_markdown("[docs](https://example.com/x)", 80, &config, true);
+        let text = flat_text(&lines);
+        assert!(text.contains("docs"), "{text}");
+        assert!(text.contains("https://example.com/x"), "{text}");
+        assert!(!text.contains("\x1b]8"), "{text}");
+    }
+
+    #[test]
+    fn render_link_with_hyperlinks_emits_osc8() {
+        let mut config = test_config();
+        config.hyperlinks = true;
+        let lines = render_markdown("[docs](https://example.com/x)", 80, &config, true);
+        let text = flat_text(&lines);
+        assert!(text.contains("\x1b]8;;https://example.com/x"), "{text}");
+        assert!(text.contains("docs"), "{text}");
+        // URL appears once (inside the sequence), not as a visible suffix.
+        assert_eq!(text.matches("https://example.com/x").count(), 1);
     }
 }
