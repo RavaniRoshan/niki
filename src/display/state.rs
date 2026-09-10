@@ -254,8 +254,8 @@ fn snap_to_boundary(s: &str, pos: usize) -> usize {
     p
 }
 
-/// Hash a markdown body for [`MarkdownCacheKey`].
-pub fn markdown_body_hash(body: &str) -> u64 {
+/// Hash a text body for render caches ([`MarkdownCacheKey`], [`DiffCacheKey`]).
+pub fn text_hash(body: &str) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut hasher = DefaultHasher::new();
@@ -272,6 +272,24 @@ pub struct MarkdownCacheKey {
     pub width: usize,
     pub show_thinking: bool,
     pub theme: crate::display::theme::ThemeMode,
+}
+
+/// Cache key for processed diffs (TUI-022). Diff lines carry no width (the
+/// widget wraps at paint), so only content + toggles key the cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DiffCacheKey {
+    pub hash: u64,
+    pub line_numbers: bool,
+    pub annotations: bool,
+}
+
+/// A processed diff: highlighted lines + file stats, computed once (TUI-022).
+#[derive(Debug, Clone, Default)]
+pub struct DiffRender {
+    pub lines: Vec<Line<'static>>,
+    pub files: usize,
+    pub adds: usize,
+    pub dels: usize,
 }
 
 /// Autocomplete state for @ file completion.
@@ -988,6 +1006,8 @@ pub struct AppState {
     /// `&AppState` render path can populate it; bounded (see `MAX` below).
     pub markdown_cache:
         std::cell::RefCell<std::collections::HashMap<MarkdownCacheKey, Vec<ChatLine>>>,
+    /// Memoized processed diffs (TUI-022). `RefCell` for `&AppState` access.
+    pub diff_cache: std::cell::RefCell<std::collections::HashMap<DiffCacheKey, DiffRender>>,
     /// Open transcript search (TUI-011). `None` = closed.
     pub search: Option<crate::display::search::SearchState>,
     /// Last rendered chat viewport height in rows (TUI-011). Written by the
@@ -1162,6 +1182,7 @@ impl AppState {
             keybinding_conflicts,
             keybinding_overrides,
             markdown_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+            diff_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             search: None,
             chat_viewport_h: std::cell::Cell::new(0),
         }

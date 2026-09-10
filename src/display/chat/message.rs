@@ -27,6 +27,9 @@ pub struct MessageRenderConfig {
     pub error_color: Color,
     pub claude_color: Color,
     pub primary_color: Color,
+    /// Emit OSC 8 hyperlinks for markdown links (TUI-021). Defaults from
+    /// terminal capability detection; plain underlined URLs otherwise.
+    pub hyperlinks: bool,
 }
 
 impl MessageRenderConfig {
@@ -46,6 +49,7 @@ impl MessageRenderConfig {
             error_color: crate::display::theme::error(),
             claude_color: crate::display::theme::claude(),
             primary_color: crate::display::theme::primary(),
+            hyperlinks: crate::display::caps::capabilities().hyperlinks,
         }
     }
 }
@@ -371,6 +375,7 @@ mod tests {
             error_color: Color::Red,
             claude_color: Color::Magenta,
             primary_color: Color::Cyan,
+            hyperlinks: false,
         }
     }
 
