@@ -10,6 +10,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::display::components::tool_card::ToolCard;
+use crate::display::scroll::ScrollState;
+use crate::display::state::AppState;
 use crate::display::theme;
 
 /// Geometry: centered modal, 80% width, 70% height.
@@ -36,6 +38,20 @@ pub fn detail_content_lines(card: &ToolCard) -> usize {
 /// outer borders + one footer row are chrome).
 pub fn detail_viewport(area: Rect) -> usize {
     modal_rect(area).height.saturating_sub(2 + 1) as usize
+}
+
+/// Route a left-click while the detail modal is open (TUI-013). Clicks
+/// inside the modal are consumed (no-op — scrolling uses the wheel);
+/// outside clicks dismiss. Returns true when the click was consumed.
+pub fn route_click(state: &mut AppState, x: u16, y: u16, area: Rect) -> bool {
+    let modal = modal_rect(area);
+    let inside =
+        x >= modal.x && x < modal.x + modal.width && y >= modal.y && y < modal.y + modal.height;
+    if !inside {
+        state.tool_detail_index = None;
+        state.tool_detail_scroll = ScrollState::new();
+    }
+    true
 }
 
 /// Render the tool output modal.
@@ -200,5 +216,21 @@ mod tests {
             scroll.view_offset(detail_content_lines(&card), detail_viewport(area)),
             5
         );
+    }
+
+    #[test]
+    fn route_click_consumes_inside_dismisses_outside() {
+        use crate::config::NikiConfig;
+        use crate::display::state::AppState;
+        let mut state = AppState::new("t".to_string(), NikiConfig::default(), ".".into());
+        state.tool_detail_index = Some(0);
+        let area = Rect::new(0, 0, 100, 30);
+        let modal = modal_rect(area);
+        // Inside: consumed, modal stays open.
+        assert!(route_click(&mut state, modal.x + 2, modal.y + 2, area));
+        assert_eq!(state.tool_detail_index, Some(0));
+        // Outside: consumed + dismissed.
+        assert!(route_click(&mut state, 0, 0, area));
+        assert_eq!(state.tool_detail_index, None);
     }
 }
