@@ -264,6 +264,75 @@ fn dump_status_bar2() {
     }
 }
 
+// ============================================================================
+// TUI-031 — new/changed surfaces reflow across terminal sizes
+// ============================================================================
+
+fn render_overlay(width: u16, height: u16, draw: impl FnOnce(&mut ratatui::Frame)) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let frame = terminal.draw(draw).unwrap();
+    let buf = frame.buffer.clone();
+    let w = buf.area.width as usize;
+    let mut out = String::new();
+    for (i, cell) in buf.content.iter().enumerate() {
+        out.push_str(cell.symbol());
+        if w > 0 && (i + 1) % w == 0 {
+            out.push('\n');
+        }
+    }
+    out
+}
+
+#[test]
+fn permission_tall_modal_reflows() {
+    use niki::display::components::permission::{option_first_row, render_permission_modal};
+    use niki::display::state::PermissionRequest;
+    let mut state = make_state();
+    state.show_permission_detail = true;
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let req = PermissionRequest {
+        tool_name: "sandbox_exec".to_string(),
+        command: "cargo test --verbose --all-features".to_string(),
+        description: "runs the suite".to_string(),
+        params: Some("{\"cmd\": \"cargo test\"}".to_string()),
+        response_tx: tx,
+    };
+    assert!(option_first_row(&req, true) > 12);
+    for (w, h) in [(60, 20), (80, 24), (120, 40)] {
+        let out = render_overlay(w, h, |f| {
+            render_permission_modal(f, &req, f.area(), &state);
+        });
+        assert!(out.contains("Allow once"), "options lost at {w}x{h}");
+        assert!(out.contains("Permission Required"), "title lost at {w}x{h}");
+    }
+}
+
+#[test]
+fn help_and_search_reflow() {
+    use niki::display::help_overlay::render_help_overlay;
+    let mut state = make_state();
+    state.show_help = true;
+    state.search = Some(niki::display::search::SearchState {
+        query: "test".to_string(),
+        matches: vec![0],
+        selected: 0,
+    });
+    for (w, h) in [(60, 20), (80, 24), (120, 40)] {
+        let out = render_overlay(w, h, |f| {
+            let area = f.area();
+            render_help_overlay(
+                f,
+                area,
+                &state.keybindings,
+                &state.keybinding_overrides,
+                state.keybinding_conflicts.len(),
+            );
+        });
+        assert!(out.contains("Keybindings"), "help lost at {w}x{h}");
+    }
+}
+
 fn render_status_bar(width: u16, height: u16, state: &AppState) -> String {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();

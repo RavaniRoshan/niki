@@ -77,6 +77,10 @@ struct MarkdownRenderer<'a> {
     list_index: usize,
     /// Active `[text](url)` destination, if any (TUI-021 hyperlink support).
     link_url: Option<String>,
+    /// Inside a table cell: text accumulates into the cell, not the line.
+    in_table: bool,
+    in_table_cell: bool,
+    table_rows: Vec<Vec<String>>,
 }
 
 impl<'a> MarkdownRenderer<'a> {
@@ -93,6 +97,9 @@ impl<'a> MarkdownRenderer<'a> {
             in_list: false,
             list_index: 0,
             link_url: None,
+            in_table: false,
+            in_table_cell: false,
+            table_rows: Vec::new(),
         }
     }
 
@@ -186,6 +193,24 @@ impl<'a> MarkdownRenderer<'a> {
                 // comes first (TUI-021).
                 self.link_url = Some(dest_url.to_string());
             }
+            Tag::Table(_aligns) => {
+                // TUI-032: collect rows, lay out at End (width-aware).
+                self.push_current_line();
+                self.in_table = true;
+                self.table_rows.clear();
+            }
+            Tag::TableHead | Tag::TableRow => {
+                if self.in_table {
+                    self.table_rows.push(Vec::new());
+                }
+            }
+            Tag::TableCell if self.in_table => {
+                if let Some(row) = self.table_rows.last_mut() {
+                    row.push(String::new());
+                }
+                self.in_table_cell = true;
+            }
+            Tag::TableCell => {}
             _ => {}
         }
     }
@@ -215,6 +240,15 @@ impl<'a> MarkdownRenderer<'a> {
             TagEnd::Paragraph => {
                 self.push_current_line();
             }
+            TagEnd::Table => {
+                self.in_table = false;
+                self.in_table_cell = false;
+                self.render_table();
+            }
+            TagEnd::TableHead | TagEnd::TableRow => {}
+            TagEnd::TableCell => {
+                self.in_table_cell = false;
+            }
             TagEnd::Link => {
                 // Hyperlink terminals already linkified the text inline;
                 // otherwise fall back to an explicit URL suffix.
@@ -239,9 +273,117 @@ impl<'a> MarkdownRenderer<'a> {
         }
     }
 
+    /// Lay out collected table rows within `width` (TUI-032). Columns share
+    /// the width budget; cells truncate with an ellipsis. Too narrow for even
+    /// minimal columns → raw `| a | b |` fallback lines, truncated to width.
+    fn render_table(&mut self) {
+        use unicode_width::UnicodeWidthStr;
+        let rows = std::mem::take(&mut self.table_rows);
+        if rows.is_empty() {
+            return;
+        }
+        let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+        if cols == 0 {
+            return;
+        }
+        // Natural column widths (display cells, not bytes).
+        let mut widths = vec![0usize; cols];
+        for row in &rows {
+            for (i, cell) in row.iter().enumerate() {
+                widths[i] = widths[i].max(cell.width());
+            }
+        }
+        // Each row renders as "│ c0 │ c1 │" → separators cost 3*n + 1.
+        let chrome = 3 * cols + 1;
+        let avail = self.width.saturating_sub(chrome);
+        // Columns narrower than 3 cells are unreadable — fall back to raw.
+        if avail < 3 * cols {
+            // Too narrow: raw fallback, hard-truncated.
+            for row in &rows {
+                let raw = format!("| {} |", row.join(" | "));
+                let line = crate::display::theme::truncate_str(&raw, self.width);
+                self.lines.push(Line::from(Span::styled(
+                    line,
+                    Style::default().fg(self.config.text_color),
+                )));
+            }
+            return;
+        }
+        // Shrink widest columns first until the budget fits.
+        if widths.iter().sum::<usize>() > avail {
+            while widths.iter().sum::<usize>() > avail {
+                let mut widest = 0;
+                for (i, w) in widths.iter().enumerate() {
+                    if *w > widths[widest] && *w > 1 {
+                        widest = i;
+                    }
+                }
+                if widths[widest] <= 1 {
+                    break;
+                }
+                widths[widest] -= 1;
+            }
+        }
+        for (ri, row) in rows.iter().enumerate() {
+            let mut spans = vec![Span::styled(
+                "│ ".to_string(),
+                Style::default().fg(self.config.border_color),
+            )];
+            for (i, max_w) in widths.iter().enumerate() {
+                let cell = row.get(i).map(|s| s.as_str()).unwrap_or("");
+                let fit = crate::display::theme::truncate_str(cell, *max_w);
+                let pad = max_w.saturating_sub(fit.width());
+                spans.push(Span::styled(
+                    fit,
+                    Style::default().fg(if ri == 0 {
+                        self.config.primary_color
+                    } else {
+                        self.config.text_color
+                    }),
+                ));
+                spans.push(Span::styled(" ".repeat(pad), Style::default()));
+                spans.push(Span::styled(
+                    " │ ".to_string(),
+                    Style::default().fg(self.config.border_color),
+                ));
+            }
+            // Trim the trailing space of the last separator ("│ " → "│").
+            if let Some(last) = spans.pop() {
+                let mut text = last.content.into_owned();
+                text.pop();
+                spans.push(Span::styled(
+                    text,
+                    Style::default().fg(self.config.border_color),
+                ));
+            }
+            self.lines.push(Line::from(spans));
+            // Header separator after the first row.
+            if ri == 0 {
+                let total: usize = widths.iter().sum::<usize>() + chrome;
+                self.lines.push(Line::from(Span::styled(
+                    format!("├{}┤", "─".repeat(total.saturating_sub(2))),
+                    Style::default().fg(self.config.border_color),
+                )));
+            }
+        }
+    }
+
     fn handle_text(&mut self, text: &str) {
         if self.in_code_block {
             self.code_content.push_str(text);
+            return;
+        }
+
+        // Table cells accumulate raw text for width-aware layout at End.
+        if self.in_table_cell {
+            if let Some(row) = self.table_rows.last_mut() {
+                if let Some(cell) = row.last_mut() {
+                    if !cell.is_empty() {
+                        cell.push(' ');
+                    }
+                    cell.push_str(text);
+                }
+            }
             return;
         }
 
@@ -282,6 +424,19 @@ impl<'a> MarkdownRenderer<'a> {
     }
 
     fn handle_inline_code(&mut self, code: &str) {
+        if self.in_table_cell {
+            if let Some(row) = self.table_rows.last_mut() {
+                if let Some(cell) = row.last_mut() {
+                    if !cell.is_empty() {
+                        cell.push(' ');
+                    }
+                    cell.push('`');
+                    cell.push_str(code);
+                    cell.push('`');
+                }
+            }
+            return;
+        }
         self.current_line.push_span(Span::styled(
             format!("`{}`", code),
             Style::default()
@@ -479,5 +634,32 @@ mod tests {
         assert!(text.contains("docs"), "{text}");
         // URL appears once (inside the sequence), not as a visible suffix.
         assert_eq!(text.matches("https://example.com/x").count(), 1);
+    }
+
+    #[test]
+    fn render_table_fits_width() {
+        let config = test_config();
+        let md = "| name | value |\n| --- | --- |\n| alpha | 1 |\n| beta-long-name | 22 |";
+        let lines = render_markdown(md, 40, &config, true);
+        let text = flat_text(&lines);
+        assert!(text.contains("alpha"), "{text}");
+        assert!(text.contains("│"), "{text}");
+        for line in &lines {
+            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+            assert!(w <= 40, "overflow: {line:?}");
+        }
+    }
+
+    #[test]
+    fn render_table_narrow_falls_back() {
+        let config = test_config();
+        let md = "| name | value |\n| --- | --- |\n| alpha | 1 |";
+        let lines = render_markdown(md, 10, &config, true);
+        let text = flat_text(&lines);
+        assert!(text.contains("alpha"), "{text}");
+        for line in &lines {
+            let w: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+            assert!(w <= 10, "overflow: {line:?}");
+        }
     }
 }
