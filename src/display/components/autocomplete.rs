@@ -1,5 +1,6 @@
 //! @ file autocomplete overlay.
 
+use nucleo::{Matcher, Utf32Str};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -75,14 +76,52 @@ pub fn render_autocomplete(frame: &mut Frame, area: Rect, state: &AppState) {
     frame.render_widget(Paragraph::new(lines), inner)
 }
 
+/// Maximum candidates shown/completed.
+pub const MAX_CANDIDATES: usize = 20;
+
+/// Score a candidate against the query with nucleo fuzzy matching
+/// (subsequence + scoring, same engine as the slash menu). Returns `None`
+/// for non-matches. Non-ASCII falls back to case-insensitive containment
+/// (nucleo's fast path is ASCII-only).
+fn fuzzy_score(candidate: &str, query: &str) -> Option<u16> {
+    if query.is_empty() {
+        return Some(u16::MAX);
+    }
+    if candidate.is_ascii() && query.is_ascii() {
+        let mut m = Matcher::default();
+        return m.fuzzy_match(
+            Utf32Str::Ascii(candidate.as_bytes()),
+            Utf32Str::Ascii(query.as_bytes()),
+        );
+    }
+    if candidate.to_lowercase().contains(&query.to_lowercase()) {
+        Some(1)
+    } else {
+        None
+    }
+}
+
 /// Build autocomplete candidates for a given prefix.
+///
+/// Uses nucleo fuzzy ranking (so `@mc` matches `src/main.rs`) instead of
+/// naive substring filtering. Empty prefix returns walk order. Ranked by
+/// score, then shorter paths, then alphabetical for determinism.
 pub fn build_candidates(prefix: &str, project_files: &[String]) -> Vec<String> {
-    let prefix_clean = prefix.trim_start_matches('@');
-    project_files
+    let query = prefix.trim_start_matches('@').to_ascii_lowercase();
+    let mut scored: Vec<(u16, &String)> = project_files
         .iter()
-        .filter(|f| f.contains(prefix_clean))
-        .take(20)
-        .cloned()
+        .filter_map(|f| fuzzy_score(&f.to_ascii_lowercase(), &query).map(|s| (s, f)))
+        .collect();
+    // Higher nucleo score = better; exact/prefix ties break short, then alpha.
+    scored.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.len().cmp(&b.1.len()))
+            .then_with(|| a.1.cmp(b.1))
+    });
+    scored
+        .into_iter()
+        .take(MAX_CANDIDATES)
+        .map(|(_, f)| f.clone())
         .collect()
 }
 
@@ -106,5 +145,42 @@ mod tests {
         let files = vec!["Cargo.toml".to_string()];
         let candidates = build_candidates("@xyz", &files);
         assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn build_candidates_fuzzy_noncontiguous() {
+        let files = vec![
+            "docs/readme.md".to_string(),
+            "src/main.rs".to_string(),
+            "src/display/mod.rs".to_string(),
+        ];
+        // "smn" is not a contiguous substring of anything — fuzzy still finds it.
+        let candidates = build_candidates("@smn", &files);
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0], "src/main.rs");
+    }
+
+    #[test]
+    fn build_candidates_ranks_exact_first() {
+        let files = vec![
+            "src/display/mod.rs".to_string(),
+            "src/main.rs".to_string(),
+            "tests/main_test.rs".to_string(),
+        ];
+        let candidates = build_candidates("@main", &files);
+        assert_eq!(candidates[0], "src/main.rs");
+    }
+
+    #[test]
+    fn build_candidates_unicode_fallback() {
+        let files = vec!["src/héllo.rs".to_string(), "src/world.rs".to_string()];
+        let candidates = build_candidates("@héllo", &files);
+        assert_eq!(candidates, vec!["src/héllo.rs".to_string()]);
+    }
+
+    #[test]
+    fn build_candidates_bounded() {
+        let files: Vec<String> = (0..100).map(|i| format!("src/file{i:03}.rs")).collect();
+        assert_eq!(build_candidates("@", &files).len(), MAX_CANDIDATES);
     }
 }
