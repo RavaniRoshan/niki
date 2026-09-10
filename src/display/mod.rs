@@ -23,6 +23,7 @@ pub mod pages;
 pub mod persistence;
 pub mod pipeline_status;
 pub mod scroll;
+pub mod search;
 pub mod state;
 pub mod theme;
 pub mod tips;

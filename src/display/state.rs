@@ -988,6 +988,11 @@ pub struct AppState {
     /// `&AppState` render path can populate it; bounded (see `MAX` below).
     pub markdown_cache:
         std::cell::RefCell<std::collections::HashMap<MarkdownCacheKey, Vec<ChatLine>>>,
+    /// Open transcript search (TUI-011). `None` = closed.
+    pub search: Option<crate::display::search::SearchState>,
+    /// Last rendered chat viewport height in rows (TUI-011). Written by the
+    /// render path (`Cell` for `&AppState` access); read by search reveal.
+    pub chat_viewport_h: std::cell::Cell<usize>,
 }
 
 /// Stage information (mirrors existing StageInfo).
@@ -1157,6 +1162,8 @@ impl AppState {
             keybinding_conflicts,
             keybinding_overrides,
             markdown_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+            search: None,
+            chat_viewport_h: std::cell::Cell::new(0),
         }
     }
 

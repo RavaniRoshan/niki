@@ -299,6 +299,7 @@ impl Page for ChatPage {
         let lines = build_chat_lines(state, width, true);
 
         let visible = area.height as usize;
+        state.chat_viewport_h.set(visible);
         let offset = state.chat_scroll.view_offset(lines.len(), visible);
 
         // Scroll indicator: show "↑ more" when scrolled up
@@ -419,6 +420,22 @@ impl Page for ChatPage {
             } else {
                 state.set_notice("No agent running — cannot steer", 2500);
             }
+            return true;
+        }
+
+        // Ctrl+F: toggle transcript search (TUI-011). While open, printable
+        // keys edit the query and Enter/Up/Down cycle matches (handled
+        // below); everything else falls through to the composer.
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('f') {
+            if state.search.is_some() {
+                state.search = None;
+            } else {
+                state.search = Some(crate::display::search::SearchState::new());
+                state.set_notice("Search transcript — type, Enter next, Esc close", 2500);
+            }
+            return true;
+        }
+        if state.search.is_some() && crate::display::search::handle_search_key(key, state) {
             return true;
         }
 
@@ -1552,6 +1569,24 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
         );
     }
 
+    // TUI-011: mark the current search hit with a position badge. Only the
+    // rich rendering is touched; `text` (copy source) stays clean. Rows
+    // without rich styling (blank/chrome) are skipped.
+    if let Some(search) = state.search.as_ref() {
+        if let (Some(cur), Some((pos, total))) = (search.current(), search.position()) {
+            if let Some(row) = lines.get_mut(cur) {
+                if let Some(rich) = row.rich.as_mut() {
+                    rich.spans.push(Span::styled(
+                        format!(" ◀ {pos}/{total}"),
+                        Style::default()
+                            .fg(theme::warning())
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+            }
+        }
+    }
+
     lines
 }
 
@@ -1780,6 +1815,46 @@ mod tests {
         crate::display::theme::set_mode(crate::display::theme::ThemeMode::Light);
         let _ = build_chat_lines(&state, 80, false);
         assert_eq!(state.markdown_cache.borrow().len(), 2);
+    }
+
+    #[test]
+    fn transcript_search_toggle_type_cycle_close() {
+        let mut state = base_state();
+        state.chat_log = vec![
+            ("assistant".to_string(), "alpha beta".to_string()),
+            ("assistant".to_string(), "gamma delta".to_string()),
+        ];
+        state.chat_viewport_h.set(20);
+        let mut page = ChatPage::new();
+        let ctrl = KeyModifiers::CONTROL;
+        let plain = KeyModifiers::empty();
+        // Ctrl+F opens.
+        assert!(page.handle_key(KeyEvent::new(KeyCode::Char('f'), ctrl), &mut state));
+        assert!(state.search.is_some());
+        // Typing filters; reveal unpins the follow.
+        assert!(page.handle_key(KeyEvent::new(KeyCode::Char('b'), plain), &mut state));
+        assert!(page.handle_key(KeyEvent::new(KeyCode::Char('e'), plain), &mut state));
+        {
+            let s = state.search.as_ref().unwrap();
+            assert_eq!(s.query, "be");
+            assert!(!s.matches.is_empty());
+        }
+        assert!(!state.chat_scroll.follow);
+        // Enter cycles; the hit row carries the position badge.
+        let first = state.search.as_ref().unwrap().current();
+        assert!(page.handle_key(KeyEvent::new(KeyCode::Enter, plain), &mut state));
+        assert_eq!(state.search.as_ref().unwrap().current(), first);
+        state.chat_lines = build_chat_lines(&state, 80, false);
+        let marked = state.chat_lines.iter().any(|l| {
+            l.rich
+                .as_ref()
+                .map(|r| r.spans.iter().any(|sp| sp.content.contains('◀')))
+                .unwrap_or(false)
+        });
+        assert!(marked);
+        // Esc closes.
+        assert!(page.handle_key(KeyEvent::new(KeyCode::Esc, plain), &mut state));
+        assert!(state.search.is_none());
     }
 
     #[test]
