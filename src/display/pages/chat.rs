@@ -439,6 +439,62 @@ impl Page for ChatPage {
             return true;
         }
 
+        // @-file autocomplete navigation + apply (TUI-012). The overlay
+        // renders from sync_input_overlays; these keys drive its selection.
+        if state.input_state.autocomplete.is_some() {
+            match key.code {
+                KeyCode::Up => {
+                    let n = state
+                        .input_state
+                        .autocomplete
+                        .as_ref()
+                        .map(|a| a.candidates.len())
+                        .unwrap_or(0);
+                    if n > 0 {
+                        let sel = &mut state.input_state.autocomplete.as_mut().unwrap().selected;
+                        *sel = sel.checked_sub(1).unwrap_or(n - 1);
+                    }
+                    return true;
+                }
+                KeyCode::Down => {
+                    let n = state
+                        .input_state
+                        .autocomplete
+                        .as_ref()
+                        .map(|a| a.candidates.len().max(1))
+                        .unwrap_or(1);
+                    let sel = &mut state.input_state.autocomplete.as_mut().unwrap().selected;
+                    *sel = (*sel + 1) % n;
+                    return true;
+                }
+                KeyCode::Tab if key.modifiers.is_empty() => {
+                    if let Some(ac) = state.input_state.autocomplete.take() {
+                        if let Some(choice) = ac.candidates.get(ac.selected).cloned() {
+                            state.input_state.buffer = format!("@{choice} ");
+                            state.input_state.cursor_pos = state.input_state.buffer.len();
+                        }
+                    }
+                    return true;
+                }
+                KeyCode::Esc => {
+                    state.input_state.autocomplete = None;
+                    return true;
+                }
+                _ => {}
+            }
+        }
+
+        // /model argument completion (TUI-012): Tab completes the model id
+        // from session models + well-known ids. Overlay integration is a
+        // follow-up; direct completion keeps this dependency-free.
+        if state.input_state.mode == InputMode::Command
+            && key.code == KeyCode::Tab
+            && key.modifiers.is_empty()
+            && complete_model_arg(state)
+        {
+            return true;
+        }
+
         // Shift+Tab (reported as `Backtab` by some terminals): cycle permission
         // modes if input is empty, otherwise toggle thinking expansion.
         if key.code == KeyCode::BackTab
@@ -1036,6 +1092,59 @@ impl Page for ChatPage {
 
     fn title(&self) -> &str {
         "chat"
+    }
+}
+
+/// Complete a `/model <prefix>` argument with Tab (TUI-012). Returns true
+/// when the buffer was rewritten. Sources: session models (current + each
+/// configured agent) first, then well-known ids. Best match = shortest
+/// prefix hit, then alphabetical (deterministic).
+fn complete_model_arg(state: &mut AppState) -> bool {
+    let buf = state.input_state.buffer.clone();
+    let prefix = match buf.strip_prefix("/model ") {
+        Some(p) if !p.contains(' ') => p.to_ascii_lowercase(),
+        _ => return false,
+    };
+    let agents = &state.config.agents;
+    let mut pool: Vec<String> = vec![
+        state.model.clone(),
+        agents.planner.model.clone(),
+        agents.coder.model.clone(),
+        agents.tester.model.clone(),
+        agents.reviewer.model.clone(),
+    ];
+    pool.extend(
+        [
+            "claude-sonnet-4",
+            "claude-haiku",
+            "claude-opus-4",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gemini-2.0-flash",
+            "gemini-2.5-pro",
+        ]
+        .iter()
+        .map(|s| s.to_string()),
+    );
+    pool.sort();
+    pool.dedup();
+    let mut hits: Vec<&String> = pool
+        .iter()
+        .filter(|m| m.to_ascii_lowercase().starts_with(&prefix))
+        .collect();
+    if hits.is_empty() {
+        hits = pool
+            .iter()
+            .filter(|m| m.to_ascii_lowercase().contains(&prefix))
+            .collect();
+    }
+    hits.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+    if let Some(best) = hits.first() {
+        state.input_state.buffer = format!("/model {best} ");
+        state.input_state.cursor_pos = state.input_state.buffer.len();
+        true
+    } else {
+        false
     }
 }
 
@@ -1855,6 +1964,70 @@ mod tests {
         // Esc closes.
         assert!(page.handle_key(KeyEvent::new(KeyCode::Esc, plain), &mut state));
         assert!(state.search.is_none());
+    }
+
+    #[test]
+    fn autocomplete_tab_applies_selection() {
+        let mut state = base_state();
+        state.input_state.mode = crate::display::state::InputMode::Insert;
+        state.input_state.buffer = "@mai".to_string();
+        state.input_state.cursor_pos = 4;
+        state.input_state.autocomplete = Some(crate::display::state::AutocompleteState {
+            prefix: "@mai".to_string(),
+            candidates: vec!["src/main.rs".to_string(), "tests/main_test.rs".to_string()],
+            selected: 1,
+        });
+        let mut page = ChatPage::new();
+        let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::empty());
+        assert!(page.handle_key(tab, &mut state));
+        assert_eq!(state.input_state.buffer, "@tests/main_test.rs ");
+        assert!(state.input_state.autocomplete.is_none());
+    }
+
+    #[test]
+    fn autocomplete_arrows_cycle_selection() {
+        let mut state = base_state();
+        state.input_state.mode = crate::display::state::InputMode::Insert;
+        state.input_state.buffer = "@m".to_string();
+        state.input_state.cursor_pos = 2;
+        state.input_state.autocomplete = Some(crate::display::state::AutocompleteState {
+            prefix: "@m".to_string(),
+            candidates: vec!["a".to_string(), "b".to_string()],
+            selected: 0,
+        });
+        let mut page = ChatPage::new();
+        let up = KeyEvent::new(KeyCode::Up, KeyModifiers::empty());
+        assert!(page.handle_key(up, &mut state));
+        assert_eq!(state.input_state.autocomplete.as_ref().unwrap().selected, 1);
+        let down = KeyEvent::new(KeyCode::Down, KeyModifiers::empty());
+        assert!(page.handle_key(down, &mut state));
+        assert_eq!(state.input_state.autocomplete.as_ref().unwrap().selected, 0);
+    }
+
+    #[test]
+    fn model_arg_tab_completes() {
+        let mut state = base_state();
+        state.model = "gpt-4o-mini".to_string();
+        state.input_state.mode = crate::display::state::InputMode::Command;
+        state.input_state.buffer = "/model gpt".to_string();
+        state.input_state.cursor_pos = 10;
+        let mut page = ChatPage::new();
+        let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::empty());
+        assert!(page.handle_key(tab, &mut state));
+        assert_eq!(state.input_state.buffer, "/model gpt-4o ");
+    }
+
+    #[test]
+    fn model_arg_tab_no_match_leaves_buffer() {
+        let mut state = base_state();
+        state.input_state.mode = crate::display::state::InputMode::Command;
+        state.input_state.buffer = "/model zzz-no-such-model".to_string();
+        state.input_state.cursor_pos = 24;
+        // Falls through to input dispatch (Tab → None), buffer untouched.
+        let mut page = ChatPage::new();
+        let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::empty());
+        page.handle_key(tab, &mut state);
+        assert_eq!(state.input_state.buffer, "/model zzz-no-such-model");
     }
 
     #[test]
