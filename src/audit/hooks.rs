@@ -205,9 +205,11 @@ fn run_one(command: &str, event: HookEvent, payload: &str) -> HookOutcome {
 
     let stdin = child.stdin.take();
     if let Some(mut s) = stdin {
-        if s.write_all(payload.as_bytes()).is_err() {
-            return HookOutcome::Noop;
-        }
+        // Best-effort: hooks that exit without reading stdin (e.g. `exit 2`,
+        // `printf ...`) close the pipe first, so this write can hit EPIPE
+        // after the child is already gone. That must not mask the child's
+        // exit code — fall through to wait_with_output either way.
+        let _ = s.write_all(payload.as_bytes());
     }
 
     let output = match child.wait_with_output() {
@@ -323,6 +325,38 @@ mod tests {
         match &outcome {
             HookOutcome::Block(r) => assert!(r.contains("no push")),
             other => panic!("expected Block, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn hook_exit_race_stress() {
+        // Regression: hooks that exit without reading stdin (`exit 2`,
+        // `printf`) used to hit EPIPE on the payload write under scheduler
+        // load, masking Block as Noop. Loop to make the race lose loudly.
+        for _ in 0..50 {
+            let mut bus = HookBus::new();
+            bus.register(HookEvent::PreToolBash, "exit 2".to_string());
+            assert!(
+                matches!(
+                    bus.run(HookEvent::PreToolBash, "payload"),
+                    HookOutcome::Block(_)
+                ),
+                "exit-2 hook masked (EPIPE race)"
+            );
+        }
+        for _ in 0..50 {
+            let mut bus = HookBus::new();
+            bus.register(
+                HookEvent::PreToolBash,
+                "printf '{\"deny\": true}'".to_string(),
+            );
+            assert!(
+                matches!(
+                    bus.run(HookEvent::PreToolBash, "payload"),
+                    HookOutcome::Block(_)
+                ),
+                "printf-deny hook masked (EPIPE race)"
+            );
         }
     }
 
