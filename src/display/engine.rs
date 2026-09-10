@@ -14,7 +14,7 @@ use std::io::{self};
 use std::time::{Duration, Instant};
 
 use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
+use ratatui::backend::{Backend, CrosstermBackend};
 
 /// Rolling frame-time statistics for performance monitoring.
 ///
@@ -110,8 +110,12 @@ pub enum FrameTarget {
 
 /// Thin shell around the `ratatui` terminal that owns the frame-rate policy and
 /// dirty flag. All actual pixel work happens in `ratatui::Terminal::draw`.
-pub struct RenderEngine {
-    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+///
+/// Generic over the backend (default: real stdout) so tests can drive it
+/// headlessly with [`ratatui::backend::TestBackend`] — `Terminal::new` on a
+/// real backend queries the terminal size and fails without a TTY.
+pub struct RenderEngine<B: Backend = CrosstermBackend<io::Stdout>> {
+    terminal: Terminal<B>,
     target: FrameTarget,
     dirty: bool,
     /// Why the current frame was requested (`None` until first `mark_dirty`).
@@ -121,9 +125,9 @@ pub struct RenderEngine {
     stats: FrameStats,
 }
 
-impl RenderEngine {
+impl<B: Backend> RenderEngine<B> {
     /// Create a new render engine, taking ownership of the terminal.
-    pub fn new(terminal: Terminal<CrosstermBackend<io::Stdout>>, _synchronized: bool) -> Self {
+    pub fn new(terminal: Terminal<B>, _synchronized: bool) -> Self {
         Self {
             terminal,
             target: FrameTarget::Low,
@@ -178,12 +182,12 @@ impl RenderEngine {
     }
 
     /// Get a reference to the terminal (for size queries etc.).
-    pub fn terminal(&self) -> &Terminal<CrosstermBackend<io::Stdout>> {
+    pub fn terminal(&self) -> &Terminal<B> {
         &self.terminal
     }
 
     /// Get a mutable reference to the terminal (the caller does the real draw).
-    pub fn terminal_mut(&mut self) -> &mut Terminal<CrosstermBackend<io::Stdout>> {
+    pub fn terminal_mut(&mut self) -> &mut Terminal<B> {
         &mut self.terminal
     }
 
@@ -208,6 +212,15 @@ impl RenderEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::TestBackend;
+
+    /// Headless engine: `Terminal::new` on a real backend queries the
+    /// terminal size and fails without a TTY (CI). `TestBackend` never does.
+    fn test_engine() -> RenderEngine<TestBackend> {
+        let backend = TestBackend::new(80, 24);
+        let terminal = Terminal::new(backend).expect("terminal");
+        RenderEngine::new(terminal, false)
+    }
 
     #[test]
     fn frame_target_intervals() {
@@ -217,9 +230,7 @@ mod tests {
 
     #[test]
     fn engine_dirty_flag_lifecycle() {
-        let backend = CrosstermBackend::new(io::stdout());
-        let terminal = Terminal::new(backend).expect("terminal");
-        let mut engine = RenderEngine::new(terminal, false);
+        let mut engine = test_engine();
         assert!(engine.needs_render());
         assert_eq!(engine.dirty_reason(), Some("init"));
         engine.mark_clean_for_render();
@@ -237,9 +248,7 @@ mod tests {
 
     #[test]
     fn engine_frame_interval_matches_target() {
-        let backend = CrosstermBackend::new(io::stdout());
-        let terminal = Terminal::new(backend).expect("terminal");
-        let mut engine = RenderEngine::new(terminal, false);
+        let mut engine = test_engine();
         assert_eq!(engine.frame_interval_ms(), 33);
         engine.set_target(FrameTarget::High);
         assert_eq!(engine.frame_interval_ms(), 16);
@@ -271,9 +280,7 @@ mod tests {
 
     #[test]
     fn engine_begin_end_frame_records_stats() {
-        let backend = CrosstermBackend::new(io::stdout());
-        let terminal = Terminal::new(backend).expect("terminal");
-        let mut engine = RenderEngine::new(terminal, false);
+        let mut engine = test_engine();
         assert_eq!(engine.stats().len(), 0);
         engine.begin_frame();
         // Simulate some work
