@@ -70,6 +70,10 @@ jobs:
           echo "$urls"
           fail=0
           for u in $urls; do
+            # Skip scoop autoupdate templates (contain $version).
+            case "$u" in
+              *'$'*) echo "SKIP(template) $u"; continue ;;
+            esac
             if curl -fIsS --max-time 30 "$u" -o /dev/null; then
               echo "OK   $u"
             else
