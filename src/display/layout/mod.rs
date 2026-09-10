@@ -41,6 +41,7 @@ pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
     // progressive disclosure, chat log). Skip inline input — rendered below.
     let lines = chat::build_chat_lines(state, msg_area.width as usize, false);
     let visible = chunks[0].height as usize;
+    state.chat_viewport_h.set(visible);
     let total = lines.len();
     let scroll = state.chat_scroll.view_offset(total, visible);
 
