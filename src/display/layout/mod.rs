@@ -42,8 +42,7 @@ pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
     let lines = chat::build_chat_lines(state, msg_area.width as usize, false);
     let visible = chunks[0].height as usize;
     let total = lines.len();
-    let max_scroll = total.saturating_sub(visible);
-    let scroll = state.scroll_offset.min(max_scroll);
+    let scroll = state.chat_scroll.view_offset(total, visible);
 
     // Scroll indicator: show "↑ more" when scrolled up
     let mut display_lines: Vec<Line> = Vec::with_capacity(visible);

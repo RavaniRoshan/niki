@@ -802,10 +802,9 @@ pub struct AppState {
     pub view: ViewMode,
     /// Current page (for page navigation; mirrors view when ViewMode::Page).
     pub current_page: PageId,
-    /// Scroll offset for chat view.
-    pub scroll_offset: usize,
-    /// Auto-scroll to bottom on new messages.
-    pub auto_scroll: bool,
+    /// Scroll state for the chat transcript (TUI-010). Starts end-pinned so
+    /// new output stays visible; any manual scroll clears the pin.
+    pub chat_scroll: crate::display::scroll::ScrollState,
     /// Whether terminal mouse capture is enabled (toggle with Ctrl+E so native
     /// drag-to-select works). Defaults to true.
     pub mouse_capture: bool,
@@ -970,8 +969,8 @@ pub struct AppState {
     pub tool_cards: Vec<crate::display::components::tool_card::ToolCard>,
     /// Index of the tool card currently open in the detail modal (None = closed).
     pub tool_detail_index: Option<usize>,
-    /// Scroll offset for the tool detail modal body.
-    pub tool_detail_scroll: usize,
+    /// Scroll state for the tool detail modal body (TUI-010; never follows).
+    pub tool_detail_scroll: crate::display::scroll::ScrollState,
     /// Set of expanded tool card indices (for chat view).
     pub expanded_tools: std::collections::HashSet<usize>,
     /// Index of the currently-running tool (for status bar indicator).
@@ -1070,8 +1069,7 @@ impl AppState {
         Self {
             view: ViewMode::Chat,
             current_page: PageId::Run,
-            scroll_offset: 0,
-            auto_scroll: true,
+            chat_scroll: crate::display::scroll::ScrollState::follow_end(),
             mouse_capture: true,
             messages: Vec::new(),
             input_state: InputState::new(),
@@ -1150,7 +1148,7 @@ impl AppState {
             voice: crate::display::voice::VoiceState::new(),
             tool_cards: Vec::new(),
             tool_detail_index: None,
-            tool_detail_scroll: 0,
+            tool_detail_scroll: crate::display::scroll::ScrollState::new(),
             expanded_tools: std::collections::HashSet::new(),
             current_tool_index: None,
             frame_mean_ms: 0.0,
@@ -1666,9 +1664,7 @@ impl Store {
                     content: input,
                     timestamp: Utc::now(),
                 });
-                if self.state.auto_scroll {
-                    self.state.scroll_offset = 0;
-                }
+                // End-pinned views need no adjustment on new input.
             }
             StoreEvent::PipelineEvent(ev) => {
                 self.state.apply_display_event(ev);
@@ -1677,19 +1673,14 @@ impl Store {
                 self.state.view = ViewMode::Page(page);
             }
             StoreEvent::ScrollUp => {
-                self.state.scroll_offset = self.state.scroll_offset.saturating_add(1);
-                self.state.auto_scroll = false;
+                self.state.chat_scroll.nudge(-1);
             }
             StoreEvent::ScrollDown => {
-                let new_offset = self.state.scroll_offset.saturating_sub(1);
-                self.state.scroll_offset = new_offset;
-                // Re-enable auto-scroll when user scrolls back to bottom.
-                if new_offset == 0 {
-                    self.state.auto_scroll = true;
-                }
+                self.state.chat_scroll.nudge(1);
             }
             StoreEvent::ToggleAutoScroll => {
-                self.state.auto_scroll = !self.state.auto_scroll;
+                let follow = self.state.chat_scroll.follow;
+                self.state.chat_scroll.follow = !follow;
             }
             StoreEvent::Tick => {
                 self.state.tick();
@@ -1764,7 +1755,7 @@ mod tests {
         let state = AppState::new("test task".to_string(), config, ".".into());
         assert_eq!(state.view, ViewMode::Chat);
         assert_eq!(state.messages.len(), 0);
-        assert!(state.auto_scroll);
+        assert!(state.chat_scroll.follow);
     }
 
     #[test]

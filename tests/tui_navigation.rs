@@ -1505,3 +1505,62 @@ fn unrecognized_keys_ignored_all_pages() {
         );
     }
 }
+
+// ============================================================================
+// TUI-010 — chat follow + manual scroll unification
+// ============================================================================
+
+fn chat_view_text(state: &niki::display::pages::AppState, width: u16, height: u16) -> String {
+    let backend = ratatui::backend::TestBackend::new(width, height);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            niki::display::layout::render_chat(f, f.area(), state);
+        })
+        .unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol().to_string())
+        .collect()
+}
+
+#[test]
+fn chat_follows_new_output_by_default() {
+    let mut state = make_state();
+    state.current_page = PageId::Chat;
+    for i in 0..40 {
+        state
+            .chat_log
+            .push(("assistant".to_string(), format!("message number {i}")));
+    }
+    // Fresh state is end-pinned: the last message is visible, the first is not.
+    let text = chat_view_text(&state, 100, 20);
+    assert!(text.contains("message number 39"), "{text}");
+    assert!(!text.contains("message number 0"), "{text}");
+}
+
+#[test]
+fn chat_wheel_up_unpins_and_down_rearms() {
+    let mut state = make_state();
+    state.current_page = PageId::Chat;
+    for i in 0..40 {
+        state
+            .chat_log
+            .push(("assistant".to_string(), format!("message number {i}")));
+    }
+    assert!(state.chat_scroll.follow);
+    // Wheel-up delta: unpins.
+    state.chat_scroll.scroll_by(-30, 90, 10);
+    assert!(!state.chat_scroll.follow);
+    // Jumped to top: the first message is visible.
+    state.chat_scroll.jump_to(0, 90, 10);
+    let text = chat_view_text(&state, 100, 20);
+    assert!(text.contains("message number 0"), "{text}");
+    // Wheel-down delta past the end: re-arms the pin.
+    let rest = state.chat_scroll.scroll_by(1000, 80, 10);
+    assert!(state.chat_scroll.follow);
+    assert!(rest > 0);
+}

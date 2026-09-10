@@ -24,6 +24,20 @@ pub fn modal_rect(area: Rect) -> Rect {
     }
 }
 
+/// Scrollable body lines of the open card (TUI-010 chaining input).
+pub fn detail_content_lines(card: &ToolCard) -> usize {
+    card.output
+        .as_deref()
+        .map(|o| o.lines().count().max(1))
+        .unwrap_or(1)
+}
+
+/// Visible body rows of the modal on `area` (mirrors the render geometry:
+/// outer borders + one footer row are chrome).
+pub fn detail_viewport(area: Rect) -> usize {
+    modal_rect(area).height.saturating_sub(2 + 1) as usize
+}
+
 /// Render the tool output modal.
 ///
 /// Layout (top → bottom):
@@ -137,5 +151,54 @@ mod tests {
         let cloned = card.clone();
         assert_eq!(card.tool_name, cloned.tool_name);
         assert_eq!(card.summary, cloned.summary);
+    }
+
+    #[test]
+    fn detail_viewport_matches_render_geometry() {
+        // 100x20 area → modal 80x14 → inner 12 rows → 11 body rows.
+        let viewport = detail_viewport(Rect::new(0, 0, 100, 20));
+        assert_eq!(viewport, 11);
+    }
+
+    #[test]
+    fn detail_modal_paints_scrolled_slice() {
+        use crate::display::scroll::ScrollState;
+        let mut card = ToolCard::new("Bash", "ls");
+        let output = (0..20)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        card.set_success(Some(output), 10);
+        assert_eq!(detail_content_lines(&card), 20);
+
+        let area = Rect::new(0, 0, 100, 20);
+        let paint = |offset: usize| -> String {
+            let backend = ratatui::backend::TestBackend::new(100, 20);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|f| render_tool_detail(f, &card, area, offset))
+                .unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol().to_string())
+                .collect()
+        };
+        let top = paint(0);
+        assert!(top.contains("line0"), "{top}");
+        assert!(top.contains("Bash"), "{top}");
+        let scrolled = paint(5);
+        assert!(!scrolled.contains("line0"), "{scrolled}");
+        assert!(scrolled.contains("line5"), "{scrolled}");
+
+        // ScrollState drives the offset the render call receives.
+        let mut scroll = ScrollState::new();
+        scroll.jump_to(5, detail_content_lines(&card), detail_viewport(area));
+        assert_eq!(
+            scroll.view_offset(detail_content_lines(&card), detail_viewport(area)),
+            5
+        );
     }
 }

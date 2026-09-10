@@ -139,7 +139,8 @@ fn perf_scroll_steps() {
         scrolled.chat_log = state.chat_log.clone();
         scrolled.stages = state.stages.clone();
         scrolled.description = state.description.clone();
-        scrolled.scroll_offset = offset;
+        scrolled.chat_scroll.follow = false;
+        scrolled.chat_scroll.offset = offset;
         let elapsed = render_once(&scrolled, 100, 40);
         report(
             &format!("scroll_render_offset_{offset}"),

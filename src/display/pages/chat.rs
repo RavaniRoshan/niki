@@ -167,7 +167,7 @@ impl ChatPage {
         let col = ev.column.saturating_sub(area.x) as usize;
         let total = state.chat_lines.len();
         let visible = area.height as usize;
-        let offset = scroll_offset(total, visible);
+        let offset = state.chat_scroll.view_offset(total, visible);
         let abs_row = offset + row;
         match ev.kind {
             MouseEventKind::Down(_) => {
@@ -284,15 +284,6 @@ impl Default for ChatPage {
     }
 }
 
-/// Scroll offset (bottom-anchored) for `total` lines in `visible` rows.
-pub fn scroll_offset(total: usize, visible: usize) -> usize {
-    if total > visible {
-        total.saturating_sub(visible)
-    } else {
-        0
-    }
-}
-
 impl Page for ChatPage {
     fn render(&self, frame: &mut Frame, area: Rect, state: &AppState) {
         let bg = theme::bg_color();
@@ -308,7 +299,7 @@ impl Page for ChatPage {
         let lines = build_chat_lines(state, width, true);
 
         let visible = area.height as usize;
-        let offset = scroll_offset(lines.len(), visible);
+        let offset = state.chat_scroll.view_offset(lines.len(), visible);
 
         // Scroll indicator: show "↑ more" when scrolled up
         let scroll_indicator = if offset > 0 {
@@ -928,11 +919,11 @@ impl Page for ChatPage {
                 true
             }
             InputAction::ScrollUp => {
-                state.scroll_offset = state.scroll_offset.saturating_sub(1);
+                state.chat_scroll.nudge(-1);
                 true
             }
             InputAction::ScrollDown => {
-                state.scroll_offset += 1;
+                state.chat_scroll.nudge(1);
                 true
             }
             InputAction::ToggleExpand(stage_idx) => {
@@ -968,15 +959,15 @@ impl Page for ChatPage {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('q') => {
                     state.tool_detail_index = None;
-                    state.tool_detail_scroll = 0;
+                    state.tool_detail_scroll = crate::display::scroll::ScrollState::new();
                     return true;
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    state.tool_detail_scroll += 1;
+                    state.tool_detail_scroll.nudge(1);
                     return true;
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    state.tool_detail_scroll = state.tool_detail_scroll.saturating_sub(1);
+                    state.tool_detail_scroll.nudge(-1);
                     return true;
                 }
                 KeyCode::Char('y') => {
@@ -1013,7 +1004,7 @@ impl Page for ChatPage {
                         );
                         if rel_row >= rows_consumed && rel_row < rows_consumed + h {
                             state.tool_detail_index = Some(idx);
-                            state.tool_detail_scroll = 0;
+                            state.tool_detail_scroll = crate::display::scroll::ScrollState::new();
                             return true;
                         }
                         rows_consumed += h;

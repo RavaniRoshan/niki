@@ -777,19 +777,32 @@ fn run_tui(
                                         Constraint::Length(1),
                                     ])
                                     .split(full);
-                                // Scroll wheel in chat viewport
+                                // Scroll wheel with innermost-first chaining (TUI-010):
+                                // an open tool-detail modal consumes the wheel
+                                // first; the remainder scrolls the chat behind it.
                                 if scrolling_up || scrolling_down {
-                                    let total = state.chat_lines.len();
-                                    let visible = chunks[1].height as usize;
-                                    if scrolling_up {
-                                        state.scroll_offset = state.scroll_offset.saturating_sub(3);
-                                    } else {
-                                        let max_scroll = total.saturating_sub(visible);
-                                        state.scroll_offset =
-                                            (state.scroll_offset + 3).min(max_scroll);
+                                    let delta = if scrolling_up { -3 } else { 3 };
+                                    let mut rest = delta;
+                                    if let Some(idx) = state.tool_detail_index {
+                                        if let Some(card) = state.tool_cards.get(idx) {
+                                            let content =
+                                                super::components::tool_detail::detail_content_lines(
+                                                    card,
+                                                );
+                                            let viewport =
+                                                super::components::tool_detail::detail_viewport(
+                                                    full,
+                                                );
+                                            rest = state
+                                                .tool_detail_scroll
+                                                .scroll_by(rest, content, viewport);
+                                        }
                                     }
-                                    state.auto_scroll =
-                                        state.scroll_offset >= total.saturating_sub(visible);
+                                    if rest != 0 {
+                                        let total = state.chat_lines.len();
+                                        let visible = chunks[1].height as usize;
+                                        state.chat_scroll.scroll_by(rest, total, visible);
+                                    }
                                     engine.mark_dirty();
                                 } else {
                                     // Scrollbar click/drag-to-jump (gaps P0 — "Drag to scroll").
@@ -807,9 +820,7 @@ fn run_tui(
                                             let frac = (mouse.row - chunks[1].y) as f64
                                                 / msg_area_h as f64;
                                             let target = (frac * total as f64).round() as usize;
-                                            state.scroll_offset = target.min(total - msg_area_h);
-                                            state.auto_scroll =
-                                                state.scroll_offset >= total - msg_area_h;
+                                            state.chat_scroll.jump_to(target, total, msg_area_h);
                                             engine.mark_dirty();
                                         }
                                     } else if hovering {
@@ -817,7 +828,7 @@ fn run_tui(
                                         let row = mouse.row.saturating_sub(chunks[1].y) as usize;
                                         let total = state.chat_lines.len();
                                         let visible = chunks[1].height as usize;
-                                        let offset = chat::scroll_offset(total, visible);
+                                        let offset = state.chat_scroll.view_offset(total, visible);
                                         let abs_row = offset + row;
                                         let new_target = if row < chunks[1].height as usize
                                             && let Some(line) = state.chat_lines.get(abs_row)
@@ -1575,6 +1586,17 @@ fn render(
     if state.show_permission_modal {
         if let Some(ref req) = state.permission_request {
             super::components::render_permission_modal(frame, req, size, state);
+        }
+    }
+
+    // Render tool detail modal if a card is open (TUI-010: previously tracked
+    // state but never painted). Renders above chat, below help overlays.
+    if let Some(idx) = state.tool_detail_index {
+        if let Some(card) = state.tool_cards.get(idx) {
+            let content = super::components::tool_detail::detail_content_lines(card);
+            let viewport = super::components::tool_detail::detail_viewport(size);
+            let offset = state.tool_detail_scroll.view_offset(content, viewport);
+            super::components::tool_detail::render_tool_detail(frame, card, size, offset);
         }
     }
 
