@@ -92,18 +92,31 @@ jobs:
   review:
     name: NIKI tasked run
     needs: guard
-    # Needs-keys gate: skip gracefully when no provider key is configured.
-    if: needs.guard.outputs.run == 'true' && (secrets.ANTHROPIC_API_KEY != '' || secrets.OPENAI_API_KEY != '' || secrets.GOOGLE_API_KEY != '')
+    # `secrets` is not a valid context in job-level `if:` (startup failure),
+    # so the needs-keys gate lives in the `keys` step below; every later step
+    # requires its `have == 'true'` output and the run skips gracefully.
+    if: needs.guard.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
+      - id: keys
+        run: |
+          have=false
+          [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ] && have=true
+          [ -n "${{ secrets.OPENAI_API_KEY }}" ] && have=true
+          [ -n "${{ secrets.GOOGLE_API_KEY }}" ] && have=true
+          echo "have=$have" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
+        if: steps.keys.outputs.have == 'true'
         with:
           ref: ${{ needs.guard.outputs.ref || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.keys.outputs.have == 'true'
       - name: Build release binary
+        if: steps.keys.outputs.have == 'true'
         run: cargo build --release
       - name: Run NIKI task (bare, JSON contract)
+        if: steps.keys.outputs.have == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -118,13 +131,14 @@ jobs:
             | tee /tmp/niki-result.jsonl | tail -1 > /tmp/niki-result.json
           python3 -c "import json; d=json.load(open('/tmp/niki-result.json')); print('status:', d['status'], '| branch:', d.get('branch'), '| cost: \$', d.get('cost_usd'))"
       - name: Upload audit trail
+        if: steps.keys.outputs.have == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: niki-task
           path: .niki/tasks/
           retention-days: 14
       - name: Comment result
-        if: github.event_name == 'issue_comment'
+        if: github.event_name == 'issue_comment' && steps.keys.outputs.have == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
