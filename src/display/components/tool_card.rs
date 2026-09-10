@@ -113,7 +113,7 @@ pub fn render_tool_card(card: &ToolCard, area_width: u16) -> Vec<Line<'static>> 
     let glyph_color = card.status_color();
 
     let summary = if card.summary.len() > width.saturating_sub(8) {
-        format!("{}...", &card.summary[..width.saturating_sub(11)])
+        theme::truncate_str_ellipsis(&card.summary, width.saturating_sub(8))
     } else {
         card.summary.clone()
     };
@@ -147,7 +147,10 @@ pub fn render_tool_card(card: &ToolCard, area_width: u16) -> Vec<Line<'static>> 
             let preview_len = output_lines.len().min(5);
             for line in &output_lines[..preview_len] {
                 let trimmed = if line.len() > width.saturating_sub(6) {
-                    format!("    {}...", &line[..width.saturating_sub(10)])
+                    format!(
+                        "    {}",
+                        theme::truncate_str_ellipsis(line, width.saturating_sub(6))
+                    )
                 } else {
                     format!("    {}", line)
                 };
@@ -332,5 +335,19 @@ mod tests {
     fn hit_test_card_outside_bounds() {
         let card = ToolCard::new("Bash", "test");
         assert!(!hit_test_card(&card, 5, 80));
+    }
+
+    #[test]
+    fn render_unicode_summary_and_output_no_panic() {
+        // TUI-020: byte slicing here used to panic on multibyte text.
+        let mut card = ToolCard::new("Bash", "déploie l’API 日🎉".repeat(4));
+        card.set_success(
+            Some("résultat héllo wörld output line\nsecond lïne 日".to_string()),
+            12,
+        );
+        let lines = render_tool_card(&card, 30);
+        assert!(!lines.is_empty());
+        let height = tool_card_height(&card, 30);
+        assert!(height >= lines.len() - 1);
     }
 }
