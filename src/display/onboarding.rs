@@ -464,6 +464,13 @@ pub fn should_show_onboarding(project_path: &Path) -> bool {
         return false;
     }
 
+    // VHS tapes force the modal on (`NIKI_FORCE_ONBOARDING=1`) so reference
+    // frames match on CI runners, where CI/NIKI_CI suppression below would
+    // otherwise hide it and fail the gate by design.
+    if std::env::var("NIKI_FORCE_ONBOARDING").is_ok() {
+        return true;
+    }
+
     if std::env::var("CI").is_ok() || std::env::var("NIKI_CI").is_ok() {
         return false;
     }
@@ -632,5 +639,17 @@ mod tests {
         // control the terminal check in tests, so we test the persisted state path)
         persist_state(project_path);
         assert!(!should_show_onboarding(project_path));
+    }
+
+    #[test]
+    fn force_override_yields_to_persisted_state() {
+        // NIKI_FORCE_ONBOARDING forces the modal, but an onboarded project
+        // stays quiet. (The terminal gate can't be controlled in tests, so
+        // only the persisted-state precedence is asserted here.)
+        unsafe { std::env::set_var("NIKI_FORCE_ONBOARDING", "1") };
+        let dir = tempfile::tempdir().unwrap();
+        persist_state(dir.path());
+        assert!(!should_show_onboarding(dir.path()));
+        unsafe { std::env::remove_var("NIKI_FORCE_ONBOARDING") };
     }
 }
