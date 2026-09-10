@@ -149,7 +149,9 @@ pub fn render_permission_modal(
         Line::from(Span::styled("The agent wants to run:", theme::text_dim())),
         Line::from(""),
         Line::from(Span::styled(
-            format!("  $ {}", request.command),
+            // TUI-023: long commands truncate to the modal instead of
+            // overflowing into the border (width-aware, no byte slicing).
+            theme::truncate_str_ellipsis(&format!("  $ {}", request.command), inner.width as usize),
             Style::default()
                 .fg(theme::primary())
                 .add_modifier(Modifier::BOLD),
@@ -399,5 +401,34 @@ mod tests {
             .collect();
         assert!(text.contains("Allow once"), "{text}");
         assert!(text.contains("deletes everything"), "{text}");
+    }
+
+    #[test]
+    fn render_long_unicode_command_truncates() {
+        // TUI-023: long commands stay inside the modal (width-aware ellipsis,
+        // no byte slicing).
+        let config = crate::config::NikiConfig::default();
+        let state = AppState::new("test".to_string(), config, ".".into());
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let req = PermissionRequest {
+            tool_name: "sandbox_exec".to_string(),
+            command: "déploie --all --force 日🎉".repeat(6),
+            description: String::new(),
+            params: None,
+            response_tx: tx,
+        };
+        let backend = ratatui::backend::TestBackend::new(80, 30);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| render_permission_modal(f, &req, f.area(), &state))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect();
+        assert!(text.contains("déploie"), "{text}");
     }
 }

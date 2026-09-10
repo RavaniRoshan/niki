@@ -1422,7 +1422,7 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
             if let Some(ref err) = s.error_message {
                 let short_err = err.lines().next().unwrap_or("unknown error");
                 let truncated = if short_err.len() > 60 {
-                    format!("{}…", &short_err[..57])
+                    format!("{}…", theme::truncate_str(short_err, 59))
                 } else {
                     short_err.to_string()
                 };
@@ -1657,7 +1657,9 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
             .next()
             .map(|c| c.to_string())
             .unwrap_or_else(|| " ".to_string());
-        let after_start = cursor_pos + cursor_char.chars().count();
+        // Byte length, not char count: multibyte caret chars must not leave
+        // `after_start` mid-character (TUI-020).
+        let after_start = cursor_pos + cursor_char.len();
         let after = &buf[after_start.min(buf.len())..];
         let input_display = format!("{}{}{}{}", prompt, before, cursor_char, after);
         push_line(&mut lines, input_display, usize::MAX, 0, true, None, None);
@@ -1964,6 +1966,19 @@ mod tests {
         // Esc closes.
         assert!(page.handle_key(KeyEvent::new(KeyCode::Esc, plain), &mut state));
         assert!(state.search.is_none());
+    }
+
+    #[test]
+    fn input_echo_with_multibyte_caret_no_panic() {
+        // TUI-020: after_start used char count (always 1) instead of byte
+        // length, slicing mid-character for multibyte caret chars.
+        let mut state = base_state();
+        state.input_state.buffer = "aé日x".to_string();
+        for cursor in [0, 1, 3, 6, 7] {
+            state.input_state.cursor_pos = cursor;
+            let lines = build_chat_lines(&state, 80, true);
+            assert!(!lines.is_empty());
+        }
     }
 
     #[test]
