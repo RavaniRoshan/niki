@@ -1473,7 +1473,7 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
                 }
             } else {
                 let key = crate::display::state::MarkdownCacheKey {
-                    body_hash: crate::display::state::markdown_body_hash(&body),
+                    body_hash: crate::display::state::text_hash(&body),
                     width,
                     show_thinking: state.show_thinking,
                     theme: build_theme,

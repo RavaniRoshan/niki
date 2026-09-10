@@ -1,10 +1,11 @@
 //! Central keybinding table (TUI-003).
 //!
 //! Semantic [`GlobalAction`]s are matched at the global dispatch level in
-//! `tui.rs`; page-local and input-editing keys stay receiver-scoped (flat IDs
-//! + receiver priority, following the Pi extraction findings). Defaults
-//! reproduce the historical literals exactly, including their modifier
-//! quirks (`g`/`s`/`?` ignore modifiers; `Tab` forbids only Ctrl).
+//! `tui.rs`; page-local and input-editing keys stay receiver-scoped.
+//!
+//! Flat IDs + receiver priority follow the Pi extraction findings. Defaults
+//! reproduce the historical literals exactly, including their modifier quirks
+//! (`g`/`s`/`?` ignore modifiers; `Tab` forbids only Ctrl).
 //!
 //! Users may override per-action keys via `[ui.keybindings]` in `niki.toml`:
 //!
