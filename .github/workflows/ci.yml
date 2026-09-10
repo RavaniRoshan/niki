@@ -200,8 +200,12 @@ jobs:
           sudo apt-get install -y ffmpeg fonts-dejavu-core
           curl -fsSL -o /tmp/vhs.deb https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_amd64.deb
           sudo dpkg -i /tmp/vhs.deb
+          # VHS renders tapes through ttyd, which is not preinstalled.
+          sudo curl -fsSL -o /usr/local/bin/ttyd https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
+          sudo chmod +x /usr/local/bin/ttyd
           python3 -m pip install --quiet --break-system-packages pillow
           vhs --version
+          ttyd --version
       - name: Build release
         run: cargo build --release
       - name: Capture + compare reference frames
