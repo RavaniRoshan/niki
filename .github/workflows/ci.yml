@@ -27,7 +27,8 @@ jobs:
       - name: Clippy lints
         run: set -eo pipefail; cargo clippy --all-targets 2>&1 | tail -40
 
-  # ── Phase 1b: Supply-chain audit (cargo-audit + cargo-deny) ────────  audit:
+  # ── Phase 1b: Supply-chain audit (cargo-audit + cargo-deny) ────────
+  audit:
     name: Audit (supply chain)
     runs-on: ubuntu-latest
     steps:
