@@ -147,6 +147,7 @@ impl Drop for RestoreGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let _ = crate::display::kitty::disable_kitty_keyboard();
+        let _ = crate::display::mouse::disable_tracking();
         let _ = execute!(
             io::stdout(),
             LeaveAlternateScreen,
@@ -189,6 +190,9 @@ fn run_tui(
         EnableMouseCapture,
         ratatui::crossterm::event::EnableBracketedPaste
     );
+    // TUI-030: button-motion + SGR coordinates so drags (scrollbar,
+    // selection) and hover highlights actually arrive. Best-effort.
+    let _ = crate::display::mouse::enable_tracking();
     // Progressive adoption of the Kitty keyboard protocol (I4): disambiguates
     // Shift+Enter from Enter on supporting terminals. Disabled on exit.
     if crate::display::kitty::kitty_capable() {
@@ -364,7 +368,9 @@ fn run_tui(
                         if state.mouse_capture {
                             let _ =
                                 ratatui::crossterm::execute!(std::io::stdout(), EnableMouseCapture);
+                            let _ = crate::display::mouse::enable_tracking();
                         } else {
+                            let _ = crate::display::mouse::disable_tracking();
                             let _ = ratatui::crossterm::execute!(
                                 std::io::stdout(),
                                 DisableMouseCapture
@@ -1177,6 +1183,8 @@ pub fn run_chat(
     if crate::display::kitty::kitty_capable() {
         let _ = crate::display::kitty::enable_kitty_keyboard();
     }
+    // TUI-030: motion tracking (see run_tui).
+    let _ = crate::display::mouse::enable_tracking();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).expect("failed to create terminal");
 
@@ -1259,7 +1267,9 @@ pub fn run_chat(
                     state.mouse_capture = !state.mouse_capture;
                     if state.mouse_capture {
                         let _ = ratatui::crossterm::execute!(std::io::stdout(), EnableMouseCapture);
+                        let _ = crate::display::mouse::enable_tracking();
                     } else {
+                        let _ = crate::display::mouse::disable_tracking();
                         let _ =
                             ratatui::crossterm::execute!(std::io::stdout(), DisableMouseCapture);
                     }
@@ -1437,6 +1447,7 @@ pub fn run_chat(
     persistence::save_chat_session(&project_path, &persistence::snapshot(&state));
 
     let _ = disable_raw_mode();
+    let _ = crate::display::mouse::disable_tracking();
     let _ = execute!(
         io::stdout(),
         LeaveAlternateScreen,

@@ -2147,6 +2147,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unicode-truncate",
+ "unicode-width 0.1.14",
  "urlencoding",
  "uuid",
  "walkdir",

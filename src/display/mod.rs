@@ -18,6 +18,7 @@ pub mod layout;
 pub mod logo;
 pub mod modal;
 pub mod motion;
+pub mod mouse;
 pub mod notify;
 pub mod onboarding;
 pub mod pages;
