@@ -5,7 +5,7 @@ Set FontFamily "DejaVu Sans Mono"
 Set Width 1200
 Set Height 800
 Hide
-Type "NIKI_REDUCED_MOTION=1 @BIN@ chat -p @FIXTURE@" Enter
+Type "NIKI_REDUCED_MOTION=1 NIKI_FORCE_ONBOARDING=1 @BIN@ chat -p @FIXTURE@" Enter
 Sleep 2s
 Show
 Sleep 1s
