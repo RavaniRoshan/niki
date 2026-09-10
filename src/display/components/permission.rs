@@ -22,10 +22,23 @@ pub const OPTIONS: [&str; 4] = ["Allow once", "Allow always", "Deny", "Deny alwa
 /// Permission scope labels.
 pub const SCOPES: [&str; 3] = ["Turn", "Session", "Project"];
 
-/// Height of the modal: borders + tool line + blue sep + description + scope + dotted sep + 4 options + hint.
-const MODAL_HEIGHT: u16 = 20;
-/// Row offset (inside the modal border) of the first option row.
-const FIRST_OPTION_ROW: u16 = 10;
+/// First option row inside the modal border, computed from the same layout
+/// the renderer emits (TUI-013). Base 12 rows (label, tool, separators,
+/// scope block, options header); a description adds 2; the detail panel
+/// adds 2 + up to 5 param lines. Render pads to this row and the hit-test
+/// reads it, so paint and clicks can never desync.
+pub fn option_first_row(request: &PermissionRequest, show_detail: bool) -> u16 {
+    let mut row: u16 = 12;
+    if !request.description.is_empty() {
+        row += 2;
+    }
+    if show_detail {
+        if let Some(ref params) = request.params {
+            row += 2 + params.lines().take(5).count().min(5) as u16;
+        }
+    }
+    row
+}
 
 /// The cursor over the permission options, seeded from `AppState`.
 pub fn cursor(state: &AppState) -> ListCursor {
@@ -43,9 +56,11 @@ pub fn action_for(index: usize) -> PermissionAction {
 }
 
 /// Geometry of the modal — shared by the renderer and the hit-test.
-pub fn modal_rect(area: Rect) -> Rect {
+/// Height follows the content (options always visible); clamped to the area.
+pub fn modal_rect(area: Rect, request: &PermissionRequest, show_detail: bool) -> Rect {
+    let content_rows = option_first_row(request, show_detail) + OPTIONS.len() as u16 + 1;
     let modal_width = 60u16.min(area.width.saturating_sub(4));
-    let modal_height = MODAL_HEIGHT.min(area.height);
+    let modal_height = (content_rows + 2).min(area.height).max(8);
     Rect {
         x: area.width.saturating_sub(modal_width) / 2,
         y: area.height.saturating_sub(modal_height) / 2,
@@ -55,14 +70,21 @@ pub fn modal_rect(area: Rect) -> Rect {
 }
 
 /// Hit-test a mouse position against the option rows, returning the row index.
-pub fn click_index(area: Rect, x: u16, y: u16) -> Option<usize> {
-    let modal = modal_rect(area);
+/// Geometry comes from [`option_first_row`], shared with the renderer.
+pub fn click_index(
+    area: Rect,
+    x: u16,
+    y: u16,
+    request: &PermissionRequest,
+    show_detail: bool,
+) -> Option<usize> {
+    let modal = modal_rect(area, request, show_detail);
     let inner_left = modal.x + 1;
     let inner_right = modal.x + modal.width.saturating_sub(1);
     if x < inner_left || x >= inner_right {
         return None;
     }
-    let first = modal.y + 1 + FIRST_OPTION_ROW;
+    let first = modal.y + 1 + option_first_row(request, show_detail);
     if y < first {
         return None;
     }
@@ -87,7 +109,7 @@ pub fn render_permission_modal(
     area: Rect,
     state: &AppState,
 ) {
-    let modal_area = modal_rect(area);
+    let modal_area = modal_rect(area, request, state.show_permission_detail);
 
     frame.render_widget(Clear, modal_area);
 
@@ -201,12 +223,13 @@ pub fn render_permission_modal(
     )));
     lines.push(Line::from(""));
 
-    // Pad to FIRST_OPTION_ROW
-    while lines.len() < FIRST_OPTION_ROW as usize {
+    // Pad to the first option row (shared with the hit-test).
+    let first_option_row = option_first_row(request, state.show_permission_detail);
+    while lines.len() < first_option_row as usize {
         lines.push(Line::from(""));
     }
 
-    debug_assert_eq!(lines.len() as u16, FIRST_OPTION_ROW);
+    debug_assert_eq!(lines.len() as u16, first_option_row);
     for (i, opt) in OPTIONS.iter().enumerate() {
         let is_selected = i == selected;
         let style = if is_selected {
@@ -271,17 +294,65 @@ mod tests {
     #[test]
     fn click_index_maps_option_rows() {
         let area = Rect::new(0, 0, 100, 40);
-        let modal = modal_rect(area);
-        let first = modal.y + 1 + FIRST_OPTION_ROW;
-        assert_eq!(click_index(area, modal.x + 3, first), Some(0));
-        assert_eq!(click_index(area, modal.x + 3, first + 1), Some(1));
-        assert_eq!(click_index(area, modal.x + 3, first + 2), Some(2));
-        assert_eq!(click_index(area, modal.x + 3, first + 3), Some(3));
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let req = PermissionRequest {
+            tool_name: "sandbox_exec".to_string(),
+            command: "ls".to_string(),
+            description: String::new(),
+            params: None,
+            response_tx: tx,
+        };
+        let modal = modal_rect(area, &req, false);
+        let first = modal.y + 1 + option_first_row(&req, false);
+        assert_eq!(first, modal.y + 1 + 12);
+        assert_eq!(click_index(area, modal.x + 3, first, &req, false), Some(0));
+        assert_eq!(
+            click_index(area, modal.x + 3, first + 1, &req, false),
+            Some(1)
+        );
+        assert_eq!(
+            click_index(area, modal.x + 3, first + 2, &req, false),
+            Some(2)
+        );
+        assert_eq!(
+            click_index(area, modal.x + 3, first + 3, &req, false),
+            Some(3)
+        );
         // Rows above the options and the hint row below are not selectable.
-        assert_eq!(click_index(area, modal.x + 3, first - 1), None);
-        assert_eq!(click_index(area, modal.x + 3, first + 4), None);
+        assert_eq!(click_index(area, modal.x + 3, first - 1, &req, false), None);
+        assert_eq!(click_index(area, modal.x + 3, first + 4, &req, false), None);
         // Border columns are not selectable.
-        assert_eq!(click_index(area, modal.x, first), None);
+        assert_eq!(click_index(area, modal.x, first, &req, false), None);
+    }
+
+    #[test]
+    fn click_index_tracks_description_and_detail_rows() {
+        let area = Rect::new(0, 0, 100, 40);
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let req = PermissionRequest {
+            tool_name: "sandbox_exec".to_string(),
+            command: "rm -rf /".to_string(),
+            description: "deletes everything".to_string(),
+            params: Some("a\nb\nc".to_string()),
+            response_tx: tx,
+        };
+        // 12 base + 2 description + 2 + 3 param lines = row 19.
+        let modal = modal_rect(area, &req, true);
+        let first = modal.y + 1 + option_first_row(&req, true);
+        assert_eq!(first, modal.y + 1 + 19);
+        assert_eq!(click_index(area, modal.x + 3, first, &req, true), Some(0));
+        assert_eq!(
+            click_index(area, modal.x + 3, first + 3, &req, true),
+            Some(3)
+        );
+        // Without the detail panel the rows move back up.
+        let collapsed_modal = modal_rect(area, &req, false);
+        let collapsed = collapsed_modal.y + 1 + option_first_row(&req, false);
+        assert_eq!(collapsed, collapsed_modal.y + 1 + 14);
+        assert_eq!(
+            click_index(area, collapsed_modal.x + 3, collapsed, &req, false),
+            Some(0)
+        );
     }
 
     #[test]
@@ -297,5 +368,36 @@ mod tests {
         assert_eq!(c.selected, 0);
         assert!(matches!(action_for(0), PermissionAction::Allow));
         assert!(matches!(action_for(1), PermissionAction::Allow));
+    }
+
+    #[test]
+    fn render_with_description_and_detail_paints_options() {
+        // Previously the pad/assert assumed a fixed row 10 and would fail
+        // with description/detail lines present.
+        let config = crate::config::NikiConfig::default();
+        let mut state = AppState::new("test".to_string(), config, ".".into());
+        state.show_permission_detail = true;
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let req = PermissionRequest {
+            tool_name: "sandbox_exec".to_string(),
+            command: "rm -rf /".to_string(),
+            description: "deletes everything".to_string(),
+            params: Some("a\nb".to_string()),
+            response_tx: tx,
+        };
+        let backend = ratatui::backend::TestBackend::new(100, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| render_permission_modal(f, &req, f.area(), &state))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect();
+        assert!(text.contains("Allow once"), "{text}");
+        assert!(text.contains("deletes everything"), "{text}");
     }
 }

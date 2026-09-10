@@ -681,24 +681,36 @@ fn run_tui(
                                 }
                                 state.permission_selected = cursor.selected;
                                 engine.mark_dirty();
-                            } else if let Some(full) = full
-                                && let Some(idx) =
-                                    permission::click_index(full, mouse.column, mouse.row)
-                            {
-                                let mut cursor = permission::cursor(&state);
-                                if hovering {
-                                    if cursor.hover(idx) {
-                                        state.permission_selected = cursor.selected;
-                                        engine.mark_dirty();
-                                    }
-                                } else if clicking {
-                                    if let Some(i) = cursor.click(idx) {
-                                        state.permission_selected = i;
-                                        if let Some(req) = state.permission_request.take() {
-                                            let _ = req.response_tx.send(permission::action_for(i));
-                                            state.show_permission_modal = false;
+                            } else if let Some(full) = full {
+                                // Geometry comes from the request + detail flag,
+                                // shared with the renderer (TUI-013).
+                                let show_detail = state.show_permission_detail;
+                                let hit = state.permission_request.as_ref().and_then(|req| {
+                                    permission::click_index(
+                                        full,
+                                        mouse.column,
+                                        mouse.row,
+                                        req,
+                                        show_detail,
+                                    )
+                                });
+                                if let Some(idx) = hit {
+                                    let mut cursor = permission::cursor(&state);
+                                    if hovering {
+                                        if cursor.hover(idx) {
+                                            state.permission_selected = cursor.selected;
+                                            engine.mark_dirty();
                                         }
-                                        engine.mark_dirty();
+                                    } else if clicking {
+                                        if let Some(i) = cursor.click(idx) {
+                                            state.permission_selected = i;
+                                            if let Some(req) = state.permission_request.take() {
+                                                let _ =
+                                                    req.response_tx.send(permission::action_for(i));
+                                                state.show_permission_modal = false;
+                                            }
+                                            engine.mark_dirty();
+                                        }
                                     }
                                 }
                             }
@@ -766,6 +778,21 @@ fn run_tui(
                             }
                         }
                         FocusState::Chat => {
+                            // Open tool-detail modal owns left-clicks (TUI-013):
+                            // inside is consumed, outside dismisses. The wheel
+                            // path below chains into the modal scroll instead.
+                            if state.tool_detail_index.is_some() && clicking {
+                                if let Some(full) = full {
+                                    super::components::tool_detail::route_click(
+                                        &mut state,
+                                        mouse.column,
+                                        mouse.row,
+                                        full,
+                                    );
+                                    engine.mark_dirty();
+                                }
+                                continue;
+                            }
                             if state.current_page == PageId::Chat
                                 && let Some(full) = full
                             {

@@ -61,23 +61,28 @@ pub fn cursor(state: &AppState) -> ListCursor {
     ListCursor::with_selected(filtered_count(state), state.command_selected)
 }
 
+/// Shared menu geometry (TUI-013): the renderer and the hit-test must agree
+/// on the box, including while a filter narrows the rows. Height follows the
+/// *filtered* count, so both sides shrink together as the user types.
+pub fn menu_rect(state: &AppState, area: Rect) -> Rect {
+    let menu_width = 50u16.min(area.width.saturating_sub(4));
+    let visible = filtered_count(state);
+    let menu_height = (visible as u16) + 3;
+    Rect {
+        x: (area.width - menu_width) / 2,
+        y: area.height.saturating_sub(menu_height + 3),
+        width: menu_width,
+        height: menu_height,
+    }
+}
+
 /// Render the slash command menu overlay.
 pub fn render_command_menu(frame: &mut Frame, area: Rect, state: &AppState) {
     let menu_width = 50u16.min(area.width.saturating_sub(4));
-    let _item_height = 1u16;
     let max_visible = MAX_VISIBLE;
-    let visible = state.commands.len().min(max_visible);
-    let menu_height = (visible as u16) + 3;
 
-    let x = (area.width - menu_width) / 2;
-    let y = area.height.saturating_sub(menu_height + 3);
-
-    let modal_area = Rect {
-        x,
-        y,
-        width: menu_width,
-        height: menu_height,
-    };
+    let modal_area = menu_rect(state, area);
+    let menu_height = modal_area.height;
 
     frame.render_widget(Clear, modal_area);
 
@@ -135,14 +140,10 @@ pub fn render_command_menu(frame: &mut Frame, area: Rect, state: &AppState) {
 
 /// Hit-test a mouse position against the command menu, returning the row index.
 pub fn click_index(state: &AppState, area: Rect, x: u16, y: u16) -> Option<usize> {
-    let menu_width = 50u16.min(area.width.saturating_sub(4));
-    let visible = state.commands.len().min(MAX_VISIBLE);
-    let menu_height = (visible as u16) + 3;
-    let mx = (area.width - menu_width) / 2;
-    let my = area.height.saturating_sub(menu_height + 3);
-    let inner_left = mx + 1;
-    let inner_right = mx + menu_width - 1;
-    let inner_top = my + 1;
+    let modal_area = menu_rect(state, area);
+    let inner_left = modal_area.x + 1;
+    let inner_right = modal_area.x + modal_area.width.saturating_sub(1);
+    let inner_top = modal_area.y + 1;
     if x >= inner_left && x < inner_right && y >= inner_top {
         let idx = (y - inner_top) as usize;
         if idx < filtered_count(state) {
@@ -216,5 +217,31 @@ mod tests {
         for row in 0..40u16 {
             assert_eq!(click_index(&state, area, 30, row), None);
         }
+    }
+
+    #[test]
+    fn menu_geometry_follows_filter() {
+        let config = crate::config::NikiConfig::default();
+        let mut state =
+            crate::display::state::AppState::new("test".to_string(), config, ".".into());
+        let area = Rect::new(0, 0, 100, 40);
+        // Unfiltered: full box.
+        state.command_filter = "/".to_string();
+        let full = menu_rect(&state, area);
+        assert!(full.height > 4);
+        // Narrow filter: box shrinks with the rows (TUI-013 — render and
+        // hit-test share menu_rect, so they cannot drift).
+        state.command_filter = "/compact".to_string();
+        let count = filtered_count(&state);
+        assert!(count >= 1);
+        let narrow = menu_rect(&state, area);
+        assert_eq!(narrow.height, count as u16 + 3);
+        assert!(narrow.height < full.height);
+        // Row 0 of the narrowed box hits; below the box misses.
+        assert_eq!(click_index(&state, area, 30, narrow.y + 1), Some(0));
+        assert_eq!(
+            click_index(&state, area, 30, narrow.y + narrow.height + 1),
+            None
+        );
     }
 }
