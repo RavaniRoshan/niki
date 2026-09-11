@@ -63,5 +63,9 @@ You MUST output a single valid JSON object conforming to this schema:
 9. If all issues are minor/nit, verdict should be "approved" (minor issues go in the issues list but don't block).
 10. When a Red challenge is present, you MUST populate `red_reconciliation` with one entry
     per challenge id — upholding or refuting each with reasoning.
+11. TEST-EVIDENCE GATE: when the TestReport shows failures, errors, or skips on
+    business-logic tests — or zero executed tests — the verdict MUST be
+    "revision_needed", never "approved". Approval without green evidence is
+    recorded as a verification failure in the project's durable learnings.
 
 IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.

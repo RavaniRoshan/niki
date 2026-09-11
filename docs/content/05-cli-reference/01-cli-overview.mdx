@@ -8,7 +8,7 @@ sidebar:
 
 # NIKI CLI Command Overview
 
-NIKI ships with 16 top-level CLI commands organized into 4 logical categories:
+NIKI ships with 19 top-level CLI commands organized into 5 logical categories:
 
 ---
 
@@ -41,3 +41,10 @@ NIKI ships with 16 top-level CLI commands organized into 4 logical categories:
 * **`niki smoke`**: End-to-end smoke testing harness for pipeline verification.
 * **`niki eval`**: Benchmark NIKI on seeded defect datasets.
 * **`niki verify`**: Visual screenshot regression testing and manifest tracking.
+
+---
+
+## 5. Repository Intelligence
+* **`niki inspect [--json]`**: Deterministic repo manifest — languages, entry points, tests, risk signals.
+* **`niki architecture build`**: Build the project knowledge base (`.niki/kb/`). Deterministic, no LLM.
+* **`niki index build|query`**: Content-addressed structural symbol index. Advisory only — grep stays authoritative.

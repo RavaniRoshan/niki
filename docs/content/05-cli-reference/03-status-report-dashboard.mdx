@@ -18,7 +18,12 @@ Displays the live or most recent task status, current active stage, revision cou
 
 ```bash
 niki status
+niki status 6d281d6d
+niki status --with-provenance 6d281d6d
 ```
+
+With `--with-provenance`, the run manifest is shown too: repo HEAD/branch/remote
+at capture time, config content hash, toolchain versions, result branch, and cost.
 
 ---
 

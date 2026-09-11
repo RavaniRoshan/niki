@@ -123,6 +123,8 @@ mod tests {
             isolation: vec![],
             topology: crate::config::types::TopologyMode::MultiAgent,
             topology_reason: String::new(),
+            risk_level: String::new(),
+            risk_rationale: String::new(),
             test_execution: None,
         }
     }

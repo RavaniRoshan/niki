@@ -136,3 +136,18 @@ pub fn render_red_challenge_summary(c: &RedChallenge) -> Vec<String> {
     }
     lines
 }
+
+pub fn render_critique_summary(c: &Critique) -> Vec<String> {
+    let mut lines = vec![match c.disposition {
+        CriticDisposition::Approve => "Critic: verdict stands".to_string(),
+        CriticDisposition::Reject => format!(
+            "Critic: rejects verdict — {} unsupported claim(s)",
+            c.unsupported_claims.len()
+        ),
+    }];
+    for claim in c.unsupported_claims.iter().take(3) {
+        lines.push(format!("• ungrounded: {}", truncate(claim, 80)));
+    }
+    lines.push(truncate(&c.summary, 100));
+    lines
+}

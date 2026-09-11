@@ -252,7 +252,10 @@ niki run "..." --backend worktree   # no container runtime
 | `niki commands` | `list/show/expand` user slash commands (`.niki/commands/*.md` + `[commands] extra_dirs`). |
 | `niki audit [id]` | Consolidated JSON compliance bundle for one task (record, proofs, costs, trace). |
 | `niki init [--scan]` | Initialize `niki.toml` (alias for `config init`); `--scan` drafts `AGENTS.md` from the project index. |
-| `niki status` | Current/most recent task status. |
+| `niki status` | Current/most recent task status (`[task-id]`, `--with-provenance` for the run manifest). |
+| `niki inspect [--json]` | Repository structure: languages, entry points, tests, risk signals. |
+| `niki architecture build` | Build the project knowledge base (`.niki/kb/`). Deterministic, no LLM. |
+| `niki index build\|query` | Content-addressed structural symbol index (`build [--full\|--dry-stats]`, `query <sym> [--callers\|--callees]`). Advisory only. |
 | `niki report [id]` | Print a task's report (UUID or short prefix). |
 | `niki doctor` | Diagnostics: install, config, providers, sandbox, image presence, security. |
 | `niki smoke` | Quick pipeline verification. |
@@ -276,8 +279,11 @@ Run `niki <command> --help` for full flags.
 
 ```text
 src/
-├── agents/        # Planner, Coder, Tester, Reviewer
-├── orchestrator/  # pipeline sequencing + task state
+├── agents/        # Planner, Coder, Tester, Reviewer (+ Red, Critic, SecurityAuditor, Synthesizer)
+├── orchestrator/  # pipeline sequencing + task state + provenance + reflection
+├── repo_intel/    # deterministic repository manifest (`niki inspect`)
+├── risk/          # risk-tier classifier gating pipeline topology
+├── knowledge/     # KB store, history miner, structural index, context pack
 ├── sandbox/       # Sandbox trait: Podman/Docker / git-worktree backends
 ├── llm/           # provider clients (anthropic, openai, google, ollama)
 ├── runtime/       # tool registry + 22 baseline tools
@@ -287,7 +293,7 @@ src/
 ├── persistence/   # mission-scoped JSON storage
 ├── output/        # git branch/commit, patch, report generation
 ├── artifacts/     # typed artifacts + JSON-schema validation
-├── knowledge/     # repository indexing for agent context
+├── knowledge/     # KB store, history miner, structural index, context pack
 ├── config/        # niki.toml loading & env overrides
 ├── display/       # streaming TUI + non-TTY log fallback
 └── cli/           # run / status / report / config

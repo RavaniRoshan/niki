@@ -44,6 +44,8 @@ pub mod output;
 pub mod permissions;
 pub mod persistence;
 pub mod recommend;
+pub mod repo_intel;
+pub mod risk;
 pub mod runtime;
 pub mod safety;
 pub mod sandbox;

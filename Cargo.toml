@@ -103,6 +103,27 @@ keyring = "2"
 notify-rust = "4"# Masked password/key input
 rpassword = "7"
 
+# Structural index AST layer (default-on feature; disable with
+# `--no-default-features`). Pure-Rust bindings + C parsers via `cc`;
+# all MIT-licensed (see deny.toml).
+tree-sitter = { version = "0.25", optional = true }
+tree-sitter-rust = { version = "0.24", optional = true }
+tree-sitter-javascript = { version = "0.25", optional = true }
+tree-sitter-typescript = { version = "0.23", optional = true }
+tree-sitter-python = { version = "0.25", optional = true }
+tree-sitter-go = { version = "0.25", optional = true }
+
+[features]
+default = ["ast"]
+ast = [
+  "dep:tree-sitter",
+  "dep:tree-sitter-rust",
+  "dep:tree-sitter-javascript",
+  "dep:tree-sitter-typescript",
+  "dep:tree-sitter-python",
+  "dep:tree-sitter-go",
+]
+
 [dev-dependencies]
 tempfile = "3"
 assert_cmd = "2"

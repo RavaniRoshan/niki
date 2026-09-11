@@ -1048,6 +1048,7 @@ fn role_to_prompt_name(role: AgentRole) -> &'static str {
         AgentRole::Synthesizer => "synthesizer",
         AgentRole::SecurityAuditor => "security_auditor",
         AgentRole::Red => "red",
+        AgentRole::Critic => "critic",
     }
 }
 

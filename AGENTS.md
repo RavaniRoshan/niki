@@ -31,10 +31,12 @@ Rust CLI (edition 2024, MSRV 1.85). Multi-agent coding pipeline: Planner → Cod
 
 ## Architecture / extension points
 
-- Entrypoint: `src/main.rs` → `src/cli/`. Core modules: `agents/`, `orchestrator/`, `sandbox/` (Podman/Docker/worktree backends), `llm/`, `runtime/` (tool registry + baseline tools), `artifacts/` (typed + JSON-schema validated), `config/`, `output/`.
+- Entrypoint: `src/main.rs` → `src/cli/`. Core modules: `agents/`, `orchestrator/`, `sandbox/` (Podman/Docker/worktree backends), `llm/`, `runtime/` (tool registry + baseline tools), `artifacts/` (typed + JSON-schema validated), `config/`, `output/`, `repo_intel/` (deterministic manifest), `risk/` (tier classifier), `knowledge/` (KB, history miner, structural index, context pack).
 - Add a tool: implement the `Tool` trait in `src/runtime/mod.rs`, register in `build_baseline_registry()`, add tests.
 - Add a provider: implement `LlmProvider` in `src/llm/provider.rs`; add a match arm in `create_provider()` in `src/llm/mod.rs`. `src/llm/anthropic.rs` is the reference impl.
-- Agent prompts are Minijinja templates in `prompts/*.md`; add an agent role → new prompt file + schema in `schemas/` + wire into `src/orchestrator/pipeline.rs`.
+- Agent prompts are Minijinja templates in `prompts/*.md`; add an agent role → new prompt file + schema in `schemas/` + wire into `src/orchestrator/pipeline.rs`. New `AgentRole` variants require arms in `role_prompt`/`parse_role`/`isolation_sources_for`/`run_role`, `artifact_json_name`, display theme/labels, `memory/store.rs`, `recommend.rs`, and `cli/run.rs::role_filename` (see the Critic wiring as reference).
+- Risk-gated stages live in `apply_risk_stages()` (`pipeline.rs`): explicit `[pipeline].stages` is never rewritten; the Critic runs once post-loop via `run_bookkept_stage()`, never inside the revision loop.
+- Provenance (`orchestrator/provenance.rs`) and reflection (`orchestrator/reflect.rs`) are best-effort: warn, never fail the run.
 - Prefer typed `NikiError` over bare `.unwrap()` on user-facing paths.
 
 ## Config & secrets

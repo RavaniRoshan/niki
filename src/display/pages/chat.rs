@@ -48,6 +48,7 @@ fn role_label(role: AgentRole) -> &'static str {
         AgentRole::Synthesizer => "Synthesizer",
         AgentRole::SecurityAuditor => "SecurityAuditor",
         AgentRole::Red => "Red",
+        AgentRole::Critic => "Critic",
     }
 }
 
@@ -60,6 +61,7 @@ fn role_color(role: AgentRole) -> ratatui::style::Color {
         AgentRole::Synthesizer => theme::sand(),
         AgentRole::SecurityAuditor => theme::error(),
         AgentRole::Red => theme::error(),
+        AgentRole::Critic => theme::warning(),
     }
 }
 
@@ -72,6 +74,7 @@ fn role_icon(role: AgentRole) -> &'static str {
         AgentRole::Synthesizer => "⧉",
         AgentRole::SecurityAuditor => "⛨",
         AgentRole::Red => "✗",
+        AgentRole::Critic => "✗",
     }
 }
 

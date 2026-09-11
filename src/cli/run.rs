@@ -310,6 +310,7 @@ fn role_filename(role: AgentRole) -> &'static str {
         AgentRole::Synthesizer => "synthesizer",
         AgentRole::SecurityAuditor => "security_auditor",
         AgentRole::Red => "red",
+        AgentRole::Critic => "critic",
     }
 }
 
@@ -912,6 +913,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // Persist final task record.
     record.topology = Some(result.topology);
     record.topology_reason = Some(result.topology_reason.clone());
+    record.risk_level = Some(result.risk_level.clone());
+    record.risk_rationale = Some(result.risk_rationale.clone());
     if let Some(note) = &branch_block_note {
         record.status = TaskStatus::Failed {
             error: note.clone(),
@@ -927,6 +930,30 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     if let Err(e) = record.save_to_disk(&task_dir) {
         eprintln!("Warning: could not save final task state: {}", e);
     }
+
+    // Provenance completion: stamp the result branch, its commit, artifact
+    // roles, and summed cost onto manifest.json. Best-effort (warns, never
+    // fails). Skipped for dry runs, whose manifest is already accurate.
+    if !args.dry_run && config.snapshot.enabled {
+        let branch_opt = if branch_block_note.is_some() {
+            None
+        } else {
+            Some(branch_name.as_str())
+        };
+        let total_cost: f64 = result.metrics.iter().map(|m| m.cost_usd).sum();
+        crate::orchestrator::provenance::record_completion(
+            &task_dir,
+            &project_dir,
+            branch_opt,
+            &result.artifacts,
+            total_cost,
+        );
+    }
+
+    // Post-run reflection: derive durable learnings (verification failures,
+    // review corrections, security fixes) into learnings.jsonl. Gated on
+    // [repo_intel] and best-effort — the run's outcome is already recorded.
+    crate::orchestrator::reflect::record_reflections(&project_dir, &config, &task_dir, &result);
 
     if !args.quiet {
         match &branch_block_note {

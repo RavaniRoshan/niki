@@ -738,6 +738,7 @@ pub fn role_color(role: crate::artifacts::types::AgentRole) -> Color {
         crate::artifacts::types::AgentRole::Synthesizer => p.cyan,
         crate::artifacts::types::AgentRole::SecurityAuditor => p.error,
         crate::artifacts::types::AgentRole::Red => p.agent_red,
+        crate::artifacts::types::AgentRole::Critic => p.agent_orange,
     }
 }
 
@@ -750,6 +751,7 @@ pub fn role_glyph(role: crate::artifacts::types::AgentRole) -> &'static str {
         crate::artifacts::types::AgentRole::Synthesizer => "⧉",
         crate::artifacts::types::AgentRole::SecurityAuditor => "⚷",
         crate::artifacts::types::AgentRole::Red => "✗",
+        crate::artifacts::types::AgentRole::Critic => "✗",
     }
 }
 
@@ -762,6 +764,7 @@ pub fn role_name(role: crate::artifacts::types::AgentRole) -> &'static str {
         crate::artifacts::types::AgentRole::Synthesizer => "Synthesizer",
         crate::artifacts::types::AgentRole::SecurityAuditor => "Security",
         crate::artifacts::types::AgentRole::Red => "Red",
+        crate::artifacts::types::AgentRole::Critic => "Critic",
     }
 }
 
@@ -1044,12 +1047,13 @@ mod tests {
             crate::artifacts::types::AgentRole::Synthesizer,
             crate::artifacts::types::AgentRole::SecurityAuditor,
             crate::artifacts::types::AgentRole::Red,
+            crate::artifacts::types::AgentRole::Critic,
         ];
         let mut colors = std::collections::HashSet::new();
         for role in &roles {
             colors.insert(format!("{:?}", role_color(*role)));
         }
-        assert_eq!(colors.len(), 7, "All role colors should be distinct");
+        assert_eq!(colors.len(), 8, "All role colors should be distinct");
     }
 
     #[test]

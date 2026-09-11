@@ -29,6 +29,10 @@ pub enum AgentRole {
     /// defects and assumptions so the Reviewer must genuinely challenge code
     /// instead of ratifying it (guards sycophantic convergence).
     Red,
+    /// Narrow meta-verifier over the Reviewer's verdict: checks that cited
+    /// files/lines exist and claims are grounded in the diff. Can force at
+    /// most one Reviewer retry; never a gate of its own.
+    Critic,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -42,6 +46,7 @@ pub enum ArtifactType {
     Synthesis,
     SecurityVerdict,
     RedChallenge,
+    Critique,
 }
 
 // ── Artifact 1: TaskSpec (Planner → Coder) ──────────────────────
@@ -354,12 +359,39 @@ pub struct RedReconciliation {
     /// Why the Reviewer took that position.
     pub rationale: String,
 }
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RedDisposition {
     Upheld,
     Refuted,
+}
+
+// ── Artifact 9: Critique (Critic → pipeline bookkeeping) ────────────
+//
+// Produced by the narrow Critic stage after the Reviewer. The Critic does not
+// re-review the code: it verifies the verdict is grounded (every cited file
+// exists, every line range is inside the diff, every issue traces to
+// evidence). A `Reject` forces exactly one Reviewer retry with the
+// unsupported claims attached; the Critic never loops.
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Critique {
+    /// Whether the verdict stands as written.
+    pub disposition: CriticDisposition,
+    /// One-paragraph judgment: what was checked and what failed, if anything.
+    pub summary: String,
+    /// Reviewer claims with no supporting evidence (empty when Approve).
+    /// Each entry names the claim and why it is ungrounded.
+    pub unsupported_claims: Vec<String>,
+    /// Reviewer findings the Critic verified against the diff/tests.
+    pub confirmed_findings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CriticDisposition {
+    Approve,
+    Reject,
 }
 
 /// Per-agent proof of *context isolation* (BUILD_PLAN 2.1, P1.2).
@@ -402,5 +434,6 @@ pub fn artifact_json_name(role: AgentRole) -> &'static str {
         AgentRole::Synthesizer => "synthesizer",
         AgentRole::SecurityAuditor => "security_auditor",
         AgentRole::Red => "red",
+        AgentRole::Critic => "critic",
     }
 }

@@ -340,6 +340,7 @@ fn role_icon_and_color(role: AgentRole, config: &MessageRenderConfig) -> (&'stat
         AgentRole::Synthesizer => ("⧉", config.primary_color),
         AgentRole::SecurityAuditor => ("⚷", config.error_color),
         AgentRole::Red => ("✗", config.error_color),
+        AgentRole::Critic => ("✗", config.warning_color),
     }
 }
 
@@ -353,6 +354,7 @@ fn role_label(role: AgentRole) -> &'static str {
         AgentRole::Synthesizer => "synthesizer",
         AgentRole::SecurityAuditor => "security",
         AgentRole::Red => "red",
+        AgentRole::Critic => "critic",
     }
 }
 

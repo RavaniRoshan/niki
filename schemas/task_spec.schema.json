@@ -1,5 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Planner output. The Planner reasons from a bounded context pack (repo manifest + project KB + symbol-index excerpts, all advisory) — every path it names must exist or be explicitly created.",
   "type": "object",
   "properties": {
     "summary": { "type": "string" },

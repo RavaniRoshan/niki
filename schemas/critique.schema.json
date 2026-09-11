@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Critic output: verdict-grounding judgment over the Reviewer's verdict. Approve = stands as written; Reject = exactly one Reviewer retry with unsupported_claims attached.",
+  "type": "object",
+  "properties": {
+    "disposition": {
+      "type": "string",
+      "enum": ["approve", "reject"]
+    },
+    "summary": { "type": "string" },
+    "unsupported_claims": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Reviewer claims with no supporting evidence (empty when Approve)."
+    },
+    "confirmed_findings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Reviewer findings verified against the diff/tests."
+    }
+  },
+  "required": ["disposition", "summary", "unsupported_claims", "confirmed_findings"],
+  "additionalProperties": false
+}
