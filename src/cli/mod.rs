@@ -1,4 +1,5 @@
 pub mod acp;
+pub mod architecture;
 pub mod audit;
 pub mod auth;
 pub mod chat;
@@ -8,6 +9,8 @@ pub mod dashboard;
 pub mod doctor;
 pub mod eval;
 pub mod goal;
+pub mod index;
+pub mod inspect;
 pub mod memory;
 pub mod plan;
 pub mod providers;

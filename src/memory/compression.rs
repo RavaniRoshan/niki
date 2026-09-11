@@ -207,6 +207,7 @@ fn compression_path(dir: &Path, role: AgentRole) -> PathBuf {
         AgentRole::Synthesizer => "synthesizer",
         AgentRole::SecurityAuditor => "security_auditor",
         AgentRole::Red => "red",
+        AgentRole::Critic => "critic",
     };
     dir.join(format!("{}.json", role_name))
 }

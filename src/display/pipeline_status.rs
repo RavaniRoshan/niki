@@ -14,6 +14,7 @@ pub fn update_pipeline_status(stages: &[StageState], theme: &Theme) {
         AgentRole::Synthesizer,
         AgentRole::SecurityAuditor,
         AgentRole::Red,
+        AgentRole::Critic,
     ];
 
     for (i, role) in all_roles.iter().enumerate() {
@@ -28,6 +29,7 @@ pub fn update_pipeline_status(stages: &[StageState], theme: &Theme) {
                 theme.security_auditor.color.clone(),
             ),
             AgentRole::Red => (theme.red.icon, theme.red.color.clone()),
+            AgentRole::Critic => (theme.red.icon, theme.red.color.clone()),
         };
 
         let mut status = None;

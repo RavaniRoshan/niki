@@ -180,19 +180,6 @@ impl SymbolIndex {
         out
     }
 
-    /// Get the project directory from any indexed symbol.
-    fn project_dir(&self) -> PathBuf {
-        if let Some(first) = self.symbols.first() {
-            first
-                .file_path
-                .parent()
-                .unwrap_or(Path::new("."))
-                .to_path_buf()
-        } else {
-            PathBuf::from(".")
-        }
-    }
-
     /// Return all symbols for a given file.
     pub fn symbols_for_file(&self, file_path: &Path) -> Vec<&Symbol> {
         self.symbols
@@ -215,7 +202,8 @@ impl SymbolIndex {
 /// Extract symbols from source code based on language.
 /// This is a lightweight regex-based approach — not a full AST parser,
 /// but sufficient for ranking files by relevance to a query.
-fn extract_symbols(content: &str, language: &str, file_path: &Path) -> Vec<Symbol> {
+/// Shared with the structural index as its guaranteed baseline backend.
+pub(crate) fn extract_symbols(content: &str, language: &str, file_path: &Path) -> Vec<Symbol> {
     let mut symbols = Vec::new();
 
     match language {
@@ -349,10 +337,7 @@ fn extract_symbols(content: &str, language: &str, file_path: &Path) -> Vec<Symbo
                 }
                 if trimmed.starts_with("class ") {
                     let rest = &trimmed[6..];
-                    let name_end = rest
-                        .find('(')
-                        .or_else(|| rest.find(':'))
-                        .unwrap_or_else(|| rest.len());
+                    let name_end = rest.find('(').or(rest.find(':')).unwrap_or(rest.len());
                     let name = rest[..name_end].trim();
                     if !name.is_empty() {
                         symbols.push(Symbol {
@@ -526,8 +511,7 @@ interface Processable {
         fs::write(dir.join("api.rs"), "pub fn test_fn() {}\n").unwrap();
 
         let index = SymbolIndex::build(dir).unwrap();
-        let rendered =
-            index.render_relevant_context(&["nonexistent_symbol".to_string()], 5, 200);
+        let rendered = index.render_relevant_context(&["nonexistent_symbol".to_string()], 5, 200);
         assert!(rendered.contains("no source files matched"));
     }
 }

@@ -416,6 +416,8 @@ fn empty_result() -> PipelineResult {
         isolation: Vec::new(),
         topology: TopologyMode::MultiAgent,
         topology_reason: String::new(),
+        risk_level: String::new(),
+        risk_rationale: String::new(),
         test_execution: None,
     }
 }
@@ -459,6 +461,8 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
             isolation: Vec::new(),
             topology: TopologyMode::MultiAgent,
             topology_reason: String::new(),
+            risk_level: String::new(),
+            risk_rationale: String::new(),
             test_execution: None,
         },
         AgentRole::Reviewer,
@@ -480,6 +484,8 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
         isolation: Vec::new(),
         topology: TopologyMode::MultiAgent,
         topology_reason: String::new(),
+        risk_level: String::new(),
+        risk_rationale: String::new(),
         test_execution: None,
     })
 }
@@ -878,6 +884,8 @@ mod tests {
             isolation: vec![],
             topology: TopologyMode::MultiAgent,
             topology_reason: String::new(),
+            risk_level: String::new(),
+            risk_rationale: String::new(),
             test_execution: None,
         }
     }

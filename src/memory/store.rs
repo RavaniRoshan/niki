@@ -120,6 +120,7 @@ pub fn query_memory_by_tag(project_dir: &Path, tag: &str) -> Vec<(AgentRole, Mem
         AgentRole::Reviewer,
         AgentRole::SecurityAuditor,
         AgentRole::Red,
+        AgentRole::Critic,
         AgentRole::Synthesizer,
     ];
     let mut results = Vec::new();
@@ -143,6 +144,7 @@ pub fn get_all_tags(project_dir: &Path) -> Vec<String> {
         AgentRole::Reviewer,
         AgentRole::SecurityAuditor,
         AgentRole::Red,
+        AgentRole::Critic,
         AgentRole::Synthesizer,
     ];
     let mut tags = std::collections::HashSet::new();
@@ -168,6 +170,7 @@ fn memory_path(project_dir: &Path, role: AgentRole) -> PathBuf {
         AgentRole::Synthesizer => "synthesizer",
         AgentRole::SecurityAuditor => "security_auditor",
         AgentRole::Red => "red",
+        AgentRole::Critic => "critic",
     };
     project_dir
         .join(".niki")

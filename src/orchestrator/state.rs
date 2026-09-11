@@ -130,6 +130,12 @@ pub struct TaskRecord {
     /// Why that topology was selected (auto-rule or explicit config).
     #[serde(default)]
     pub topology_reason: Option<String>,
+    /// Risk tier the spec classified into (absent in old records).
+    #[serde(default)]
+    pub risk_level: Option<String>,
+    /// Why that tier was assigned.
+    #[serde(default)]
+    pub risk_rationale: Option<String>,
 }
 
 impl TaskRecord {
@@ -151,6 +157,8 @@ impl TaskRecord {
             max_ttft_ms: 0,
             topology: None,
             topology_reason: None,
+            risk_level: None,
+            risk_rationale: None,
         }
     }
 

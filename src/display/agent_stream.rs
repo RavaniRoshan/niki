@@ -70,6 +70,7 @@ fn role_label(role: AgentRole) -> &'static str {
         AgentRole::Synthesizer => "Synthesizer",
         AgentRole::SecurityAuditor => "SecurityAuditor",
         AgentRole::Red => "Red",
+        AgentRole::Critic => "Critic",
     }
 }
 
@@ -215,6 +216,7 @@ impl AgenticDisplay {
             AgentRole::Synthesizer => self.theme.synthesizer.icon,
             AgentRole::SecurityAuditor => self.theme.security_auditor.icon,
             AgentRole::Red => self.theme.red.icon,
+            AgentRole::Critic => self.theme.red.icon,
         }
     }
 
@@ -227,6 +229,7 @@ impl AgenticDisplay {
             AgentRole::Synthesizer => self.theme.synthesizer.name,
             AgentRole::SecurityAuditor => self.theme.security_auditor.name,
             AgentRole::Red => self.theme.red.name,
+            AgentRole::Critic => "Critic",
         }
     }
 
@@ -239,6 +242,7 @@ impl AgenticDisplay {
             AgentRole::Synthesizer => self.theme.synthesizer.label_style.clone(),
             AgentRole::SecurityAuditor => self.theme.security_auditor.label_style.clone(),
             AgentRole::Red => self.theme.red.label_style.clone(),
+            AgentRole::Critic => self.theme.red.label_style.clone(),
         }
     }
 

@@ -1,6 +1,6 @@
 ---
 title: Specialized Agents
-description: Red Agent debate, Parallel Coders, and Security Auditor.
+description: Red Agent debate, Parallel Coders, Security Auditor, risk gating, and the Critic.
 sidebar:
   order: 6
   label: Specialized Agents
@@ -50,4 +50,28 @@ A dedicated security pass that scans diffs for hardcoded secrets, injection vect
 enabled  = true
 provider = "anthropic"
 model    = "claude-sonnet-4-20250514"
+```
+
+---
+
+## 4. Risk-Based Gating and the Critic (`[risk]`, `[critic]`)
+
+Every spec is classified deterministically (no LLM) into `low`, `normal`,
+`high`, or `security` from touched paths, severity keywords, and edited-file
+count. `normal` adds the **Critic** after the Reviewer; `high`/`security`
+also force a SecurityAuditor. `low` runs the default path unchanged, and an
+explicit `[pipeline].stages` topology is never rewritten.
+
+The Critic is a narrow meta-verifier, not a second Reviewer: it checks that
+the verdict's cited files/lines exist and its claims trace to diff/test
+evidence. A `reject` forces exactly one Reviewer retry with the unsupported
+claims attached, followed by a closing judgment that is recorded, not enforced.
+
+```toml
+[risk]
+mode = "auto" # or force "low" | "normal" | "high" | "security"
+
+[critic]
+enabled    = true
+max_tokens = 4096
 ```

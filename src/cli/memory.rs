@@ -238,6 +238,7 @@ fn parse_role(s: &str) -> Result<AgentRole> {
         "tester" => Ok(AgentRole::Tester),
         "reviewer" => Ok(AgentRole::Reviewer),
         "red" => Ok(AgentRole::Red),
+        "critic" => Ok(AgentRole::Critic),
         "security_auditor" => Ok(AgentRole::SecurityAuditor),
         "synthesizer" => Ok(AgentRole::Synthesizer),
         _ => Err(anyhow::anyhow!(
@@ -256,6 +257,7 @@ fn memory_path(project_dir: &PathBuf, role: AgentRole) -> std::path::PathBuf {
         AgentRole::Synthesizer => "synthesizer",
         AgentRole::SecurityAuditor => "security_auditor",
         AgentRole::Red => "red",
+        AgentRole::Critic => "critic",
     };
     project_dir
         .join(".niki")

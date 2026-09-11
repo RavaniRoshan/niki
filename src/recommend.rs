@@ -66,6 +66,12 @@ pub fn recommendations() -> Vec<RoleRec> {
             cheap: ("anthropic", "claude-sonnet-4-20250514"),
             rationale: "The Red agent's job is to find what stronger models miss; it defaults to strong.",
         },
+        RoleRec {
+            role: AgentRole::Critic,
+            strong: ("anthropic", "claude-opus-4"),
+            cheap: ("anthropic", "claude-sonnet-4-20250514"),
+            rationale: "Verdict-grounding is mechanical; sonnet suffices, opus for high-stakes runs.",
+        },
     ]
 }
 

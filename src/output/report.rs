@@ -790,6 +790,8 @@ mod tests {
             isolation: vec![],
             topology: TopologyMode::Auto,
             topology_reason: String::new(),
+            risk_level: String::new(),
+            risk_rationale: String::new(),
             test_execution: None,
         }
     }
@@ -942,6 +944,8 @@ mod tests {
             isolation: vec![],
             topology: TopologyMode::Auto,
             topology_reason: String::new(),
+            risk_level: String::new(),
+            risk_rationale: String::new(),
             test_execution: None,
         };
 
@@ -994,6 +998,8 @@ mod tests {
             ],
             topology: TopologyMode::Auto,
             topology_reason: String::new(),
+            risk_level: String::new(),
+            risk_rationale: String::new(),
             test_execution: None,
         };
         let section = render_isolation_section(&result);
@@ -1066,6 +1072,8 @@ mod tests {
             isolation: vec![],
             topology: TopologyMode::Auto,
             topology_reason: String::new(),
+            risk_level: String::new(),
+            risk_rationale: String::new(),
             test_execution: None,
         }
     }
@@ -1163,6 +1171,8 @@ index 3333333..4444444 100644
             isolation: vec![],
             topology: TopologyMode::Auto,
             topology_reason: String::new(),
+            risk_level: String::new(),
+            risk_rationale: String::new(),
             test_execution: None,
         }
     }

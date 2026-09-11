@@ -4,6 +4,44 @@ All notable changes to NIKI are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Repository intelligence (`[repo_intel]`, `niki inspect [--json]`):
+  deterministic `RepoManifest` (languages, entry points, tests, build
+  files, vendor exclusion, risk cues). Fail-soft; indexing can no longer
+  abort a run unless `on_failure = "fail"`.
+- Run provenance (`[snapshot]`, `manifest.json` per task,
+  `niki status [id] --with-provenance`): repo HEAD/branch/remote, config
+  content hash, toolchain versions, result branch + costs.
+- Project KB (`niki architecture build`, `.niki/kb/`): snapshot-stamped
+  Markdown + provenance-wrapped JSON sidecars, rebuilt from scratch.
+- History miner (`.niki/history/`, cache-as-truth with rewrite detection):
+  keyword-classified commit learnings rebuilt from cache every run.
+- Structural index (`niki index build|query`, `.niki/kb/structural_index/`):
+  content-addressed per-file units, AST→regex→coverage backend ladder
+  (tree-sitter behind the default-on `ast` Cargo feature; `--no-default-features`
+  keeps the regex baseline). Advisory only — grep stays authoritative.
+- Bounded Planner context (`[general] max_context_chars`, default 48000):
+  manifest + KB + symbol excerpts + learnings, priority-ordered with an
+  explicit truncation marker.
+- Risk-based pipeline (`[risk]`, `[critic]`): deterministic TaskSpec
+  classifier (low/normal/high/security) injects the Critic after the
+  Reviewer on Normal+ and forces a SecurityAuditor on High/Security.
+  Explicit `[pipeline].stages` topologies are never rewritten.
+- Critic stage: narrow verdict-grounding checker (`prompts/critic.md`,
+  `schemas/critique.schema.json`); a Reject forces exactly one Reviewer
+  retry, then a closing judgment. Recorded, never a gate of its own.
+- Post-run reflection (`src/orchestrator/reflect.rs`): `verification_failure`,
+  `review_correction`, and `security_fix` learnings into
+  `.niki/learnings.jsonl`, flowing back to the Planner via the KB.
+- Reviewer test-evidence gate: failures/skips (or zero executed tests) on
+  business-logic tests must yield `revision_needed`, never `approved`.
+
+### Fixed
+- `[general] max_diff_lines` from `niki.toml` is now honored (it was parsed
+  but never merged into the active config).
+
 ## [0.7.0] - 2026-09-08
 
 Mega-plan execution (30 commits): plan-mode approval gates, oracle

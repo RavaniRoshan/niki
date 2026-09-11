@@ -6,8 +6,8 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use crate::artifacts::types::{
-    AgentRole, CodeDiff, IsolationRecord, RedChallenge, ReviewVerdict, SecurityVerdict, Synthesis,
-    TaskSpec, TestReport, Verdict,
+    AgentRole, CodeDiff, CriticDisposition, Critique, IsolationRecord, RedChallenge, ReviewVerdict,
+    SecurityVerdict, Synthesis, TaskSpec, TestReport, Verdict,
 };
 pub use crate::config::types::{PipelineStageConfig, TopologyMode};
 use crate::config::{NikiConfig, SecurityPolicyConfig};
@@ -69,6 +69,10 @@ pub struct PipelineResult {
     /// Why `topology` was selected (auto-rule outcome or explicit config).
     /// Rendered in the report so a fast-path collapse is never silent.
     pub topology_reason: String,
+    /// Risk tier the spec classified into (`low`/`normal`/`high`/`security`).
+    pub risk_level: String,
+    /// Why that tier was assigned (classifier rationale or explicit mode).
+    pub risk_rationale: String,
     /// Real test-suite execution result from inside the sandbox, recorded as
     /// verification evidence before the branch is created. `None` when no test
     /// command could be resolved or execution was skipped.
@@ -89,6 +93,7 @@ pub enum RoleOutput {
     Synthesizer(Synthesis),
     SecurityAuditor(SecurityVerdict),
     Red(RedChallenge),
+    Critic(Critique),
 }
 
 /// The ordered stages to run, honoring a user-defined `[pipeline]` topology when
@@ -234,6 +239,98 @@ fn security_stage_target(config: &NikiConfig) -> (String, String) {
     )
 }
 
+/// Adjust the resolved stage list by risk tier (deterministic gating):
+///
+/// - `Low`: unchanged — today's default path is untouched.
+/// - `Normal`: + Critic after the Reviewer (unless `[critic] enabled = false`).
+/// - `High`/`Security`: + Critic, and a SecurityAuditor is forced even when
+///   `[security]` is off (the tier means the run needs the audit).
+///
+/// An explicit `[pipeline].stages` topology is never rewritten: user intent
+/// wins over risk injection.
+pub fn apply_risk_stages(
+    stages: Vec<PipelineStageConfig>,
+    risk: &crate::risk::TaskRisk,
+    config: &NikiConfig,
+) -> Vec<PipelineStageConfig> {
+    use crate::risk::RiskLevel;
+    if matches!(risk.level, RiskLevel::Low) {
+        return stages;
+    }
+    if !config.pipeline.stages.is_empty() {
+        tracing::info!(
+            target: "niki::pipeline",
+            "risk is {} but [pipeline].stages is explicit — leaving the topology alone",
+            risk.level.as_str()
+        );
+        return stages;
+    }
+    let mut out = stages;
+    if matches!(risk.level, RiskLevel::High | RiskLevel::Security)
+        && !out.iter().any(|s| s.role == AgentRole::SecurityAuditor)
+    {
+        let (provider, model) = security_stage_target(config);
+        let agent = &config.agents.security_auditor;
+        out.push(PipelineStageConfig {
+            role: AgentRole::SecurityAuditor,
+            provider,
+            model,
+            skip: false,
+            max_tokens: agent.max_tokens,
+            temperature: agent.temperature,
+            fallbacks: agent.fallbacks.clone(),
+        });
+    }
+    if config.critic.enabled && !out.iter().any(|s| s.role == AgentRole::Critic) {
+        let (provider, model) = critic_stage_target(config, &out);
+        let stage = PipelineStageConfig {
+            role: AgentRole::Critic,
+            provider,
+            model,
+            skip: false,
+            // The Critic is deliberately cheap: grounding checks need
+            // determinism, not a large completion.
+            max_tokens: config.critic.effective_max_tokens(),
+            temperature: config.critic.temperature,
+            fallbacks: Vec::new(),
+        };
+        match out.iter().position(|s| s.role == AgentRole::Reviewer) {
+            Some(pos) => out.insert(pos + 1, stage),
+            None => out.push(stage),
+        }
+    }
+    out
+}
+
+/// Resolve the provider/model for the injected Critic stage: explicit
+/// `[critic]` overrides win, otherwise the resolved Reviewer's binding (so
+/// the Critic reasons at the same level as the verdict it checks).
+fn critic_stage_target(config: &NikiConfig, stages: &[PipelineStageConfig]) -> (String, String) {
+    let reviewer = stages.iter().find(|s| s.role == AgentRole::Reviewer);
+    let fallback_provider = reviewer
+        .map(|s| s.provider.clone())
+        .unwrap_or_else(|| config.agents.reviewer.provider.clone());
+    let fallback_model = reviewer
+        .map(|s| s.model.clone())
+        .unwrap_or_else(|| config.agents.reviewer.model.clone());
+    (
+        config.critic.provider.clone().unwrap_or(fallback_provider),
+        config.critic.model.clone().unwrap_or(fallback_model),
+    )
+}
+
+/// Cache key for the per-provider client map: primary + failover chain, so
+/// different failover chains never collide.
+fn provider_cache_key(stage: &PipelineStageConfig) -> String {
+    if stage.fallbacks.is_empty() {
+        stage.provider.clone()
+    } else {
+        let mut parts = vec![stage.provider.clone()];
+        parts.extend(stage.fallbacks.iter().cloned());
+        parts.join(":")
+    }
+}
+
 /// Evidence-only view of the Coder's diff for the Red agent.
 ///
 /// The Red agent must probe the change adversarially, which requires the
@@ -289,6 +386,15 @@ fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
         // never receives Tester/Reviewer/Red artifacts, so the record says so
         // even though that narrowness is itself a follow-up decision.
         SecurityAuditor => vec![Planner, Coder],
+        // The critic checks the Reviewer's verdict against the same evidence
+        // the Reviewer saw (plus Red, when that pass ran).
+        Critic => {
+            let mut v = vec![Planner, Coder, Tester, Reviewer];
+            if with_red {
+                v.push(Red);
+            }
+            v
+        }
     }
 }
 
@@ -569,6 +675,7 @@ async fn run_parallel_coders(
                 "",
                 "",
                 "",
+                "",
                 0,
                 &knowledge,
                 &project_path,
@@ -674,6 +781,7 @@ fn role_prompt(role: AgentRole) -> (&'static str, &'static str) {
         AgentRole::Synthesizer => ("synthesizer.md", "schemas/synthesis.schema.json"),
         AgentRole::SecurityAuditor => ("security_auditor.md", "schemas/security_audit.schema.json"),
         AgentRole::Red => ("red.md", "schemas/red_challenge.schema.json"),
+        AgentRole::Critic => ("critic.md", "schemas/critique.schema.json"),
     }
 }
 
@@ -692,6 +800,7 @@ async fn run_role(
     coder_json: &str,
     tester_json: &str,
     red_json: &str,
+    reviewer_json: &str,
     round: u32,
     knowledge_str: &str,
     project_path: &Path,
@@ -793,6 +902,26 @@ async fn run_role(
             project_memory => memory_str,
             mcp_tools => mcp_tools.to_string(),
         },
+        AgentRole::Critic => {
+            // Narrow meta-verifier: the spec, the Coder's evidence (never its
+            // rationale), the Tester report, and the Reviewer verdict under
+            // test — plus Red when that pass ran.
+            let mut artifacts = vec![
+                task_spec_json.clone(),
+                red_evidence_json(coder_json),
+                tester_json.to_string(),
+                reviewer_json.to_string(),
+            ];
+            if !red_json.is_empty() {
+                artifacts.push(red_json.to_string());
+            }
+            context! {
+                input_artifacts => artifacts,
+                project_knowledge => knowledge_str.to_string(),
+                project_memory => memory_str,
+                mcp_tools => mcp_tools.to_string(),
+            }
+        }
         AgentRole::Planner => {
             // Should never happen — the Planner is run separately. Keep the
             // match exhaustive and surface a clear error if it does.
@@ -837,6 +966,7 @@ async fn run_role(
             crate::display::artifact_render::render_security_verdict_summary(v)
         }
         RoleOutput::Red(v) => crate::display::artifact_render::render_red_challenge_summary(v),
+        RoleOutput::Critic(v) => crate::display::artifact_render::render_critique_summary(v),
     };
     fire_hook(
         hooks,
@@ -855,7 +985,82 @@ fn parse_role(role: AgentRole, json: &str) -> Result<RoleOutput> {
         AgentRole::Synthesizer => RoleOutput::Synthesizer(serde_json::from_str(json)?),
         AgentRole::SecurityAuditor => RoleOutput::SecurityAuditor(serde_json::from_str(json)?),
         AgentRole::Red => RoleOutput::Red(serde_json::from_str(json)?),
+        AgentRole::Critic => RoleOutput::Critic(serde_json::from_str(json)?),
     })
+}
+
+/// Run one post-loop stage (the Critic, or the single Critic-forced Reviewer
+/// retry) with the same bookkeeping as loop stages: metrics, artifacts,
+/// isolation record, display, spend cap, and incremental task record.
+#[allow(clippy::too_many_arguments)]
+async fn run_bookkept_stage(
+    stage: &PipelineStageConfig,
+    llm: &dyn LlmProvider,
+    task_spec: &TaskSpec,
+    coder_json: &str,
+    tester_json: &str,
+    red_json: &str,
+    reviewer_json: &str,
+    round: u32,
+    knowledge_str: &str,
+    project_path: &Path,
+    review_feedback: Option<&String>,
+    display: &mut AgenticDisplay,
+    metrics: &mut Vec<StageMetric>,
+    artifacts: &mut Vec<(AgentRole, String)>,
+    isolation: &mut Vec<IsolationRecord>,
+    mcp_tools: &str,
+    config: &NikiConfig,
+    hook_bus: &crate::audit::HookBus,
+    hook_task_id: &Uuid,
+    task: &Task,
+    task_dir: &Path,
+    state: &mut super::state::PipelineState,
+    bare: bool,
+    steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+) -> Result<(String, RoleOutput)> {
+    let (json, summary, output) = run_role(
+        stage.role,
+        llm,
+        &stage.model,
+        &stage.provider,
+        task_spec,
+        coder_json,
+        tester_json,
+        red_json,
+        reviewer_json,
+        round,
+        knowledge_str,
+        project_path,
+        review_feedback,
+        display,
+        metrics,
+        stage.max_tokens,
+        stage.temperature,
+        mcp_tools,
+        config_max_diff_lines(config),
+        bare,
+        hook_bus,
+        hook_task_id,
+        steer_rx,
+    )
+    .await?;
+    artifacts.push((stage.role, json.clone()));
+    isolation.push(IsolationRecord {
+        role: stage.role,
+        backend: config.docker.backend,
+        context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
+        saw_other_reasoning: false,
+    });
+    let m = metrics
+        .last()
+        .unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
+    display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
+    display.update_pipeline_status();
+    enforce_spend_cap(config.general.spend_cap_usd, metrics)?;
+    update_context_budget(metrics, state, project_path, task_dir);
+    save_task_record(task, metrics, TaskStatus::Running, task_dir);
+    Ok((json, output))
 }
 
 /// Hard-enforce the per-run spend cap. Returns an error that aborts the pipeline
@@ -977,8 +1182,28 @@ pub async fn execute_pipeline(
     } else {
         config
     };
-    // 1. Index Project
-    let knowledge = index_project(&task.project_path, config).await?;
+    // 1. Index Project — fail-soft by contract (Mantis "never fail, produce
+    // an empty index"): indexing informs the Planner but must never abort the
+    // run. Opt out via `[repo_intel] on_failure = "fail"`.
+    let knowledge = match index_project(&task.project_path, config).await {
+        Ok(k) => k,
+        Err(e) => {
+            if config.repo_intel.on_failure == "fail" {
+                return Err(e);
+            }
+            eprintln!("Warning: project indexing failed ({e}); continuing with an empty index");
+            crate::knowledge::ProjectKnowledge {
+                file_tree: String::new(),
+                detected_languages: Vec::new(),
+                package_info: Vec::new(),
+                git_recent_commits: Vec::new(),
+                skills_files: Vec::new(),
+                project_size: crate::knowledge::ProjectSize::Small,
+                external_sources: Vec::new(),
+                standing_rules: crate::knowledge::indexer::load_standing_rules(&task.project_path),
+            }
+        }
+    };
     let knowledge_str = knowledge.render();
     // Project memory is ambient history: present by default, absent when bare.
     let memory_for = |role: AgentRole| {
@@ -1047,6 +1272,31 @@ pub async fn execute_pipeline(
     // Resolve the ordered, data-driven stage list.
     let stages = ensure_planner(resolve_stages(config), config);
 
+    // Provenance anchor: snapshot the repo/config state this run reasons
+    // about, before the Planner executes. Best-effort by design — a manifest
+    // write failure warns and never fails the run.
+    let mut run_manifest =
+        super::provenance::capture(config, &task.project_path, &task.id, &stages);
+    if config.snapshot.enabled
+        && let Err(e) = super::provenance::write_manifest(task_dir, &run_manifest)
+    {
+        eprintln!("Warning: could not write run manifest: {e}");
+    }
+
+    // History mining is deterministic and cached (known commits are skipped),
+    // so it runs every time without an LLM. Failures warn and never fail the
+    // run; outside a git repo the miner records `unsupported` and stops.
+    if config.repo_intel.enabled && config.repo_intel.history {
+        let outcome = crate::knowledge::history::mine_history(
+            &task.project_path,
+            config,
+            &run_manifest.active_snapshot.snapshot_id,
+        );
+        if outcome.invalidated {
+            eprintln!("Note: git history was rewritten — history cache invalidated and rebuilt");
+        }
+    }
+
     // --- Planner (entry point) ---
     // An approved plan (`niki run --plan <id>`) skips the Planner LLM call:
     // the user-reviewed spec drives the run directly. The JSON is re-validated
@@ -1070,6 +1320,21 @@ pub async fn execute_pipeline(
             .ok_or_else(|| crate::NikiError::Config("No Planner stage configured".to_string()))?;
         let planner_llm = provider_for(&planner_stage.provider, &planner_stage.fallbacks, config)?;
 
+        // Planner context: the bounded pack (repo manifest + KB + symbol
+        // excerpts + learnings) when repo intelligence is on; the legacy full
+        // index render otherwise. Role memory injection is unchanged.
+        let planner_context = if config.repo_intel.enabled {
+            let repo_manifest = crate::repo_intel::build_manifest(&task.project_path, config);
+            crate::knowledge::context_pack::build_context_pack(
+                &task.project_path,
+                config,
+                &task.description,
+                &repo_manifest,
+            )
+        } else {
+            knowledge_str.clone()
+        };
+
         run_stage(
             AgentRole::Planner,
             planner_llm.as_ref(),
@@ -1078,7 +1343,7 @@ pub async fn execute_pipeline(
             "planner.md",
             context! {
                 task_description => task.description.clone(),
-                project_knowledge => knowledge_str.clone(),
+                project_knowledge => planner_context,
                 project_memory => memory_for(AgentRole::Planner),
             },
             "schemas/task_spec.schema.json",
@@ -1141,6 +1406,14 @@ pub async fn execute_pipeline(
     let topology = select_topology(&task_spec, config);
     let topology_reason = topology_reason(&task_spec, config);
 
+    // Risk gating: classify the spec, then adjust the stage list (Critic on
+    // Normal+, SecurityAuditor forced on High/Security). Runs before the
+    // dry-run return so dry runs report the same risk the real run would use.
+    // Explicit `[pipeline].stages` topologies are never rewritten.
+    let task_risk = crate::risk::classify(&task_spec, config);
+    let stages = apply_risk_stages(stages, &task_risk, config);
+    let topology_reason = format!("{}; risk: {}", topology_reason, task_risk.rationale);
+
     // Dry-run: stop after the Planner and surface the spec without executing.
     if dry_run {
         fire_hook(
@@ -1148,6 +1421,14 @@ pub async fn execute_pipeline(
             crate::audit::HookEvent::PostTaskStop,
             serde_json::json!({"task_id": task.id.to_string(), "dry_run": true}),
         )?;
+        // The manifest still records what the dry run reasoned about (no
+        // branch by design). Best-effort like every provenance write.
+        if config.snapshot.enabled {
+            run_manifest.dry_run = true;
+            if let Err(e) = super::provenance::write_manifest(task_dir, &run_manifest) {
+                eprintln!("Warning: could not update run manifest: {e}");
+            }
+        }
         return Ok(PipelineResult {
             task_id: task.id,
             context_budget: state.context_budget.clone(),
@@ -1162,6 +1443,8 @@ pub async fn execute_pipeline(
             isolation,
             topology,
             topology_reason: topology_reason.clone(),
+            risk_level: task_risk.level.as_str().to_string(),
+            risk_rationale: task_risk.rationale.clone(),
             test_execution: None,
         });
     }
@@ -1232,6 +1515,8 @@ pub async fn execute_pipeline(
     let mut coder_json = String::new();
     let mut tester_json = String::new();
     let mut red_json = String::new();
+    // Latest Reviewer verdict JSON, fed to the post-loop Critic pass.
+    let mut reviewer_json = String::new();
     // Revision feedback is intentionally latest-round-only: each Reviewer
     // verdict OVERWRITES (never appends), so a retrying Coder sees the
     // current critique, not an accumulation of stale guidance. Full history
@@ -1322,6 +1607,7 @@ pub async fn execute_pipeline(
                     &coder_json_in,
                     "",
                     "",
+                    "",
                     0,
                     &knowledge_str,
                     &task.project_path,
@@ -1371,11 +1657,13 @@ pub async fn execute_pipeline(
 
                 // 3) Run the remaining stages (Tester / Red / Reviewer / SecurityAuditor)
                 //    exactly once. In parallel mode the coders don't re-run on revision
-                //    feedback, so there is no inner revision loop.
-                for stage in body_stages
-                    .iter()
-                    .filter(|s| s.role != AgentRole::Coder && s.role != AgentRole::Synthesizer)
-                {
+                //    feedback, so there is no inner revision loop. The Critic is
+                //    excluded here: it runs once post-loop with the final verdict.
+                for stage in body_stages.iter().filter(|s| {
+                    s.role != AgentRole::Coder
+                        && s.role != AgentRole::Synthesizer
+                        && s.role != AgentRole::Critic
+                }) {
                     let cache_key = if stage.fallbacks.is_empty() {
                         stage.provider.clone()
                     } else {
@@ -1395,6 +1683,7 @@ pub async fn execute_pipeline(
                         &coder_json,
                         &tester_json,
                         &red_json,
+                        &reviewer_json,
                         0,
                         &knowledge_str,
                         &task.project_path,
@@ -1439,6 +1728,7 @@ pub async fn execute_pipeline(
                         }
                         RoleOutput::Reviewer(v) => {
                             verdict = v.verdict;
+                            reviewer_json = json;
                         }
                         RoleOutput::SecurityAuditor(_) => {}
                         _ => unreachable!("only Tester/Red/Reviewer/SecurityAuditor remain"),
@@ -1452,7 +1742,7 @@ pub async fn execute_pipeline(
                         save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir);
                         return Err(crate::NikiError::Cancelled.into());
                     }
-                    for stage in &body_stages {
+                    for stage in body_stages.iter().filter(|s| s.role != AgentRole::Critic) {
                         let cache_key = if stage.fallbacks.is_empty() {
                             stage.provider.clone()
                         } else {
@@ -1472,6 +1762,7 @@ pub async fn execute_pipeline(
                             &coder_json,
                             &tester_json,
                             &red_json,
+                            &reviewer_json,
                             round,
                             &knowledge_str,
                             &task.project_path,
@@ -1528,6 +1819,7 @@ pub async fn execute_pipeline(
                             }
                             RoleOutput::Reviewer(v) => {
                                 verdict = v.verdict;
+                                reviewer_json = json.clone();
                                 review_feedback = match v.feedback {
                                     Some(f) => Some(serde_json::to_string_pretty(&f)?),
                                     None => None,
@@ -1556,6 +1848,11 @@ pub async fn execute_pipeline(
                                 }
                             }
                             RoleOutput::Planner(_) => unreachable!("planner is handled separately"),
+                            // The Critic is filtered from loop iteration and
+                            // runs once post-loop with the final verdict.
+                            RoleOutput::Critic(_) => {
+                                unreachable!("critic runs post-loop, never in the loop")
+                            }
                         }
                     }
 
@@ -1745,6 +2042,142 @@ pub async fn execute_pipeline(
         }
     }
 
+    // Critic pass (risk-gated, max-once by construction): checks that the
+    // Reviewer verdict is grounded in the diff/test evidence. A Reject forces
+    // exactly one Reviewer retry with the unsupported claims attached,
+    // followed by a closing Critic run. The Critic never loops and never
+    // gates on its own — the verdict follows the (possibly retried)
+    // Reviewer; both Critiques stay in the artifact trail. Skipped when no
+    // Reviewer ran (e.g. the single-agent fast-path).
+    if topology == TopologyMode::MultiAgent && !reviewer_json.is_empty() {
+        let critic_stage = stages
+            .iter()
+            .find(|s| s.role == AgentRole::Critic && !s.skip)
+            .cloned();
+        let reviewer_stage = stages
+            .iter()
+            .find(|s| s.role == AgentRole::Reviewer && !s.skip)
+            .cloned();
+        if let (Some(critic_stage), Some(reviewer_stage)) = (critic_stage, reviewer_stage) {
+            let critic_llm = provider_cache
+                .get(&provider_cache_key(&critic_stage))
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Provider '{}' not found in cache", critic_stage.provider)
+                })?
+                .clone();
+            let (_critic_json, critic_output) = run_bookkept_stage(
+                &critic_stage,
+                &*critic_llm,
+                &task_spec,
+                &coder_json,
+                &tester_json,
+                &red_json,
+                &reviewer_json,
+                round,
+                &knowledge_str,
+                &task.project_path,
+                None,
+                display,
+                &mut metrics,
+                &mut artifacts,
+                &mut isolation,
+                &mcp_tools,
+                config,
+                &hook_bus,
+                &task.id,
+                task,
+                task_dir,
+                &mut state,
+                bare,
+                steer_rx,
+            )
+            .await?;
+            let rejected = matches!(
+                critic_output,
+                RoleOutput::Critic(ref c) if matches!(c.disposition, CriticDisposition::Reject)
+            );
+            if rejected && let RoleOutput::Critic(critique) = critic_output {
+                // One exact Reviewer retry with the critique as guidance.
+                let retry_guidance = format!(
+                    "The Critic rejected the previous verdict as ungrounded: {}\nUnsupported claims:\n- {}\nRe-verify each claim against the diff and test evidence, then render a fresh verdict.",
+                    critique.summary,
+                    critique.unsupported_claims.join("\n- ")
+                );
+                review_feedback = Some(retry_guidance);
+                let reviewer_llm = provider_cache
+                    .get(&provider_cache_key(&reviewer_stage))
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("Provider '{}' not found in cache", reviewer_stage.provider)
+                    })?
+                    .clone();
+                let (retry_json, retry_output) = run_bookkept_stage(
+                    &reviewer_stage,
+                    &*reviewer_llm,
+                    &task_spec,
+                    &coder_json,
+                    &tester_json,
+                    &red_json,
+                    &reviewer_json,
+                    round,
+                    &knowledge_str,
+                    &task.project_path,
+                    review_feedback.as_ref(),
+                    display,
+                    &mut metrics,
+                    &mut artifacts,
+                    &mut isolation,
+                    &mcp_tools,
+                    config,
+                    &hook_bus,
+                    &task.id,
+                    task,
+                    task_dir,
+                    &mut state,
+                    bare,
+                    steer_rx,
+                )
+                .await?;
+                if let RoleOutput::Reviewer(v) = retry_output {
+                    verdict = v.verdict;
+                    reviewer_json = retry_json;
+                    // No further rounds exist post-loop, so the retried
+                    // verdict's feedback has nowhere to go — the verdict
+                    // itself is what the closing Critic judges.
+                }
+                round += 1;
+                // Closing Critic run: records the final grounding judgment.
+                // Its disposition is recorded, not enforced.
+                run_bookkept_stage(
+                    &critic_stage,
+                    &*critic_llm,
+                    &task_spec,
+                    &coder_json,
+                    &tester_json,
+                    &red_json,
+                    &reviewer_json,
+                    round,
+                    &knowledge_str,
+                    &task.project_path,
+                    None,
+                    display,
+                    &mut metrics,
+                    &mut artifacts,
+                    &mut isolation,
+                    &mcp_tools,
+                    config,
+                    &hook_bus,
+                    &task.id,
+                    task,
+                    task_dir,
+                    &mut state,
+                    bare,
+                    steer_rx,
+                )
+                .await?;
+            }
+        }
+    }
+
     // Read the resulting diff. For the Docker backend the patch was applied to the
     // bind-mounted host project, so we read the host working tree directly. For
     // worktree the change lives only in the sandbox copy, so we read it from
@@ -1821,6 +2254,8 @@ pub async fn execute_pipeline(
         isolation,
         topology,
         topology_reason: topology_reason.clone(),
+        risk_level: task_risk.level.as_str().to_string(),
+        risk_rationale: task_risk.rationale.clone(),
         test_execution,
     })
 }

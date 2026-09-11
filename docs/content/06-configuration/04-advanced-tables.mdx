@@ -64,3 +64,38 @@ enabled         = true
 threshold_pct   = 85 # Trigger compaction when 85% of model context is filled
 reserved_tokens = 4096
 ```
+
+---
+
+## `[repo_intel]`, `[risk]`, `[snapshot]`, and `[critic]`
+
+Repository intelligence, risk-gated topology, run provenance, and the Critic stage:
+
+```toml
+[repo_intel]
+enabled          = true
+structural_index = true
+history          = true
+max_units        = 10000
+disk_budget_mb   = 512
+on_failure       = "warn" # or "fail"
+ast              = true   # tree-sitter layer (only in `ast`-feature builds)
+
+[risk]
+mode                 = "auto" # or "low" | "normal" | "high" | "security"
+file_count_threshold = 9
+
+[snapshot]
+enabled        = true
+retention_days = 14
+
+[critic]
+enabled    = true  # injected on Normal+ risk tiers only
+max_tokens = 4096  # deliberately cheap; grounding checks need determinism
+```
+
+Risk tiers map to stages: `low` runs today's default path unchanged;
+`normal` adds the Critic after the Reviewer; `high`/`security` also force a
+SecurityAuditor. An explicit `[pipeline].stages` topology is never rewritten.
+The Critic is a narrow verdict-grounding checker — a Reject forces exactly one
+Reviewer retry, then a closing judgment is recorded.

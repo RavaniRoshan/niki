@@ -13,6 +13,10 @@ spend_cap_usd = 0.0
 # Optional diff-size guardrail: when non-zero, the Reviewer is nudged toward tighter
 # deltas and report.md flags diffs that exceed this many added lines. 0 = off.
 max_diff_lines = 0
+# Hard character budget for the Planner's assembled repo context
+# (manifest + KB + symbol-index excerpts). Sections are priority-ordered;
+# the remainder is cut with an explicit marker.
+max_context_chars = 48000
 
 [providers.anthropic]
 api_key = "sk-ant-..."               # Or set ANTHROPIC_API_KEY env var
@@ -135,8 +139,7 @@ model = "meta/llama-3.1-405b-instruct"
 # urls = ["https://example.com/architecture.md"]
 # max_source_chars = 8000
 
-# Optional: rebind global TUI keys (action id → key specs like "ctrl+p", "?", "f5").
-# Ids: toggle_help, toggle_mouse, cancel_exit, command_palette, cycle_theme,
+# Optional: rebind global TUI keys (action id → key specs like "ctrl+p", "?", "f5").# Ids: toggle_help, toggle_mouse, cancel_exit, command_palette, cycle_theme,
 # toggle_chat, goto_fleet, goto_session. Unknown ids and bad specs are
 # reported in the help overlay (?), never fatal. Clashes resolve by table
 # order (first wins).
@@ -216,3 +219,35 @@ network_disabled = true
 # [hooks.commands]
 # PreTaskStart = ["echo \"starting $NIKI_HOOK_PAYLOAD\" >> .niki/hooks.log"]
 # PostTaskStop = ["echo \"finished $NIKI_HOOK_PAYLOAD\" >> .niki/hooks.log"]
+
+# Repository intelligence: deterministic structural understanding (no LLM).
+# Powers `niki inspect`, the KB, and the structural index. Fail-soft:
+# steps log and continue on failure unless on_failure = "fail".
+# [repo_intel]
+# enabled = true
+# structural_index = true
+# history = true
+# max_units = 10000
+# disk_budget_mb = 512
+# on_failure = "warn"
+# ast = true  # tree-sitter extraction layer (only in builds with the `ast`
+              # Cargo feature, on by default; `false` forces regex-only)
+
+# Risk-based pipeline gating (deterministic TaskSpec classifier, no LLM).
+# mode = "auto" classifies per run; force with "low" | "normal" | "high" | "security".
+# [risk]
+# mode = "auto"
+# file_count_threshold = 9
+
+# Run snapshot anchoring: records the exact repo/config state each run saw
+# in .niki/tasks/<id>/manifest.json (retention is informational in v1).
+# [snapshot]
+# enabled = true
+# retention_days = 14
+
+# Adversarial critic over the Reviewer's verdict (narrow meta-verifier:
+# checks cited files/lines exist and claims are grounded; max one retry).
+# Only injected on Normal+ risk tiers; Low runs are unchanged.
+# [critic]
+# enabled = true
+# max_tokens = 4096

@@ -79,6 +79,18 @@ enum Commands {
     Research(niki::cli::research::ResearchArgs),
     /// Record and transcribe a voice message
     Voice(niki::cli::voice::VoiceArgs),
+    /// Inspect repository structure (languages, entry points, risk signals)
+    Inspect(niki::cli::inspect::InspectArgs),
+    /// Build the project knowledge base (architecture, entities, history)
+    Architecture {
+        #[command(subcommand)]
+        command: niki::cli::architecture::ArchitectureCommands,
+    },
+    /// Build and query the structural symbol index (advisory code graph)
+    Index {
+        #[command(subcommand)]
+        command: niki::cli::index::IndexCommands,
+    },
     /// Capture a screenshot for visual verification
     Verify(niki::cli::verify::VerifyArgs),
 }
@@ -129,6 +141,9 @@ async fn main() -> Result<()> {
         Commands::Research(args) => niki::cli::research::handle(args).await?,
         Commands::Verify(args) => niki::cli::verify::handle(args)?,
         Commands::Voice(args) => niki::cli::voice::handle(args).await?,
+        Commands::Inspect(args) => niki::cli::inspect::handle(args)?,
+        Commands::Architecture { command } => niki::cli::architecture::handle(command).await?,
+        Commands::Index { command } => niki::cli::index::handle(command)?,
     }
 
     Ok(())

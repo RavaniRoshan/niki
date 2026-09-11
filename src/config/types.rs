@@ -69,6 +69,18 @@ pub struct NikiConfig {
     /// AGENTS.md / project instructions configuration.
     #[serde(default)]
     pub instructions: InstructionsConfig,
+    /// Repository intelligence (structural understanding of the repo).
+    #[serde(default)]
+    pub repo_intel: RepositoryIntelligenceConfig,
+    /// Deterministic risk classification gating pipeline topology.
+    #[serde(default)]
+    pub risk: RiskConfig,
+    /// Run snapshot anchoring for provenance.
+    #[serde(default)]
+    pub snapshot: SnapshotConfig,
+    /// Adversarial critic pass over the Reviewer's verdict.
+    #[serde(default)]
+    pub critic: CriticConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -728,6 +740,222 @@ fn default_auto_detect_agents_md() -> bool {
     true
 }
 
+/// Repository intelligence: deterministic structural understanding of the repo.
+///
+/// Additive and fail-soft: every advanced consumer (structural index, history
+/// miner, KB) degrades to warn-and-continue when disabled or when a step
+/// fails, so `niki run` never breaks because of intelligence bookkeeping.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RepositoryIntelligenceConfig {
+    /// Master switch for repo-intel consumers (inspect, KB, structural index).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Build/refresh the content-addressed structural symbol index.
+    #[serde(default = "default_true")]
+    pub structural_index: bool,
+    /// Mine git history into cached learnings.
+    #[serde(default = "default_true")]
+    pub history: bool,
+    /// Max files the manifest/index walk will consider; excess truncates with
+    /// `truncated = true` rather than failing.
+    #[serde(default = "default_repo_intel_max_units")]
+    pub max_units: usize,
+    /// Disk budget (MB) for on-disk caches under `<output_dir>/kb/`.
+    #[serde(default = "default_repo_intel_disk_budget_mb")]
+    pub disk_budget_mb: u64,
+    /// Failure posture for intel steps: `"warn"` (log and continue) or
+    /// `"fail"` (abort the run). Anything else warns and behaves as `"warn"`.
+    #[serde(default = "default_repo_intel_on_failure")]
+    pub on_failure: String,
+    /// Use the tree-sitter AST extraction layer when the `ast` Cargo feature
+    /// is compiled in. `false` forces the regex-only baseline.
+    #[serde(default = "default_true")]
+    pub ast: bool,
+}
+
+impl Default for RepositoryIntelligenceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            structural_index: true,
+            history: true,
+            max_units: default_repo_intel_max_units(),
+            disk_budget_mb: default_repo_intel_disk_budget_mb(),
+            on_failure: default_repo_intel_on_failure(),
+            ast: true,
+        }
+    }
+}
+
+fn default_repo_intel_max_units() -> usize {
+    10000
+}
+
+fn default_repo_intel_disk_budget_mb() -> u64 {
+    512
+}
+
+fn default_repo_intel_on_failure() -> String {
+    "warn".to_string()
+}
+
+/// Which risk tier a run is treated at. `Auto` classifies deterministically
+/// from the TaskSpec; the other variants force a tier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RiskMode {
+    /// Classify from the TaskSpec via keyword/path heuristics.
+    #[default]
+    Auto,
+    Low,
+    Normal,
+    High,
+    Security,
+}
+
+/// Deterministic risk classification gating pipeline topology.
+///
+/// No LLM call: classification is a cheap keyword/path heuristic over the
+/// TaskSpec, so it can run before any stage executes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RiskConfig {
+    #[serde(default)]
+    pub mode: RiskMode,
+    /// File-count threshold above which a run is bumped one tier.
+    #[serde(default = "default_risk_file_count_threshold")]
+    pub file_count_threshold: usize,
+    /// Substrings matched (case-insensitive) against spec text to detect
+    /// security-sensitive work.
+    #[serde(default = "default_risk_denylist_patterns")]
+    pub denylist_patterns: Vec<String>,
+    /// Keywords matched against spec text that raise severity one notch.
+    #[serde(default = "default_risk_severity_keywords")]
+    pub severity_keywords: Vec<String>,
+}
+
+impl Default for RiskConfig {
+    fn default() -> Self {
+        Self {
+            mode: RiskMode::default(),
+            file_count_threshold: default_risk_file_count_threshold(),
+            denylist_patterns: default_risk_denylist_patterns(),
+            severity_keywords: default_risk_severity_keywords(),
+        }
+    }
+}
+
+fn default_risk_file_count_threshold() -> usize {
+    9
+}
+
+fn default_risk_denylist_patterns() -> Vec<String> {
+    [
+        "auth",
+        "security",
+        "crypto",
+        "secret",
+        "key",
+        "token",
+        "permission",
+        "password",
+        "credential",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+fn default_risk_severity_keywords() -> Vec<String> {
+    [
+        "vuln",
+        "cve",
+        "exploit",
+        "injection",
+        "xss",
+        "unsafe",
+        "panic",
+        "leak",
+        "privilege",
+        "sandbox",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// Run snapshot anchoring: records the exact repo/config state a run reasoned
+/// about so later runs (and `niki status`) can answer "what did this see?".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SnapshotConfig {
+    /// Write `.niki/tasks/<id>/manifest.json` provenance records.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// How long snapshot metadata is retained (informational in v1; the
+    /// `niki/<id>` branch remains the authoritative anchor).
+    #[serde(default = "default_snapshot_retention_days")]
+    pub retention_days: u64,
+}
+
+impl Default for SnapshotConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            retention_days: default_snapshot_retention_days(),
+        }
+    }
+}
+
+fn default_snapshot_retention_days() -> u64 {
+    14
+}
+
+/// Adversarial critic pass over the Reviewer's verdict.
+///
+/// The Critic is a narrow meta-verifier (not a second Reviewer): it checks
+/// that the verdict's claims are grounded (cited files/lines exist, issues
+/// reference the actual diff) and can force at most one Reviewer retry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CriticConfig {
+    /// Inject the Critic stage on Normal+ risk tiers.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Optional provider override; defaults to the Reviewer's binding.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Optional model override; defaults to the Reviewer's model.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Max tokens for the Critic call. `0` = cheaper built-in default (4096).
+    #[serde(default)]
+    pub max_tokens: u32,
+    /// Temperature for the Critic call. `0.0` = deterministic default.
+    #[serde(default)]
+    pub temperature: f32,
+}
+
+impl Default for CriticConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            provider: None,
+            model: None,
+            max_tokens: 0,
+            temperature: 0.0,
+        }
+    }
+}
+
+impl CriticConfig {
+    /// Effective max_tokens: per-config override, else the cheaper critic default.
+    pub fn effective_max_tokens(&self) -> u32 {
+        if self.max_tokens > 0 {
+            self.max_tokens
+        } else {
+            4096
+        }
+    }
+}
+
 fn default_coder_count() -> u32 {
     2
 }
@@ -831,6 +1059,15 @@ pub struct GeneralConfig {
     /// smaller diffs when this is set.
     #[serde(default = "default_max_diff_lines")]
     pub max_diff_lines: u32,
+    /// Hard character budget for the Planner's assembled repo context
+    /// (manifest + KB + symbol-index excerpts). Sections are added in priority
+    /// order and the remainder is cut with a marker, never silently.
+    #[serde(default = "default_max_context_chars")]
+    pub max_context_chars: usize,
+}
+
+fn default_max_context_chars() -> usize {
+    48000
 }
 
 fn default_max_diff_lines() -> u32 {
@@ -845,6 +1082,7 @@ impl Default for GeneralConfig {
             output_dir: ".niki".to_string(),
             spend_cap_usd: 0.0,
             max_diff_lines: 0,
+            max_context_chars: default_max_context_chars(),
         }
     }
 }
@@ -1103,6 +1341,10 @@ impl NikiConfig {
         "commands",
         "permissions",
         "instructions",
+        "repo_intel",
+        "risk",
+        "snapshot",
+        "critic",
     ];
 
     fn warn_unknown_sections(content: &str, path: &std::path::Path) {
@@ -1233,6 +1475,12 @@ impl NikiConfig {
         self.general.max_revision_rounds = other.general.max_revision_rounds;
         self.general.output_dir = other.general.output_dir;
         self.general.spend_cap_usd = other.general.spend_cap_usd;
+        if other.general.max_diff_lines != default_max_diff_lines() {
+            self.general.max_diff_lines = other.general.max_diff_lines;
+        }
+        if other.general.max_context_chars != default_max_context_chars() {
+            self.general.max_context_chars = other.general.max_context_chars;
+        }
 
         for (k, v) in other.providers {
             self.providers.insert(k, v);
@@ -1360,6 +1608,21 @@ impl NikiConfig {
                 }
             }
             self.commands.extra_dirs = merged;
+        }
+        // Repo-intel / risk / snapshot / critic: adopt the overlay when it
+        // differs from defaults, so global settings survive a local file that
+        // does not mention these sections.
+        if other.repo_intel != RepositoryIntelligenceConfig::default() {
+            self.repo_intel = other.repo_intel;
+        }
+        if other.risk != RiskConfig::default() {
+            self.risk = other.risk;
+        }
+        if other.snapshot != SnapshotConfig::default() {
+            self.snapshot = other.snapshot;
+        }
+        if other.critic != CriticConfig::default() {
+            self.critic = other.critic;
         }
     }
 
@@ -1530,7 +1793,8 @@ impl NikiConfig {
                         "max_revision_rounds": {"type": "integer", "default": 3},
                         "output_dir": {"type": "string", "default": ".niki"},
                         "spend_cap_usd": {"type": "number", "default": 0.0, "description": "Hard per-run USD ceiling; aborts before the next stage if exceeded."},
-                        "max_diff_lines": {"type": "integer", "default": 0, "description": "Diff-size guardrail; reviewer nudged toward tighter deltas and report.md flags overflows."}
+                        "max_diff_lines": {"type": "integer", "default": 0, "description": "Diff-size guardrail; reviewer nudged toward tighter deltas and report.md flags overflows."},
+                        "max_context_chars": {"type": "integer", "default": 48000, "description": "Hard character budget for the Planner's assembled repo context."}
                     }
                 },
                 "providers": {
@@ -1577,7 +1841,11 @@ impl NikiConfig {
                 "compaction": {"type": "object", "properties": {"strategy": {"type": "string"}}},
                 "mcp": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
                 "permissions": {"type": "object", "properties": {"mode": {"type": "string"}, "disable_worktree": {"type": "boolean"}, "fail_closed_headless": {"type": "boolean"}, "auto_approve": {"type": "boolean"}}},
-                "instructions": {"type": "object"}
+                "instructions": {"type": "object"},
+                "repo_intel": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "structural_index": {"type": "boolean"}, "history": {"type": "boolean"}, "max_units": {"type": "integer"}, "disk_budget_mb": {"type": "integer"}, "on_failure": {"type": "string"}, "ast": {"type": "boolean"}}},
+                "risk": {"type": "object", "properties": {"mode": {"type": "string", "enum": ["auto", "low", "normal", "high", "security"]}, "file_count_threshold": {"type": "integer"}}},
+                "snapshot": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "retention_days": {"type": "integer"}}},
+                "critic": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "provider": {"type": "string"}, "model": {"type": "string"}, "max_tokens": {"type": "integer"}, "temperature": {"type": "number"}}}
             },
             "$defs": {
                 "agent": {
@@ -1856,5 +2124,50 @@ max_exec_seconds = 600
         assert!(!c.permissions.fail_closed_headless);
         assert!(!c.permissions.disable_worktree);
         assert_eq!(c.permissions.mode, "manual");
+    }
+
+    #[test]
+    fn repo_intel_risk_snapshot_critic_round_trip() {
+        let toml = r#"
+[repo_intel]
+enabled = true
+max_units = 500
+ast = false
+
+[risk]
+mode = "high"
+
+[snapshot]
+retention_days = 30
+
+[critic]
+enabled = false
+max_tokens = 2048
+"#;
+        let c: NikiConfig = toml::from_str(toml).unwrap();
+        assert_eq!(c.repo_intel.max_units, 500);
+        assert!(!c.repo_intel.ast);
+        assert_eq!(c.risk.mode, RiskMode::High);
+        assert_eq!(c.snapshot.retention_days, 30);
+        assert!(!c.critic.enabled);
+        assert_eq!(c.critic.effective_max_tokens(), 2048);
+        // Untouched sections keep fail-soft defaults.
+        assert!(c.repo_intel.enabled);
+        assert!(c.snapshot.enabled);
+        assert_eq!(c.risk.file_count_threshold, 9);
+        assert!(!c.risk.denylist_patterns.is_empty());
+    }
+
+    #[test]
+    fn new_sections_merge_preserves_global_when_local_omits() {
+        let mut base = NikiConfig::default();
+        let global: NikiConfig = toml::from_str("[risk]\nmode = \"security\"\n").unwrap();
+        base.merge(global);
+        assert_eq!(base.risk.mode, RiskMode::Security);
+        // A local file without [risk] parses to defaults and must not wipe it.
+        let local: NikiConfig = toml::from_str("[general]\nmax_revision_rounds = 5\n").unwrap();
+        base.merge(local);
+        assert_eq!(base.risk.mode, RiskMode::Security);
+        assert_eq!(base.general.max_revision_rounds, 5);
     }
 }
