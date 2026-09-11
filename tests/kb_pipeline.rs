@@ -235,6 +235,9 @@ async fn critic_reject_forces_one_retry_and_learning() {
         .with_mock_provider();
     harness.config.critic.provider = Some("mock".to_string());
     harness.config.critic.model = Some("mock-critic".to_string());
+    // The mock pipeline needs only git/node/npm/python3; the default
+    // extra_packages (nodejs, ...) vary by platform and are absent in CI.
+    harness.config.docker.extra_packages.clear();
 
     let result = harness.run_pipeline().await;
     assert_eq!(result.risk_level, "normal");
