@@ -108,9 +108,12 @@ async fn dry_run_writes_provenance_manifest() {
 
 #[tokio::test]
 async fn full_clean_run_updates_manifest_without_learnings() {
-    let harness = TestHarness::new()
+    let mut harness = TestHarness::new()
         .with_worktree_backend()
         .with_mock_provider();
+    // The mock pipeline needs only git/node/npm/python3; the default
+    // extra_packages (nodejs, ...) vary by platform and are absent in CI.
+    harness.config.docker.extra_packages.clear();
     let result = harness.run_pipeline().await;
     assert_eq!(format!("{:?}", result.verdict), "Approved");
     assert_eq!(format!("{:?}", result.topology), "SingleAgent");
@@ -174,10 +177,13 @@ async fn testgap_rejection_records_verification_failure() {
             150,
             50,
         );
-    let harness = TestHarness::new()
+    let mut harness = TestHarness::new()
         .with_mock_builder(|_| builder)
         .with_worktree_backend()
         .with_mock_provider();
+    // The mock pipeline needs only git/node/npm/python3; the default
+    // extra_packages (nodejs, ...) vary by platform and are absent in CI.
+    harness.config.docker.extra_packages.clear();
     let result = harness.run_pipeline().await;
     assert_eq!(format!("{:?}", result.verdict), "Approved");
 
