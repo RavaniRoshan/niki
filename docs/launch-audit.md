@@ -62,7 +62,7 @@ Build: `dist-workspace.toml` (cargo-dist v0.32.0)
 
 ### Core Pipeline
 - Four-agent pipeline: Planner → Coder → Tester → Reviewer
-- Podman/Docker sandbox with rootless containers, CapDrop ALL, read-only rootfs
+- Podman/Docker sandbox with rootless containers, CapDrop ALL, network disabled, optional read-only rootfs (off by default)
 - Git worktree alternative backend (no container runtime required)
 - Per-agent provider/model mixing (different providers per role)
 - Reviewer-driven revision loop (up to `max_revision_rounds`)
@@ -140,7 +140,7 @@ Build: `dist-workspace.toml` (cargo-dist v0.32.0)
 
 1. **Four independent agents** — Not a single monolithic model. Each agent (Planner/Coder/Tester/Reviewer) has its own prompt, model, and context. Independence eliminates confirmation bias.
 
-2. **Hermetic sandbox by default** — Podman/Docker rootless containers with CapDrop ALL, read-only rootfs, network disabled by default. Agent commands run as untrusted input. Git worktree alternative for lightweight use.
+2. **Hermetic sandbox by default** — Podman/Docker rootless containers with CapDrop ALL, network disabled by default, optional read-only rootfs. Agent commands run as untrusted input. Git worktree alternative for lightweight use.
 
 3. **Output is a git branch** — `niki/<id>` branch with real commit, diff, report, and per-agent artifacts. Reviewable like a human PR. No opaque auto-commits to main.
 

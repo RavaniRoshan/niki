@@ -9,15 +9,14 @@
 > end up babysitting the thing I bought to save time (the babysitting tax).
 >
 > **What NIKI does differently.** One sentence in, a verified pull request out.
-> Four *independent* agents — Planner → Coder → Tester → Reviewer — each in its
-> own sandbox, sharing no history, exchanging only typed artifacts. The
+> Four *independent* agents — Planner → Coder → Tester → Reviewer — sharing no history, exchanging only typed artifacts, executed inside a sandbox. The
 > Reviewer can bounce work back to the Coder. You get a `niki/<id>` git branch
 > with a real commit, a diff, and a full audit trail (`report.md`,
 > `changes.patch`, per-agent JSON). Nothing lands on `main` until you say so.
 >
 > **Three things I refused to compromise on:**
-> 1. **Your working tree is never touched mid-run.** Hermetic Podman/Docker
->    sandboxes (or a git-worktree backend that needs no container at all).
+> 1. **Committed branches are never rewritten mid-run.** Hermetic Podman/Docker
+>    sandboxes (or a git-worktree backend that needs no container at all); the finished diff is applied to the working tree for review.
 > 2. **Honest costs.** Every run reports exact tokens and dollars, a spend cap
 >    aborts past your ceiling, and unpriced models warn instead of pretending
 >    to cost $0.00. A small task is ~$0.01 on Sonnet, $0.00 on local Ollama.
