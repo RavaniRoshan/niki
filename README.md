@@ -14,9 +14,9 @@
 
 **One sentence in, a verified pull request out.**
 
-Four independent LLM agents — **Planner → Coder → Tester → Reviewer** — run in hermetic
-sandboxes and hand you a reviewable `niki/<id>` branch with a full audit trail.
-Your working tree is never touched.
+Four independent LLM agents — **Planner → Coder → Tester → Reviewer** — run in a hermetic
+sandbox and hand you a reviewable `niki/<id>` branch with a full audit trail.
+Committed branches are never rewritten; the host working tree is updated to apply the finished diff for review.
 
 <br>
 
@@ -76,14 +76,14 @@ Today's AI coding tools — Cursor, Devin — run on a **single agent** in one l
 - **Context drift** — output quality degrades as the conversation grows.
 - **The babysitting tax** — you must constantly steer, correct, and re-verify its work.
 
-Niki takes a different path. Work is split across **independent agents that can't influence one another** — isolated at both the **filesystem** layer (each runs in its own Podman or Docker container against a copy of the repo) and the **context** layer (they share no history; they exchange only typed artifacts). Independence is the whole point: it's what removes the bias a single agent can't escape. You describe the task, the agents debate their way to a result, and you review a finished branch.
+Niki takes a different path. Work is split across **independent agents that can't influence one another** — isolated at the **context** layer (they share no history; they exchange only typed artifacts) and executed inside a Podman or Docker sandbox. Sequential stages intentionally share one execution sandbox so the diff persists from Coder → Tester → Reviewer; independence is at the LLM-session layer, not per-stage containers. Independence is the whole point: it's what removes the bias a single agent can't escape. You describe the task, the agents debate their way to a result, and you review a finished branch.
 
 **Who it's for** — solo developers, indie hackers, and small teams (2–5) who already use AI coding tools but are tired of the prompt-response loop, and want to delegate complex, multi-file tasks and review a polished result instead.
 
 |   |   |
 |---|---|
 | 🧩 **Multi-agent, not monolithic** | Planning, coding, testing, and review are separate agents with their own prompts and models — each does one job well, instead of one model doing everything at once. |
-| 🔒 **Hermetic by default** | All work happens in a Podman or Docker sandbox bind-mounted to a *copy* of your project. Your working tree is never mutated mid-run. |
+| 🔒 **Hermetic by default** | All work happens in a Podman or Docker sandbox bind-mounted to your project (Docker writes through the mount; worktree applies the diff back). Committed branches are never repointed and history is never rewritten; the working tree receives the finished diff for review. |
 | 🌿 **Output is a git branch** | You get `niki/<id>` with a real commit, a diff, and artifacts — reviewable like any human PR. No opaque auto-commits to `main`. |
 | 🔑 **BYOK & provider-mixing** | Bring your own keys. Give each agent a different provider/model — a strong reasoner for Planner/Reviewer, a cheap model for Tester. |
 | 🔁 **Reviewer-driven revisions** | The Reviewer can bounce work back to the Coder for up to `max_revision_rounds` before completion. |
@@ -235,7 +235,7 @@ niki run "..." --backend worktree   # no container runtime
 ### Security & privacy
 
 - **No telemetry.** Only outbound traffic is your LLM API calls (or local Ollama).
-- **Sandboxed by default.** Rootless container with CapDrop ALL, read-only rootfs.
+- **Sandboxed by default.** Rootless container with CapDrop ALL, network disabled, optional read-only rootfs (`[docker] readonly_rootfs`, off by default; the bind-mounted workspace stays writable).
 - **Your keys, never bundled.** BYOK only; keys redacted from logs and reports.
 - **Spend cap enforced.** Aborts before branch creation if cost exceeds limit.
 - **Audit trail.** Per-agent artifacts, metrics, `safety_proof.json`, `trace.jsonl`, and `niki audit` bundles for every run.
@@ -249,6 +249,7 @@ niki run "..." --backend worktree   # no container runtime
 | `niki run <description>` | Run the pipeline. Flags: `--project`, `--branch`, `--max-rounds`, `--backend`, `--tui`, `--dry-run`, `--plan <id>`, `--force`, `--bare`, `--output-format text\|json`, `--permission-mode`, `--otel-endpoint`, per-agent `--*-model`. |
 | `niki plan <description>` | Plan mode: research without executing; writes reviewable `plan.md`. Approve with `niki run --plan <id>`. |
 | `niki session` | `list/show/checkpoints/undo/rewind [--mode both\|code\|conversation]` chat & pipeline sessions. |
+| `niki resume <id>` | Resume an interrupted agent session from a checkpoint. |
 | `niki commands` | `list/show/expand` user slash commands (`.niki/commands/*.md` + `[commands] extra_dirs`). |
 | `niki audit [id]` | Consolidated JSON compliance bundle for one task (record, proofs, costs, trace). |
 | `niki init [--scan]` | Initialize `niki.toml` (alias for `config init`); `--scan` drafts `AGENTS.md` from the project index. |
@@ -293,10 +294,18 @@ src/
 ├── persistence/   # mission-scoped JSON storage
 ├── output/        # git branch/commit, patch, report generation
 ├── artifacts/     # typed artifacts + JSON-schema validation
-├── knowledge/     # KB store, history miner, structural index, context pack
 ├── config/        # niki.toml loading & env overrides
 ├── display/       # streaming TUI + non-TTY log fallback
-└── cli/           # run / status / report / config
+├── memory/        # hierarchical memory store & compression
+├── session/       # interactive session tracking & rewind
+├── goal/          # multi-iteration autonomous goal loop
+├── mcp/           # Model Context Protocol client & gateway
+├── skills/        # skill registry, discovery & promotion
+├── store/         # converged storage engine (hybrid vector + FTS)
+├── permissions/   # command and tool execution policy
+├── audit/         # lifecycle hook execution & audit logging
+├── eval/          # evaluation runner & scoring harness
+└── cli/           # run / status / report / config / goal / memory / skills
 prompts/           # externalized agent prompts (*.md)
 docker/            # sandbox image (Dockerfile)
 ```

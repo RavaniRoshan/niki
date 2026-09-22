@@ -24,8 +24,31 @@ jobs:
       - uses: actions/setup-node@v7
       - name: Check formatting
         run: cargo fmt --check
-      - name: Clippy lints
-        run: set -eo pipefail; cargo clippy --all-targets 2>&1 | tail -40
+      - name: Clippy lints (fatal)
+        run: cargo clippy --all-targets -- -D warnings
+
+  # ── Phase 1-msrv: Minimum Supported Rust Version (1.85) ─────────────
+  msrv:
+    name: MSRV (1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85.0"
+      - uses: actions/setup-node@v7
+      - name: Check MSRV build
+        run: cargo check --all-targets
+
+  # ── Phase 1-features: Build without default features ────────────────
+  no-default-features:
+    name: Build (--no-default-features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build without default features
+        run: cargo build --no-default-features
 
   # ── Phase 1b: Supply-chain audit (cargo-audit + cargo-deny) ────────
   audit:
@@ -91,11 +114,13 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
-    needs: check
+    needs: [check, msrv, no-default-features]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v7
+      - name: Run artifact contracts and lifecycle tests
+        run: cargo test --test artifact_contracts --test run_lifecycle --verbose
       - name: Run unit + integration tests
         run: cargo test --verbose
       - name: Build release binary

@@ -323,6 +323,41 @@ fn redact_generic_patterns(text: &str) -> String {
     result
 }
 
+/// Cap serialized tool specs before sending: at most 16 tools, descriptions
+/// truncated to 2k chars, parameter schemas capped at ~8k serialized chars.
+/// Prevents a large registry from blowing up the prompt (context-rot defense).
+pub fn capped_tool_specs(tools: &[ToolSpec]) -> Vec<ToolSpec> {
+    tools
+        .iter()
+        .take(16)
+        .map(|t| {
+            let description: String = t.description.chars().take(2000).collect();
+            let params_str = t.parameters.to_string();
+            let parameters = if params_str.len() > 8192 {
+                serde_json::json!({"type": "object"})
+            } else {
+                t.parameters.clone()
+            };
+            ToolSpec {
+                name: t.name.chars().take(128).collect(),
+                description,
+                parameters,
+            }
+        })
+        .collect()
+}
+
+/// Cap a tool-call argument payload (~16k serialized chars); oversized args
+/// are replaced with an explicit truncation marker object.
+pub fn capped_tool_arguments(args: &serde_json::Value) -> serde_json::Value {
+    let s = args.to_string();
+    if s.len() > 16384 {
+        serde_json::json!({"_truncated": "arguments exceeded 16k chars"})
+    } else {
+        args.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -15,7 +15,7 @@
           },
           "category": {
             "type": "string",
-            "enum": ["bug", "security", "performance", "style", "logic", "test_gap", "spec_deviation"]
+            "enum": ["bug", "security", "performance", "style", "logic", "test_gap", "spec_deviation", "correctness", "boundary"]
           },
           "claim": { "type": "string" },
           "confidence": {

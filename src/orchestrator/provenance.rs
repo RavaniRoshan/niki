@@ -138,6 +138,33 @@ pub fn read_manifest(task_dir: &Path) -> Result<RunManifest> {
     Ok(serde_json::from_str(&content)?)
 }
 
+/// Prune task directories older than `retention_days` in `tasks_dir`.
+/// Best effort: errors warn and never fail the run.
+pub fn prune_stale_snapshots(tasks_dir: &Path, retention_days: u64) {
+    if retention_days == 0 || !tasks_dir.is_dir() {
+        return;
+    }
+    let max_age = std::time::Duration::from_secs(retention_days * 86400);
+    let now = std::time::SystemTime::now();
+    if let Ok(entries) = std::fs::read_dir(tasks_dir) {
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type()
+                && file_type.is_dir()
+            {
+                if let Ok(meta) = entry.metadata()
+                    && let Ok(modified) = meta.modified()
+                {
+                    if let Ok(age) = now.duration_since(modified)
+                        && age > max_age
+                    {
+                        let _ = std::fs::remove_dir_all(entry.path());
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Best-effort completion update: stamps the result branch, its commit, the
 /// artifact roles, and the summed cost. Never fails — warnings go to stderr.
 pub fn record_completion(

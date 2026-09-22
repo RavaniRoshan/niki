@@ -123,16 +123,29 @@ pub enum HookOutcome {
 }
 
 /// A registry of hook commands keyed by event, plus the runner.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct HookBus {
     scripts: HashMap<HookEvent, Vec<String>>,
+    timeout: std::time::Duration,
+}
+
+impl Default for HookBus {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HookBus {
     pub fn new() -> Self {
         Self {
             scripts: HashMap::new(),
+            timeout: std::time::Duration::from_secs(30),
         }
+    }
+
+    /// Override the per-hook timeout. `0` waits forever (explicit opt-out).
+    pub fn set_timeout_secs(&mut self, secs: u64) {
+        self.timeout = std::time::Duration::from_secs(secs);
     }
 
     /// Register a hook command for an event (multiple commands run in order).
@@ -177,7 +190,7 @@ impl HookBus {
             return HookOutcome::Allow;
         };
         for command in commands {
-            match run_one(command, event, payload) {
+            match run_one(command, event, payload, self.timeout) {
                 HookOutcome::Block(reason) => return HookOutcome::Block(reason),
                 HookOutcome::Noop => continue,
                 HookOutcome::Allow => continue,
@@ -188,7 +201,17 @@ impl HookBus {
 }
 
 /// Run a single hook command and interpret its exit contract.
-fn run_one(command: &str, event: HookEvent, payload: &str) -> HookOutcome {
+///
+/// Phase 5.4: bounded by `timeout` (`0` = unbounded). A hook that exceeds the
+/// budget is killed on Unix (best-effort `kill -9` by pid — the pid cannot be
+/// recycled before we reap it) and always degrades to Noop-with-warning, so a
+/// hanging hook hangs neither the run nor the policy decision.
+fn run_one(
+    command: &str,
+    event: HookEvent,
+    payload: &str,
+    timeout: std::time::Duration,
+) -> HookOutcome {
     let mut child = match Command::new("sh")
         .arg("-c")
         .arg(command)
@@ -208,13 +231,44 @@ fn run_one(command: &str, event: HookEvent, payload: &str) -> HookOutcome {
         // Best-effort: hooks that exit without reading stdin (e.g. `exit 2`,
         // `printf ...`) close the pipe first, so this write can hit EPIPE
         // after the child is already gone. That must not mask the child's
-        // exit code — fall through to wait_with_output either way.
+        // exit code — fall through to the wait either way.
         let _ = s.write_all(payload.as_bytes());
     }
 
-    let output = match child.wait_with_output() {
-        Ok(o) => o,
-        Err(_) => return HookOutcome::Noop,
+    // `wait_with_output` has no timeout, so wait on a thread and bound it
+    // with `recv_timeout`. The waiter thread reaps the child either way.
+    let pid = child.id();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    let output = if timeout.is_zero() {
+        match rx.recv() {
+            Ok(Ok(o)) => o,
+            _ => return HookOutcome::Noop,
+        }
+    } else {
+        match rx.recv_timeout(timeout) {
+            Ok(Ok(o)) => o,
+            _ => {
+                // Best-effort kill: the child is still ours (unreaped), so
+                // the pid is valid. Non-Unix platforms orphan the hook;
+                // either way the run continues as Noop.
+                #[cfg(unix)]
+                {
+                    let _ = Command::new("sh")
+                        .arg("-c")
+                        .arg(format!("kill -9 {pid} 2>/dev/null"))
+                        .status();
+                }
+                eprintln!(
+                    "Warning: hook for {} exceeded {}s; treating as Noop",
+                    event.as_str(),
+                    timeout.as_secs()
+                );
+                return HookOutcome::Noop;
+            }
+        }
     };
 
     if !output.status.success() {
@@ -326,6 +380,28 @@ mod tests {
             HookOutcome::Block(r) => assert!(r.contains("no push")),
             other => panic!("expected Block, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn hanging_hook_times_out_to_noop() {
+        // Phase 5.4: a hook sleeping 30s with a 1s budget returns in well
+        // under 2s and never Blocks (run_one degrades to Noop-with-warning;
+        // the bus then allows — the run continues).
+        let mut bus = HookBus::new();
+        bus.set_timeout_secs(1);
+        bus.register(HookEvent::PreToolBash, "sleep 30".to_string());
+        let start = std::time::Instant::now();
+        let outcome = bus.run(HookEvent::PreToolBash, "payload");
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "hook must time out fast, took {:?}",
+            start.elapsed()
+        );
+        assert!(
+            !matches!(outcome, HookOutcome::Block(_)),
+            "timeout must never block, got {:?}",
+            outcome
+        );
     }
 
     #[test]

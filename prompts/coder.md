@@ -24,6 +24,11 @@ Fix ONLY the issues identified above. Do NOT change files/aspects listed as "kee
 {{ project_memory }}
 {% endif %}
 
+{% if mcp_tools %}
+## Available Tools (MCP gateway)
+{{ mcp_tools }}
+{% endif %}
+
 ## Current File Contents
 The following are the EXACT current contents of the files you are asked to modify. You MUST
 preserve their existing code and produce edits that modify them **in place**.

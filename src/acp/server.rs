@@ -240,6 +240,9 @@ pub async fn run(project_dir: PathBuf) -> std::io::Result<()> {
                 capabilities(),
             ),
             "prompt/send" => {
+                // Reset cancel state from any previous session/cancel so a
+                // subsequent prompt/send starts from a clean slate.
+                cancel.store(false, std::sync::atomic::Ordering::SeqCst);
                 let params: crate::acp::protocol::PromptParams = match request.params.clone() {
                     Some(p) => serde_json::from_value(p).unwrap_or_else(|_| {
                         crate::acp::protocol::PromptParams {

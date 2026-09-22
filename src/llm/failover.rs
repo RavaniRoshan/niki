@@ -340,6 +340,103 @@ impl LlmProvider for FailoverProvider {
             .map(|(name, _, _)| name.as_str())
             .unwrap_or("failover")
     }
+
+    /// Propagate the active provider's structured-output capability so callers
+    /// can route through `request_structured` instead of plain `complete()`.
+    /// Without this override, FailoverProvider always reports `false` (the
+    /// trait default), so structured output silently degrades on failover.
+    fn supports_structured_output(&self) -> bool {
+        self.chain
+            .first()
+            .map(|(name, provider, _)| {
+                let supported = provider.supports_structured_output();
+                tracing::debug!(
+                    target: "niki::failover",
+                    provider = name.as_str(),
+                    supports_structured = supported,
+                    "FailoverProvider::supports_structured_output"
+                );
+                supported
+            })
+            .unwrap_or(false)
+    }
+
+    /// Route structured output through the failover chain: try each provider's
+    /// `request_structured` in order, respecting circuit breakers. This keeps
+    /// the structured-output path consistent with `complete()` — the first
+    /// healthy provider that honors the schema serves the request.
+    async fn request_structured(
+        &self,
+        request: CompletionRequest,
+        schema: &serde_json::Value,
+    ) -> Result<CompletionResponse> {
+        let mut last_err = None;
+
+        for (name, provider, breaker) in &self.chain {
+            {
+                let mut b = breaker.lock().await;
+                if !b.allows_request() {
+                    continue;
+                }
+            }
+
+            match provider.request_structured(request.clone(), schema).await {
+                Ok(response) => {
+                    let mut b = breaker.lock().await;
+                    b.record_success();
+                    if self
+                        .chain
+                        .first()
+                        .is_some_and(|(first, _, _)| first != name)
+                    {
+                        tracing::warn!(
+                            target: "niki::failover",
+                            provider = name.as_str(),
+                            "Structured output served by fallback provider; primary unavailable"
+                        );
+                    }
+                    tracing::debug!(
+                        target: "niki::failover",
+                        provider = name.as_str(),
+                        "Structured output request succeeded"
+                    );
+                    return Ok(response);
+                }
+                Err(e) => {
+                    let err_str = e.to_string().to_lowercase();
+                    let is_transient = err_str.contains("timeout")
+                        || err_str.contains("rate")
+                        || err_str.contains("429")
+                        || err_str.contains("503")
+                        || err_str.contains("overloaded")
+                        || err_str.contains("connection")
+                        || err_str.contains("network");
+
+                    {
+                        let mut b = breaker.lock().await;
+                        b.record_failure();
+                    }
+
+                    if is_transient {
+                        tracing::warn!(
+                            target: "niki::failover",
+                            provider = name.as_str(),
+                            error = %e,
+                            "Transient structured-output error — trying next provider"
+                        );
+                        last_err = Some(e);
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| {
+            anyhow!("All providers in failover chain failed for structured output")
+        }))
+    }
 }
 
 /// Health check result for a single provider.
@@ -502,5 +599,55 @@ mod tests {
         cb.record_failure();
         // The failures from 150ms ago are pruned; only the recent one counts.
         assert_eq!(cb.state(), CircuitState::Closed);
+    }
+
+    // ---- FailoverProvider structured-output propagation ----
+
+    #[test]
+    fn failover_provider_propagates_structured_output_capability() {
+        // OpenAI supports structured output; FailoverProvider must report
+        // the same capability so callers route through request_structured.
+        let configs = std::collections::HashMap::new();
+        let mut configs = configs;
+        configs.insert(
+            "openai".to_string(),
+            ProviderConfig {
+                api_key: Some("test".to_string()),
+                ..Default::default()
+            },
+        );
+        configs.insert(
+            "anthropic".to_string(),
+            ProviderConfig {
+                api_key: Some("test".to_string()),
+                ..Default::default()
+            },
+        );
+        let provider =
+            FailoverProvider::new("openai", &["anthropic".to_string()], &configs).unwrap();
+        assert!(
+            provider.supports_structured_output(),
+            "FailoverProvider must propagate the primary's structured-output capability"
+        );
+    }
+
+    #[test]
+    fn failover_provider_reports_false_when_primary_unsupported() {
+        // Anthropic does not support structured output; FailoverProvider
+        // must report false so callers fall back to plain complete().
+        let configs = std::collections::HashMap::new();
+        let mut configs = configs;
+        configs.insert(
+            "anthropic".to_string(),
+            ProviderConfig {
+                api_key: Some("test".to_string()),
+                ..Default::default()
+            },
+        );
+        let provider = FailoverProvider::new("anthropic", &[], &configs).unwrap();
+        assert!(
+            !provider.supports_structured_output(),
+            "FailoverProvider must report false when the primary does not support structured output"
+        );
     }
 }

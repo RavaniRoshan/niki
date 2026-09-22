@@ -105,6 +105,8 @@ impl LlmProvider for GoogleProvider {
                 cached_input_tokens,
                 reasoning_tokens,
             },
+            // Phase 3.1: no native tool support on this provider —
+            // `tools` is ignored and `tool_calls` stays empty by design.
             tool_calls: Vec::new(),
         })
     }

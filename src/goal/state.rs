@@ -45,7 +45,11 @@ pub struct GoalState {
     pub tasks: Vec<GoalTask>,
     pub current_task: usize,
     pub iterations: u32,
+    /// Micro-USD accrued across executed pipeline tasks (Phase 5.5).
     pub budget_used: u64,
+    /// Micro-USD ceiling (Phase 5.5 cost halt). 0 = unlimited.
+    #[serde(default)]
+    pub max_budget: u64,
     pub max_iterations: u32,
     pub negative_knowledge: Vec<String>,
     pub context_summary: String,
@@ -100,6 +104,16 @@ pub struct DriftSignals {
     pub reentry_rate: f64,
     /// Last-checked timestamp.
     pub checked_at: String,
+}
+
+impl DriftSignals {
+    /// True when any cheap drift signal breaches its tolerance threshold:
+    /// - goal adherence drops below 0.5
+    /// - environment coherence drops below 0.5
+    /// - re-entry / repetition rate exceeds 0.7
+    pub fn is_drifting(&self) -> bool {
+        self.goal_adherence < 0.5 || self.env_coherence < 0.5 || self.reentry_rate > 0.7
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,9 +277,11 @@ impl GoalState {
     /// Returns `Some(DriftSignals)` if any signal breaches its threshold,
     /// indicating the goal is drifting.
     pub fn check_drift(&self) -> Option<DriftSignals> {
-        // Placeholder: in a full implementation these would be computed from
-        // recent pipeline outputs. For now we return None (no drift detected)
-        // so existing behavior is preserved.
+        if let Some(ref d) = self.drift {
+            if d.is_drifting() {
+                return Some(d.clone());
+            }
+        }
         None
     }
 }
@@ -350,6 +366,7 @@ mod tests {
             current_task: 0,
             iterations: 0,
             budget_used: 0,
+            max_budget: 0,
             max_iterations: 30,
             negative_knowledge: vec![],
             context_summary: String::new(),

@@ -21,6 +21,27 @@ pub fn write_restricted(path: &std::path::Path, contents: impl AsRef<[u8]>) -> s
     Ok(())
 }
 
+/// Atomic + restricted write: temp file in the same directory + rename + 0600,
+/// so state files are both crash-safe and secret-safe. Use for JSON session,
+/// memory, and chat state that currently goes through `write_restricted`.
+pub fn write_atomic_restricted(
+    path: &std::path::Path,
+    contents: impl AsRef<[u8]>,
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("tmp-niki-atomic");
+    std::fs::write(&tmp, contents)?;
+    #[cfg(unix)]
+    {
+        let perms = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(&tmp, perms)?;
+    }
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 /// Stable, non-cryptographic 64-bit FNV-1a hash, hex-encoded. Used for local
 /// content fingerprints (cache keys, workdir/config identity) where crypto
 /// would add a dependency for no security benefit: these hashes detect

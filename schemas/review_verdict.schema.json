@@ -28,7 +28,7 @@
           },
           "category": {
             "type": "string",
-            "enum": ["bug", "security", "performance", "style", "logic", "test_gap", "spec_deviation"]
+            "enum": ["bug", "security", "performance", "style", "logic", "test_gap", "spec_deviation", "correctness", "boundary"]
           },
           "file_path": { "type": ["string", "null"] },
           "line_range": { "type": ["string", "null"] },
@@ -71,7 +71,7 @@
               },
               "category": {
                 "type": "string",
-                "enum": ["bug", "security", "performance", "style", "logic", "test_gap", "spec_deviation"]
+                "enum": ["bug", "security", "performance", "style", "logic", "test_gap", "spec_deviation", "correctness", "boundary"]
               },
               "file_path": { "type": ["string", "null"] },
               "line_range": { "type": ["string", "null"] },

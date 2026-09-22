@@ -108,14 +108,32 @@ fn deny_error_message_contains_context() {
 }
 
 #[test]
-fn allow_list_takes_precedence_over_deny() {
+fn deny_wins_over_allow_on_overlap() {
+    // Phase 5.3: deny always wins, independent of evaluation order. The old
+    // allow-bypass let overlapping allow entries escalate past the deny-list.
     let policy = SecurityPolicyConfig {
         allowed_commands: vec!["git diff".to_string()],
         denied_commands: vec!["git".to_string()],
         ..Default::default()
     };
-    // "git diff" is in the allow-list, so it should pass even though "git" is denied
+    assert!(check_command_policy(&["git", "diff"], &policy).is_err());
+    // Non-overlapping allow entries still pass.
+    let policy = SecurityPolicyConfig {
+        allowed_commands: vec!["git diff".to_string()],
+        denied_commands: vec!["git push".to_string()],
+        ..Default::default()
+    };
     assert!(check_command_policy(&["git", "diff"], &policy).is_ok());
+    assert!(check_command_policy(&["git", "push"], &policy).is_err());
+}
+
+#[test]
+fn coder_rm_is_bounded_by_global_deny() {
+    // The coder allow-list contains bare `rm`, but `rm -rf /` stays denied
+    // via the global list while plain `rm` still passes.
+    let policy = niki::config::types::default_coder_policy();
+    assert!(check_command_policy(&["rm", "-rf", "/"], &policy).is_err());
+    assert!(check_command_policy(&["rm", "scratch.txt"], &policy).is_ok());
 }
 
 #[test]

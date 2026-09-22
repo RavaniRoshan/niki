@@ -10,7 +10,7 @@ description: Turn a sentence into a verified pull request. Hermetic multi-agent 
 NIKI is an open-source, hermetic multi-agent coding engine written in Rust. Four specialized LLM agents — **Planner → Coder → Tester → Reviewer** — collaborate inside a rootless Podman or Docker container to produce a verified git branch (`niki/<id>`), a unified diff, and a full audit trail.
 
 <Callout type="tip">
-  **Your working tree is never touched mid-run.** NIKI clones your workspace into an isolated container sandbox, debates the implementation, executes real test suites, and hands you a clean branch ready for human review.
+  **Committed branches are never rewritten mid-run.** NIKI runs the pipeline inside an isolated container sandbox, debates the implementation, executes real test suites, and hands you a clean branch ready for human review — the host working tree receives the finished diff for review.
 </Callout>
 
 ```bash

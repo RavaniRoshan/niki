@@ -46,17 +46,37 @@ pub enum IndexStatus {
 /// Atomic commit point for one index build.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexManifest {
+    #[serde(default)]
     pub snapshot_id: String,
+    #[serde(default = "default_index_status")]
     pub status: IndexStatus,
     /// Extractor ladder that produced this index (`regex@1`, `ts@1+regex@1`).
+    #[serde(default)]
     pub resolver_version: String,
     /// Language → backend actually used (`ast`, `regex`, `coverage`).
+    #[serde(default)]
     pub precision: HashMap<String, String>,
+    #[serde(default)]
     pub units_total: usize,
+    #[serde(default)]
     pub units_indexed: usize,
+    #[serde(default)]
     pub units_coverage_only: usize,
+    #[serde(default)]
     pub units_skipped: usize,
+    #[serde(default)]
     pub truncated: bool,
+    /// Store schema version; mismatches warn loudly instead of emptying silently.
+    #[serde(default = "structural_schema_version")]
+    pub schema_version: u32,
+}
+
+fn default_index_status() -> IndexStatus {
+    IndexStatus::Empty
+}
+
+fn structural_schema_version() -> u32 {
+    1
 }
 
 /// Precision tier of a single answer.
@@ -81,32 +101,48 @@ impl Precision {
 /// One extracted symbol with its (possibly approximate) span.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexedSymbol {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub kind: String,
+    #[serde(default)]
     pub line: usize,
+    #[serde(default)]
     pub end_line: usize,
+    #[serde(default)]
     pub definition: String,
 }
 
 /// One caller → callee edge inside a file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallEdge {
+    #[serde(default)]
     pub caller: String,
+    #[serde(default)]
     pub callee: String,
+    #[serde(default)]
     pub line: usize,
 }
 
 /// One cached per-file extraction unit.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnitFile {
+    #[serde(default)]
     pub key: String,
+    #[serde(default)]
     pub path: String,
+    #[serde(default)]
     pub language: String,
     /// `ast`, `regex`, or `coverage` (no symbols extracted).
+    #[serde(default)]
     pub backend: String,
+    #[serde(default)]
     pub digest: String,
+    #[serde(default)]
     pub symbols: Vec<IndexedSymbol>,
+    #[serde(default)]
     pub imports: Vec<String>,
+    #[serde(default)]
     pub calls: Vec<CallEdge>,
 }
 
@@ -353,6 +389,7 @@ pub fn build_index(
         units_coverage_only: coverage_only,
         units_skipped: skipped,
         truncated,
+        schema_version: 1,
     };
     crate::knowledge::kb::write_atomic(
         &manifest_path(project_path, config),

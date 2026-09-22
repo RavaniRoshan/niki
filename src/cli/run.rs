@@ -83,6 +83,20 @@ pub struct RunArgs {
     #[arg(long)]
     pub max_rounds: Option<u32>,
 
+    /// Override the unified run budget: max billable steps (stages + retries
+    /// + tool-loop steps). Exhaustion stops the run with BudgetExhausted.
+    #[arg(long)]
+    pub max_steps: Option<u32>,
+
+    /// Override the unified run budget: max estimated USD (falls back to
+    /// spend_cap_usd when unset).
+    #[arg(long)]
+    pub max_usd: Option<f64>,
+
+    /// Override the unified run budget: max wallclock seconds.
+    #[arg(long)]
+    pub max_wallclock_secs: Option<u64>,
+
     /// Override planner model
     #[arg(long)]
     pub planner_model: Option<String>,
@@ -148,10 +162,6 @@ pub struct RunArgs {
     /// forced branch is explicitly NOT a verified branch.
     #[arg(long)]
     pub force: bool,
-
-    /// Show full agent reasoning (not just summaries)
-    #[arg(long)]
-    pub verbose: bool,
 
     /// Render a rich terminal TUI (panels per agent stage) instead of the
     /// inline streaming view. Requires a TTY; ignored when piped.
@@ -339,6 +349,16 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     if let Some(r) = args.max_rounds {
         config.general.max_revision_rounds = r;
     }
+    // Phase 5.5: CLI overrides land in the unified `[budget]` table.
+    if let Some(s) = args.max_steps {
+        config.budget.max_steps = s;
+    }
+    if let Some(u) = args.max_usd {
+        config.budget.max_usd = u;
+    }
+    if let Some(w) = args.max_wallclock_secs {
+        config.budget.max_wallclock_secs = w;
+    }
     if let Some(ref m) = args.planner_model {
         config.agents.planner.model = m.clone();
     }
@@ -445,9 +465,10 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         let task_dir = task_dir.clone();
         let task_id_str = task.id.to_string();
         let output_dir = output_dir_for_ctrlc;
-        let worktree_dir = project_dir_for_ctrlc
-            .join(&output_dir)
-            .join(format!(".niki-worktrees/{}", task_id_str));
+        // Phase 5.2: worktrees live at <project>/.niki-worktrees/<id> (see
+        // `WorktreeSandbox::create`), NOT under the output dir — the old path
+        // cleaned a directory that never exists, leaking worktrees.
+        let project_for_ctrlc = project_dir_for_ctrlc.clone();
         tokio::spawn(async move {
             if signal::ctrl_c().await.is_ok() {
                 eprintln!("\n Shutting down — cleaning up...");
@@ -477,13 +498,13 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 rec.status = TaskStatus::Cancelled;
                 let _ = rec.save_to_disk(&task_dir);
 
-                // Clean up any leftover .niki-worktrees/<task_id> dirs that were
-                // created for parallel coder agents. Left behind after a cancelled
-                // or killed run, they can be large and are never reused. See
-                // research report S13.
-                if worktree_dir.exists() {
-                    let _ = std::fs::remove_dir_all(&worktree_dir);
-                }
+                // Clean up any leftover .niki-worktrees/<task_id> dirs (plus
+                // suffixed parallel-coder siblings) via the real location.
+                // Left behind after a cancelled run they are never reused.
+                crate::sandbox::worktree::cleanup_worktrees_for_task(
+                    &project_for_ctrlc,
+                    &task_id_str,
+                );
 
                 eprintln!(" Partial results saved under ./{}/tasks/", output_dir);
                 // 130 = 128 + SIGINT(2), the conventional exit code for Ctrl+C.
@@ -502,9 +523,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         let containers = containers.clone();
         let task_dir = task_dir.clone();
         let task_id_str = task.id.to_string();
-        let worktree_cleanup = project_dir_for_signal
-            .join(&output_dir)
-            .join(format!(".niki-worktrees/{}", task.id));
+        // Phase 5.2: real worktree location (see Ctrl+C path above).
+        let project_for_sigterm = project_dir_for_signal.clone();
         tokio::spawn(async move {
             let mut sigterm = match signal(SignalKind::terminate()) {
                 Ok(s) => s,
@@ -530,9 +550,10 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                     }
                 }
             }
-            if worktree_cleanup.exists() {
-                let _ = std::fs::remove_dir_all(&worktree_cleanup);
-            }
+            crate::sandbox::worktree::cleanup_worktrees_for_task(
+                &project_for_sigterm,
+                &task_id_str,
+            );
             let mut rec =
                 TaskRecord::new(uuid::Uuid::parse_str(&task_id_str).unwrap_or_default(), "");
             rec.status = TaskStatus::Cancelled;
@@ -633,15 +654,19 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 rec.total_retry_count = existing.total_retry_count;
                 rec.max_ttft_ms = existing.max_ttft_ms;
             }
-            rec.status = TaskStatus::Failed {
-                error: e.to_string(),
-            };
-            let _ = rec.save_to_disk(&task_dir);
-
-            // T9: Emit OS notification for failure or cancellation.
-            if let Some(crate::NikiError::Cancelled) = e.downcast_ref::<crate::NikiError>() {
+            let is_cancelled = e
+                .downcast_ref::<crate::NikiError>()
+                .map(|ne| matches!(ne, crate::NikiError::Cancelled))
+                .unwrap_or(false);
+            if is_cancelled {
+                rec.status = TaskStatus::Cancelled;
+                let _ = rec.save_to_disk(&task_dir);
                 crate::display::notify::pipeline_cancelled();
             } else {
+                rec.status = TaskStatus::Failed {
+                    error: e.to_string(),
+                };
+                let _ = rec.save_to_disk(&task_dir);
                 crate::display::notify::pipeline_complete(false, "");
             }
             display.finish_tui();
@@ -651,8 +676,9 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                     serde_json::json!({
                         "task_id": task.id.to_string(),
                         "description": task.description,
-                        "status": "error",
+                        "status": if is_cancelled { "cancelled" } else { "error" },
                         "error": e.to_string(),
+                        "branch": serde_json::Value::Null,
                         "task_dir": task_dir.display().to_string(),
                     })
                 );
@@ -781,12 +807,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         }
     }
 
-    // Generate the patch file.
-    if let Err(e) =
-        crate::output::patch::generate_patch(&result.final_diff, &task_dir.join("changes.patch"))
-    {
-        eprintln!("Failed to generate patch: {}", e);
-    }
+    // changes.patch is written exactly once, by `generate_report` alongside
+    // report.md (Phase 5.6 single-writer rule).
 
     // Red-suite gate (goal-a3f9c2, Phase 2): a failing executed suite — or a
     // failing mutation gate — blocks the branch. The evidence (patch, report,
@@ -838,6 +860,16 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // entirely when the red-suite gate blocked the branch, and in dry-run /
     // plan mode where a branch — even an empty ref — would misrepresent a
     // proposal as a result).
+    // Phase 5.6: unresolved conflict markers (e.g. from a `--3way` fallback)
+    // block the branch like a failed suite — abort instead of committing a
+    // conflicted tree. Recorded in task.json as Failed.
+    if branch_block_note.is_none() && !result.final_diff.trim().is_empty() {
+        if let Err(e) =
+            crate::output::git::ensure_no_conflict_markers(&project_dir, &result.final_diff)
+        {
+            branch_block_note = Some(format!("Branch blocked: {e}."));
+        }
+    }
     if branch_block_note.is_none() && !args.dry_run {
         if let Err(e) = crate::output::git::create_branch_and_commit(
             &project_dir,

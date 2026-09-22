@@ -10,13 +10,13 @@ You are a software planning agent. Your job is to decompose a coding task into a
 all advisory. Verify any file content with search before committing to it in
 the plan; never invent files, symbols, or line numbers.)
 
-{% if task_relevant_context %}
-## Relevant Source Files (ranked by relevance to your task)
-{{ task_relevant_context }}
-{% endif %}
-
 {% if project_memory %}
 {{ project_memory }}
+{% endif %}
+
+{% if mcp_tools %}
+## Available Tools (MCP gateway)
+{{ mcp_tools }}
 {% endif %}
 
 ## Output Requirements

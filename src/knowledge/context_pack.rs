@@ -84,10 +84,13 @@ pub fn build_context_pack(
     }
     push_section(&mut out, &boundary, budget, &mut truncated);
 
-    // 2. Recent learnings relevant to the task (K=3, keyword overlap first).
+    // 2. Learnings relevant to the task (K=3, store hybrid rank).
+    // Phase 4.5: ranking goes through the converged store's hybrid query
+    // (keyword + vector + recency + authority) instead of local keyword
+    // overlap, keeping the same K cap and truncation markers.
+    let picked =
+        crate::store::query_learnings(project_path, config, task_description, MAX_LEARNINGS);
     let keywords = task_keywords(task_description);
-    let learnings = crate::knowledge::learnings::tail_learnings(project_path, config, 10);
-    let picked = pick_learnings(&learnings, &keywords, MAX_LEARNINGS);
     if !picked.is_empty() {
         let mut section = String::from("## Learnings from past runs (advisory)\n");
         for learning in picked {
@@ -183,29 +186,6 @@ fn push_section(out: &mut String, section: &str, budget: usize, truncated: &mut 
     } else {
         *truncated = true;
     }
-}
-
-fn pick_learnings(
-    learnings: &[crate::knowledge::learnings::LearningEntry],
-    keywords: &[String],
-    n: usize,
-) -> Vec<crate::knowledge::learnings::LearningEntry> {
-    // Newest first, then stable-sort by score: keyword hits lead, and ties
-    // stay newest-first. `sort_by` is stable, so this composes correctly.
-    let mut scored: Vec<(usize, &crate::knowledge::learnings::LearningEntry)> = learnings
-        .iter()
-        .rev()
-        .map(|l| {
-            let details = l.details.to_lowercase();
-            let score = keywords
-                .iter()
-                .filter(|k| details.contains(k.as_str()))
-                .count();
-            (score, l)
-        })
-        .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
-    scored.into_iter().take(n).map(|(_, l)| l.clone()).collect()
 }
 
 /// Rank indexed files by symbol-name overlap with task keywords and excerpt
@@ -328,6 +308,44 @@ mod tests {
         assert!(
             pack.contains("login retry fix"),
             "relevant learning included"
+        );
+    }
+
+    #[test]
+    fn pack_prefers_relevant_over_recent_learning() {
+        // Phase 4.5: the store hybrid rank must prefer a relevant older
+        // learning over a recent irrelevant one (not merely last-N).
+        let tmp = tiny_project();
+        let config = NikiConfig::default();
+        crate::knowledge::learnings::append_learning(
+            tmp.path(),
+            &config,
+            &crate::knowledge::learnings::LearningEntry::new(
+                "history",
+                "niki-task-test",
+                "history-miner",
+                "inferred",
+                "login retry fix in auth".to_string(),
+            ),
+        )
+        .unwrap();
+        crate::knowledge::learnings::append_learning(
+            tmp.path(),
+            &config,
+            &crate::knowledge::learnings::LearningEntry::new(
+                "history",
+                "niki-task-test",
+                "history-miner",
+                "inferred",
+                "unrelated deploy pipeline note for staging".to_string(),
+            ),
+        )
+        .unwrap();
+        let manifest = build_manifest(tmp.path(), &config);
+        let pack = build_context_pack(tmp.path(), &config, "fix login retry", &manifest);
+        assert!(
+            pack.contains("login retry fix"),
+            "relevant (older) learning must be chosen, got:\n{pack}"
         );
     }
 

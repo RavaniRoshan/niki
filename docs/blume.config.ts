@@ -30,8 +30,8 @@ export default defineConfig({
     root: "content",
   },
   deployment: {
-    site: "https://ravaniroshan.github.io",
-    base: "/niki/",
+    site: process.env.DOCS_SITE || "https://niki-docs.pages.dev",
+    base: process.env.DOCS_BASE || "/",
     output: "static",
   },
   ai: {

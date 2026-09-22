@@ -44,6 +44,11 @@ Rubber-stamping the Coder while ignoring the Red critique is a failure of your r
 {{ diff_guardrail_hint }}
 {% endif %}
 
+{% if mcp_tools %}
+## Available Tools (MCP gateway)
+{{ mcp_tools }}
+{% endif %}
+
 ## Output Requirements
 You MUST output a single valid JSON object conforming to this schema:
 

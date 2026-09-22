@@ -17,6 +17,11 @@ You are a software testing agent. You analyze the code change and write tests th
 {{ project_memory }}
 {% endif %}
 
+{% if mcp_tools %}
+## Available Tools (MCP gateway)
+{{ mcp_tools }}
+{% endif %}
+
 ## Output Requirements
 You MUST output a single valid JSON object conforming to this schema:
 

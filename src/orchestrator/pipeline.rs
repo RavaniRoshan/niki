@@ -117,8 +117,8 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
                 provider: agent.provider.clone(),
                 model: agent.model.clone(),
                 skip: false,
-                max_tokens: agent.max_tokens,
-                temperature: agent.temperature,
+                max_tokens: agent.effective_max_tokens(),
+                temperature: agent.effective_temperature(),
                 fallbacks: agent.fallbacks.clone(),
             });
         }
@@ -142,8 +142,8 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
                     model
                 },
                 skip: false,
-                max_tokens: agent.max_tokens,
-                temperature: agent.temperature,
+                max_tokens: agent.effective_max_tokens(),
+                temperature: agent.effective_temperature(),
                 fallbacks: agent.fallbacks.clone(),
             });
         }
@@ -161,8 +161,8 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
             provider: agent.provider.clone(),
             model: agent.model.clone(),
             skip: false,
-            max_tokens: agent.max_tokens,
-            temperature: agent.temperature,
+            max_tokens: agent.effective_max_tokens(),
+            temperature: agent.effective_temperature(),
             fallbacks: agent.fallbacks.clone(),
         });
     }
@@ -192,8 +192,8 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
                     model
                 },
                 skip: false,
-                max_tokens: agent.max_tokens,
-                temperature: agent.temperature,
+                max_tokens: agent.effective_max_tokens(),
+                temperature: agent.effective_temperature(),
                 fallbacks: agent.fallbacks.clone(),
             },
         );
@@ -254,6 +254,10 @@ pub fn apply_risk_stages(
     config: &NikiConfig,
 ) -> Vec<PipelineStageConfig> {
     use crate::risk::RiskLevel;
+    // Phase 5.7 documented interaction: Low-risk runs pass through unchanged
+    // even with `[critic] enabled = true` — the Critic reviews a Reviewer
+    // verdict, and Low-risk runs have none worth re-judging. To force a
+    // Critic on a Low-risk task, set `[risk] mode` to a higher tier.
     if matches!(risk.level, RiskLevel::Low) {
         return stages;
     }
@@ -276,8 +280,8 @@ pub fn apply_risk_stages(
             provider,
             model,
             skip: false,
-            max_tokens: agent.max_tokens,
-            temperature: agent.temperature,
+            max_tokens: agent.effective_max_tokens(),
+            temperature: agent.effective_temperature(),
             fallbacks: agent.fallbacks.clone(),
         });
     }
@@ -453,6 +457,23 @@ pub fn select_topology(spec: &TaskSpec, config: &NikiConfig) -> TopologyMode {
     }
 }
 
+/// Phase 5.7: Auto High/Security tiers force the full multi-agent chain so
+/// risk-added stages (SecurityAuditor) survive the SingleAgent collapse.
+/// Explicit `[pipeline].topology` is never overridden. Returns whether the
+/// override fired (the caller upgrades the topology + reason).
+pub fn force_multiagent_for_high_risk(
+    topology: TopologyMode,
+    configured: TopologyMode,
+    level: crate::risk::RiskLevel,
+) -> bool {
+    matches!(configured, TopologyMode::Auto)
+        && matches!(
+            level,
+            crate::risk::RiskLevel::High | crate::risk::RiskLevel::Security
+        )
+        && matches!(topology, TopologyMode::SingleAgent)
+}
+
 /// Human-readable reason for the topology decision, recorded in the task
 /// record and report so an `Auto` collapse is self-describing, never silent
 /// (goal-a3f9c2, Phase 3: the fast-path drops independent review, and the
@@ -531,8 +552,8 @@ fn ensure_planner(
             provider: agent.provider.clone(),
             model: agent.model.clone(),
             skip: false,
-            max_tokens: agent.max_tokens,
-            temperature: agent.temperature,
+            max_tokens: agent.effective_max_tokens(),
+            temperature: agent.effective_temperature(),
             fallbacks: agent.fallbacks.clone(),
         }];
         out.extend(stages);
@@ -619,7 +640,7 @@ async fn run_parallel_coders(
     project_path: &Path,
     config: &NikiConfig,
     containers: ActiveContainers,
-    task_id: &Uuid,
+    _task_id: &Uuid,
     base_display: &AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
     mcp_tools: &str,
@@ -642,7 +663,7 @@ async fn run_parallel_coders(
         let project_path = project_path.to_path_buf();
         let config = config.clone();
         let containers = containers.clone();
-        let task_id = *task_id;
+        let coder_task_id = Uuid::new_v4();
         let mut disp = base_display.fork();
         let mcp_tools = mcp_tools.to_string();
         let event_tx = event_tx.clone();
@@ -655,7 +676,7 @@ async fn run_parallel_coders(
                 None,
                 AgentRole::Coder,
                 &project_path,
-                &task_id,
+                &coder_task_id,
                 &config.docker,
                 &config,
                 role_policy(AgentRole::Coder, &config),
@@ -704,7 +725,15 @@ async fn run_parallel_coders(
             {
                 eprintln!("Warning: coder worktree patch failed: {}", e);
             }
-            let _wt_diff = sandbox.get_diff().await?;
+            let _wt_diff = sandbox
+                .get_diff(
+                    &diff
+                        .files_changed
+                        .iter()
+                        .map(|f| f.path.clone())
+                        .collect::<Vec<_>>(),
+                )
+                .await?;
             sandbox.destroy().await?;
             Ok::<_, anyhow::Error>((diff, local_metrics))
         }));
@@ -721,6 +750,99 @@ async fn run_parallel_coders(
     Ok(out)
 }
 
+/// Experimental bounded research step (Phase 3.3, Layers 4+5).
+///
+/// Runs one `run_tool_loop` with the baseline registry before the Planner and
+/// returns a context appendix plus a usage metric. Returns `None` when the
+/// flag is off so the default pipeline stays byte-identical.
+async fn run_experimental_research(
+    llm: &dyn LlmProvider,
+    model: &str,
+    provider: &str,
+    task: &Task,
+    config: &NikiConfig,
+    display: &mut AgenticDisplay,
+    budget: Option<&mut super::budget::RunBudget>,
+) -> Result<Option<(String, StageMetric)>> {
+    if !config.tools.experimental_tool_loop {
+        return Ok(None);
+    }
+    let start = Instant::now();
+    let mut registry = crate::runtime::build_baseline_registry();
+    // Phase 5.4: bound tool-loop hooks by the same `[hooks] timeout_seconds`.
+    registry.set_hook_timeout_secs(config.hooks.timeout_seconds);
+    let ctx = crate::runtime::ToolContext {
+        agent_id: crate::mission::AgentId(format!("research-{}", task.id)),
+        mission_id: crate::mission::MissionId(task.id.to_string()),
+        role: "planner".into(),
+        project_path: task.project_path.clone(),
+        permissions: HashMap::new(),
+        // Inherit the configured posture (manual fails closed headless).
+        permission_mode: crate::runtime::ToolContext::parse_permission_mode(
+            &config.permissions.mode,
+        ),
+        task_store: None,
+    };
+    let messages = vec![
+        crate::runtime::LoopMessage::System(
+            "You are a research assistant. Use the available tools to gather facts about the task, then summarize briefly.".into(),
+        ),
+        crate::runtime::LoopMessage::User(task.description.clone()),
+    ];
+    let out = crate::runtime::run_tool_loop(
+        llm,
+        model,
+        &registry,
+        &ctx,
+        messages,
+        None,
+        config.tools.max_steps.max(1),
+        display.tui_tx(),
+        budget,
+    )
+    .await?;
+    tracing::info!(
+        target: "niki::pipeline",
+        steps = out.steps,
+        tool_calls = out.tool_calls.len(),
+        input_tokens = out.usage.input_tokens,
+        output_tokens = out.usage.output_tokens,
+        "experimental research loop finished"
+    );
+    let cost_usd = compute_cost(provider, model, &out.usage);
+    // Phase 3.5: loop usage lands in the existing StageDone/StageTotals
+    // accounting via agent_done (muted-safe, TTY-safe).
+    display.agent_done(
+        AgentRole::Planner,
+        vec![format!(
+            "research loop: {} steps, {} tool calls",
+            out.steps,
+            out.tool_calls.len()
+        )],
+        out.usage,
+        cost_usd,
+    );
+    let latency_ms = start.elapsed().as_millis() as u64;
+    let appendix = format!(
+        "## Tool Research (experimental loop, {} steps)\n{}",
+        out.steps, out.content
+    );
+    let metric = StageMetric {
+        role: AgentRole::Planner,
+        provider: provider.to_string(),
+        model: model.to_string(),
+        input_tokens: out.usage.input_tokens,
+        output_tokens: out.usage.output_tokens,
+        cached_input_tokens: out.usage.cached_input_tokens,
+        reasoning_tokens: out.usage.reasoning_tokens,
+        latency_ms,
+        cost_usd,
+        retry_count: 0,
+        ttft_ms: 0,
+    };
+    Ok(Some((appendix, metric)))
+}
+
 /// Run one agent: stream its output, measure latency, compute cost, record a
 /// metric, and return the raw JSON artifact.
 async fn run_stage(
@@ -733,7 +855,6 @@ async fn run_stage(
     schema_path: &str,
     display: &mut AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
-    degrade_on_invalid: bool,
     max_tokens: u32,
     temperature: f32,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
@@ -747,7 +868,6 @@ async fn run_stage(
         ctx,
         schema_path,
         display,
-        degrade_on_invalid,
         max_tokens,
         temperature,
         steer_rx,
@@ -823,10 +943,12 @@ async fn run_role(
     let (template, schema) = role_prompt(role);
 
     // Load role-specific memory for prompt injection (absent when bare).
+    // Phase 4.6: hierarchical memory (user > team > project) completes the
+    // user/team → prompt loop; empty by default so default prompts are unchanged.
     let memory_str = if bare_memory {
         String::new()
     } else {
-        crate::memory::render_memory_for_prompt(project_path, role, 10)
+        crate::memory::render_hierarchical_memory(project_path, role, 10)
     };
 
     let ctx = match role {
@@ -947,7 +1069,6 @@ async fn run_role(
         schema,
         display,
         metrics,
-        false, // degrade_on_invalid: strict by default for body stages
         max_tokens,
         temperature,
         steer_rx,
@@ -976,7 +1097,7 @@ async fn run_role(
     Ok((json, summary, output))
 }
 
-fn parse_role(role: AgentRole, json: &str) -> Result<RoleOutput> {
+pub fn parse_role(role: AgentRole, json: &str) -> Result<RoleOutput> {
     Ok(match role {
         AgentRole::Planner => RoleOutput::Planner(serde_json::from_str(json)?),
         AgentRole::Coder => RoleOutput::Coder(serde_json::from_str(json)?),
@@ -1058,8 +1179,9 @@ async fn run_bookkept_stage(
     display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
     display.update_pipeline_status();
     enforce_spend_cap(config.general.spend_cap_usd, metrics)?;
-    update_context_budget(metrics, state, project_path, task_dir);
-    save_task_record(task, metrics, TaskStatus::Running, task_dir);
+    state.accrue_budget(metrics)?;
+    update_context_budget(metrics, state, project_path, task_dir, config);
+    save_task_record(task, metrics, TaskStatus::Running, task_dir, round);
     Ok((json, output))
 }
 
@@ -1099,56 +1221,114 @@ fn config_max_diff_lines(config: &NikiConfig) -> Option<usize> {
 
 /// T7: Update the context budget from accumulated metrics, write context.json,
 /// and auto-compact when the session-switch threshold is crossed.
+/// Lowest-priority sections compress first (history, external sources, older
+/// memory); what was dropped is recorded in `context.json`. When compaction is
+/// off, an explicit warning is emitted and the run continues.
 fn update_context_budget(
     metrics: &[StageMetric],
     state: &mut super::state::PipelineState,
     project_path: &Path,
     task_dir: &Path,
+    config: &NikiConfig,
 ) {
     let total: u32 = metrics.iter().map(|m| m.total_tokens()).sum();
     state.context_budget.used = total;
+    let past_threshold = state.context_budget.needs_session_switch();
+
+    if past_threshold {
+        if config.compaction.enabled && config.compaction.auto_compact {
+            let dropped = vec!["history", "external_sources", "older_memory"];
+            let _ = crate::memory::compression::compress_context(
+                project_path,
+                AgentRole::Planner,
+                crate::memory::compression::CompressionStrategy::KnowledgeBlock,
+                format!(
+                    "Pipeline context at {:.1}% budget ({}k/{}k tokens used).",
+                    state.context_budget.fill_ratio() * 100.0,
+                    state.context_budget.used / 1000,
+                    state.context_budget.capacity / 1000,
+                ),
+                vec![format!(
+                    "Total tokens consumed: {}",
+                    state.context_budget.used
+                )],
+                vec!["Pipeline auto-compaction triggered by context budget threshold.".to_string()],
+                vec![],
+                Some(state.context_budget.used),
+            );
+            let ctx_json = serde_json::json!({
+                "used": state.context_budget.used,
+                "capacity": state.context_budget.capacity,
+                "fill_ratio": state.context_budget.fill_ratio(),
+                "should_compress": state.context_budget.should_compress(),
+                "needs_session_switch": true,
+                "compacted": true,
+                "dropped_sections": dropped,
+            });
+            let _ = std::fs::create_dir_all(task_dir);
+            let _ = std::fs::write(
+                task_dir.join("context.json"),
+                serde_json::to_string_pretty(&ctx_json).unwrap_or_default(),
+            );
+            return;
+        }
+        eprintln!(
+            "Warning: context budget past threshold ({:.1}% of {} tokens) with compaction off — continuing without compression.",
+            state.context_budget.fill_ratio() * 100.0,
+            state.context_budget.capacity
+        );
+        tracing::warn!(
+            target: "niki::pipeline",
+            fill = state.context_budget.fill_ratio(),
+            "context budget past threshold, compaction off"
+        );
+    }
 
     let ctx_json = serde_json::json!({
         "used": state.context_budget.used,
         "capacity": state.context_budget.capacity,
         "fill_ratio": state.context_budget.fill_ratio(),
         "should_compress": state.context_budget.should_compress(),
-        "needs_session_switch": state.context_budget.needs_session_switch(),
+        "needs_session_switch": past_threshold,
+        "compacted": false,
     });
     let _ = std::fs::create_dir_all(task_dir);
     let _ = std::fs::write(
         task_dir.join("context.json"),
         serde_json::to_string_pretty(&ctx_json).unwrap_or_default(),
     );
-
-    if state.context_budget.needs_session_switch() {
-        let _ = crate::memory::compression::compress_context(
-            project_path,
-            AgentRole::Planner,
-            crate::memory::compression::CompressionStrategy::KnowledgeBlock,
-            format!(
-                "Pipeline context at {:.1}% budget ({}k/{}k tokens used).",
-                state.context_budget.fill_ratio() * 100.0,
-                state.context_budget.used / 1000,
-                state.context_budget.capacity / 1000,
-            ),
-            vec![format!(
-                "Total tokens consumed: {}",
-                state.context_budget.used
-            )],
-            vec!["Pipeline auto-compaction triggered by context budget threshold.".to_string()],
-            vec![],
-            Some(state.context_budget.used),
-        );
-    }
 }
 
 /// T8: Save an incremental TaskRecord snapshot to disk.
-fn save_task_record(task: &Task, metrics: &[StageMetric], status: TaskStatus, task_dir: &Path) {
+fn save_task_record(
+    task: &Task,
+    metrics: &[StageMetric],
+    status: TaskStatus,
+    task_dir: &Path,
+    round: u32,
+) {
     let mut rec = TaskRecord::new(task.id, &task.description);
     rec.status = status;
+    rec.revision_rounds = round;
     rec.add_metrics(metrics);
     let _ = rec.save_to_disk(task_dir);
+}
+
+/// Project memory for prompt injection: ambient history, present by default,
+/// absent when bare (`--bare` = no ambient inputs). Phase 4.6: budget-aware
+/// rendering wires the compaction readers — full entries by default, trimmed
+/// to compressed knowledge under context pressure.
+fn memory_for_role(
+    project_path: &Path,
+    role: AgentRole,
+    bare: bool,
+    budget: &crate::memory::ContextBudget,
+) -> String {
+    if bare {
+        String::new()
+    } else {
+        crate::memory::render_memory_with_budget(project_path, role, budget)
+    }
 }
 
 pub async fn execute_pipeline(
@@ -1201,24 +1381,19 @@ pub async fn execute_pipeline(
                 project_size: crate::knowledge::ProjectSize::Small,
                 external_sources: Vec::new(),
                 standing_rules: crate::knowledge::indexer::load_standing_rules(&task.project_path),
+                agents_md: String::new(),
             }
         }
     };
     let knowledge_str = knowledge.render();
-    // Project memory is ambient history: present by default, absent when bare.
-    let memory_for = |role: AgentRole| {
-        if bare {
-            String::new()
-        } else {
-            crate::memory::render_memory_for_prompt(&task.project_path, role, 10)
-        }
-    };
 
     // Shell-hook bus from `[hooks]` config. Wired subset: PreTaskStart,
     // PostTaskStop, PreAgentStart, PostAgentStop. A Block outcome aborts the
     // run fail-closed — hooks are policy, and policy violations must not be
     // advisory. (PreToolUse/PostToolUse fire inside the runtime tool loop.)
-    let hook_bus = crate::audit::HookBus::from_map(&config.hooks.commands);
+    let mut hook_bus = crate::audit::HookBus::from_map(&config.hooks.commands);
+    // Phase 5.4: bound every hook by `[hooks] timeout_seconds`.
+    hook_bus.set_timeout_secs(config.hooks.timeout_seconds);
     fire_hook(
         &hook_bus,
         crate::audit::HookEvent::PreTaskStart,
@@ -1226,11 +1401,50 @@ pub async fn execute_pipeline(
     )?;
 
     let mut state = super::state::PipelineState::new(task.id);
+    state
+        .context_budget
+        .apply_compaction_config(&config.compaction);
+    // Phase 5.5: resolve the unified run budget (steps/cost/wallclock) once;
+    // every stage boundary accrues into it via `accrue_budget`.
+    state.run_budget = super::budget::RunBudget::resolve(config);
     let mut metrics: Vec<StageMetric> = Vec::new();
+
+    // Initialize AgentRuntime and start the persistent AgentSession
+    let agent_runtime = crate::runtime::AgentRuntime::new(config.clone());
+    let journal_sink = Arc::new(crate::runtime::JournalEventSink::new(
+        task_dir.join("events.jsonl"),
+    ));
+    let mut runtime_session = match agent_runtime
+        .start_session(
+            task.project_path.clone(),
+            task.id,
+            task.description.clone(),
+            Some(journal_sink),
+            Some(crate::runtime::CancellationToken::from_atomic(
+                cancel.clone(),
+            )),
+        )
+        .await
+    {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::warn!(target: "niki::pipeline", "Failed to start agent session: {e}");
+            None
+        }
+    };
+
+    if let Some(ref s) = runtime_session {
+        let prewarm = s.prewarm().await;
+        tracing::info!(
+            target: "niki::pipeline",
+            prewarm_ms = prewarm.prewarm_ms,
+            "AgentRuntime prewarmed resources"
+        );
+    }
 
     // T8: Save an early TaskRecord (Running) so a crash mid-pipeline still
     // leaves a status file on disk.
-    save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
 
     let mut artifacts: Vec<(AgentRole, String)> = Vec::new();
     // Per-agent context-isolation records (BUILD_PLAN 2.1). Populated as each
@@ -1277,10 +1491,13 @@ pub async fn execute_pipeline(
     // write failure warns and never fails the run.
     let mut run_manifest =
         super::provenance::capture(config, &task.project_path, &task.id, &stages);
-    if config.snapshot.enabled
-        && let Err(e) = super::provenance::write_manifest(task_dir, &run_manifest)
-    {
-        eprintln!("Warning: could not write run manifest: {e}");
+    if config.snapshot.enabled {
+        if let Err(e) = super::provenance::write_manifest(task_dir, &run_manifest) {
+            eprintln!("Warning: could not write run manifest: {e}");
+        }
+        if let Some(tasks_dir) = task_dir.parent() {
+            super::provenance::prune_stale_snapshots(tasks_dir, config.snapshot.retention_days);
+        }
     }
 
     // History mining is deterministic and cached (known commits are skipped),
@@ -1323,7 +1540,7 @@ pub async fn execute_pipeline(
         // Planner context: the bounded pack (repo manifest + KB + symbol
         // excerpts + learnings) when repo intelligence is on; the legacy full
         // index render otherwise. Role memory injection is unchanged.
-        let planner_context = if config.repo_intel.enabled {
+        let mut planner_context = if config.repo_intel.enabled {
             let repo_manifest = crate::repo_intel::build_manifest(&task.project_path, config);
             crate::knowledge::context_pack::build_context_pack(
                 &task.project_path,
@@ -1335,7 +1552,27 @@ pub async fn execute_pipeline(
             knowledge_str.clone()
         };
 
-        run_stage(
+        // Phase 3.3: experimental bounded research loop (default off → the
+        // context below is byte-identical to a flag-off run).
+        let mut research_metric: Option<StageMetric> = None;
+        if config.tools.experimental_tool_loop {
+            if let Some((appendix, metric)) = run_experimental_research(
+                planner_llm.as_ref(),
+                &planner_stage.model,
+                &planner_stage.provider,
+                task,
+                config,
+                display,
+                Some(&mut state.run_budget),
+            )
+            .await?
+            {
+                planner_context = format!("{planner_context}\n{appendix}");
+                research_metric = Some(metric);
+            }
+        }
+
+        let planned = run_stage(
             AgentRole::Planner,
             planner_llm.as_ref(),
             &planner_stage.model,
@@ -1344,17 +1581,31 @@ pub async fn execute_pipeline(
             context! {
                 task_description => task.description.clone(),
                 project_knowledge => planner_context,
-                project_memory => memory_for(AgentRole::Planner),
+                project_memory => memory_for_role(&task.project_path, AgentRole::Planner, bare, &state.context_budget),
+                mcp_tools => mcp_tools.clone(),
             },
             "schemas/task_spec.schema.json",
             display,
             &mut metrics,
-            false, // Planner must not degrade — it's the pipeline entry point
             planner_stage.max_tokens,
             planner_stage.temperature,
             steer_rx,
         )
-        .await?
+        .await?;
+        // Phase 5.5: accrue the Planner stage (and any earlier unaccounted
+        // metric) at this boundary — unconditional, not just when the
+        // research loop ran.
+        state.accrue_budget(&metrics)?;
+        if let Some(metric) = research_metric {
+            // Order the research step before the Planner call it informed.
+            // The inserted research metric must not accrue again: mark
+            // everything accounted (its loop already accrued per-iteration).
+            if let Some(pos) = metrics.len().checked_sub(1) {
+                metrics.insert(pos, metric);
+                state.run_budget.account_metrics_up_to(metrics.len());
+            }
+        }
+        planned
     };
     let task_spec: TaskSpec = serde_json::from_str(&planner_json)?;
     artifacts.push((AgentRole::Planner, planner_json.clone()));
@@ -1397,24 +1648,67 @@ pub async fn execute_pipeline(
     display.update_pipeline_status();
 
     // T7+T8: Update context budget and save incremental task record after Planner.
-    update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
-    save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+    update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
+    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
 
     // Decide the agent topology from the task shape (BUILD_PLAN 3.2, P2.2).
     // The Planner has already derived `estimated_complexity`, so we can pick
     // the fast-path (single solo Coder) or the full multi-agent chain now.
-    let topology = select_topology(&task_spec, config);
-    let topology_reason = topology_reason(&task_spec, config);
-
-    // Risk gating: classify the spec, then adjust the stage list (Critic on
-    // Normal+, SecurityAuditor forced on High/Security). Runs before the
-    // dry-run return so dry runs report the same risk the real run would use.
-    // Explicit `[pipeline].stages` topologies are never rewritten.
+    // Phase 5.7: risk classifies FIRST and topology resolves AFTER it — an
+    // Auto High/Security tier forces MultiAgent so the risk-added
+    // SecurityAuditor survives (the SingleAgent fast-path would collapse it
+    // away). Explicit `[pipeline].stages` topologies are never rewritten.
     let task_risk = crate::risk::classify(&task_spec, config);
     let stages = apply_risk_stages(stages, &task_risk, config);
+    let mut topology = select_topology(&task_spec, config);
+    let mut topology_reason = topology_reason(&task_spec, config);
+    if force_multiagent_for_high_risk(topology, config.pipeline.topology, task_risk.level)
+        && matches!(topology, TopologyMode::SingleAgent)
+    {
+        topology = TopologyMode::MultiAgent;
+        topology_reason = format!(
+            "{}; risk override: {} tier forces the full multi-agent chain",
+            topology_reason,
+            task_risk.level.as_str()
+        );
+    }
     let topology_reason = format!("{}; risk: {}", topology_reason, task_risk.rationale);
 
+    if let Some(ref mut sess) = runtime_session {
+        let _ = sess
+            .emit_event(
+                "planner",
+                "done",
+                crate::runtime::AgentEventKind::ArtifactProduced,
+                serde_json::json!({
+                    "role": "planner",
+                    "schema": "schemas/task_spec.schema.json",
+                }),
+            )
+            .await;
+
+        if let Ok(mut store) = sess.context_store.try_write() {
+            store.upsert(crate::runtime::ContextFragment::new(
+                "planner_artifact",
+                crate::runtime::FragmentKind::PlanContext,
+                &planner_json,
+                2000,
+            ));
+        }
+
+        let _ = agent_runtime
+            .checkpoint(
+                sess,
+                AgentRole::Planner,
+                None,
+                Some(task_risk.level.as_str().to_string()),
+                artifacts.clone(),
+            )
+            .await;
+    }
+
     // Dry-run: stop after the Planner and surface the spec without executing.
+
     if dry_run {
         fire_hook(
             &hook_bus,
@@ -1568,6 +1862,12 @@ pub async fn execute_pipeline(
                     task.id,
                 )
                 .await?;
+                // Phase 5.5: close the parallel-coder spend hole — N coders
+                // accrue N costs before the Synthesizer runs, so enforce the
+                // hard ceiling and the unified budget here, not at the next
+                // stage boundary.
+                enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
+                state.accrue_budget(&metrics)?;
 
                 // Each parallel coder ran in its own git worktree — record the isolation
                 // pattern (one record represents the N independent coder sessions).
@@ -1640,8 +1940,8 @@ pub async fn execute_pipeline(
                 display.agent_done(AgentRole::Synthesizer, summary, m.usage(), m.cost_usd);
                 display.update_pipeline_status();
 
-                update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
-                save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+                update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
+                save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
 
                 let merged = match role_output {
                     RoleOutput::Synthesizer(s) => s.merged,
@@ -1713,9 +2013,16 @@ pub async fn execute_pipeline(
                     display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
                     display.update_pipeline_status();
                     enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
+                    state.accrue_budget(&metrics)?;
 
-                    update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
-                    save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+                    update_context_budget(
+                        &metrics,
+                        &mut state,
+                        &task.project_path,
+                        task_dir,
+                        config,
+                    );
+                    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
 
                     match role_output {
                         RoleOutput::Tester(_) => {
@@ -1739,7 +2046,7 @@ pub async fn execute_pipeline(
                     // Cooperative cancellation: the TUI (or any holder of the
                     // flag) can abort the run between revision rounds.
                     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                        save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir);
+                        save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, round);
                         return Err(crate::NikiError::Cancelled.into());
                     }
                     for stage in body_stages.iter().filter(|s| s.role != AgentRole::Critic) {
@@ -1780,6 +2087,49 @@ pub async fn execute_pipeline(
                         )
                         .await?;
                         artifacts.push((stage.role, json.clone()));
+                        if let Some(ref mut sess) = runtime_session {
+                            let fragment_kind = match stage.role {
+                                AgentRole::Planner => crate::runtime::FragmentKind::PlanContext,
+                                AgentRole::Coder => crate::runtime::FragmentKind::ArtifactSummary,
+                                AgentRole::Tester => crate::runtime::FragmentKind::TestFailure,
+                                AgentRole::Reviewer
+                                | AgentRole::Critic
+                                | AgentRole::SecurityAuditor => {
+                                    crate::runtime::FragmentKind::ReviewFinding
+                                }
+                                _ => crate::runtime::FragmentKind::ArtifactSummary,
+                            };
+                            if let Ok(mut store) = sess.context_store.try_write() {
+                                store.upsert(crate::runtime::ContextFragment::new(
+                                    format!("{}_{}", stage.role.as_str(), round),
+                                    fragment_kind,
+                                    &json,
+                                    1500,
+                                ));
+                            }
+                            let _ = sess
+                                .emit_event(
+                                    stage.role.as_str(),
+                                    &format!("round_{round}"),
+                                    crate::runtime::AgentEventKind::ArtifactProduced,
+                                    serde_json::json!({
+                                        "role": stage.role.as_str(),
+                                        "round": round,
+                                        "summary": summary,
+                                    }),
+                                )
+                                .await;
+
+                            let _ = agent_runtime
+                                .checkpoint(
+                                    sess,
+                                    stage.role,
+                                    Some(format!("round_{round}")),
+                                    Some(task_risk.level.as_str().to_string()),
+                                    artifacts.clone(),
+                                )
+                                .await;
+                        }
                         isolation.push(IsolationRecord {
                             role: stage.role,
                             backend: config.docker.backend,
@@ -1795,9 +2145,16 @@ pub async fn execute_pipeline(
                         display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
                         display.update_pipeline_status();
                         enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
+                        state.accrue_budget(&metrics)?;
 
-                        update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
-                        save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+                        update_context_budget(
+                            &metrics,
+                            &mut state,
+                            &task.project_path,
+                            task_dir,
+                            config,
+                        );
+                        save_task_record(task, &metrics, TaskStatus::Running, task_dir, round);
 
                         match role_output {
                             RoleOutput::Coder(diff) => {
@@ -1911,13 +2268,12 @@ pub async fn execute_pipeline(
                 context! {
                     task_description => task.description.clone(),
                     project_knowledge => knowledge_str.clone(),
-                    project_memory => memory_for(AgentRole::Coder),
+                    project_memory => memory_for_role(&task.project_path, AgentRole::Coder, bare, &state.context_budget),
                     current_files => current_files.clone(),
                 },
                 "schemas/code_diff.schema.json",
                 display,
                 &mut metrics,
-                false, // Solo mode: strict — no degradation
                 coder_stage.max_tokens,
                 coder_stage.temperature,
                 steer_rx,
@@ -1946,9 +2302,10 @@ pub async fn execute_pipeline(
             );
             display.update_pipeline_status();
             enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
+            state.accrue_budget(&metrics)?;
 
-            update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
-            save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+            update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
+            save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
 
             // The solo Coder returns a CodeDiff; apply it so the downstream diff
             // read picks up the change.
@@ -1986,13 +2343,12 @@ pub async fn execute_pipeline(
                             task.description,
                         ),
                         project_knowledge => knowledge_str.clone(),
-                        project_memory => memory_for(AgentRole::Coder),
+                        project_memory => memory_for_role(&task.project_path, AgentRole::Coder, bare, &state.context_budget),
                         current_files => current_files.clone(),
                     },
                     "schemas/code_diff.schema.json",
                     display,
                     &mut metrics,
-                    false,
                     coder_stage.max_tokens,
                     coder_stage.temperature,
                     steer_rx,
@@ -2024,9 +2380,10 @@ pub async fn execute_pipeline(
                 );
                 display.update_pipeline_status();
                 enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
+                state.accrue_budget(&metrics)?;
 
-                update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
-                save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+                update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
+                save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
 
                 coder_json = repair_json;
                 if let Ok(repaired) = serde_json::from_str::<CodeDiff>(&coder_json)
@@ -2178,13 +2535,21 @@ pub async fn execute_pipeline(
         }
     }
 
-    // Read the resulting diff. For the Docker backend the patch was applied to the
-    // bind-mounted host project, so we read the host working tree directly. For
-    // worktree the change lives only in the sandbox copy, so we read it from
-    // there (the run step applies it back to the host before committing).
+    // Read the resulting diff, scoped to agent-produced files (Phase 5.1).
+    // For the Docker backend the patch was applied to the bind-mounted host
+    // project, so we read the host working tree directly. For worktree the
+    // change lives only in the sandbox copy, so we read it from there (the
+    // run step applies it back to the host before committing).
+    let agent_files: Vec<String> = artifacts
+        .iter()
+        .filter(|(r, _)| *r == AgentRole::Coder)
+        .flat_map(|(_, j)| crate::output::git::agent_files_from_coder_json(Some(j)))
+        .collect();
     let final_diff = match config.docker.backend {
-        SandboxBackend::Docker => crate::output::git::working_tree_diff(&task.project_path),
-        _ => sandbox.get_diff().await?,
+        SandboxBackend::Docker => {
+            crate::output::git::working_tree_diff_scoped(&task.project_path, &agent_files)
+        }
+        _ => sandbox.get_diff(&agent_files).await?,
     };
 
     // Diff-size guardrail (optional). Warns when a single run's diff grows past
@@ -2222,8 +2587,8 @@ pub async fn execute_pipeline(
 
     sandbox.destroy().await?;
 
-    update_context_budget(&metrics, &mut state, &task.project_path, task_dir);
-    save_task_record(task, &metrics, TaskStatus::Running, task_dir);
+    update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
+    save_task_record(task, &metrics, TaskStatus::Running, task_dir, round);
 
     // Extract learnings from this run and save to memory
     extract_memory_from_artifacts(
@@ -2233,6 +2598,61 @@ pub async fn execute_pipeline(
         &verdict,
         &state,
     );
+
+    // Phase 4.4 distillation trigger: an Approved run with a green executed
+    // suite stages a skill candidate (never auto-activates; promotion is an
+    // explicit `niki skills promote` step). Best-effort: never fails the run.
+    maybe_stage_skill_candidate(
+        &task.project_path,
+        config,
+        &task.description,
+        &artifacts,
+        &verdict,
+        test_execution.as_ref(),
+        &metrics,
+        &task.id.to_string(),
+    );
+
+    // Phase 4.6: the audit trail writers are live — one entry per completed
+    // run, appended (never overwritten) under the project dir. Best-effort.
+    crate::audit::append_audit_entry(
+        &task.project_path,
+        &task.id.to_string(),
+        &crate::audit::AuditEntry::new(
+            "pipeline_completed",
+            serde_json::json!({
+                "verdict": format!("{:?}", verdict),
+                "stages": metrics.len(),
+                "cost_usd": metrics.iter().map(|m| m.cost_usd).sum::<f64>(),
+            }),
+        ),
+    );
+
+    if let Some(ref mut sess) = runtime_session {
+        let _ = sess
+            .emit_event(
+                "pipeline",
+                "completed",
+                crate::runtime::AgentEventKind::SessionCompleted,
+                serde_json::json!({
+                    "verdict": format!("{:?}", verdict),
+                    "revision_rounds": round,
+                    "stages": metrics.len(),
+                    "cost_usd": metrics.iter().map(|m| m.cost_usd).sum::<f64>(),
+                }),
+            )
+            .await;
+
+        let _ = agent_runtime
+            .checkpoint(
+                sess,
+                AgentRole::Reviewer,
+                Some(format!("round_{round}")),
+                Some(task_risk.level.as_str().to_string()),
+                artifacts.clone(),
+            )
+            .await;
+    }
 
     fire_hook(
         &hook_bus,
@@ -2288,15 +2708,23 @@ fn extract_memory_from_artifacts(
 
     // 2. Coder memory: record revision needed patterns
     if matches!(verdict, Verdict::RevisionNeeded) {
-        let content = "Revision was needed on this task — reviewer found issues".to_string();
+        let content = format!(
+            "Revision was needed on this task — reviewer found issues: {}",
+            task.chars().take(200).collect::<String>(),
+        );
         let tags = vec!["revision-needed".into(), "error-pattern".into()];
         let _ = append_memory(project_dir, AgentRole::Coder, task, tags, content, None);
     }
 
-    // 3. If verdict is Approved, record success pattern for the Coder
+    // 3. If verdict is Approved, record success pattern for the Coder.
+    // Phase 4.3: the content includes the task so dedupe keys are per-task
+    // rather than a constant string that would otherwise accumulate.
     if matches!(verdict, Verdict::Approved) {
         let tags = vec!["success".into()];
-        let content = "Task completed successfully with Approved verdict".to_string();
+        let content = format!(
+            "Task completed successfully with Approved verdict: {}",
+            task.chars().take(200).collect::<String>(),
+        );
         let _ = append_memory(project_dir, AgentRole::Coder, task, tags, content, None);
     }
 
@@ -2318,6 +2746,58 @@ fn extract_memory_from_artifacts(
         let tags = vec!["adversarial-finding".into()];
         let _ = append_memory(project_dir, AgentRole::Red, task, tags, content, None);
     }
+}
+
+/// Phase 4.4 distillation trigger. Stages a skill candidate only for Approved
+/// runs with a green executed suite; everything else is a no-op. Best-effort
+/// by contract: all failures are swallowed so distillation never fails a run.
+#[allow(clippy::too_many_arguments)]
+fn maybe_stage_skill_candidate(
+    project_dir: &Path,
+    config: &NikiConfig,
+    task: &str,
+    artifacts: &[(AgentRole, String)],
+    verdict: &Verdict,
+    test_execution: Option<&crate::agents::tester::TestExecution>,
+    metrics: &[StageMetric],
+    task_id: &str,
+) {
+    let suite_green = test_execution.map(|t| t.passed).unwrap_or(false);
+    if !matches!(verdict, Verdict::Approved) || !suite_green {
+        return;
+    }
+    let plan_shape = artifacts
+        .iter()
+        .find(|(r, _)| *r == AgentRole::Planner)
+        .and_then(|(_, j)| serde_json::from_str::<crate::artifacts::types::TaskSpec>(j).ok())
+        .map(|spec| {
+            format!(
+                "{} ({} files)",
+                spec.summary.chars().take(200).collect::<String>(),
+                spec.files_to_modify.len()
+            )
+        })
+        .unwrap_or_default();
+    let review_notes = artifacts
+        .iter()
+        .find(|(r, _)| *r == AgentRole::Reviewer)
+        .map(|(_, j)| j.chars().take(300).collect::<String>())
+        .unwrap_or_default();
+    let model = metrics.first().map(|m| m.model.as_str()).unwrap_or("");
+    let test_command = test_execution.map(|t| t.command.as_str()).unwrap_or("");
+    let snapshot = crate::skills::head_snapshot_ref(project_dir);
+    let _ = crate::skills::stage_candidate(
+        project_dir,
+        config,
+        task,
+        &plan_shape,
+        test_command,
+        &review_notes,
+        "Approved",
+        model,
+        &snapshot,
+        task_id,
+    );
 }
 
 #[cfg(test)]
@@ -2354,6 +2834,64 @@ mod tests {
         assert!(s.iter().any(|x| x.role == AgentRole::SecurityAuditor));
     }
 
+    fn mock_script_provider(
+        dir: &std::path::Path,
+        model: &str,
+        text: &str,
+    ) -> crate::llm::mock::MockProvider {
+        let script = serde_json::json!({
+            "models": { model: { "responses": [
+                {"text": text, "input_tokens": 30, "output_tokens": 12}
+            ] } }
+        });
+        let path = dir.join("mock-script.json");
+        std::fs::write(&path, serde_json::to_string(&script).unwrap()).unwrap();
+        crate::llm::mock::MockProvider::new(Some(path.to_str().unwrap())).unwrap()
+    }
+
+    #[tokio::test]
+    async fn experimental_research_off_returns_none() {
+        // Phase 3.3: default flag off → no research step (pipeline unchanged).
+        let tmp = tempfile::tempdir().unwrap();
+        let provider = mock_script_provider(tmp.path(), "m", "unused");
+        let config = NikiConfig::default();
+        assert!(!config.tools.experimental_tool_loop);
+        let task = Task {
+            id: uuid::Uuid::new_v4(),
+            description: "do thing".into(),
+            project_path: tmp.path().to_path_buf(),
+        };
+        let mut display = AgenticDisplay::new();
+        let out =
+            run_experimental_research(&provider, "m", "mock", &task, &config, &mut display, None)
+                .await
+                .unwrap();
+        assert!(out.is_none());
+    }
+
+    #[tokio::test]
+    async fn experimental_research_on_runs_loop_and_reports_usage() {
+        // Phase 3.3: flag on → loop runs (mock answers immediately) and the
+        // appendix + usage metric come back.
+        let tmp = tempfile::tempdir().unwrap();
+        let provider = mock_script_provider(tmp.path(), "m", "researched facts here");
+        let mut config = NikiConfig::default();
+        config.tools.experimental_tool_loop = true;
+        let task = Task {
+            id: uuid::Uuid::new_v4(),
+            description: "do thing".into(),
+            project_path: tmp.path().to_path_buf(),
+        };
+        let mut display = AgenticDisplay::new();
+        let (appendix, metric) =
+            run_experimental_research(&provider, "m", "mock", &task, &config, &mut display, None)
+                .await
+                .unwrap()
+                .expect("flag on must run the loop");
+        assert!(appendix.contains("researched facts here"), "{appendix}");
+        assert_eq!(metric.input_tokens, 30);
+        assert_eq!(metric.output_tokens, 12);
+    }
     #[test]
     fn red_blue_injects_red_before_reviewer() {
         // Red/Blue off by default — enable to get 5-stage pipeline:
@@ -2450,6 +2988,38 @@ mod tests {
         c.pipeline.topology = TopologyMode::Auto;
         let spec = spec_with(Complexity::Low);
         assert_eq!(select_topology(&spec, &c), TopologyMode::SingleAgent);
+    }
+
+    #[test]
+    fn high_risk_forces_multiagent_under_auto_only() {
+        // Phase 5.7: Auto + High/Security upgrades SingleAgent; explicit
+        // topologies and lower tiers are untouched.
+        use crate::risk::RiskLevel;
+        assert!(force_multiagent_for_high_risk(
+            TopologyMode::SingleAgent,
+            TopologyMode::Auto,
+            RiskLevel::High
+        ));
+        assert!(force_multiagent_for_high_risk(
+            TopologyMode::SingleAgent,
+            TopologyMode::Auto,
+            RiskLevel::Security
+        ));
+        assert!(!force_multiagent_for_high_risk(
+            TopologyMode::SingleAgent,
+            TopologyMode::Auto,
+            RiskLevel::Normal
+        ));
+        assert!(!force_multiagent_for_high_risk(
+            TopologyMode::SingleAgent,
+            TopologyMode::SingleAgent,
+            RiskLevel::High
+        ));
+        assert!(!force_multiagent_for_high_risk(
+            TopologyMode::MultiAgent,
+            TopologyMode::Auto,
+            RiskLevel::High
+        ));
     }
 
     #[test]
@@ -2572,6 +3142,29 @@ mod tests {
     }
 
     #[test]
+    fn parallel_spend_cap_sums_coder_costs() {
+        // Phase 5.5: the hard ceiling the parallel-coder hole-close relies
+        // on — N coder metrics are summed, so parallel mode honors the cap.
+        let metric = |cost: f64| StageMetric {
+            role: AgentRole::Coder,
+            provider: "mock".into(),
+            model: "m".into(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cached_input_tokens: 0,
+            reasoning_tokens: 0,
+            latency_ms: 0,
+            cost_usd: cost,
+            retry_count: 0,
+            ttft_ms: 0,
+        };
+        let metrics = vec![metric(0.05), metric(0.05), metric(0.05)];
+        assert!(enforce_spend_cap(0.10, &metrics).is_err());
+        assert!(enforce_spend_cap(0.20, &metrics).is_ok());
+        assert!(enforce_spend_cap(0.0, &metrics).is_ok(), "0 disables");
+    }
+
+    #[test]
     fn body_stages_for_single_agent_keeps_only_coder() {
         let stages = vec![
             PipelineStageConfig {
@@ -2610,5 +3203,38 @@ mod tests {
         // Multi-agent passes every body stage through unchanged.
         let multi = body_stages_for(TopologyMode::MultiAgent, stages);
         assert_eq!(multi.len(), 3);
+    }
+
+    #[test]
+    fn resolve_stages_honors_effort_preset_and_explicit_override() {
+        let mut config = NikiConfig::default();
+        config.agents.coder.effort = Some("low".to_string());
+        config.agents.coder.max_tokens = 0;
+        config.agents.coder.temperature = 0.0;
+
+        let stages = resolve_stages(&config);
+        let coder = stages.iter().find(|s| s.role == AgentRole::Coder).unwrap();
+        assert_eq!(
+            coder.max_tokens, 4096,
+            "low effort preset resolves to 4096 tokens"
+        );
+        assert_eq!(
+            coder.temperature, 0.0,
+            "low effort preset resolves to 0.0 temperature"
+        );
+
+        // Explicit override wins over effort preset
+        config.agents.coder.max_tokens = 2048;
+        config.agents.coder.temperature = 0.7;
+        let stages2 = resolve_stages(&config);
+        let coder2 = stages2.iter().find(|s| s.role == AgentRole::Coder).unwrap();
+        assert_eq!(
+            coder2.max_tokens, 2048,
+            "explicit max_tokens overrides effort"
+        );
+        assert_eq!(
+            coder2.temperature, 0.7,
+            "explicit temperature overrides effort"
+        );
     }
 }

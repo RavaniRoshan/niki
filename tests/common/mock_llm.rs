@@ -251,9 +251,12 @@ pub fn red_challenge_json_with_issue(claim: &str) -> String {
 pub fn synthesis_json() -> String {
     json!({
         "merged": {
-            "edits": [],
-            "unified_diff": "",
-            "files_changed": [],
+            "edits": [
+                {"search": "let end = start + size - 1;", "replace": "let end = start + size;"}
+            ],
+            "files_changed": [
+                {"path": "src/list.rs", "action": "modify", "language": "rust"}
+            ],
             "implementation_notes": "Synthesized from parallel coders.",
             "spec_adherence": "Matches the spec."
         },

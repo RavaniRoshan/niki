@@ -134,15 +134,18 @@ impl TestHarness {
         self.repo.dir.path().to_path_buf()
     }
 
-    pub async fn run_pipeline(&self) -> niki::orchestrator::pipeline::PipelineResult {
+    pub async fn run_pipeline_with_task_id(
+        &self,
+        task_id: Uuid,
+        cancel: Arc<AtomicBool>,
+    ) -> anyhow::Result<niki::orchestrator::pipeline::PipelineResult> {
         let task = Task {
-            id: Uuid::new_v4(),
+            id: task_id,
             description: "Fix the off-by-one bug in paginate".to_string(),
             project_path: self.project_path(),
         };
         let mut display = AgenticDisplay::new();
         let containers: ActiveContainers = Arc::new(Mutex::new(Vec::new()));
-        let cancel = Arc::new(AtomicBool::new(false));
         let task_dir = task
             .project_path
             .join(&self.config.general.output_dir)
@@ -161,7 +164,26 @@ impl TestHarness {
             false,
         )
         .await
-        .expect("pipeline should succeed")
+    }
+
+    pub async fn run_pipeline_with_cancel(
+        &self,
+        cancel: Arc<AtomicBool>,
+    ) -> anyhow::Result<niki::orchestrator::pipeline::PipelineResult> {
+        self.run_pipeline_with_task_id(Uuid::new_v4(), cancel).await
+    }
+
+    pub async fn run_pipeline_result(
+        &self,
+    ) -> anyhow::Result<niki::orchestrator::pipeline::PipelineResult> {
+        self.run_pipeline_with_cancel(Arc::new(AtomicBool::new(false)))
+            .await
+    }
+
+    pub async fn run_pipeline(&self) -> niki::orchestrator::pipeline::PipelineResult {
+        self.run_pipeline_result()
+            .await
+            .expect("pipeline should succeed")
     }
 
     pub async fn run_pipeline_dry(&self) -> niki::orchestrator::pipeline::PipelineResult {

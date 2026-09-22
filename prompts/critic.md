@@ -2,10 +2,33 @@ You are a verdict-grounding critic. Your job is NOT to re-review the code — it
 
 ## Inputs (published artifacts only)
 
-1. The task spec (what was asked).
-2. The Coder's diff EVIDENCE (edit blocks + files changed; the Coder's self-justification is withheld on purpose).
-3. The Tester's report.
-4. The Reviewer's verdict under test.
+## Task Specification
+```json
+{{ input_artifacts[0] }}
+```
+
+## Coder's Diff EVIDENCE (edit blocks + files changed; self-justification withheld on purpose)
+```json
+{{ input_artifacts[1] }}
+```
+
+## Tester's Report
+```json
+{{ input_artifacts[2] }}
+```
+
+## Reviewer's Verdict Under Test
+```json
+{{ input_artifacts[3] }}
+```
+
+{% if input_artifacts | length > 4 %}
+## Red Challenge (RECONCILE WHEN PRESENT)
+```json
+{{ input_artifacts[4] }}
+```
+When present, every Red challenge id must appear in `red_reconciliation` handling — missing reconciliations are UNSUPPORTED.
+{% endif %}
 
 ## Your checks (mechanical, in order)
 

@@ -1,0 +1,81 @@
+---
+title: skills
+description: Distill Approved runs into versioned project skills with explicit promotion and retirement.
+sidebar:
+  order: 7
+  label: skills
+---
+
+# `niki skills`
+
+Project skills are versioned workflows distilled from successful runs — plan
+shapes, test commands, and review notes that worked. Distillation is always
+two-step: an Approved run with a green executed suite **stages** a candidate,
+and a human **promotes** it. Nothing auto-activates.
+
+```bash
+# Staged candidates awaiting review
+niki skills candidates --project /path/to/repo
+
+# Promote a candidate into a versioned skill
+niki skills promote <candidate-id> --project /path/to/repo
+
+# List promoted skills (active only)
+niki skills list --project /path/to/repo
+
+# Show a skill's SKILL.md body
+niki skills show <name> --project /path/to/repo
+
+# Diff a candidate against the promoted skill of the same shape
+niki skills diff <candidate-id> --project /path/to/repo
+
+# Retire a skill (reason is preserved in the lock)
+niki skills retire <name> --reason "superseded by better evidence" --project /path/to/repo
+```
+
+## Layout
+
+Skills live under the configured `output_dir` (default `.niki/`), which stays
+git-ignored:
+
+```text
+<output_dir>/skills/<name>/SKILL.md        the workflow (format v1 below)
+<output_dir>/skills/<name>/metadata.json   name, version, source runs, snapshot
+<output_dir>/skills-staging/<id>/          candidates awaiting promotion
+<output_dir>/skills-lock.json              name → version → content hash → runs
+```
+
+Re-promoting the same task shape **supersedes**: the version bumps and the
+previous metadata is kept in `metadata.json:history`. Retiring removes the
+skill directory but keeps the reason in the lock. A skill whose source
+snapshot no longer matches HEAD is listed with a `[stale]` flag — it is never
+silently served as fresh.
+
+Promoted skills are served by the `skill_list` / `skill_load` tools alongside
+the shared `~/.agents/skills/` layer (project wins on name collision).
+
+## SKILL.md format (v1)
+
+Every promoted skill body has three sections plus a provenance quote:
+
+```markdown
+# Skill: <name>
+
+> Distilled from niki run `<task>` (verdict: Approved, model: <model>).
+> Promoted skills are versioned workflows, not facts: verify paths and
+> commands against the current tree before following them.
+
+## When to use
+
+Tasks shaped like: <task description>
+
+## What worked
+
+- Plan shape: <spec summary + file count>
+- Test command: `<command>` (was green at distillation time)
+- Review notes: <reviewer excerpt>
+
+## Freshness
+
+- Source snapshot: `<commit-sha>` (flag stale when HEAD differs).
+```

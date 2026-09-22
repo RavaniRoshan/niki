@@ -20,10 +20,7 @@ You can define ordered fallback model lists per agent role in `niki.toml`. If th
 [agents.planner]
 provider  = "anthropic"
 model     = "claude-sonnet-4-20250514"
-fallbacks = [
-  { provider = "openai", model = "gpt-4o" },
-  { provider = "openrouter", model = "deepseek/deepseek-r1" }
-]
+fallbacks = ["openai", "openrouter"]
 ```
 
 ---
@@ -36,3 +33,13 @@ NIKI includes a deterministic AST-based JSON repair engine:
 1. Strips markdown fences, preamble text, and comments.
 2. Fixes trailing commas and missing bracket closures.
 3. Attempts multi-pass schema re-parsing before triggering an agent retry prompt.
+
+## No constrained decoding (explicit constraint)
+
+`run_agent` always sends `json_schema: None` — the JSON Schema travels as
+prompt text only, never as a provider constrained-decoding parameter. Only the
+OpenAI-compatible provider and the Mock provider implement structured output
+(`request_structured`), and `request_structured` has no production caller in the
+`niki run` path today. Do not assume constrained decoding in Phase 3 tool-loop
+work; validation happens after generation via `validate_artifact` plus local
+repair and at most two LLM re-prompt retries, fail-loud on persistent mismatch.

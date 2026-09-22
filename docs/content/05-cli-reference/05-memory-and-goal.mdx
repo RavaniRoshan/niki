@@ -38,13 +38,17 @@ niki goal resume <goal-id>
 NIKI maintains a hierarchical project memory in `.niki/memory/` across runs so agents remember project architecture, conventions, and previous bug fixes.
 
 ```bash
-# Query memory with natural language
-niki memory query "What database conventions do we use?"
+# Query memory entries by tag
+niki memory query "arch"
 
-# Manually store a persistent architectural rule
-niki memory store --tag arch "Always use UTC timestamps in database models"
+# Recall memory across all levels matching a search phrase
+niki memory recall "database conventions"
 
-# View all stored tags and entries
+# Manually store a persistent fact in user memory (key value)
+niki memory store arch "Always use UTC timestamps in database models"
+
+# View all stored tags, show entries, or preview prompt injection
 niki memory tags
-niki memory show
+niki memory show --role coder
+niki memory preview --role coder
 ```

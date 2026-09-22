@@ -284,4 +284,50 @@ mod tests {
         assert_eq!(loaded.cost_usd, 1.25);
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn mission_snapshot_roundtrip_under_relaunch() {
+        // Phase 7.3: mission snapshot roundtrip under relaunch preserves fields and timestamps.
+        let root = test_root("relaunch");
+        let _ = std::fs::remove_dir_all(&root);
+
+        let mut m = Mission::new(
+            MissionId("mission-relaunch".into()),
+            "Fix auth issue".into(),
+            "s1".into(),
+        );
+        m.status = MissionStatus::Running;
+        m.attention = crate::mission::AttentionPriority::NeedsAttention;
+        m.progress = 0.75;
+        m.cost_usd = 0.42;
+        m.branch = Some("niki/auth-fix".into());
+        m.error = Some("warning: retry occurred".into());
+        m.model = "claude-sonnet-4".into();
+        m.sessions.push(SessionId("s1".into()));
+        m.sessions.push(SessionId("s2".into()));
+        m.started_at = Some(Instant::now());
+
+        save_mission(&root, &m).unwrap();
+
+        // Simulate relaunch: load into a fresh Mission instance
+        let reloaded = load_mission(&root, "mission-relaunch")
+            .unwrap()
+            .expect("reloaded mission");
+        assert_eq!(reloaded.id.0, "mission-relaunch");
+        assert_eq!(reloaded.description, "Fix auth issue");
+        assert_eq!(reloaded.status, MissionStatus::Running);
+        assert_eq!(
+            reloaded.attention,
+            crate::mission::AttentionPriority::NeedsAttention
+        );
+        assert_eq!(reloaded.progress, 0.75);
+        assert!((reloaded.cost_usd - 0.42).abs() < 1e-6);
+        assert_eq!(reloaded.branch.as_deref(), Some("niki/auth-fix"));
+        assert_eq!(reloaded.error.as_deref(), Some("warning: retry occurred"));
+        assert_eq!(reloaded.model, "claude-sonnet-4");
+        assert_eq!(reloaded.sessions.len(), 2);
+        assert!(reloaded.started_at.is_some());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

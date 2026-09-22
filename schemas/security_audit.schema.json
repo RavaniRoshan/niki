@@ -46,7 +46,8 @@
   "required": [
     "verdict",
     "overall_assessment",
-    "findings"
+    "findings",
+    "strengths"
   ],
   "additionalProperties": false
 }

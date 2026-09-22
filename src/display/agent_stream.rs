@@ -98,9 +98,12 @@ impl AgenticDisplay {
     }
 
     /// Silence every terminal write (stdout stays clean for machine parsing).
-    /// Buffered events and TUI forwarding are unaffected.
+    /// Buffered events are unaffected, but TUI output is suppressed.
     pub fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
+        if muted && self.tui.is_some() {
+            self.finish_tui();
+        }
     }
 
     /// Create a cheap independent instance of the display that forwards events to the
@@ -126,13 +129,14 @@ impl AgenticDisplay {
 
     /// Enable the rich terminal TUI. Spawns the render thread; subsequent
     /// display calls forward events to it instead of printing inline.
+    /// In muted/json mode, TUI is suppressed so stdout carries only machine output.
     pub fn enable_tui(
         &mut self,
         description: String,
         project_path: PathBuf,
         cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) {
-        if !self.is_tty {
+        if !self.is_tty || self.muted {
             return;
         }
         self.cancel = Some(cancel.clone());
@@ -665,5 +669,53 @@ impl AgenticDisplay {
 impl Default for AgenticDisplay {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn tui_json_precedence_muted_suppresses_tui() {
+        let mut display = AgenticDisplay::new();
+        display.set_muted(true);
+        let cancel = Arc::new(AtomicBool::new(false));
+        display.enable_tui("test task".to_string(), PathBuf::from("."), cancel);
+        assert!(display.tui_tx().is_none());
+    }
+
+    #[test]
+    fn event_buffer_drain_and_fork_behavior() {
+        let display = AgenticDisplay::new();
+        assert!(display.take_events().is_empty());
+
+        display.emit(DisplayEvent::Banner {
+            description: "test banner".to_string(),
+        });
+        display.emit(DisplayEvent::Final);
+
+        let forked = display.fork();
+        forked.emit(DisplayEvent::DiffContent("diff --git a b".to_string()));
+
+        let drained = display.take_events();
+        assert_eq!(drained.len(), 3);
+        match &drained[0] {
+            DisplayEvent::Banner { description } => assert_eq!(description, "test banner"),
+            _ => panic!("unexpected event 0"),
+        }
+        match &drained[1] {
+            DisplayEvent::Final => {}
+            _ => panic!("unexpected event 1"),
+        }
+        match &drained[2] {
+            DisplayEvent::DiffContent(d) => assert_eq!(d, "diff --git a b"),
+            _ => panic!("unexpected event 2"),
+        }
+
+        assert!(display.take_events().is_empty());
+        assert!(forked.take_events().is_empty());
     }
 }

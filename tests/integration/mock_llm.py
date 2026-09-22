@@ -162,6 +162,77 @@ def chunk_text(text, size=20):
     return [text[i:i+size] for i in range(0, len(text), size)]
 
 
+def openai_json_response(role, body):
+    """Non-streaming OpenAI response. Tool-loop path (Phase 3.3): a request
+    carrying `tools` gets one `tool_calls` turn until a `tool_result` shows up
+    in the conversation, then a final text turn. Stateless."""
+    text = json.dumps(body)
+    tools = body.get("tools") or []
+    usage = {"prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 150}
+    if tools and "tool_result" not in text:
+        return {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_probe1",
+                        "type": "function",
+                        "function": {
+                            "name": "bash",
+                            "arguments": json.dumps({"command": "echo tool-loop-probe"}),
+                        },
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+            "usage": usage,
+        }
+    if tools:
+        content = "Tool research complete: the probe command returned as observed."
+    else:
+        content = json.dumps(ROLE_RESPONSES[role], indent=2)
+    return {
+        "choices": [{
+            "message": {"role": "assistant", "content": content},
+            "finish_reason": "stop",
+        }],
+        "usage": usage,
+    }
+
+
+def anthropic_json_response(role, body):
+    """Non-streaming Anthropic response with the same tool-loop behavior."""
+    text = json.dumps(body)
+    tools = body.get("tools") or []
+    if tools and "tool_result" not in text:
+        content = [{
+            "type": "tool_use",
+            "id": "toolu_probe1",
+            "name": "bash",
+            "input": {"command": "echo tool-loop-probe"},
+        }]
+    elif tools:
+        content = [{
+            "type": "text",
+            "text": "Tool research complete: the probe command returned as observed.",
+        }]
+    else:
+        content = [{
+            "type": "text",
+            "text": json.dumps(ROLE_RESPONSES[role], indent=2),
+        }]
+    return {
+        "id": "msg_" + uuid.uuid4().hex[:24],
+        "type": "message",
+        "role": "assistant",
+        "model": "mock-model",
+        "content": content,
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 50, "output_tokens": 100},
+    }
+
+
 def sse_openai_stream(role):
     """Generate OpenAI-format SSE stream events."""
     content = json.dumps(ROLE_RESPONSES[role], indent=2)
@@ -301,14 +372,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = self._read_body()
         role = detect_role(body)
+        stream = body.get("stream", False)
 
         if "/v1/messages" in self.path:
-            self._stream_sse(sse_anthropic_stream(role))
+            if stream:
+                self._stream_sse(sse_anthropic_stream(role))
+            else:
+                self._send_json(anthropic_json_response(role, body))
         elif "/v1/chat/completions" in self.path or "/chat/completions" in self.path:
-            self._stream_sse(sse_openai_stream(role))
+            if stream:
+                self._stream_sse(sse_openai_stream(role))
+            else:
+                self._send_json(openai_json_response(role, body))
         else:
             # Default: treat as openai
-            self._stream_sse(sse_openai_stream(role))
+            if stream:
+                self._stream_sse(sse_openai_stream(role))
+            else:
+                self._send_json(openai_json_response(role, body))
 
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):

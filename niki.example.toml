@@ -18,6 +18,16 @@ max_diff_lines = 0
 # the remainder is cut with an explicit marker.
 max_context_chars = 48000
 
+# Unified run hysteresis: one step/cost/wallclock budget. Every retry, repair,
+# revision, tool-loop step, and goal iteration accrues; exhaustion stops the run
+# with BudgetExhausted (recorded in task.json). All zero = unlimited.
+# max_usd falls back to spend_cap_usd above when unset. CLI overrides:
+#   niki run --max-steps 50 --max-usd 5 --max-wallclock-secs 1800
+[budget]
+max_steps = 0
+max_usd = 0.0
+max_wallclock_secs = 0
+
 [providers.anthropic]
 api_key = "sk-ant-..."               # Or set ANTHROPIC_API_KEY env var
 # base_url = "https://api.anthropic.com"  # Host/base for compatible APIs (or set ANTHROPIC_BASE_URL)
@@ -139,7 +149,22 @@ model = "meta/llama-3.1-405b-instruct"
 # urls = ["https://example.com/architecture.md"]
 # max_source_chars = 8000
 
-# Optional: rebind global TUI keys (action id → key specs like "ctrl+p", "?", "f5").# Ids: toggle_help, toggle_mouse, cancel_exit, command_palette, cycle_theme,
+# TUI display configuration.
+# [ui]
+# theme = "auto"  # "auto" | "dark" | "light"
+
+# [ui.tips]
+# enabled = true
+# rotation_seconds = 30
+
+# [ui.transcript]
+# collapse_completed = true
+# expand_failures = true
+# show_intent_labels = true
+# auto_collapse_turns = false
+
+# Optional: rebind global TUI keys (action id → key specs like "ctrl+p", "?", "f5").
+# Ids: toggle_help, toggle_mouse, cancel_exit, command_palette, cycle_theme,
 # toggle_chat, goto_fleet, goto_session. Unknown ids and bad specs are
 # reported in the help overlay (?), never fatal. Clashes resolve by table
 # order (first wins).
@@ -155,18 +180,21 @@ model = "meta/llama-3.1-405b-instruct"
 # A bare upstream image (e.g. ubuntu:24.04) lacks those tools and fails the
 # sandbox's tool check at runtime.
 base_image = "niki-sandbox:24.04"
-# Additional packages to install in agent containers
+# Additional tool binaries that must be present in agent sandboxes. Despite the
+# name, nothing is installed: entries extend the startup `command -v` checklist,
+# so the pre-baked image must already provide them.
 extra_packages = ["nodejs", "npm", "python3"]
 # Memory limit per container
 memory_limit = "2g"
 # CPU limit per container
 cpu_limit = 2.0
 # Disable outbound network egress (default: true for security).
-# Use network_allowlist for specific domains that need egress.
 network_disabled = true
-# Domain allowlist for outbound network egress. Only these domains are allowed
-# when network_disabled = true. Use "*" to allow all (equivalent to network_disabled = false).
-# network_allowlist = ["registry.npmjs.org", "pypi.org", "crates.io"]
+# Egress allowlist. NOTE: per-domain filtering is NOT implemented — container
+# egress is all-or-nothing. Only "*" opens egress (equivalent to
+# network_disabled = false); a non-empty domain list warns at startup and
+# behaves as block-all.
+# network_allowlist = ["*"]
 # Sandbox backend: "docker" (container, default) or "worktree" (git worktree + local
 # process, no container runtime). Override at runtime with: niki run --backend worktree
 # backend = "docker"
@@ -216,6 +244,10 @@ network_disabled = true
 # Contract per command: exit 2 (or stdout JSON {"deny": true}) BLOCKS and aborts
 # the run fail-closed; anything else allows. Payload arrives via
 # NIKI_HOOK_EVENT / NIKI_HOOK_PAYLOAD env vars. Unknown events warn + skip.
+# A hook running longer than [hooks] timeout_seconds is killed and treated as
+# Noop with a warning (0 = wait forever). Default 30.
+# [hooks]
+# timeout_seconds = 30
 # [hooks.commands]
 # PreTaskStart = ["echo \"starting $NIKI_HOOK_PAYLOAD\" >> .niki/hooks.log"]
 # PostTaskStop = ["echo \"finished $NIKI_HOOK_PAYLOAD\" >> .niki/hooks.log"]
@@ -251,3 +283,59 @@ network_disabled = true
 # [critic]
 # enabled = true
 # max_tokens = 4096
+
+# Executable tool loop (Layers 4+5). Default off: the pipeline is unchanged.
+# When true, one bounded research step runs through run_tool_loop before the
+# Planner and its output is appended to the Planner context. The loop inherits
+# [permissions] mode: Ask tools (e.g. bash) need mode auto/dontask/bypass to
+# execute — manual fails closed headless (the loop has no approval UI).
+# [tools]
+# experimental_tool_loop = false
+# max_steps = 4
+
+# Security auditor pass: injected after Reviewer on high-risk tiers or when enabled.
+# [security]
+# enabled = false
+# provider = "anthropic"
+# model = "claude-sonnet-4-20250514"
+
+# Parallel-coder mode: multiple coder agents run concurrently in isolated worktrees,
+# then a Synthesizer reconciles their diffs into one coherent change.
+# [parallel]
+# enabled = false
+# coder_count = 2
+
+# Adversarial Red/Blue verification: an independent Red agent probes the Coder's
+# diff before the Reviewer runs; the Reviewer must reconcile each Red challenge.
+# [red_blue]
+# enabled = false
+# provider = "anthropic"
+# model = "claude-sonnet-4-20250514"
+
+# Autonomous multi-iteration goal loop runner.
+# [goal]
+# max_iterations = 30
+# fail_fast = true
+# retry_attempts = 3
+# retry_delay_ms = 1000
+
+# Session management and persistence across interactive runs.
+# [session]
+# enabled = true
+# max_sessions = 50
+# auto_save = false
+
+# Context compaction: automatically compacts conversational and tool memory
+# when token usage crosses the threshold percentage.
+# [compaction]
+# enabled = true
+# threshold_pct = 80
+# reserved_tokens = 4096
+# auto_compact = true
+
+# Project instruction injection (AGENTS.md and custom instruction paths).
+# [instructions]
+# enabled = true
+# paths = ["AGENTS.md"]
+# auto_detect_agents_md = true
+

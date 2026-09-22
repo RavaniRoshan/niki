@@ -25,9 +25,31 @@ pub struct DockerSandbox {
     pub workspace_path: PathBuf,
     docker: Docker,
     containers: ActiveContainers,
+    /// Set by `destroy()`; Drop only cleans up when explicit destroy was
+    /// skipped (panic/error paths).
+    destroyed: std::sync::atomic::AtomicBool,
     policy: crate::config::SecurityPolicyConfig,
     permission_checker: crate::permissions::PermissionChecker,
     event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
+}
+
+impl Drop for DockerSandbox {
+    /// Best-effort container removal for paths that skip `destroy()`.
+    /// The async client is unavailable here, so fall back to the runtime
+    /// CLIs; failures are ignored (a leaked container is waste, not
+    /// corruption — and `destroy()` remains the primary path).
+    fn drop(&mut self) {
+        if self.destroyed.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let id = &self.container_id;
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "docker rm -f '{id}' 2>/dev/null || podman rm -f '{id}' 2>/dev/null"
+            ))
+            .status();
+    }
 }
 
 #[derive(Debug)]
@@ -40,7 +62,24 @@ pub struct ExecOutput {
 /// Returns true when the network allowlist is a wildcard (`"*"` or `"all"`),
 /// which means the operator explicitly wants full egress despite
 /// `network_disabled = true`.
+///
+/// Phase 5.3 honesty: per-domain filtering is NOT implemented — container
+/// egress is all-or-nothing (`none` vs default bridge). A non-empty,
+/// non-wildcard list is therefore equivalent to block-all, and creation warns
+/// loudly instead of pretending otherwise.
 fn allowlist_allows_all(config: &DockerConfig) -> bool {
+    if !config.network_allowlist.is_empty()
+        && !config
+            .network_allowlist
+            .iter()
+            .any(|s| s == "*" || s == "all")
+        && config.network_disabled
+    {
+        eprintln!(
+            "Warning: network_allowlist {:?} requests per-domain egress, which is not implemented (container network is all-or-nothing); treating as block-all. Use \"*\" for full egress or network_disabled = false.",
+            config.network_allowlist
+        );
+    }
     config
         .network_allowlist
         .iter()
@@ -170,6 +209,7 @@ impl DockerSandbox {
             workspace_path,
             docker: docker.clone(),
             containers,
+            destroyed: std::sync::atomic::AtomicBool::new(false),
             policy: policy.clone(),
             permission_checker: crate::sandbox::build_permission_checker(&policy, niki_config),
             event_tx,
@@ -342,16 +382,10 @@ impl DockerSandbox {
         Ok(())
     }
 
-    /// Normalize an LLM-generated diff before writing it to disk: unify CRLF→LF
-    /// line endings and guarantee a trailing newline. `git apply` treats a patch
-    /// that ends mid-line (no final newline) as a "corrupt patch" at the last
-    /// context line, which silently breaks the Coder's output.
+    /// Normalize an LLM-generated diff before writing it to disk.
+    /// Phase 5.1: delegates to the single shared helper in `output::git`.
     fn normalize_patch(patch: &str) -> String {
-        let mut s = patch.replace("\r\n", "\n");
-        if !s.ends_with('\n') {
-            s.push('\n');
-        }
-        s
+        crate::output::git::normalize_patch(patch)
     }
 
     pub async fn apply_patch(&self, patch: &str, host_workspace: &Path) -> Result<()> {
@@ -408,6 +442,17 @@ impl DockerSandbox {
                 }
             }
 
+            // Phase 5.1 partial-apply semantics: all-or-nothing per stage.
+            // A stage with ANY unmatched block writes NOTHING, so a failed
+            // stage never leaves a half-applied workspace behind. The error
+            // names the unmatched count; the caller records it.
+            if !unmatched.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "No edit block matched its target file in the workspace ({} unmatched); nothing was written",
+                    unmatched.len()
+                ));
+            }
+
             // Write back only the files that actually changed.
             for file_path in changed_files {
                 if let Some(content) = contents.get(&file_path) {
@@ -415,12 +460,6 @@ impl DockerSandbox {
                 }
             }
 
-            if !unmatched.is_empty() {
-                return Err(anyhow::anyhow!(
-                    "No edit block matched its target file in the workspace ({} unmatched)",
-                    unmatched.len()
-                ));
-            }
             return Ok(());
         }
 
@@ -463,11 +502,35 @@ impl DockerSandbox {
         }
     }
 
-    pub async fn get_diff(&self) -> Result<String> {
+    pub async fn get_diff(&self, agent_files: &[String]) -> Result<String> {
         // Run from /workspace so `git diff` sees the repository.
-        let output = self
-            .exec(&["sh", "-c", "cd /workspace && git diff"])
-            .await?;
+        // Phase 5.1: scope to agent-reported files (intent-to-add just
+        // those), so pre-existing container dirt never leaks into the patch.
+        let files: Vec<&str> = agent_files
+            .iter()
+            .map(|s| s.as_str())
+            .filter(|s| {
+                !s.is_empty()
+                    && !s.starts_with('.')
+                    && !s.starts_with('/')
+                    && !s.contains("..")
+                    && *s != "niki.toml"
+            })
+            .collect();
+        if files.is_empty() {
+            return Ok(String::new());
+        }
+        let quoted: Vec<String> = files
+            .iter()
+            .map(|f| format!("'{}'", f.replace('\'', "'\\''")))
+            .collect();
+        let add = format!(
+            "cd /workspace && git add -N -- {} 2>/dev/null; true",
+            quoted.join(" ")
+        );
+        let _ = self.exec(&["sh", "-c", &add]).await;
+        let diff = format!("cd /workspace && git diff -- {}", quoted.join(" "));
+        let output = self.exec(&["sh", "-c", &diff]).await?;
         Ok(output.stdout)
     }
 
@@ -484,6 +547,9 @@ impl DockerSandbox {
     }
 
     pub async fn destroy(&self) -> Result<()> {
+        // Mark first so Drop never repeats an explicit teardown.
+        self.destroyed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         // Unregister first so a concurrent Ctrl+C handler doesn't double-remove.
         {
             let mut list = self.containers.lock().await;
@@ -509,8 +575,8 @@ impl Sandbox for DockerSandbox {
     async fn apply_patch(&self, patch: &str, host_workspace: &Path) -> Result<()> {
         DockerSandbox::apply_patch(self, patch, host_workspace).await
     }
-    async fn get_diff(&self) -> Result<String> {
-        DockerSandbox::get_diff(self).await
+    async fn get_diff(&self, agent_files: &[String]) -> Result<String> {
+        DockerSandbox::get_diff(self, agent_files).await
     }
     async fn exec(&self, cmd: &[&str], role: Option<&AgentRole>) -> Result<ExecOutput> {
         // F1: Enforce security policy when a role is supplied.

@@ -4,9 +4,25 @@
   "properties": {
     "merged": {
       "type": "object",
-      "description": "The reconciled change, shaped like a single coder's CodeDiff.",
+      "description": "The reconciled change, shaped exactly like a single coder's CodeDiff.",
       "properties": {
-        "unified_diff": { "type": "string" },
+        "edits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "search": {
+                "type": "string",
+                "description": "Verbatim text copied EXACTLY from the Current File Contents (whitespace and indentation included, 3-5+ lines so the match is unique)."
+              },
+              "replace": {
+                "type": "string",
+                "description": "Replacement text that takes the place of 'search' verbatim."
+              }
+            },
+            "required": ["search", "replace"]
+          }
+        },
         "files_changed": {
           "type": "array",
           "items": {
@@ -17,21 +33,28 @@
                 "type": "string",
                 "enum": ["create", "modify", "delete"]
               },
-              "diff": { "type": "string" },
-              "language": { "type": ["string", "null"] }
+              "language": {
+                "type": ["string", "null"]
+              }
             },
-            "required": ["path", "action", "diff"]
+            "required": ["path", "action"]
           }
         },
         "implementation_notes": { "type": "string" },
-        "spec_adherence": { "type": "string" }
+        "spec_adherence": { "type": "string" },
+        "uncertainties": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "Risks, open questions, or assumptions made under time pressure."
+        }
       },
       "required": [
-        "unified_diff",
+        "edits",
         "files_changed",
         "implementation_notes",
         "spec_adherence"
-      ]
+      ],
+      "additionalProperties": false
     },
     "reconciliation_notes": { "type": "string" },
     "sources_merged": { "type": "integer", "minimum": 1 }

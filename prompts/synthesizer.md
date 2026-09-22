@@ -10,7 +10,7 @@ You are a synthesis agent. Multiple independent coder agents have each produced 
 {{ input_artifacts[1] }}
 ```
 
-In the parallel-coder flow these are multiple unified diffs (one per coder). They may touch overlapping or distinct files.
+In the parallel-coder flow these are multiple CodeDiffs (one per coder, SEARCH/REPLACE edits). They may touch overlapping or distinct files.
 
 ## Project Context
 {{ project_knowledge }}
@@ -29,7 +29,7 @@ You MUST output a single valid JSON object conforming to this schema:
 ## Rules
 1. Produce a single `merged` change that includes the best parts of every coder's work. Do not silently drop a coder's substantive change without noting why.
 2. If two coders edited the SAME file in conflicting ways, pick the approach that best satisfies the spec and the acceptance criteria; explain the choice in `reconciliation_notes`.
-3. The `merged.unified_diff` MUST be a single valid unified diff that `git apply` can apply cleanly to the base tree. Do not include conflict markers, commentary, or partial hunks.
+3. The `merged.edits` MUST be SEARCH/REPLACE blocks in the same shape as a single coder's CodeDiff, applicable to the base tree. Do not include conflict markers, commentary, unified-diff hunks, or partial edits.
 4. Never introduce code that depends on a file/function another coder was supposed to create unless that creation is included in `merged`.
 5. `sources_merged` is the number of distinct coder diffs you reconciled.
 6. After synthesizing, reason about integration risk: do the merged files compile/import consistently? Call out anything the downstream Tester should focus on.

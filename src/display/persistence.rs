@@ -16,32 +16,60 @@ const CHAT_FILE: &str = ".niki/chat.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChatSession {
+    #[serde(default)]
     pub chat_log: Vec<(String, String)>,
+    #[serde(default)]
     pub notes: Vec<String>,
+    #[serde(default)]
     pub model: String,
+    #[serde(default)]
     pub revision_round: u32,
+    /// Store schema version; mismatches warn loudly instead of dropping silently.
+    #[serde(default = "chat_schema_version")]
+    pub schema_version: u32,
+}
+
+fn chat_schema_version() -> u32 {
+    1
 }
 
 fn state_path(project_path: &Path) -> PathBuf {
     project_path.join(CHAT_FILE)
 }
 
-/// Load a saved chat session, if present.
+/// Load a saved chat session, if present. Version mismatches warn loudly.
 pub fn load_chat_session(project_path: &Path) -> Option<ChatSession> {
     let path = state_path(project_path);
     let content = fs::read_to_string(&path).ok()?;
-    let session: ChatSession = serde_json::from_str(&content).ok()?;
-    Some(session)
+    match serde_json::from_str::<ChatSession>(&content) {
+        Ok(session) => {
+            if session.schema_version != 1 {
+                eprintln!(
+                    "Warning: {} schema_version={} (expected 1); reading best-effort",
+                    path.display(),
+                    session.schema_version
+                );
+            }
+            Some(session)
+        }
+        Err(e) => {
+            eprintln!(
+                "Warning: {} unparsable ({}); starting fresh",
+                path.display(),
+                e
+            );
+            None
+        }
+    }
 }
 
-/// Persist the current chat session to disk.
+/// Persist the current chat session to disk (atomic + 0600).
 pub fn save_chat_session(project_path: &Path, session: &ChatSession) -> bool {
     let path = state_path(project_path);
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    match serde_json::to_string_pretty(session) {
-        Ok(json) => fs::write(&path, json).is_ok(),
+    let mut owned = session.clone();
+    owned.schema_version = 1;
+    match serde_json::to_string_pretty(&owned) {
+        Ok(json) => crate::util::write_atomic_restricted(&path, json).is_ok(),
         Err(_) => false,
     }
 }
@@ -70,6 +98,7 @@ pub fn snapshot(state: &AppState) -> ChatSession {
         notes: state.notes.iter().map(|(t, _)| t.clone()).collect(),
         model: state.model.clone(),
         revision_round: state.revision_round,
+        schema_version: 1,
     }
 }
 
@@ -94,6 +123,7 @@ mod tests {
             notes: vec!["note one".to_string()],
             model: "test-model".to_string(),
             revision_round: 2,
+            schema_version: 1,
         };
         assert!(save_chat_session(&dir, &session));
         let loaded = load_chat_session(&dir).expect("session should load");
@@ -123,5 +153,33 @@ mod tests {
         assert_eq!(snap.chat_log.len(), 1);
         assert_eq!(snap.model, "m");
         assert_eq!(snap.revision_round, 3);
+    }
+
+    #[test]
+    fn apply_session_rehydrates_exact_scope_and_preserves_unrelated_state() {
+        let config = NikiConfig::default();
+        let mut state = AppState::new("task".to_string(), config, PathBuf::from("."));
+        state.branch_name = "feat-unrelated".to_string();
+
+        let session = ChatSession {
+            chat_log: vec![
+                ("user".to_string(), "hello assistant".to_string()),
+                ("assistant".to_string(), "hello user".to_string()),
+            ],
+            notes: vec!["important context".to_string()],
+            model: "claude-3-7-sonnet".to_string(),
+            revision_round: 4,
+            schema_version: 1,
+        };
+
+        apply_session(&mut state, session);
+
+        assert_eq!(state.chat_log.len(), 2);
+        assert_eq!(state.notes.len(), 1);
+        assert_eq!(state.notes[0].0, "important context");
+        assert_eq!(state.model, "claude-3-7-sonnet");
+        assert_eq!(state.revision_round, 4);
+        assert!(!state.chat_lines.is_empty());
+        assert_eq!(state.branch_name, "feat-unrelated");
     }
 }

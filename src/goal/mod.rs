@@ -1,9 +1,7 @@
-pub mod config;
 pub mod creator;
 pub mod runner;
 pub mod state;
 
-pub use config::GoalConfig;
 pub use creator::GoalCreator;
 pub use runner::GoalRunner;
 pub use state::{

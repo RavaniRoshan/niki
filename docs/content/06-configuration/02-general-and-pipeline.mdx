@@ -30,8 +30,8 @@ Customize the execution topology and stages:
 
 ```toml
 [pipeline]
-topology                    = "Auto" # "Auto" | "MultiAgent" | "SingleAgent"
-single_agent_max_complexity = "Low"  # Complexity threshold for single-agent fast path
+topology                    = "auto" # "auto" | "multiagent" | "singleagent"
+single_agent_max_complexity = "low"  # "low" | "medium" | "high" (complexity threshold for single-agent fast path)
 max_revision_rounds         = 3
 
 stages = [

@@ -11,7 +11,7 @@ readme = "README.md"
 authors = ["Ravani Roshan <ravani.roshan@gmail.com>"]
 keywords = ["ai", "agents", "coding-agent", "multi-agent", "llm", "cli", "rust", "sandbox", "devtools", "automation"]
 categories = ["command-line-utilities", "development-tools", "ai"]
-exclude = ["/.github", "/assets", "/docs", "/research", "/tests", "/evals", "/bench", "/scripts", "/target", "/prompts", "/schemas", "/niki.example.toml"]
+exclude = ["/.github", "/assets", "/convex", "/docs", "/research", "/tests", "/evals", "/bench", "/scripts", "/target", "/prompts", "/schemas", "/niki.example.toml"]
 
 [dependencies]
 # CLI framework
@@ -127,7 +127,6 @@ ast = [
 [dev-dependencies]
 tempfile = "3"
 assert_cmd = "2"
-predicates = "3"
 wiremock = "0.6"
 
 # The profile that 'dist' will build with
