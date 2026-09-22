@@ -17,22 +17,28 @@ use std::path::Path;
 pub struct LearningEntry {
     /// Machine-readable kind: `verification_failure`, `review_correction`,
     /// `security_fix`, `cost_anomaly`, or `history`.
+    #[serde(default)]
     pub kind: String,
     /// Owning task id, when the learning came from a run.
     #[serde(default)]
     pub task_id: Option<String>,
     /// Snapshot anchor (`niki-task-<8 hex>`) the learning was derived under.
+    #[serde(default)]
     pub snapshot_id: String,
     /// Role or subsystem that authored the entry (e.g. `reviewer`,
     /// `history-miner`, `reflect`).
+    #[serde(default)]
     pub author_role: String,
     /// Provenance tier: `authoritative`, `inferred`, or `advisory`.
+    #[serde(default)]
     pub authority: String,
     /// Human-readable detail (bounded by writers; readers do not enforce).
+    #[serde(default)]
     pub details: String,
     /// Optional ordering hint; higher surfaces first in prompts.
     #[serde(default)]
     pub priority: Option<i64>,
+    #[serde(default)]
     pub created_at: DateTime<Utc>,
 }
 
@@ -135,6 +141,42 @@ mod tests {
         assert!(tail[0].details.contains('1'));
         assert!(tail[1].details.contains('2'));
         assert_eq!(tail[0].authority, "inferred");
+    }
+
+    #[test]
+    fn sparse_learning_parses_with_defaults() {
+        // Phase 2.1: old fixtures missing new fields must still parse.
+        let entry: LearningEntry = serde_json::from_str(r#"{"kind":"history"}"#).unwrap();
+        assert_eq!(entry.kind, "history");
+        assert!(entry.details.is_empty());
+    }
+
+    #[test]
+    fn interleaved_appends_lose_no_entries() {
+        // Phase 2.1: sequential appends (interleaved-line model) keep every
+        // entry and leave valid JSONL.
+        let tmp = tempfile::tempdir().unwrap();
+        let config = NikiConfig::default();
+        for i in 0..20 {
+            append_learning(
+                tmp.path(),
+                &config,
+                &LearningEntry::new(
+                    "history",
+                    "niki-task-test",
+                    "history-miner",
+                    "inferred",
+                    format!("detail {i}"),
+                ),
+            )
+            .unwrap();
+        }
+        let content = std::fs::read_to_string(learnings_path(tmp.path(), &config)).unwrap();
+        assert_eq!(content.lines().count(), 20);
+        for line in content.lines() {
+            serde_json::from_str::<LearningEntry>(line).expect("every JSONL line must parse");
+        }
+        assert_eq!(tail_learnings(tmp.path(), &config, 50).len(), 20);
     }
 
     #[test]

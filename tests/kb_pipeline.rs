@@ -273,3 +273,74 @@ async fn critic_reject_forces_one_retry_and_learning() {
     assert!(learnings.contains("review_correction"));
     assert!(learnings.contains("ghost.rs"));
 }
+
+#[tokio::test]
+async fn budget_exhaustion_stops_tiny_run() {
+    // Phase 5.5 acceptance: a fixture configured with a tiny budget stops
+    // with a typed BudgetExhausted error (cli maps it to task.json Failed —
+    // see `cli/run.rs` error arm), regardless of which mechanism would
+    // otherwise retry.
+    let mut harness = TestHarness::new()
+        .with_worktree_backend()
+        .with_mock_provider();
+    harness.config.docker.extra_packages.clear();
+    harness.config.budget.max_steps = 1;
+    let err = harness.run_pipeline_expect_fail().await;
+    let msg = err.to_string();
+    assert!(
+        msg.contains("budget exhausted"),
+        "tiny budget must stop the run, got: {msg}"
+    );
+    assert!(msg.contains("steps"), "dimension must be named: {msg}");
+}
+
+#[tokio::test]
+async fn auto_high_risk_yields_multiagent_with_security_auditor() {
+    // Phase 5.7 acceptance: Auto + High tier forces the full multi-agent
+    // chain and the run produces a SecurityAuditor artifact (the SingleAgent
+    // fast-path would have collapsed it away).
+    let mut harness = TestHarness::new()
+        .with_worktree_backend()
+        .with_mock_provider();
+    harness.config.docker.extra_packages.clear();
+    harness.config.risk.mode = niki::config::types::RiskMode::High;
+    // The risk-added stages need mock answers: the Critic reuses the
+    // reviewer's model binding (appended as its second response), the
+    // SecurityAuditor has its own model.
+    let script_text =
+        std::fs::read_to_string(&harness.mock_script_path).expect("happy-path script exists");
+    let mut script: serde_json::Value = serde_json::from_str(&script_text).unwrap();
+    script["models"]["mock-reviewer"]["responses"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "text": wrap_json(&critic_approve_json()),
+            "input_tokens": 150,
+            "output_tokens": 50,
+        }));
+    script["models"]["mock-security_auditor"] = serde_json::json!({"responses": [{
+        "text": wrap_json(&mock_llm::security_verdict_json()),
+        "input_tokens": 100,
+        "output_tokens": 40,
+    }]});
+    std::fs::write(
+        &harness.mock_script_path,
+        serde_json::to_string_pretty(&script).unwrap(),
+    )
+    .unwrap();
+
+    let result = harness.run_pipeline().await;
+    assert_eq!(format!("{:?}", result.topology), "MultiAgent");
+    assert!(
+        result
+            .artifacts
+            .iter()
+            .any(|(r, _)| *r == AgentRole::SecurityAuditor),
+        "High-risk Auto run must produce a SecurityAuditor artifact"
+    );
+    assert!(
+        result.topology_reason.contains("risk override"),
+        "{}",
+        result.topology_reason
+    );
+}

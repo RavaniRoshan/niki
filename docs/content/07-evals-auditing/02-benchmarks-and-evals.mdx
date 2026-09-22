@@ -30,9 +30,43 @@ test_file   = "tests/api_pagination_test.js"
 ## Running Evaluations
 
 ```bash
-# Run 5 seeded evaluations
+# Run seeded evaluations via deterministic replay (default)
 niki eval --dataset evals/dataset.toml --limit 5
 
 # Benchmark with live provider execution and output report
 niki eval --dataset evals/dataset.toml --live --out evals/report.json
+
+# Record human maintainer merge judgment
+niki eval grade --case defect-001 --verdict merge --reviewer alice --note "clean fix"
 ```
+
+---
+
+## Evaluation Modes & Honesty Principles
+
+NIKI's evaluation harness follows strict scientific honesty and disclosure principles:
+
+### Replay Mode (Default)
+- **What it tests**: Deterministic regression gating of NIKI's review/scoring logic on recorded stage artifacts.
+- **What it does NOT test**: Replay does not invoke live LLMs or execute code in a sandbox.
+- **Cost disclosure**: Replay runs report `$0.0000 (replay: unmeasured, not free)`. It does not claim zero actual compute cost to produce the original traces.
+- **Fixture integrity**: Fixtures are editable files on disk. To guard against accidental drift or tampering, `niki eval grade` captures a deterministic hash of the fixture directory. If fixture contents change after grading, `niki eval` emits a **Fixture integrity warning**.
+
+### Live Mode (`--live`)
+- **Direct execution**: Executes full multi-agent pipelines against real models and sandbox environments.
+- **Working tree guard**: Live mode writes directly to the target project directory without creating a temporary branch or commit. To prevent accidental corruption of user work, `--live` will refuse to run on a dirty working tree unless `--allow-dirty` is explicitly passed.
+- **Spend measurement**: Live runs track exact per-case API token spend in USD and report `Cost per NIKI-caught defect`.
+
+---
+
+## Disclosure Manifest (`eval-manifest.json`)
+
+Every evaluation run generates a machine-readable `eval-manifest.json` alongside `eval_report.md` and `eval_report.json`:
+
+- `date_utc`: Timestamp of the evaluation run.
+- `niki_version`: Exact crate version producing the report.
+- `mode`: `"replay"` or `"live"`.
+- `harness_commit`: Git commit SHA of the evaluation harness, flagged with `harness_dirty: true` if the checkout had uncommitted changes.
+- `fixture_warnings`: List of any fixture checksum mismatches against maintainer grade records.
+- `success_definition`: Explicit criteria used to score defects (surfaced by reviewer issues or upheld Red challenge).
+- `grader_agreement`: Correlation between automated review verdicts and human maintainer merge judgments.

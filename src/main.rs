@@ -55,6 +55,8 @@ enum Commands {
     Plan(niki::cli::plan::PlanArgs),
     /// Inspect and rewind chat/pipeline sessions
     Session(niki::cli::session::SessionArgs),
+    /// Resume an interrupted agent session from a checkpoint
+    Resume(niki::cli::resume::ResumeArgs),
     /// Manage API credentials (login, logout, status)
     Auth {
         #[command(subcommand)]
@@ -90,6 +92,11 @@ enum Commands {
     Index {
         #[command(subcommand)]
         command: niki::cli::index::IndexCommands,
+    },
+    /// Distill, promote, and retire versioned project skills
+    Skills {
+        #[command(subcommand)]
+        command: niki::cli::skills::SkillsCommands,
     },
     /// Capture a screenshot for visual verification
     Verify(niki::cli::verify::VerifyArgs),
@@ -132,6 +139,7 @@ async fn main() -> Result<()> {
         Commands::Goal(args) => niki::cli::goal::handle(args).await?,
         Commands::Plan(args) => niki::cli::plan::handle(args).await?,
         Commands::Session(args) => niki::cli::session::handle(args)?,
+        Commands::Resume(args) => niki::cli::resume::handle(args).await?,
         Commands::Auth { command } => niki::cli::auth::handle(command).await?,
         Commands::Providers(args) => niki::cli::providers::handle(args).await?,
         Commands::Doctor(args) => niki::cli::doctor::handle(args)?,
@@ -144,6 +152,7 @@ async fn main() -> Result<()> {
         Commands::Inspect(args) => niki::cli::inspect::handle(args)?,
         Commands::Architecture { command } => niki::cli::architecture::handle(command).await?,
         Commands::Index { command } => niki::cli::index::handle(command)?,
+        Commands::Skills { command } => niki::cli::skills::handle(command)?,
     }
 
     Ok(())

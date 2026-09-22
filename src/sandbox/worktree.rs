@@ -2,6 +2,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use uuid::Uuid;
 
 use crate::artifacts::types::AgentRole;
@@ -20,6 +21,11 @@ pub struct WorktreeSandbox {
     pub worktree_path: PathBuf,
     pub agent_role: AgentRole,
     task_id: String,
+    /// Owning repo, for Drop-time `worktree remove` without path surgery.
+    source_repo: PathBuf,
+    /// Set by `destroy()`; Drop only cleans up when explicit destroy was
+    /// skipped (panic/error paths).
+    destroyed: AtomicBool,
     policy: SecurityPolicyConfig,
     permission_checker: crate::permissions::PermissionChecker,
     event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
@@ -41,58 +47,133 @@ impl WorktreeSandbox {
         // Prune stale worktrees from crashed or interrupted prior runs (>24h old)
         let _ = cleanup_stale_worktrees(source_repo, std::time::Duration::from_secs(86400));
 
-        let wt = base.join(task_id.to_string());
-        if wt.exists() {
-            let _ = std::fs::remove_dir_all(&wt);
+        // Phase 5.2: same-task-id collision fails loudly instead of deleting
+        // the other run's dir. A registered (live) worktree at the exact path
+        // means a concurrent run owns this id. An unregistered leftover is
+        // crash debris and is safe to clear.
+        let first = base.join(task_id.to_string());
+        if first.exists() {
+            if is_registered_worktree(source_repo, &first) {
+                anyhow::bail!(
+                    "worktree for task {task_id} already exists (concurrent run with the same task id?)"
+                );
+            }
+            let _ = std::fs::remove_dir_all(&first);
         }
 
         // Blocking git operation — run off the async runtime.
+        // `git worktree add` can still lose a race with a parallel coder
+        // sharing this task id — suffix and retry instead of clobbering.
         let repo = source_repo.to_path_buf();
-        let wt_clone = wt.clone();
-        // Capture (don't inherit) child output: `git worktree add` prints
-        // informational lines ("Preparing worktree...") that would otherwise
-        // leak onto our stdout and break `--output-format json` pipe-purity.
-        let status = tokio::task::spawn_blocking(move || {
-            Command::new("git")
-                .arg("-C")
-                .arg(&repo)
-                .arg("worktree")
-                .arg("add")
-                .arg("--force")
-                .arg(&wt_clone)
-                .arg("HEAD")
-                .output()
-                .map(|o| o.status)
+        let tid = task_id.to_string();
+        let mut attempt = 0u32;
+        let wt = loop {
+            let candidate = if attempt == 0 {
+                first.clone()
+            } else {
+                base.join(format!("{tid}-{attempt}"))
+            };
+            // Capture (don't inherit) child output: `git worktree add` prints
+            // informational lines ("Preparing worktree...") that would otherwise
+            // leak onto our stdout and break `--output-format json` pipe-purity.
+            let repo_clone = repo.clone();
+            let cand_clone = candidate.clone();
+            let status = tokio::task::spawn_blocking(move || {
+                Command::new("git")
+                    .arg("-C")
+                    .arg(&repo_clone)
+                    .arg("worktree")
+                    .arg("add")
+                    .arg("--force")
+                    .arg(&cand_clone)
+                    .arg("HEAD")
+                    .output()
+                    .map(|o| o.status)
+            })
+            .await
+            .map_err(|e| anyhow!("worktree spawn failed: {e}"))?;
+
+            match status {
+                Ok(s) if s.success() => break candidate,
+                _ => {
+                    // Lost a race (path taken concurrently) → suffix, retry.
+                    // A genuinely broken repo fails on a free path → bail.
+                    if is_registered_worktree(&repo, &candidate) || candidate.exists() {
+                        attempt += 1;
+                        if attempt > 100 {
+                            anyhow::bail!(
+                                "worktree for task {tid} is contended after 100 attempts"
+                            );
+                        }
+                        continue;
+                    }
+                    anyhow::bail!(
+                        "Failed to create git worktree at {} (is the project a git repo?)",
+                        candidate.display()
+                    );
+                }
+            }
+        };
+
+        Ok(Self {
+            worktree_path: wt,
+            agent_role,
+            task_id: task_id.to_string(),
+            source_repo: source_repo.to_path_buf(),
+            destroyed: AtomicBool::new(false),
+            policy: policy.clone(),
+            permission_checker: crate::sandbox::build_permission_checker(&policy, niki_config),
+            event_tx,
         })
-        .await
-        .map_err(|e| anyhow!("worktree spawn failed: {e}"))?;
+    }
+}
 
-        match status {
-            Ok(s) if s.success() => Ok(Self {
-                worktree_path: wt,
-                agent_role,
-                task_id: task_id.to_string(),
-                policy: policy.clone(),
-                permission_checker: crate::sandbox::build_permission_checker(&policy, niki_config),
-                event_tx,
-            }),
-            _ => Err(anyhow!(
-                "Failed to create git worktree at {} (is the project a git repo?)",
-                wt.display()
-            )),
+/// True when `path` is a registered worktree of `repo` (live or leaked
+/// registration — either way, owned by someone).
+fn is_registered_worktree(repo: &Path, path: &Path) -> bool {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["worktree", "list", "--porcelain"])
+        .output();
+    match out {
+        Ok(o) => {
+            let text = String::from_utf8_lossy(&o.stdout);
+            let needle = format!("worktree {}", path.display());
+            text.lines().any(|l| l == needle)
+        }
+        Err(_) => false,
+    }
+}
+
+/// Remove every worktree dir belonging to `task_id`: the exact
+/// `.niki-worktrees/<id>` dir plus suffixed parallel-coder siblings
+/// (`<id>-1`, …). Used by the Ctrl+C/SIGTERM handlers, which cannot track
+/// per-sandbox paths. Returns the number of dirs removed.
+pub fn cleanup_worktrees_for_task(source_repo: &Path, task_id: &str) -> usize {
+    let base = source_repo.join(".niki-worktrees");
+    let Ok(entries) = std::fs::read_dir(&base) else {
+        return 0;
+    };
+    let suffixed = format!("{task_id}-");
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name != task_id && !name.starts_with(&suffixed) {
+            continue;
+        }
+        let path = entry.path();
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(source_repo)
+            .args(["worktree", "remove", "--force"])
+            .arg(&path)
+            .output();
+        if std::fs::remove_dir_all(&path).is_ok() {
+            removed += 1;
         }
     }
-
-    /// Normalize a diff: unify CRLF→LF and guarantee a trailing newline, matching
-    /// the Docker sandbox's `normalize_patch` so `git apply` never chokes on the
-    /// last context line.
-    fn normalize_patch(patch: &str) -> String {
-        let mut s = patch.replace("\r\n", "\n");
-        if !s.ends_with('\n') {
-            s.push('\n');
-        }
-        s
-    }
+    removed
 }
 
 #[async_trait]
@@ -178,16 +259,19 @@ impl Sandbox for WorktreeSandbox {
                         unmatched.retain(|&idx| idx != i);
                     }
                 }
+                // Phase 5.1 partial-apply semantics: all-or-nothing per stage.
+                // A stage with ANY unmatched block writes NOTHING, so a failed
+                // stage never leaves a half-applied worktree behind.
+                if !unmatched.is_empty() {
+                    return Err(anyhow!(
+                        "No edit block matched its target file in the worktree ({} unmatched); nothing was written",
+                        unmatched.len()
+                    ));
+                }
                 for file_path in changed_files {
                     if let Some(content) = contents.get(&file_path) {
                         std::fs::write(&file_path, content)?;
                     }
-                }
-                if !unmatched.is_empty() {
-                    return Err(anyhow!(
-                        "No edit block matched its target file in the worktree ({} unmatched)",
-                        unmatched.len()
-                    ));
                 }
                 Ok(())
             })
@@ -202,20 +286,42 @@ impl Sandbox for WorktreeSandbox {
         if !looks_like_diff {
             return Ok(());
         }
-        let normalized = Self::normalize_patch(patch);
+        let normalized = crate::output::git::normalize_patch(patch);
         let wt = self.worktree_path.clone();
         let patch_text = normalized.clone();
         tokio::task::spawn_blocking(move || Self::apply_in_worktree(&wt, &patch_text)).await?
     }
 
-    async fn get_diff(&self) -> Result<String> {
+    async fn get_diff(&self, agent_files: &[String]) -> Result<String> {
+        // Phase 5.1: scope to agent-reported files (intent-to-add just those),
+        // so brand-new agent files appear in the diff while worktree-local
+        // byproducts (caches, tool output) stay out.
         let wt = self.worktree_path.clone();
+        let files: Vec<String> = agent_files
+            .iter()
+            .filter(|s| {
+                !s.is_empty()
+                    && !s.starts_with('.')
+                    && !s.starts_with('/')
+                    && !s.contains("..")
+                    && *s != "niki.toml"
+            })
+            .cloned()
+            .collect();
         tokio::task::spawn_blocking(move || -> Result<String> {
-            let out = Command::new("git")
-                .arg("-C")
-                .arg(&wt)
-                .args(["diff", "--", ".", ":(exclude).niki", ":(exclude)niki.toml"])
-                .output()?;
+            if files.is_empty() {
+                return Ok(String::new());
+            }
+            let wt_str = wt
+                .to_str()
+                .ok_or_else(|| anyhow!("worktree path is not valid UTF-8"))?;
+            let mut add_args = vec!["-C", wt_str, "add", "-N", "--"];
+            let refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
+            add_args.extend(refs.iter().copied());
+            let _ = Command::new("git").args(&add_args).output();
+            let mut diff_args = vec!["-C", wt_str, "diff", "--"];
+            diff_args.extend(refs);
+            let out = Command::new("git").args(&diff_args).output()?;
             Ok(String::from_utf8_lossy(&out.stdout).to_string())
         })
         .await
@@ -302,6 +408,9 @@ impl Sandbox for WorktreeSandbox {
     }
 
     async fn destroy(&self) -> Result<()> {
+        // Mark first: Drop must not repeat an explicit teardown even when the
+        // removal below partially fails (the 24h prune is the backstop).
+        self.destroyed.store(true, Ordering::SeqCst);
         let wt = self.worktree_path.clone();
         let task_id = self.task_id.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
@@ -324,6 +433,24 @@ impl Sandbox for WorktreeSandbox {
         })
         .await
         .map_err(|e| anyhow!("destroy spawn failed: {e}"))?
+    }
+}
+
+impl Drop for WorktreeSandbox {
+    /// Best-effort teardown for panic/error paths that skip `destroy()`.
+    /// Synchronous by necessity; failures are ignored (the 24h prune is the
+    /// backstop). Skipped entirely after an explicit `destroy()`.
+    fn drop(&mut self) {
+        if self.destroyed.load(Ordering::SeqCst) {
+            return;
+        }
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(&self.source_repo)
+            .args(["worktree", "remove", "--force"])
+            .arg(&self.worktree_path)
+            .output();
+        let _ = std::fs::remove_dir_all(&self.worktree_path);
     }
 }
 
@@ -374,6 +501,20 @@ fn find_files_in_worktree(wt: &Path) -> Result<Vec<(std::path::PathBuf, String)>
     Ok(result)
 }
 
+/// True when any file under `path` was modified within `max_age` — i.e. the
+/// worktree is active and must not be pruned, however old its top-level dir.
+fn is_active_worktree(
+    path: &Path,
+    now: std::time::SystemTime,
+    max_age: std::time::Duration,
+) -> bool {
+    walkdir::WalkDir::new(path)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.metadata().ok()?.modified().ok())
+        .any(|t| now.duration_since(t).is_ok_and(|d| d <= max_age))
+}
+
 /// Scan the `.niki-worktrees` directory for stale worktrees older than `max_age` and prune them.
 pub fn cleanup_stale_worktrees(source_repo: &Path, max_age: std::time::Duration) -> usize {
     let base = source_repo.join(".niki-worktrees");
@@ -391,13 +532,18 @@ pub fn cleanup_stale_worktrees(source_repo: &Path, max_age: std::time::Duration)
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            let is_stale = entry
+            let top_stale = entry
                 .metadata()
                 .ok()
                 .and_then(|m| m.modified().ok())
                 .and_then(|t| now.duration_since(t).ok())
                 .map(|dur| dur > max_age)
                 .unwrap_or(false);
+            // Phase 5.2: top-level dir mtime lies for old-but-active
+            // worktrees (the dir entry itself rarely changes) — confirm with
+            // the recursive newest mtime before pruning, so another run's
+            // active worktree is never deleted out from under it.
+            let is_stale = top_stale && !is_active_worktree(&path, now, max_age);
 
             if is_stale {
                 let _ = Command::new("git")

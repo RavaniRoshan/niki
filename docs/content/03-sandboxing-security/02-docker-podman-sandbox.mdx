@@ -25,7 +25,7 @@ cpu_limit        = 2.0                   # max CPU cores
 pids_limit       = 512                   # max child processes (fork bomb guard)
 cap_drop_all     = true                  # drops all Linux capabilities
 network_disabled = true                  # blocks all outbound network traffic
-readonly_rootfs  = false                 # enables read-only root filesystem
+readonly_rootfs  = false                 # optional read-only rootfs (workspace stays writable)
 extra_packages   = ["nodejs", "npm", "python3"]
 ```
 

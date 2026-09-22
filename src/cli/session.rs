@@ -72,6 +72,22 @@ fn working_tree_clean(project_dir: &Path) -> bool {
         .unwrap_or(true)
 }
 
+/// Current branch name, if HEAD is attached. Used to warn before a code
+/// rewind detaches HEAD (Phase 5.6).
+fn current_branch(project_dir: &Path) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(project_dir)
+        .output()
+        .ok()?;
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if out.status.success() && !name.is_empty() {
+        Some(name)
+    } else {
+        None
+    }
+}
+
 fn checkout_commit(project_dir: &Path, commit: &str) -> Result<()> {
     let out = std::process::Command::new("git")
         .args(["checkout", commit])
@@ -172,6 +188,19 @@ pub fn handle(args: &SessionArgs) -> Result<()> {
                     if needs_code {
                         match commit {
                             Some(c) => {
+                                // Phase 5.6: checking out a commit hash
+                                // detaches HEAD — warn first with the way
+                                // back, instead of silently stranding the
+                                // user off-branch.
+                                let before = current_branch(&project_dir);
+                                eprintln!(
+                                    "Warning: code rewind checks out {c} and detaches HEAD{}. Restore with: git switch {}",
+                                    before
+                                        .as_deref()
+                                        .map(|b| format!(" (was on '{b}')"))
+                                        .unwrap_or_default(),
+                                    before.as_deref().unwrap_or("-"),
+                                );
                                 checkout_commit(&project_dir, &c)?;
                                 println!(
                                     "Code restored to {c} (mode: {}).",

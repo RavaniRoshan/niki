@@ -15,8 +15,17 @@ pub struct EvalArgs {
 
     /// Drive the real pipeline against live models (needs API keys + sandbox).
     /// Default: replay recorded fixtures deterministically (no keys, no cost).
+    /// WARNING: --live mutates the project tree with NO branch/commit — the
+    /// pipeline writes straight into the working dir. Refuses on a dirty
+    /// tree unless --allow-dirty is passed.
     #[arg(long)]
     pub live: bool,
+
+    /// Allow --live on a dirty working tree. Without this, --live refuses
+    /// when tracked files are modified (live mode has no branch to contain
+    /// its changes, so dirty state risks mixing eval edits with user work).
+    #[arg(long)]
+    pub allow_dirty: bool,
 
     /// Directory to write eval_report.md / eval_report.json.
     #[arg(short, long)]
@@ -66,6 +75,17 @@ pub enum EvalCommands {
     },
 }
 
+/// True when no tracked files are modified. --live has no branch to contain
+/// its changes, so dirt refuses without --allow-dirty (Phase 5.6).
+fn working_tree_clean(project_dir: &std::path::Path) -> bool {
+    std::process::Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=no"])
+        .current_dir(project_dir)
+        .output()
+        .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim().is_empty())
+        .unwrap_or(true)
+}
+
 pub async fn handle(args: &EvalArgs) -> Result<()> {
     if let Some(EvalCommands::Grade {
         case,
@@ -85,6 +105,14 @@ pub async fn handle(args: &EvalArgs) -> Result<()> {
         Some(p) => p.clone(),
         None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
     };
+
+    // Phase 5.6 guard: --live mutates the project tree with no branch, so
+    // refuse on a dirty tree unless explicitly allowed.
+    if args.live && !args.allow_dirty && !working_tree_clean(&project) {
+        anyhow::bail!(
+            "eval --live refuses on a dirty working tree (it mutates the tree with no branch). Commit/stash first, or re-run with --allow-dirty."
+        );
+    }
 
     let mut report = run_eval(&dataset, args.live, &project).await?;
 
@@ -166,6 +194,7 @@ pub async fn handle(args: &EvalArgs) -> Result<()> {
         "cost_per_niki_caught": report.cost_per_niki_caught,
         "graded_cases": report.graded_cases,
         "grader_agreement": report.grader_agreement,
+        "fixture_warnings": report.fixture_warnings,
         "success_definition": "seeded defect surfaced by reviewer issues or upheld Red challenge (test-passing only, not maintainer-merge grading)",
     });
     std::fs::write(
@@ -221,6 +250,8 @@ fn handle_grade(
     #[derive(serde::Deserialize)]
     struct MinimalCase {
         id: String,
+        #[serde(default)]
+        replay_dir: Option<String>,
     }
     #[derive(serde::Deserialize)]
     struct MinimalDataset {
@@ -229,12 +260,16 @@ fn handle_grade(
     }
     let ds: MinimalDataset = toml::from_str(&raw)
         .map_err(|e| anyhow::anyhow!("cannot parse dataset {}: {e}", dataset_path.display()))?;
-    if !ds.cases.iter().any(|c| c.id == case) {
-        anyhow::bail!(
+    let case_entry = ds.cases.iter().find(|c| c.id == case).ok_or_else(|| {
+        anyhow::anyhow!(
             "unknown case '{case}': no such id in {}",
             dataset_path.display()
-        );
-    }
+        )
+    })?;
+    let fixture_hash = {
+        let rd = case_entry.replay_dir.as_deref().unwrap_or(".");
+        crate::eval::compute_fixture_hash(&dataset_dir.join(rd))
+    };
     let grades_dir = dataset_dir.join("grades");
     std::fs::create_dir_all(&grades_dir)?;
     let grade = MaintainerGrade {
@@ -243,6 +278,7 @@ fn handle_grade(
         merge_worthy,
         note: note.to_string(),
         date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+        fixture_hash,
     };
     let path = grades_dir.join(format!("{case}.json"));
     std::fs::write(&path, serde_json::to_string_pretty(&grade)?)?;

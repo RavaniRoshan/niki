@@ -7,10 +7,7 @@ use anyhow::{Result, anyhow};
 use minijinja::Environment;
 use std::time::{Duration, Instant};
 
-pub mod coder;
 pub mod errors;
-pub mod planner;
-pub mod reviewer;
 pub mod tester;
 
 /// Full-jitter exponential backoff delay.
@@ -30,7 +27,6 @@ pub async fn run_agent(
     context: minijinja::Value,
     schema_path: &str,
     display: &mut crate::display::agent_stream::AgenticDisplay,
-    degrade_on_invalid: bool,
     max_tokens: u32,
     temperature: f32,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
@@ -257,7 +253,7 @@ pub async fn run_agent(
         }
 
         if repair_attempt >= MAX_REPAIR_RETRIES {
-            // Budget exhausted — will degrade
+            // Budget exhausted — will fail-loud in final validation
             break;
         }
 
@@ -351,26 +347,15 @@ pub async fn run_agent(
         "agent response captured"
     );
 
-    // Final validation — if still invalid, surface the error (or degrade)
+    // Final validation — fail-loud: invalid artifacts never degrade silently.
     if let Err(e) = validate_artifact(&json_content, schema_path) {
         let err_msg = e.to_string();
-        if degrade_on_invalid {
-            tracing::warn!(
-                target: "niki::agent",
-                role = ?role,
-                error = %err_msg,
-                "Validation failed — degrading to partial artifact"
-            );
-            display.agent_warning(role, &format!("Degraded: {}", err_msg));
-            // Return repaired content without validation — caller handles degradation
-        } else {
-            display.agent_failed(role, &format!("Validation failed: {}", err_msg));
-            return Err(crate::NikiError::ArtifactValidation {
-                agent: role,
-                errors: err_msg,
-            }
-            .into());
+        display.agent_failed(role, &format!("Validation failed: {}", err_msg));
+        return Err(crate::NikiError::ArtifactValidation {
+            agent: role,
+            errors: err_msg,
         }
+        .into());
     }
 
     let ttft_ms = first_text_time

@@ -57,7 +57,7 @@ impl LlmProvider for AnthropicProvider {
                 .unwrap_or("https://api.anthropic.com"),
         );
 
-        let payload = json!({
+        let mut payload = json!({
             "model": request.model,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
@@ -69,6 +69,24 @@ impl LlmProvider for AnthropicProvider {
                 }
             ]
         });
+
+        // Native tool calling (Phase 3.1): Anthropic `tool_use` blocks.
+        if let Some(tools) = request.tools.as_deref()
+            && !tools.is_empty()
+        {
+            let specs = super::provider::capped_tool_specs(tools);
+            let anthropic_tools: Vec<serde_json::Value> = specs
+                .iter()
+                .map(|t| {
+                    json!({
+                        "name": t.name,
+                        "description": t.description,
+                        "input_schema": t.parameters,
+                    })
+                })
+                .collect();
+            payload["tools"] = serde_json::Value::Array(anthropic_tools);
+        }
 
         // Build the request once; send_request rebuilds it on each retry attempt
         // (RequestBuilder is Clone). Retries on 429/5xx; 120s timeout on the shared
@@ -95,10 +113,32 @@ impl LlmProvider for AnthropicProvider {
         }
 
         let data: serde_json::Value = resp.json().await?;
-        let content = data["content"][0]["text"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        // Concatenate all text blocks; tool_use blocks are parsed separately.
+        let mut content = String::new();
+        let mut tool_calls = Vec::new();
+        if let Some(blocks) = data["content"].as_array() {
+            for block in blocks {
+                match block["type"].as_str().unwrap_or("") {
+                    "text" => {
+                        if let Some(text) = block["text"].as_str() {
+                            content.push_str(text);
+                        }
+                    }
+                    "tool_use" => {
+                        let name = block["name"].as_str().unwrap_or("").to_string();
+                        if name.is_empty() {
+                            continue;
+                        }
+                        tool_calls.push(super::provider::ToolCall {
+                            id: block["id"].as_str().unwrap_or("").to_string(),
+                            name,
+                            arguments: super::provider::capped_tool_arguments(&block["input"]),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         let input_tokens = data["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
         let output_tokens = data["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
@@ -120,7 +160,7 @@ impl LlmProvider for AnthropicProvider {
                 cached_input_tokens,
                 ..Default::default()
             },
-            tool_calls: Vec::new(),
+            tool_calls,
         })
     }
 

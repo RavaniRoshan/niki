@@ -34,30 +34,53 @@ pub enum Authority {
 /// Provenance wrapper for JSON sidecars.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sidecar<T: Serialize> {
+    #[serde(default)]
     pub generated_by: String,
+    #[serde(default)]
     pub generated_at: DateTime<Utc>,
     /// Snapshot anchor (`niki-task-<8 hex>`) this data was derived under.
+    #[serde(default)]
     pub state_ref: String,
+    #[serde(default = "default_authority")]
     pub authority: Authority,
     pub payload: T,
+}
+
+fn default_authority() -> Authority {
+    Authority::Advisory
 }
 
 /// One dependency inventory row.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DependencyRow {
+    #[serde(default)]
     pub manager: String,
+    #[serde(default)]
     pub file_path: String,
+    #[serde(default)]
     pub dependencies: Vec<String>,
 }
 
 /// KB-level manifest (`kb/manifest.json`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KbManifest {
+    #[serde(default)]
     pub snapshot_id: String,
+    #[serde(default)]
     pub commit_sha: Option<String>,
+    #[serde(default)]
     pub generated_at: DateTime<Utc>,
+    #[serde(default)]
     pub generated_by: String,
+    #[serde(default)]
     pub files: Vec<String>,
+    /// Store schema version; mismatches warn loudly instead of emptying silently.
+    #[serde(default = "kb_schema_version")]
+    pub schema_version: u32,
+}
+
+fn kb_schema_version() -> u32 {
+    1
 }
 
 /// Root of the KB store, honoring `general.output_dir`.

@@ -212,6 +212,7 @@ pub fn build_architecture(project_dir: &Path) -> Result<ArchitectureBuildSummary
         generated_at: chrono::Utc::now(),
         generated_by: GENERATED_BY.to_string(),
         files: files_written.clone(),
+        schema_version: 1,
     };
     write_atomic(
         &root.join("manifest.json"),

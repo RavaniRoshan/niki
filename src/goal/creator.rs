@@ -52,6 +52,7 @@ impl GoalCreator {
             current_task: 0,
             iterations: 0,
             budget_used: 0,
+            max_budget: 0,
             max_iterations,
             negative_knowledge: vec![],
             context_summary,

@@ -80,6 +80,12 @@ impl GoalRunner {
             .await
             {
                 Ok(result) => {
+                    // Phase 5.5: accrue the task's estimated cost into the
+                    // goal budget (micro-USD) so the cost halt can fire.
+                    let task_usd: f64 = result.metrics.iter().map(|m| m.cost_usd).sum();
+                    state.budget_used = state
+                        .budget_used
+                        .saturating_add((task_usd * 1_000_000.0) as u64);
                     let gate_passed = Self::staged_evidence_gates(&result, config).await;
                     if gate_passed {
                         state.tasks[task_idx].status = TaskStatus::Done;
@@ -227,8 +233,25 @@ impl GoalRunner {
         if state.status == GoalStatus::Cancelled {
             return Some("Goal is cancelled".to_string());
         }
+        if state.status == GoalStatus::Drifting {
+            return Some("Goal is drifting".to_string());
+        }
+        if let Some(drift) = state.check_drift() {
+            return Some(format!(
+                "Goal drift detected (adherence {:.2}, coherence {:.2}, reentry {:.2})",
+                drift.goal_adherence, drift.env_coherence, drift.reentry_rate
+            ));
+        }
         if state.iterations >= state.max_iterations {
             return Some(format!("Max iterations ({}) reached", state.max_iterations));
+        }
+        // Phase 5.5: cost halt alongside the iteration halt. `budget_used`
+        // accrues micro-USD per executed pipeline task (see the Ok arm below).
+        if state.max_budget > 0 && state.budget_used >= state.max_budget {
+            return Some(format!(
+                "Budget exhausted (used {} of {} micro-USD)",
+                state.budget_used, state.max_budget
+            ));
         }
         let violations = Self::scope_violations(state);
         if !violations.is_empty() {
@@ -270,6 +293,7 @@ mod tests {
             current_task: 0,
             iterations: 0,
             budget_used: 0,
+            max_budget: 0,
             max_iterations: 30,
             negative_knowledge: vec![],
             context_summary: String::new(),
@@ -305,6 +329,44 @@ mod tests {
         let mut state = make_active_state();
         state.iterations = 30;
         assert!(GoalRunner::halt_conditions(&state).is_some());
+    }
+
+    #[test]
+    fn test_halt_conditions_budget_exhausted() {
+        // Phase 5.5: the goal loop halts on budget as well as iterations.
+        let mut state = make_active_state();
+        state.max_budget = 1_000_000;
+        state.budget_used = 1_000_000;
+        let halt = GoalRunner::halt_conditions(&state).expect("budget halt fires");
+        assert!(halt.contains("Budget exhausted"), "{halt}");
+        // Unlimited (0) never halts on cost.
+        let mut state = make_active_state();
+        state.budget_used = u64::MAX;
+        assert!(GoalRunner::halt_conditions(&state).is_none());
+    }
+
+    #[test]
+    fn test_halt_conditions_drifting_status() {
+        let mut state = make_active_state();
+        state.status = GoalStatus::Drifting;
+        let halt = GoalRunner::halt_conditions(&state).expect("drifting halt fires");
+        assert_eq!(halt, "Goal is drifting");
+    }
+
+    #[test]
+    fn test_halt_conditions_drift_signal_detected() {
+        use crate::goal::state::DriftSignals;
+
+        let mut state = make_active_state();
+        state.drift = Some(DriftSignals {
+            goal_adherence: 0.35, // below 0.5 threshold
+            env_coherence: 0.8,
+            reentry_rate: 0.1,
+            checked_at: "2026-09-21T00:00:00Z".to_string(),
+        });
+        let halt = GoalRunner::halt_conditions(&state).expect("drift signal halt fires");
+        assert!(halt.contains("Goal drift detected"), "{halt}");
+        assert!(halt.contains("0.35"), "{halt}");
     }
 
     #[test]

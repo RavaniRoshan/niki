@@ -35,6 +35,12 @@ pub enum AgentRole {
     Critic,
 }
 
+impl AgentRole {
+    pub fn as_str(&self) -> &'static str {
+        artifact_json_name(*self)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactType {
@@ -81,8 +87,11 @@ pub enum FileAction {
 #[serde(rename_all = "snake_case")]
 pub enum Complexity {
     #[default]
+    #[serde(alias = "Low")]
     Low,
+    #[serde(alias = "Medium")]
     Medium,
+    #[serde(alias = "High")]
     High,
 }
 

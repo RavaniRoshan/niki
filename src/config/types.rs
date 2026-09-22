@@ -81,6 +81,12 @@ pub struct NikiConfig {
     /// Adversarial critic pass over the Reviewer's verdict.
     #[serde(default)]
     pub critic: CriticConfig,
+    /// Tool-loop configuration (Layers 4+5 executable path).
+    #[serde(default)]
+    pub tools: ToolsConfig,
+    /// Unified hysteresis/step-cost budget configuration.
+    #[serde(default)]
+    pub budget: BudgetConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -562,7 +568,7 @@ fn default_session_enabled() -> bool {
     true
 }
 
-fn default_max_sessions() -> usize {
+pub fn default_max_sessions() -> usize {
     50
 }
 
@@ -603,7 +609,7 @@ fn default_compaction_reserved_tokens() -> u32 {
 }
 
 /// MCP server configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpConfig {
     #[serde(default)]
     pub servers: Vec<McpServerConfigEntry>,
@@ -611,6 +617,26 @@ pub struct McpConfig {
     pub enabled: bool,
     #[serde(default = "default_mcp_timeout_ms")]
     pub timeout_ms: u64,
+    #[serde(default = "default_mcp_read_only")]
+    pub read_only: bool,
+    #[serde(default)]
+    pub domain_allowlist: Vec<String>,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            servers: Vec::new(),
+            enabled: default_mcp_enabled(),
+            timeout_ms: default_mcp_timeout_ms(),
+            read_only: default_mcp_read_only(),
+            domain_allowlist: Vec::new(),
+        }
+    }
+}
+
+fn default_mcp_read_only() -> bool {
+    true
 }
 
 fn default_mcp_enabled() -> bool {
@@ -622,6 +648,57 @@ fn default_mcp_enabled() -> bool {
 
 fn default_mcp_timeout_ms() -> u64 {
     5000
+}
+
+/// Tool-loop configuration (Layers 4+5 executable path).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolsConfig {
+    #[serde(default)]
+    pub experimental_tool_loop: bool,
+    #[serde(default = "default_tool_loop_max_steps")]
+    pub max_steps: usize,
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            experimental_tool_loop: false,
+            max_steps: default_tool_loop_max_steps(),
+        }
+    }
+}
+
+fn default_tool_loop_max_steps() -> usize {
+    4
+}
+
+/// Unified hysteresis/step-cost budget configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BudgetConfig {
+    #[serde(default = "default_budget_max_steps")]
+    pub max_steps: u32,
+    #[serde(default)]
+    pub max_usd: f64,
+    #[serde(default = "default_budget_max_wallclock_secs")]
+    pub max_wallclock_secs: u64,
+}
+
+impl Default for BudgetConfig {
+    fn default() -> Self {
+        Self {
+            max_steps: default_budget_max_steps(),
+            max_usd: 0.0,
+            max_wallclock_secs: default_budget_max_wallclock_secs(),
+        }
+    }
+}
+
+fn default_budget_max_steps() -> u32 {
+    0
+}
+
+fn default_budget_max_wallclock_secs() -> u64 {
+    0
 }
 
 /// A single MCP server configuration entry.
@@ -662,7 +739,7 @@ pub struct PermissionsConfig {
     #[serde(default)]
     pub disable_worktree: bool,
     /// Fail closed when headless: an Ask with no TUI listening denies instead
-    /// of allowing with a warning. Default false (behavior-preserving).
+    /// of warning and proceeding (enterprise / unattended safety).
     #[serde(default)]
     pub fail_closed_headless: bool,
 }
@@ -688,11 +765,30 @@ impl Default for PermissionsConfig {
 /// PostAgentStop (plus PreToolUse/PostToolUse inside the runtime tool loop).
 /// Unknown event names warn and are skipped. Contract per command is the
 /// HookBus one: exit 2 (or JSON `{"deny": true}` on stdout) blocks.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HooksConfig {
     /// Event name (PascalCase or snake_case) to shell commands.
     #[serde(default)]
     pub commands: std::collections::HashMap<String, Vec<String>>,
+    /// Max seconds a single hook command may run. A hook exceeding the
+    /// budget is killed (Unix) or abandoned (other platforms) and treated
+    /// as Noop-with-warning — a hanging hook must never hang the run.
+    /// 0 = wait forever (explicit opt-out). Default 30.
+    #[serde(default = "default_hook_timeout_seconds")]
+    pub timeout_seconds: u64,
+}
+
+impl Default for HooksConfig {
+    fn default() -> Self {
+        Self {
+            commands: std::collections::HashMap::new(),
+            timeout_seconds: default_hook_timeout_seconds(),
+        }
+    }
+}
+
+fn default_hook_timeout_seconds() -> u64 {
+    30
 }
 
 /// Slash-command source directories.
@@ -989,10 +1085,13 @@ fn default_output_dir() -> String {
 pub enum TopologyMode {
     /// Decide per task shape (estimated complexity + whether security/parallel need the full chain).
     #[default]
+    #[serde(alias = "Auto")]
     Auto,
     /// Always run the full multi-agent chain.
+    #[serde(alias = "MultiAgent", alias = "multi_agent")]
     MultiAgent,
     /// Always collapse to the single-agent fast-path.
+    #[serde(alias = "SingleAgent", alias = "single_agent")]
     SingleAgent,
 }
 
@@ -1345,7 +1444,12 @@ impl NikiConfig {
         "risk",
         "snapshot",
         "critic",
+        "tools",
+        "budget",
     ];
+
+    /// Tables whose fields are still parsed-but-unwired at Phase 6.1. All known sections are now live.
+    const DEAD_TABLES: &'static [&'static str] = &[];
 
     fn warn_unknown_sections(content: &str, path: &std::path::Path) {
         if let Ok(raw) = content.parse::<toml::Value>() {
@@ -1363,7 +1467,7 @@ impl NikiConfig {
                     if !table.contains_key(*known) {
                         continue;
                     }
-                    if matches!(*known, "session" | "compaction" | "mcp") {
+                    if Self::DEAD_TABLES.contains(known) {
                         eprintln!(
                             "note: `[{}]` in {} is parsed but not yet wired to any runtime behavior — settings will be ignored for now",
                             known,
@@ -1624,157 +1728,97 @@ impl NikiConfig {
         if other.critic != CriticConfig::default() {
             self.critic = other.critic;
         }
+        if other.tools != ToolsConfig::default() {
+            self.tools = other.tools;
+        }
+        if other.budget != BudgetConfig::default() {
+            self.budget = other.budget;
+        }
     }
 
     fn apply_env_vars(&mut self) {
-        // Ensure provider entries exist so that environment variables are picked up
-        // even when no provider block is present in the TOML config.
-        self.providers.entry("anthropic".to_string()).or_default();
-        self.providers.entry("openai".to_string()).or_default();
-        self.providers.entry("google".to_string()).or_default();
-        self.providers.entry("openrouter".to_string()).or_default();
-        self.providers.entry("nvidia".to_string()).or_default();
-        self.providers.entry("together".to_string()).or_default();
-        self.providers.entry("groq".to_string()).or_default();
-        self.providers.entry("deepseek".to_string()).or_default();
-        self.providers.entry("ollama".to_string()).or_default();
-        self.providers.entry("ollama".to_string()).or_default();
-        self.providers.entry("zen".to_string()).or_default();
-        self.providers.entry("kimi".to_string()).or_default();
-        self.providers.entry("kilo".to_string()).or_default();
+        self.apply_env_lookup(&|k| std::env::var(k).ok());
+    }
 
-        // Standard provider keys take precedence, so a vanilla `ANTHROPIC_API_KEY`
-        // (or `OPENAI_API_KEY`) always wins. Gateway-style tokens
-        // (ANTHROPIC_AUTH_TOKEN / OPENROUTER_API_KEY) are only fallbacks. This keeps
-        // NIKI standard and BYOK: users supply their own OpenAI/Anthropic (or any
-        // compatible) key via env or `niki.toml`, and nothing is tied to a specific
-        // gateway.
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
-            && !key.is_empty()
-            && let Some(p) = self.providers.get_mut("anthropic")
-        {
-            p.api_key = Some(key);
+    /// Unify env-vs-TOML precedence (Phase 6.3): explicit non-empty environment
+    /// variables always win over TOML values for keys, base URLs, and models.
+    pub fn apply_env_lookup(&mut self, get_env: &dyn Fn(&str) -> Option<String>) {
+        for name in [
+            "anthropic",
+            "openai",
+            "google",
+            "openrouter",
+            "nvidia",
+            "together",
+            "groq",
+            "deepseek",
+            "ollama",
+            "zen",
+            "kimi",
+            "kilo",
+        ] {
+            self.providers.entry(name.to_string()).or_default();
         }
-        if let Ok(key) = std::env::var("NIKI_PROVIDERS_ANTHROPIC_API_KEY")
-            && !key.is_empty()
-            && let Some(p) = self.providers.get_mut("anthropic")
-            && p.api_key.is_none()
-        {
-            p.api_key = Some(key);
-        }
-        if let Some(p) = self.providers.get_mut("anthropic")
-            && p.api_key.is_none()
-        {
-            if let Ok(token) = std::env::var("ANTHROPIC_AUTH_TOKEN") {
-                if !token.is_empty() {
-                    p.api_key = Some(token);
+
+        // Standard provider keys take precedence: explicit env always wins over TOML.
+        for (var, prov) in [
+            ("ANTHROPIC_API_KEY", "anthropic"),
+            ("OPENAI_API_KEY", "openai"),
+            ("GOOGLE_API_KEY", "google"),
+            ("OPENROUTER_API_KEY", "openrouter"),
+            ("NVIDIA_API_KEY", "nvidia"),
+            ("TOGETHER_API_KEY", "together"),
+            ("GROQ_API_KEY", "groq"),
+            ("DEEPSEEK_API_KEY", "deepseek"),
+            ("OPENCODE_API_KEY", "zen"),
+            ("KIMI_API_KEY", "kimi"),
+            ("KILO_API_KEY", "kilo"),
+        ] {
+            if let Some(key) = get_env(var).filter(|k| !k.is_empty()) {
+                if let Some(p) = self.providers.get_mut(prov) {
+                    p.api_key = Some(key);
                 }
             }
         }
-        if let Ok(key) = std::env::var("OPENAI_API_KEY")
-            && let Some(p) = self.providers.get_mut("openai")
-            && p.api_key.is_none()
-        {
-            p.api_key = Some(key);
-        }
-        if let Ok(key) = std::env::var("GOOGLE_API_KEY")
-            && let Some(p) = self.providers.get_mut("google")
-            && p.api_key.is_none()
-        {
-            p.api_key = Some(key);
-        }
 
-        // OpenAI-compatible provider env vars (each gets its own key).
-        if let Ok(key) = std::env::var("OPENROUTER_API_KEY")
-            && !key.is_empty()
-            && let Some(p) = self.providers.get_mut("openrouter")
+        // Fallback tokens for Anthropic (only when api_key is still unset).
+        if let Some(p) = self.providers.get_mut("anthropic")
             && p.api_key.is_none()
         {
-            p.api_key = Some(key);
-        }
-        if let Ok(key) = std::env::var("NVIDIA_API_KEY")
-            && !key.is_empty()
-            && let Some(p) = self.providers.get_mut("nvidia")
-            && p.api_key.is_none()
-        {
-            p.api_key = Some(key);
-        }
-        if let Ok(key) = std::env::var("TOGETHER_API_KEY")
-            && !key.is_empty()
-            && let Some(p) = self.providers.get_mut("together")
-            && p.api_key.is_none()
-        {
-            p.api_key = Some(key);
-        }
-        if let Ok(key) = std::env::var("GROQ_API_KEY")
-            && !key.is_empty()
-            && let Some(p) = self.providers.get_mut("groq")
-            && p.api_key.is_none()
-        {
-            p.api_key = Some(key);
-        }
-        if let Ok(key) = std::env::var("DEEPSEEK_API_KEY")
-            && !key.is_empty()
-            && let Some(p) = self.providers.get_mut("deepseek")
-            && p.api_key.is_none()
-        {
-            p.api_key = Some(key);
-        }
-        if let Ok(key) = std::env::var("OPENCODE_API_KEY")
-            && !key.is_empty()
-            && let Some(p) = self.providers.get_mut("zen")
-            && p.api_key.is_none()
-        {
-            p.api_key = Some(key);
-        }
-        if let Ok(key) = std::env::var("KIMI_API_KEY")
-            && !key.is_empty()
-            && let Some(p) = self.providers.get_mut("kimi")
-            && p.api_key.is_none()
-        {
-            p.api_key = Some(key);
-        }
-        if let Ok(key) = std::env::var("KILO_API_KEY")
-            && !key.is_empty()
-            && let Some(p) = self.providers.get_mut("kilo")
-            && p.api_key.is_none()
-        {
-            p.api_key = Some(key);
-        }
-
-        // Standard base-URL overrides (SDK convention: a host/base, not the full
-        // endpoint — the provider appends the path). Env takes precedence over
-        // whatever is in niki.toml.
-        if let Ok(base) = std::env::var("ANTHROPIC_BASE_URL")
-            && !base.is_empty()
-            && let Some(p) = self.providers.get_mut("anthropic")
-        {
-            p.base_url = Some(base.trim_end_matches('/').to_string());
-        }
-        if let Ok(base) = std::env::var("OPENAI_BASE_URL")
-            && !base.is_empty()
-            && let Some(p) = self.providers.get_mut("openai")
-        {
-            p.base_url = Some(base.trim_end_matches('/').to_string());
-        }
-
-        // Standard model overrides. Applied to agents still using the provider's
-        // built-in default, so an explicit per-agent model in niki.toml is respected.
-        if let Ok(model) = std::env::var("ANTHROPIC_MODEL")
-            && !model.is_empty()
-        {
-            if let Some(p) = self.providers.get_mut("anthropic") {
-                p.default_model = model.clone();
+            if let Some(key) = get_env("NIKI_PROVIDERS_ANTHROPIC_API_KEY").filter(|k| !k.is_empty())
+            {
+                p.api_key = Some(key);
+            } else if let Some(token) = get_env("ANTHROPIC_AUTH_TOKEN").filter(|k| !k.is_empty()) {
+                p.api_key = Some(token);
             }
-            apply_env_model_to_agents(&mut self.agents, "anthropic", &model);
         }
-        if let Ok(model) = std::env::var("OPENAI_MODEL")
-            && !model.is_empty()
-        {
-            if let Some(p) = self.providers.get_mut("openai") {
-                p.default_model = model.clone();
+
+        // Standard base-URL overrides: explicit env always wins over TOML.
+        for (var, prov) in [
+            ("ANTHROPIC_BASE_URL", "anthropic"),
+            ("OPENAI_BASE_URL", "openai"),
+            ("GOOGLE_BASE_URL", "google"),
+            ("OPENROUTER_BASE_URL", "openrouter"),
+        ] {
+            if let Some(base) = get_env(var).filter(|b| !b.is_empty()) {
+                if let Some(p) = self.providers.get_mut(prov) {
+                    p.base_url = Some(base.trim_end_matches('/').to_string());
+                }
             }
-            apply_env_model_to_agents(&mut self.agents, "openai", &model);
+        }
+
+        // Standard model overrides: explicit env updates provider default and agents using default.
+        for (var, prov) in [
+            ("ANTHROPIC_MODEL", "anthropic"),
+            ("OPENAI_MODEL", "openai"),
+            ("GOOGLE_MODEL", "google"),
+        ] {
+            if let Some(model) = get_env(var).filter(|m| !m.is_empty()) {
+                if let Some(p) = self.providers.get_mut(prov) {
+                    p.default_model = model.clone();
+                }
+                apply_env_model_to_agents(&mut self.agents, prov, &model);
+            }
         }
     }
 
@@ -1865,10 +1909,11 @@ impl NikiConfig {
 /// to `provider` and is still using the provider's built-in default. Agents with
 /// an explicit model set in niki.toml are left untouched.
 fn apply_env_model_to_agents(agents: &mut AgentsConfig, provider: &str, model: &str) {
-    let default_model = if provider == "anthropic" {
-        "claude-sonnet-4-20250514"
-    } else {
-        "gpt-4o-mini"
+    let default_model = match provider {
+        "anthropic" => "claude-sonnet-4-20250514",
+        "openai" => "gpt-4o-mini",
+        "google" => "gemini-2.5-flash",
+        _ => "",
     };
     for a in [
         &mut agents.planner,
@@ -1877,6 +1922,7 @@ fn apply_env_model_to_agents(agents: &mut AgentsConfig, provider: &str, model: &
         &mut agents.reviewer,
         &mut agents.synthesizer,
         &mut agents.security_auditor,
+        &mut agents.red,
     ] {
         if a.provider == provider && a.model == default_model {
             a.model = model.to_string();
@@ -2169,5 +2215,96 @@ max_tokens = 2048
         base.merge(local);
         assert_eq!(base.risk.mode, RiskMode::Security);
         assert_eq!(base.general.max_revision_rounds, 5);
+    }
+
+    #[test]
+    fn env_precedence_matrix_for_keys_base_urls_and_models() {
+        // Phase 6.3: explicit env variables always win over TOML values
+        // for keys, base URLs, and default models across Anthropic, OpenAI, and Google.
+        let toml = r#"
+[providers.anthropic]
+api_key = "toml-anthropic-key"
+base_url = "https://toml.anthropic.com"
+default_model = "claude-sonnet-4-20250514"
+
+[providers.openai]
+api_key = "toml-openai-key"
+base_url = "https://toml.openai.com"
+default_model = "gpt-4o-mini"
+
+[providers.google]
+api_key = "toml-google-key"
+base_url = "https://toml.google.com"
+default_model = "gemini-2.5-flash"
+
+[agents.coder]
+provider = "openai"
+model = "gpt-4o-mini"
+
+[agents.reviewer]
+provider = "openai"
+model = "custom-override-model"
+"#;
+        let mut config: NikiConfig = toml::from_str(toml).unwrap();
+
+        let env_map: std::collections::HashMap<&str, &str> = [
+            ("ANTHROPIC_API_KEY", "env-anthropic-key"),
+            ("OPENAI_API_KEY", "env-openai-key"),
+            ("GOOGLE_API_KEY", "env-google-key"),
+            ("ANTHROPIC_BASE_URL", "https://env.anthropic.com"),
+            ("OPENAI_BASE_URL", "https://env.openai.com"),
+            ("GOOGLE_BASE_URL", "https://env.google.com"),
+            ("ANTHROPIC_MODEL", "claude-opus-4-20250514"),
+            ("OPENAI_MODEL", "gpt-4o-2024-08-06"),
+            ("GOOGLE_MODEL", "gemini-2.5-pro"),
+        ]
+        .into_iter()
+        .collect();
+
+        config.apply_env_lookup(&|k| env_map.get(k).map(|s| s.to_string()));
+
+        // 1. API Keys: env wins over TOML
+        assert_eq!(
+            config.providers["anthropic"].api_key.as_deref(),
+            Some("env-anthropic-key")
+        );
+        assert_eq!(
+            config.providers["openai"].api_key.as_deref(),
+            Some("env-openai-key")
+        );
+        assert_eq!(
+            config.providers["google"].api_key.as_deref(),
+            Some("env-google-key")
+        );
+
+        // 2. Base URLs: env wins over TOML
+        assert_eq!(
+            config.providers["anthropic"].base_url.as_deref(),
+            Some("https://env.anthropic.com")
+        );
+        assert_eq!(
+            config.providers["openai"].base_url.as_deref(),
+            Some("https://env.openai.com")
+        );
+        assert_eq!(
+            config.providers["google"].base_url.as_deref(),
+            Some("https://env.google.com")
+        );
+
+        // 3. Models: env updates provider default_model and agents using default model
+        assert_eq!(
+            config.providers["anthropic"].default_model,
+            "claude-opus-4-20250514"
+        );
+        assert_eq!(
+            config.providers["openai"].default_model,
+            "gpt-4o-2024-08-06"
+        );
+        assert_eq!(config.providers["google"].default_model, "gemini-2.5-pro");
+
+        // Coder used provider default, so it is updated
+        assert_eq!(config.agents.coder.model, "gpt-4o-2024-08-06");
+        // Reviewer had an explicit custom model in TOML, so it is preserved
+        assert_eq!(config.agents.reviewer.model, "custom-override-model");
     }
 }

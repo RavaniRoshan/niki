@@ -1,6 +1,6 @@
 ---
 title: CLI Overview
-description: Complete inventory of all 16 NIKI CLI commands.
+description: Complete inventory of all 26 NIKI CLI commands.
 sidebar:
   order: 1
   label: CLI Overview
@@ -8,20 +8,25 @@ sidebar:
 
 # NIKI CLI Command Overview
 
-NIKI ships with 19 top-level CLI commands organized into 5 logical categories:
+NIKI ships with 26 top-level CLI commands organized into 5 logical categories:
 
 ---
 
 ## 1. Pipeline & Task Execution
 * **`niki run <task>`**: Execute an end-to-end multi-agent coding task.
+* **`niki plan <task>`**: Research and propose a change without making code edits.
 * **`niki status`**: Display status, current stage, and verdict of the active or latest task.
 * **`niki report [id]`**: Render the markdown decision trail report.
 * **`niki dashboard [id]`**: Launch or locate the visual HTML diff & review dashboard.
+* **`niki session [subcommand]`**: Inspect, list, and rewind chat or pipeline checkpoints.
+* **`niki resume <session-id>`**: Resume an interrupted agent session from a checkpoint.
+* **`niki audit [id]`**: Emit a consolidated compliance and security bundle for one task as JSON.
 
 ---
 
 ## 2. Configuration, Auth & Diagnostics
 * **`niki config`**: Initialize or validate configuration files and export JSON schemas.
+* **`niki init`**: Initialize a new `niki.toml` configuration file (alias for `config init`).
 * **`niki auth`**: Manage secure credentials stored in the OS keyring (`login`, `logout`, `status`).
 * **`niki providers`**: Health check all configured LLM provider connections.
 * **`niki doctor`**: Complete system diagnostic suite across dependencies, containers, and permissions.
@@ -29,17 +34,21 @@ NIKI ships with 19 top-level CLI commands organized into 5 logical categories:
 
 ---
 
-## 3. Autonomous Agents & Memory
+## 3. Autonomous Agents, Memory & Skills
 * **`niki goal`**: Autonomous long-running goal runner with self-healing and drift recovery.
 * **`niki memory`**: Inspect, query, tag, or prune hierarchical cross-session project memory.
+* **`niki skills`**: Distill, stage, promote, or retire versioned project skills (`SKILL.md`).
 * **`niki research <query>`**: Autonomous web search & cited technical summary generator.
 
 ---
 
-## 4. Interactive TUI, Benchmarking & Verification
+## 4. Interactive TUI, Protocols & Benchmarking
 * **`niki chat`**: Interactive terminal chat interface with streaming markdown and slash commands.
+* **`niki acp`**: Run NIKI as an Agent Client Protocol (ACP) server over stdio.
+* **`niki commands`**: Inspect and execute custom slash commands.
+* **`niki voice`**: Record and transcribe a voice instruction.
 * **`niki smoke`**: End-to-end smoke testing harness for pipeline verification.
-* **`niki eval`**: Benchmark NIKI on seeded defect datasets.
+* **`niki eval`**: Benchmark NIKI on seeded defect datasets with replay and live grading.
 * **`niki verify`**: Visual screenshot regression testing and manifest tracking.
 
 ---

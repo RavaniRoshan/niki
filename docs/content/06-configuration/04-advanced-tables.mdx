@@ -50,9 +50,17 @@ env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_..." }
 
 ```toml
 [ui]
-theme      = "auto" # "auto" | "dark" | "light"
-tips       = true
-transcript = true
+theme = "auto" # "auto" | "dark" | "light"
+
+[ui.tips]
+enabled          = true
+rotation_seconds = 30
+
+[ui.transcript]
+collapse_completed  = true
+expand_failures     = true
+show_intent_labels  = true
+auto_collapse_turns = false
 
 [session]
 enabled      = true
@@ -61,8 +69,9 @@ auto_save    = true
 
 [compaction]
 enabled         = true
-threshold_pct   = 85 # Trigger compaction when 85% of model context is filled
+threshold_pct   = 80 # Trigger compaction when 80% of model context is filled (default: 80)
 reserved_tokens = 4096
+auto_compact    = true
 ```
 
 ---

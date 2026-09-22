@@ -1,4 +1,4 @@
-use crate::artifacts::types::{AgentRole, ArtifactEnvelope, ReviewFeedback};
+use crate::artifacts::types::AgentRole;
 use crate::config::types::TopologyMode;
 use crate::llm::provider::TokenUsage;
 use crate::memory::compression::ContextBudget;
@@ -12,6 +12,10 @@ use uuid::Uuid;
 pub struct PipelineState {
     pub task_id: Uuid,
     pub context_budget: ContextBudget,
+    /// Unified run hysteresis (Phase 5.5). Resolved from config at run start;
+    /// every stage boundary accrues new metrics into it.
+    #[serde(default)]
+    pub run_budget: super::budget::RunBudget,
 }
 
 impl PipelineState {
@@ -19,21 +23,15 @@ impl PipelineState {
         Self {
             task_id,
             context_budget: ContextBudget::new(200_000),
+            run_budget: super::budget::RunBudget::default(),
         }
     }
 
-    pub fn set_artifact<T: Serialize>(
-        &mut self,
-        _agent: AgentRole,
-        _artifact: &ArtifactEnvelope<T>,
-    ) -> Result<()> {
-        Ok(())
-    }
-
-    pub fn set_feedback(&mut self, _feedback: ReviewFeedback) {}
-
-    pub fn get_latest_feedback(&self) -> Option<ReviewFeedback> {
-        None
+    /// Accrue not-yet-accounted stage metrics into the run budget and enforce
+    /// all three dimensions. Call after every stage boundary; idempotent.
+    pub fn accrue_budget(&mut self, metrics: &[StageMetric]) -> anyhow::Result<()> {
+        self.run_budget.accrue_new_stages(metrics);
+        self.run_budget.check()
     }
 }
 

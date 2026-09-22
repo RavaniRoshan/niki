@@ -34,7 +34,14 @@ niki run <DESCRIPTION> [OPTIONS]
 | `--coder-model <M>` | String | Override model for the Coder stage | Config value |
 | `--tester-model <M>` | String | Override model for the Tester stage | Config value |
 | `--reviewer-model <M>` | String | Override model for the Reviewer stage | Config value |
+| `--plan <TASK_ID>` | String | Execute from a user-approved plan | None |
 | `--dry-run` | Flag | Generate plan and diff without applying or committing | `false` |
+| `--output-format <FMT>` | `text` \| `json` | Output contract (`text` streaming or `json` stdout envelope) | `text` |
+| `--bare` | Flag | Deterministic CI mode: skip ambient inputs (memory, MCP, doc URLs) | `false` |
+| `--permission-mode <M>` | String | Permission posture (`manual`, `auto`, `dontask`, `bypass`) | Config value |
+| `--max-steps <N>` | Integer | Override unified budget max steps | Config value |
+| `--max-usd <USD>` | Float | Override unified budget max USD | Config value |
+| `--max-wallclock-secs <S>` | Integer | Override unified budget max wallclock seconds | Config value |
+| `--force` | Flag | Create branch even if tests or mutation checks fail | `false` |
 | `--tui` | Flag | Launch interactive rich terminal dashboard | `false` |
 | `--quiet` | Flag | Suppress progress output and print only final branch/verdict | `false` |
-| `--verbose` | Flag | Enable debug-level execution traces | `false` |

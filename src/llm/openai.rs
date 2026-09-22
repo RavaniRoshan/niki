@@ -100,7 +100,7 @@ impl LlmProvider for OpenAiProvider {
             .ok_or_else(|| super::provider::missing_key_error(&self.provider_name))?;
         let url = openai_endpoint(self.base_url());
 
-        let payload = json!({
+        let mut payload = json!({
             "model": request.model,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
@@ -115,6 +115,29 @@ impl LlmProvider for OpenAiProvider {
                 }
             ]
         });
+
+        // Native tool calling (Phase 3.1): serialize capped specs so the model
+        // can emit `tool_calls`; absent/empty tools leave the payload unchanged.
+        if let Some(tools) = request.tools.as_deref()
+            && !tools.is_empty()
+        {
+            let specs = super::provider::capped_tool_specs(tools);
+            let openai_tools: Vec<serde_json::Value> = specs
+                .iter()
+                .map(|t| {
+                    json!({
+                        "type": "function",
+                        "function": {
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": t.parameters,
+                        }
+                    })
+                })
+                .collect();
+            payload["tools"] = serde_json::Value::Array(openai_tools);
+            payload["tool_choice"] = json!("auto");
+        }
 
         let req = self
             .client
@@ -151,6 +174,26 @@ impl LlmProvider for OpenAiProvider {
             .as_u64()
             .unwrap_or(0) as u32;
 
+        // Parse native tool calls (Phase 3.1), capping returned arguments.
+        let mut tool_calls = Vec::new();
+        if let Some(calls) = data["choices"][0]["message"]["tool_calls"].as_array() {
+            for call in calls {
+                let id = call["id"].as_str().unwrap_or("").to_string();
+                let name = call["function"]["name"].as_str().unwrap_or("").to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
+                let args: serde_json::Value =
+                    serde_json::from_str(args_str).unwrap_or(serde_json::json!({}));
+                tool_calls.push(super::provider::ToolCall {
+                    id,
+                    name,
+                    arguments: super::provider::capped_tool_arguments(&args),
+                });
+            }
+        }
+
         Ok(CompletionResponse {
             content,
             model: request.model,
@@ -160,7 +203,7 @@ impl LlmProvider for OpenAiProvider {
                 cached_input_tokens,
                 reasoning_tokens,
             },
-            tool_calls: Vec::new(),
+            tool_calls,
         })
     }
 

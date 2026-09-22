@@ -83,3 +83,30 @@ fn acp_session_status_reports_idle() {
     let resp = acp_response(&stdout, 4);
     assert_eq!(resp["result"]["status"], "idle");
 }
+
+#[test]
+fn acp_response_id_matches_request_id() {
+    // ACP must echo the request id back in the response so IDEs can match
+    // request/response pairs on a multiplexed stream.
+    let stdout = run_acp(r#"{"jsonrpc":"2.0","id":42,"method":"initialize","params":{}}"#);
+    let resp = acp_response(&stdout, 42);
+    assert_eq!(resp["id"], 42, "ACP must echo the request id");
+}
+
+#[test]
+fn acp_cancel_then_prompt_still_resets_cancel_state() {
+    // After session/cancel, a subsequent prompt/send with an empty prompt
+    // must still reach the prompt/send handler (cancel state reset) rather
+    // than being stuck in the cancelled state.
+    let stdin = r#"{"jsonrpc":"2.0","id":1,"method":"session/cancel","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"prompt/send","params":{"prompt":""}}"#;
+    let stdout = run_acp(stdin);
+    // The empty-prompt response must be the -32602 error (reached handler),
+    // proving cancel state was reset before prompt/send.
+    let resp = acp_response(&stdout, 2);
+    assert!(
+        resp["error"].is_object(),
+        "empty prompt must reach the prompt/send handler (cancel reset)"
+    );
+    assert_eq!(resp["error"]["code"], -32602);
+}

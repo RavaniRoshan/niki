@@ -10,13 +10,31 @@ use crate::memory::store::load_memory;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextBudget {
     /// Total context window capacity (in tokens) for the model in use.
+    /// Default 200_000; resolved per run from `[compaction]`-aware defaults
+    /// (per-model capacity resolution is a follow-up; the default is documented).
+    #[serde(default = "default_budget_capacity")]
     pub capacity: u32,
     /// Current token count consumed (approximate).
+    #[serde(default)]
     pub used: u32,
     /// Threshold at which the agent should consider compression (e.g., 0.6 = 60%).
+    #[serde(default = "default_early_warning")]
     pub early_warning_at: f32,
     /// Threshold at which a session switch is triggered (e.g., 0.8 = 80%).
+    #[serde(default = "default_session_switch")]
     pub session_switch_at: f32,
+}
+
+fn default_budget_capacity() -> u32 {
+    200_000
+}
+
+fn default_early_warning() -> f32 {
+    0.6
+}
+
+fn default_session_switch() -> f32 {
+    0.8
 }
 
 impl ContextBudget {
@@ -27,6 +45,18 @@ impl ContextBudget {
             early_warning_at: 0.6,
             session_switch_at: 0.8,
         }
+    }
+
+    /// Wire `[compaction]` (`threshold_pct`/`auto_compact`/`enabled`) into the
+    /// budget, replacing the hardcoded 80% switch. `threshold_pct` becomes the
+    /// session-switch fill ratio; early warning sits 20 points below it.
+    pub fn apply_compaction_config(&mut self, compaction: &crate::config::types::CompactionConfig) {
+        if !compaction.enabled {
+            return;
+        }
+        let threshold = (compaction.threshold_pct.min(95).max(10) as f32) / 100.0;
+        self.session_switch_at = threshold;
+        self.early_warning_at = (threshold - 0.2).max(0.1);
     }
 
     /// Current fill ratio (0.0 to 1.0).
@@ -64,15 +94,27 @@ pub enum CompressionStrategy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompressedKnowledge {
     /// A concise summary of key learnings from the session.
+    #[serde(default)]
     pub summary: String,
     /// Critical facts the agent must remember.
+    #[serde(default)]
     pub key_facts: Vec<String>,
     /// Decisions made during the session.
+    #[serde(default)]
     pub decisions: Vec<String>,
     /// Warnings and gotchas the agent encountered.
+    #[serde(default)]
     pub warnings: Vec<String>,
     /// Token savings achieved (approximate).
+    #[serde(default)]
     pub tokens_saved: Option<u32>,
+    /// Store schema version; mismatches warn loudly instead of emptying silently.
+    #[serde(default = "compressed_schema_version")]
+    pub schema_version: u32,
+}
+
+fn compressed_schema_version() -> u32 {
+    1
 }
 
 impl CompressedKnowledge {
@@ -132,14 +174,15 @@ pub fn compress_context(
         decisions,
         warnings,
         tokens_saved,
+        schema_version: 1,
     };
 
-    // Persist the compressed knowledge so subsequent agent stages can reuse it.
+    // Persist atomically so subsequent stages never read a half-written block.
     let dir = project_dir.join(".niki").join("memory").join("compressed");
     std::fs::create_dir_all(&dir)?;
     let path = compression_path(&dir, agent_role);
     let json = serde_json::to_string_pretty(&knowledge)?;
-    std::fs::write(&path, json)?;
+    crate::knowledge::kb::write_atomic(&path, json.as_bytes())?;
 
     Ok(knowledge)
 }
@@ -154,9 +197,28 @@ pub fn load_compressed_knowledge(
     if !path.exists() {
         return None;
     }
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
+    match std::fs::read_to_string(&path) {
+        Ok(s) => match serde_json::from_str::<CompressedKnowledge>(&s) {
+            Ok(ck) => {
+                if ck.schema_version != 1 {
+                    eprintln!(
+                        "Warning: {} schema_version={} (expected 1); reading best-effort",
+                        path.display(),
+                        ck.schema_version
+                    );
+                }
+                Some(ck)
+            }
+            Err(e) => {
+                eprintln!("Warning: {} unparsable ({}); ignoring", path.display(), e);
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("Warning: could not read {}: {e}", path.display());
+            None
+        }
+    }
 }
 
 /// Render memory for prompt, but with budget-aware trimming.
@@ -230,6 +292,20 @@ mod tests {
     }
 
     #[test]
+    fn compaction_config_drives_threshold() {
+        // Phase 2.4: `[compaction]` wires into the budget (no hardcoded 80%).
+        let mut budget = ContextBudget::new(200_000);
+        let mut cfg = crate::config::types::CompactionConfig::default();
+        cfg.enabled = true;
+        cfg.threshold_pct = 50;
+        cfg.auto_compact = true;
+        budget.apply_compaction_config(&cfg);
+        assert!((budget.session_switch_at - 0.5).abs() < 0.001);
+        budget.used = 120_000; // 60% — past the 50% threshold
+        assert!(budget.needs_session_switch());
+    }
+
+    #[test]
     fn context_budget_fill_ratio() {
         let budget = ContextBudget::new(100000);
         assert_eq!(budget.fill_ratio(), 0.0);
@@ -296,6 +372,7 @@ mod tests {
             decisions: vec!["Decision A".to_string()],
             warnings: vec!["Warning X".to_string()],
             tokens_saved: Some(5000),
+            schema_version: 1,
         };
 
         let rendered = knowledge.render();

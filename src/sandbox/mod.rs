@@ -117,8 +117,9 @@ pub trait Sandbox: Send + Sync {
     async fn ensure_tools(&self, tools: &[String]) -> Result<()>;
     /// Apply a unified diff to the sandbox's working copy.
     async fn apply_patch(&self, patch: &str, host_workspace: &Path) -> Result<()>;
-    /// Return the working-tree diff produced inside the sandbox.
-    async fn get_diff(&self) -> Result<String>;
+    /// Return the working-tree diff produced inside the sandbox, scoped to
+    /// `agent_files` (Phase 5.1: pre-existing dirt is never included).
+    async fn get_diff(&self, agent_files: &[String]) -> Result<String>;
     /// Run a command inside the sandbox, returning its exit code + output.
     ///
     /// When `role` is provided and a security policy exists for that role, the
@@ -131,20 +132,19 @@ pub trait Sandbox: Send + Sync {
 
 /// Check whether `cmd` is allowed by `policy`. Returns `Ok(())` if allowed,
 /// or `Err` with a descriptive message if denied.
+///
+/// Phase 5.3: deny ALWAYS wins on overlap, independent of evaluation order.
+/// The allow-list is a convenience fast path, never an escalation: an
+/// allow-listed prefix that matches a denied pattern is still rejected.
+/// Permissive bypasses (DontAsk/BypassPermissions) come only from the
+/// explicit `[permissions] mode`, never from overlapping allow entries.
 pub fn check_command_policy(cmd: &[&str], policy: &SecurityPolicyConfig) -> Result<()> {
     let full_cmd = cmd.join(" ");
 
-    // Allow-list takes precedence: if the command starts with any allowed prefix, skip deny check.
-    for allowed in &policy.allowed_commands {
-        if full_cmd.starts_with(allowed) {
-            return Ok(());
-        }
-    }
-
-    // The global deny-list is *always* enforced for every role, in addition to
-    // any per-role denies. (Previously the per-role policies overrode it, which
-    // let the coder/reviewer roles run dangerous commands like `curl | sh`,
-    // `mkfs`, `dd`, or `rm -rf`.) See research report S1.
+    // Deny first: the global deny-list is *always* enforced for every role,
+    // in addition to any per-role denies. (Previously the per-role policies
+    // overrode it, which let the coder/reviewer roles run dangerous commands
+    // like `curl | sh`, `mkfs`, `dd`, or `rm -rf`.) See research report S1.
     let mut denied: Vec<String> = policy.denied_commands.clone();
     denied.extend(crate::config::default_global_deny_list());
 
@@ -177,6 +177,13 @@ pub fn check_command_policy(cmd: &[&str], policy: &SecurityPolicyConfig) -> Resu
                 full_cmd,
                 denied
             ));
+        }
+    }
+
+    // Allow-list fast path (no bypass power: deny already ran above).
+    for allowed in &policy.allowed_commands {
+        if full_cmd.starts_with(allowed) {
+            return Ok(());
         }
     }
 

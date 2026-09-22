@@ -28,37 +28,54 @@ impl AuditEntry {
     }
 }
 
-pub fn write_audit_entry(task_id: &str, entry: &AuditEntry) {
-    let audit_dir = Path::new(".niki").join("audit");
+/// Append one entry to the task's audit trail
+/// (`<project>/.niki/audit/<task_id>.jsonl`).
+///
+/// Phase 4.6: the single live writer. Uses `O_APPEND` so concurrent runs
+/// interleave lines instead of clobbering each other (the old
+/// `write_audit_entry` overwrote the file and the read-modify-write append
+/// raced — both deleted). Best-effort: failures warn, never abort the run.
+pub fn append_audit_entry(project_path: &Path, task_id: &str, entry: &AuditEntry) {
+    let audit_dir = project_path.join(".niki").join("audit");
     if let Err(e) = fs::create_dir_all(&audit_dir) {
         eprintln!("Warning: could not create audit directory: {}", e);
         return;
     }
-
     let file_path = audit_dir.join(format!("{}.jsonl", task_id));
     let line = entry.to_json_line();
-    if let Err(e) = crate::util::write_restricted(&file_path, format!("{}\n", line)) {
-        eprintln!("Warning: could not write audit entry: {}", e);
+    let res = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file_path)
+        .and_then(|mut f| {
+            use std::io::Write as _;
+            writeln!(f, "{line}").and_then(|_| {
+                f.sync_all()
+                    .map_err(|_| std::io::Error::other("fsync failed"))
+            })
+        });
+    if let Err(e) = res {
+        eprintln!("Warning: could not append audit entry: {}", e);
     }
 }
 
-pub fn append_audit_entry(task_id: &str, entry: &AuditEntry) {
-    let audit_dir = Path::new(".niki").join("audit");
-    if let Err(e) = fs::create_dir_all(&audit_dir) {
-        eprintln!("Warning: could not create audit directory: {}", e);
-        return;
-    }
+#[cfg(test)]
+mod audit_writer_tests {
+    use super::*;
 
-    let file_path = audit_dir.join(format!("{}.jsonl", task_id));
-    let line = entry.to_json_line();
-
-    let existing = if file_path.exists() {
-        fs::read_to_string(&file_path).unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    if let Err(e) = crate::util::write_restricted(&file_path, format!("{}{}\n", existing, line)) {
-        eprintln!("Warning: could not append audit entry: {}", e);
+    #[test]
+    fn append_creates_project_scoped_jsonl() {
+        // Phase 4.6: entries land under the project dir, one JSON object per
+        // line, and repeated appends accumulate instead of overwriting.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        append_audit_entry(dir, "task-1", &AuditEntry::new("a", serde_json::json!({})));
+        append_audit_entry(dir, "task-1", &AuditEntry::new("b", serde_json::json!({})));
+        let text = std::fs::read_to_string(dir.join(".niki").join("audit").join("task-1.jsonl"))
+            .expect("audit file written under the project dir");
+        assert_eq!(text.lines().count(), 2, "appends must accumulate");
+        for line in text.lines() {
+            serde_json::from_str::<serde_json::Value>(line).expect("every line parses");
+        }
     }
 }

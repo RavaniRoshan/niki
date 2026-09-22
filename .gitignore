@@ -56,3 +56,4 @@ __pycache__/
 
 # TUI smoke suite transient captures
 tui-smoke-logs/
+.wrangler/

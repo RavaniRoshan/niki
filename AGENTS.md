@@ -14,11 +14,11 @@ Rust CLI (edition 2024, MSRV 1.85). Multi-agent coding pipeline: Planner → Cod
 
 ## Critical quirk: prompts and schemas are baked into the binary
 
-`src/lib.rs:130-131` compiles `prompts/` and `schemas/` into the binary at build time via `include_dir!`. Editing `prompts/*.md` or `schemas/*.json` has **no effect until you rebuild** (`cargo build`/`cargo run`). If your prompt/schema change "doesn't take", rebuild first. Runtime reads from embedded copies, not the source files.
+`src/lib.rs:138-139` compiles `prompts/` and `schemas/` into the binary at build time via `include_dir!`. Editing `prompts/*.md` or `schemas/*.json` has **no effect until you rebuild** (`cargo build`/`cargo run`). If your prompt/schema change "doesn't take", rebuild first. Runtime reads from embedded copies, not the source files.
 
 ## Tests & end-to-end
 
-- Unit/integration tests live in `tests/` and `src/**` (`#[test]`). Dev-deps include `wiremock`, `assert_cmd`, `predicates`, `tempfile`.
+- Unit/integration tests live in `tests/` and `src/**` (`#[test]`). Dev-deps include `wiremock`, `assert_cmd`, `tempfile`.
 - The real pipeline needs an LLM. For local e2e without keys or a container runtime, run the mock server and use the worktree backend:
   - `python3 tests/integration/mock_llm.py &` (serves on `:8080`)
   - `./target/release/niki run 'Add health endpoint' --backend worktree --quiet --project <git_repo>`
@@ -31,9 +31,9 @@ Rust CLI (edition 2024, MSRV 1.85). Multi-agent coding pipeline: Planner → Cod
 
 ## Architecture / extension points
 
-- Entrypoint: `src/main.rs` → `src/cli/`. Core modules: `agents/`, `orchestrator/`, `sandbox/` (Podman/Docker/worktree backends), `llm/`, `runtime/` (tool registry + baseline tools), `artifacts/` (typed + JSON-schema validated), `config/`, `output/`, `repo_intel/` (deterministic manifest), `risk/` (tier classifier), `knowledge/` (KB, history miner, structural index, context pack).
+- Entrypoint: `src/main.rs` → `src/cli/`. Core modules: `agents/`, `orchestrator/`, `sandbox/` (Podman/Docker/worktree backends), `llm/`, `runtime/` (tool registry + baseline tools), `artifacts/` (typed + JSON-schema validated), `config/`, `output/`, `repo_intel/` (deterministic manifest), `risk/` (tier classifier), `knowledge/` (KB, history miner, structural index, context pack), `mcp/`, `memory/`, `session/`, `goal/`, `persistence/`, `acp/`, `control_plane/`, `audit/`, `mission/`, `eval/`, `permissions/`, `safety/`, `tools/`, `commands/`, `event/`, `activity/`, `cost.rs`, `recommend.rs`.
 - Add a tool: implement the `Tool` trait in `src/runtime/mod.rs`, register in `build_baseline_registry()`, add tests.
-- Add a provider: implement `LlmProvider` in `src/llm/provider.rs`; add a match arm in `create_provider()` in `src/llm/mod.rs`. `src/llm/anthropic.rs` is the reference impl.
+- Add a provider: implement `LlmProvider` in `src/llm/provider.rs`; add a match arm in `create_provider()` in `src/llm/provider.rs`. `src/llm/anthropic.rs` is the reference impl.
 - Agent prompts are Minijinja templates in `prompts/*.md`; add an agent role → new prompt file + schema in `schemas/` + wire into `src/orchestrator/pipeline.rs`. New `AgentRole` variants require arms in `role_prompt`/`parse_role`/`isolation_sources_for`/`run_role`, `artifact_json_name`, display theme/labels, `memory/store.rs`, `recommend.rs`, and `cli/run.rs::role_filename` (see the Critic wiring as reference).
 - Risk-gated stages live in `apply_risk_stages()` (`pipeline.rs`): explicit `[pipeline].stages` is never rewritten; the Critic runs once post-loop via `run_bookkept_stage()`, never inside the revision loop.
 - Provenance (`orchestrator/provenance.rs`) and reflection (`orchestrator/reflect.rs`) are best-effort: warn, never fail the run.

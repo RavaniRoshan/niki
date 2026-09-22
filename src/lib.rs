@@ -27,6 +27,7 @@ pub mod audit;
 pub mod cli;
 pub mod commands;
 pub mod config;
+pub mod control_plane;
 pub mod cost;
 pub mod display;
 pub mod errors;
@@ -38,7 +39,6 @@ pub mod llm;
 pub mod mcp;
 pub mod memory;
 pub mod mission;
-pub mod observability;
 pub mod orchestrator;
 pub mod output;
 pub mod permissions;
@@ -50,6 +50,8 @@ pub mod runtime;
 pub mod safety;
 pub mod sandbox;
 pub mod session;
+pub mod skills;
+pub mod store;
 pub mod tools;
 pub mod util;
 
@@ -104,6 +106,9 @@ pub enum NikiError {
 
     #[error("Task was cancelled by the user")]
     Cancelled,
+
+    #[error("Run budget exhausted [{dimension}]: {detail}")]
+    BudgetExhausted { dimension: String, detail: String },
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),

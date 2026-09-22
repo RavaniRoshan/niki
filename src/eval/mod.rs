@@ -138,6 +138,63 @@ pub struct MaintainerGrade {
     #[serde(default)]
     pub note: String,
     pub date: String,
+    #[serde(default)]
+    pub fixture_hash: Option<String>,
+}
+
+/// Compute a deterministic hash of all files in a fixture directory.
+pub fn compute_fixture_hash(dir: &std::path::Path) -> Option<String> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hasher;
+
+    if !dir.exists() {
+        return None;
+    }
+    let mut files = Vec::new();
+    for entry in walkdir::WalkDir::new(dir).sort_by_file_name() {
+        if let Ok(entry) = entry
+            && entry.file_type().is_file()
+        {
+            files.push(entry.into_path());
+        }
+    }
+    if files.is_empty() {
+        return None;
+    }
+    let mut hasher = DefaultHasher::new();
+    for file in files {
+        if let Ok(rel) = file.strip_prefix(dir) {
+            hasher.write(rel.to_string_lossy().as_bytes());
+        }
+        if let Ok(content) = std::fs::read(&file) {
+            hasher.write(&content);
+        }
+    }
+    Some(format!("{:016x}", hasher.finish()))
+}
+
+/// Check fixture integrity across all cases that carry a maintainer grade with a recorded hash.
+pub fn check_fixture_integrity(
+    ds: &EvalDataset,
+    dataset_dir: &std::path::Path,
+    grades: &std::collections::HashMap<String, MaintainerGrade>,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for case in &ds.cases {
+        if let Some(grade) = grades.get(&case.id) {
+            if let Some(ref expected_hash) = grade.fixture_hash {
+                let base = dataset_dir.join(case.replay_dir.as_deref().unwrap_or("."));
+                let current_hash = compute_fixture_hash(&base).unwrap_or_default();
+                if expected_hash != &current_hash {
+                    warnings.push(format!(
+                        "Warning: fixture integrity mismatch for case '{}': grade recorded hash {}, but fixture directory '{}' hashed to {}",
+                        case.id, expected_hash, base.display(), current_hash
+                    ));
+                }
+            }
+        }
+    }
+    warnings
 }
 
 /// Load all maintainer grades from `<dataset-dir>/grades/*.json`.
@@ -239,6 +296,9 @@ pub struct EvalReport {
     /// Grader-vs-harness agreement (see [`grader_agreement`]). `None` when
     /// nothing is graded.
     pub grader_agreement: Option<f64>,
+    /// Warnings produced when fixture files differ from recorded grade hashes.
+    #[serde(default)]
+    pub fixture_warnings: Vec<String>,
 }
 
 impl EvalReport {
@@ -620,7 +680,12 @@ pub async fn run_eval(dataset_path: &Path, live: bool, project_dir: &Path) -> Re
         }
     }
     let grades = load_grades(&dataset_dir);
-    Ok(build_report(&ds, &cases, live, &grades))
+    let mut report = build_report(&ds, &cases, live, &grades);
+    report.fixture_warnings = check_fixture_integrity(&ds, &dataset_dir, &grades);
+    for w in &report.fixture_warnings {
+        eprintln!("{w}");
+    }
+    Ok(report)
 }
 
 /// Best-effort harness provenance for the disclosure manifest: current UTC
@@ -733,6 +798,7 @@ pub fn build_report(
         grades: grades.clone(),
         graded_cases,
         grader_agreement: grader_agreement(cases, grades),
+        fixture_warnings: Vec::new(),
     }
 }
 
@@ -811,6 +877,12 @@ pub fn render_report_md(report: &EvalReport) -> String {
          upheld Red challenge (test-passing only, not maintainer-merge grading — \
          see research report VG-12).\n",
     );
+    if !report.fixture_warnings.is_empty() {
+        s.push_str("\n### Fixture integrity warnings\n\n");
+        for w in &report.fixture_warnings {
+            s.push_str(&format!("- {w}\n"));
+        }
+    }
 
     // Per-category breakdown
     if !report.categories.is_empty() {
@@ -1035,6 +1107,7 @@ mod tests {
             merge_worthy: merge,
             note: String::new(),
             date: "2026-09-07".into(),
+            fixture_hash: None,
         };
         let cases = vec![mk("a", true), mk("b", true), mk("c", true)];
         // Nothing graded: no claim.
@@ -1085,5 +1158,64 @@ mod tests {
         let md = render_report_md(&rep);
         assert!(md.contains("Disclosure manifest"));
         assert!(md.contains("Cost per NIKI-caught defect"));
+    }
+
+    #[test]
+    fn fixture_tampering_triggers_warning_in_report() {
+        let temp = tempfile::tempdir().unwrap();
+        let fixtures_dir = temp.path().join("case_defect");
+        std::fs::create_dir_all(&fixtures_dir).unwrap();
+        let fixture_file = fixtures_dir.join("review.json");
+        std::fs::write(&fixture_file, "{\"verdict\": \"Approved\"}").unwrap();
+
+        let initial_hash = compute_fixture_hash(&fixtures_dir).expect("should compute hash");
+
+        let mut grades = std::collections::HashMap::new();
+        grades.insert(
+            "case_defect".to_string(),
+            MaintainerGrade {
+                case_id: "case_defect".to_string(),
+                reviewer: "test-reviewer".to_string(),
+                merge_worthy: true,
+                note: "ok".to_string(),
+                date: "2026-09-21".to_string(),
+                fixture_hash: Some(initial_hash),
+            },
+        );
+
+        let ds = EvalDataset {
+            name: Some("tamper-test".to_string()),
+            cases: vec![EvalCase {
+                id: "case_defect".to_string(),
+                description: "desc".to_string(),
+                difficulty: Difficulty::Easy,
+                seeded_defect: SeededDefect {
+                    label: "label".to_string(),
+                    category: IssueCategory::Security,
+                    keyword: None,
+                    expected_caught: true,
+                },
+                replay_dir: Some("case_defect".to_string()),
+            }],
+        };
+
+        // Before tampering: 0 warnings
+        let warnings = check_fixture_integrity(&ds, temp.path(), &grades);
+        assert!(warnings.is_empty());
+
+        // Tamper with the fixture file
+        std::fs::write(&fixture_file, "{\"verdict\": \"Rejected\"}").unwrap();
+
+        // After tampering: warning emitted
+        let warnings = check_fixture_integrity(&ds, temp.path(), &grades);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("fixture integrity mismatch for case 'case_defect'"));
+
+        // Report renders the warning
+        let mut rep = build_report(&ds, &[], false, &grades);
+        rep.fixture_warnings = warnings;
+        let md = render_report_md(&rep);
+        assert!(md.contains("Fixture integrity warnings"));
+        assert!(md.contains("case_defect"));
     }
 }

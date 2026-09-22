@@ -45,6 +45,11 @@ pub struct McpTool {
     pub description: String,
     pub server_name: String,
     pub input_schema: Option<serde_json::Value>,
+    /// Real read-only metadata from `annotations.readOnlyHint` (Phase 3.6).
+    /// Absent annotations mean `false`: under default read-only governance an
+    /// unmarked tool is denied (deny-by-default), never assumed safe.
+    #[serde(default)]
+    pub read_only: bool,
 }
 
 /// MCP governance policy — controls what agents can do with MCP tools.
@@ -182,6 +187,14 @@ pub fn trust_store_path(project_path: &Path) -> std::path::PathBuf {
     project_path.join(".niki").join("mcp_trust.json")
 }
 
+/// Heuristic for web-fetch-shaped MCP tools: the governance
+/// `domain_allowlist` applies when the tool name suggests fetching and the
+/// arguments carry a URL.
+fn is_web_fetch_tool(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.contains("fetch") || n.contains("url") || n.contains("http") || n.contains("web")
+}
+
 /// Manages MCP server connections and tool discovery.
 pub struct McpManager {
     servers: Vec<McpServerConfig>,
@@ -192,6 +205,9 @@ pub struct McpManager {
     /// warned) until the user allows them. When `None`, behavior is
     /// unchanged (all enabled servers connect).
     trust_store: Option<McpTrustStore>,
+    /// Live connections retained per server (Phase 3.6) so tools can be
+    /// called end to end instead of dropping `_conn` after discovery.
+    connections: HashMap<String, std::sync::Arc<tokio::sync::Mutex<client::McpConnection>>>,
 }
 
 impl McpManager {
@@ -202,6 +218,7 @@ impl McpManager {
             tools: Vec::new(),
             governance: McpGovernance::default(),
             trust_store: None,
+            connections: HashMap::new(),
         }
     }
 
@@ -235,7 +252,8 @@ impl McpManager {
         }
     }
 
-    /// Load MCP server configurations from a config file.
+    /// Load MCP server configurations from a JSON config file (legacy path;
+    /// prefer `from_config`, which reads `[[mcp.servers]]` from `niki.toml`).
     pub fn load_config(&mut self, config_path: &Path) -> Result<()> {
         if !config_path.exists() {
             return Ok(());
@@ -244,6 +262,46 @@ impl McpManager {
         let servers: Vec<McpServerConfig> = serde_json::from_str(&content)?;
         self.servers = servers;
         Ok(())
+    }
+
+    /// Build a manager from `[mcp]` config (Phase 3.6): servers, timeout,
+    /// and governance load here instead of `McpManager::new()` leaving
+    /// `[[mcp.servers]]` unloadable.
+    pub fn from_config(config: &crate::config::NikiConfig) -> Self {
+        let mut mgr = Self::new().with_governance(McpGovernance {
+            read_only: config.mcp.read_only,
+            domain_allowlist: config.mcp.domain_allowlist.clone(),
+        });
+        for entry in &config.mcp.servers {
+            if !entry.enabled {
+                continue;
+            }
+            let server_type = if let Some(url) = &entry.url {
+                McpServerType::Remote {
+                    url: url.clone(),
+                    headers: HashMap::new(),
+                }
+            } else if let Some(command) = &entry.command {
+                McpServerType::Local {
+                    command: command.clone(),
+                    args: entry.args.clone(),
+                    env: entry.env.clone(),
+                }
+            } else {
+                tracing::warn!(
+                    "MCP server '{}' has neither command nor url — skipped",
+                    entry.name
+                );
+                continue;
+            };
+            mgr.add_server(McpServerConfig {
+                name: entry.name.clone(),
+                server_type,
+                enabled: entry.enabled,
+                timeout_ms: config.mcp.timeout_ms,
+            });
+        }
+        mgr
     }
 
     /// Add a server configuration.
@@ -288,13 +346,18 @@ impl McpManager {
                 continue;
             }
             match client::connect_server(server_config).await {
-                Ok((_conn, tools)) => {
+                Ok((conn, tools)) => {
                     tracing::info!(
                         "MCP server '{}' connected, {} tools discovered",
                         server_config.name,
                         tools.len()
                     );
                     self.tools.extend(tools);
+                    // Retain the live connection so tools/call works end to end.
+                    self.connections.insert(
+                        server_config.name.clone(),
+                        std::sync::Arc::new(tokio::sync::Mutex::new(conn)),
+                    );
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -309,15 +372,86 @@ impl McpManager {
         Ok(())
     }
 
-    /// Filter tools by governance policy.
+    /// Call a tool on a connected server end to end (`tools/call`).
+    /// Governance (`check_tool_call`) runs before the call; untrusted or
+    /// unconnected servers error instead of connecting implicitly.
+    pub async fn call_tool(
+        &self,
+        server_name: &str,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let tool = self
+            .tools
+            .iter()
+            .find(|t| t.server_name == server_name && t.name == tool_name)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "MCP tool '{tool_name}' on server '{server_name}' is not discovered"
+                )
+            })?;
+        self.check_tool_call(tool, &arguments)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let conn = self
+            .connections
+            .get(server_name)
+            .ok_or_else(|| anyhow::anyhow!("MCP server '{server_name}' is not connected"))?;
+        let mut guard = conn.lock().await;
+        guard.call_tool(tool_name, Some(arguments)).await
+    }
+
+    /// Filter tools by governance policy (Phase 3.6, deny-by-default).
+    /// When `read_only` governance is on (the default), only tools carrying
+    /// explicit `readOnlyHint: true` metadata are served; unmarked tools are
+    /// denied rather than assumed safe.
     pub fn allowed_tools(&self) -> Vec<&McpTool> {
         if self.governance.read_only {
-            // In read-only mode, return all tools (we trust the server to mark tools correctly)
-            // In a future implementation, we could filter by tool metadata
-            self.tools.iter().collect()
+            self.tools.iter().filter(|t| t.read_only).collect()
         } else {
             self.tools.iter().collect()
         }
+    }
+
+    /// Whether a tool call is governed to run: read-only gate plus the
+    /// `domain_allowlist` for web-fetch-shaped tools (name suggests fetching
+    /// and arguments carry a `url`/`uri`). Deny-by-default with explicit
+    /// reasons for diagnostics.
+    pub fn check_tool_call(
+        &self,
+        tool: &McpTool,
+        arguments: &serde_json::Value,
+    ) -> Result<(), String> {
+        if self.governance.read_only && !tool.read_only {
+            return Err(format!(
+                "MCP tool '{}' is not marked read-only and governance is read-only — denied",
+                tool.name
+            ));
+        }
+        if is_web_fetch_tool(&tool.name)
+            && let Some(url) = arguments
+                .get("url")
+                .or_else(|| arguments.get("uri"))
+                .and_then(|v| v.as_str())
+            && !self.url_allowed(url)
+        {
+            return Err(format!(
+                "MCP tool '{}' URL '{url}' is not in domain_allowlist — denied",
+                tool.name
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether `url`'s host is covered by `domain_allowlist` (empty = block all).
+    pub fn url_allowed(&self, url: &str) -> bool {
+        let host = match reqwest::Url::parse(url) {
+            Ok(u) => u.host_str().unwrap_or_default().to_ascii_lowercase(),
+            Err(_) => return false,
+        };
+        self.governance.domain_allowlist.iter().any(|d| {
+            let d = d.to_ascii_lowercase();
+            host == d || host.ends_with(&format!(".{d}"))
+        })
     }
 
     /// Format MCP tools for injection into agent prompts.

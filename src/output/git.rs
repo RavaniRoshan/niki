@@ -44,23 +44,50 @@ fn diff_files(diff: &str) -> Vec<String> {
     files
 }
 
-/// Capture the current working-tree diff on the host. The sandbox applies the Coder's
-/// patch to the bind-mounted project directory, so the host working tree already holds
-/// the change — we read it from there rather than from inside the container.
+/// Capture the working-tree diff scoped to agent-produced changes.
 ///
-/// `git diff` only reports changes to *tracked* files, so a brand-new (untracked) file
-/// the Coder created would be invisible and `changes.patch` would come back empty. We
-/// mark new files with intent-to-add (`-N`) first, which makes them show up in the diff
-/// as a normal `@@ -0,0 +1,N @@` hunk without actually staging their content.
+/// Phase 5.1: the old implementation ran `git add -A -N` on the host and
+/// diffed everything, so pre-existing unrelated dirt landed in
+/// `changes.patch`, the commit, and the final diff. This version diffs ONLY
+/// the files the agent reported (`CodeDiff.files_changed`), intent-to-adding
+/// just those — the host index is otherwise untouched.
 ///
-/// The diff is restricted to real source changes: the `.niki` working directory
-/// (task artifacts) and `niki.toml` (may contain secrets) are excluded, mirroring the
-/// files `create_branch_and_commit` strips from the committed branch. This keeps the
-/// published `changes.patch` free of internal state and secrets.
-pub fn working_tree_diff(repo_path: &Path) -> String {
-    let _ = run_git(repo_path, &["add", "-A", "-N"]);
+/// Paths under `.niki/` / `niki.toml` and escapes (`..`, absolute) are
+/// dropped: task artifacts and secrets never belong in the published patch.
+/// An empty file list yields an empty diff without touching the host at all.
+pub fn working_tree_diff_scoped(repo_path: &Path, agent_files: &[String]) -> String {
+    let files: Vec<&str> = agent_files
+        .iter()
+        .map(|s| s.as_str())
+        .filter(|s| {
+            !s.is_empty()
+                && !s.starts_with('.')
+                && !s.starts_with('/')
+                && !s.contains("..")
+                && *s != "niki.toml"
+                && !s.starts_with(".niki/")
+                && !s.starts_with(".niki\\")
+        })
+        .collect();
+    if files.is_empty() {
+        return String::new();
+    }
+    // Intent-to-add ONLY agent files that are new on disk, so `git diff`
+    // reports them. Pre-existing untracked user dirt stays invisible.
+    let new_files: Vec<&str> = files
+        .iter()
+        .filter(|f| repo_path.join(f).is_file() && is_untracked(repo_path, f))
+        .copied()
+        .collect();
+    if !new_files.is_empty() {
+        let mut args = vec!["add", "-N", "--"];
+        args.extend(new_files);
+        let _ = run_git(repo_path, &args);
+    }
+    let mut args = vec!["diff", "--"];
+    args.extend(files);
     let out = std::process::Command::new("git")
-        .args(["diff", "--", ".", ":(exclude).niki", ":(exclude)niki.toml"])
+        .args(&args)
         .current_dir(repo_path)
         .output();
     match out {
@@ -69,54 +96,94 @@ pub fn working_tree_diff(repo_path: &Path) -> String {
     }
 }
 
+/// True when `path` (repo-relative) is untracked in the host repo.
+fn is_untracked(repo_path: &Path, path: &str) -> bool {
+    let out = std::process::Command::new("git")
+        .args(["ls-files", "--others", "--exclude-standard", "--", path])
+        .current_dir(repo_path)
+        .output();
+    matches!(out, Ok(o) if !o.stdout.is_empty())
+}
+
+/// File paths the Coder stage reported changing, for diff scoping.
+/// Unparseable coder JSON yields an empty list (empty scope, never everything).
+pub fn agent_files_from_coder_json(coder_json: Option<&str>) -> Vec<String> {
+    let Some(json) = coder_json else {
+        return Vec::new();
+    };
+    serde_json::from_str::<crate::artifacts::types::CodeDiff>(json)
+        .map(|d| d.files_changed.into_iter().map(|f| f.path).collect())
+        .unwrap_or_default()
+}
+
 /// Apply a unified diff (produced by the sandbox `get_diff`) to the host working
 /// tree. Used for the worktree backend, where the change lives only inside
 /// the sandbox copy and must be replayed onto the host before we commit the
-/// `niki/<id>` branch. Mirrors the Docker sandbox's `apply_patch` (git apply,
-/// with a `patch -p1` fallback) and normalizes line endings / trailing newline
-/// first so `git apply` doesn't reject the final context line.
+/// `niki/<id>` branch.
+///
+/// Strategy (single temp file, two attempts): `git apply` first, then
+/// `git -c apply.whitespace=nowarn apply -p1 --3way`. The patch is normalized
+/// once up front (see [`normalize_patch`]) so `git apply` doesn't reject the
+/// final context line; the temp file is removed on every path.
 pub fn apply_diff_to_working_tree(repo_path: &Path, diff: &str) -> Result<()> {
-    let normalized = normalize_patch(diff);
     let patch_path = repo_path.join(".niki-tmp.patch");
-    std::fs::write(&patch_path, &normalized)?;
-
+    std::fs::write(&patch_path, normalize_patch(diff))?;
     let patch_str = patch_path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("patch path is not valid UTF-8"))?;
-    let res = run_git(repo_path, &["apply", patch_str]);
+    let res = run_git(repo_path, &["apply", patch_str]).or_else(|_| {
+        run_git(
+            repo_path,
+            &[
+                "-c",
+                "apply.whitespace=nowarn",
+                "apply",
+                "-p1",
+                "--3way",
+                patch_str,
+            ],
+        )
+    });
     let _ = std::fs::remove_file(&patch_path);
+    res
+}
 
-    match res {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            // Fallback: patch -p1
-            let normalized = normalize_patch(diff);
-            let patch_path = repo_path.join(".niki-tmp.patch");
-            let _ = std::fs::write(&patch_path, &normalized);
-            let patch_str = patch_path
-                .to_str()
-                .ok_or_else(|| anyhow::anyhow!("patch path is not valid UTF-8"))?;
-            let res = run_git(
-                repo_path,
-                &[
-                    "-c",
-                    "apply.whitespace=nowarn",
-                    "apply",
-                    "-p1",
-                    "--3way",
-                    patch_str,
-                ],
-            );
-            let _ = std::fs::remove_file(&patch_path);
-            res
+/// Scan the diff's files for unresolved merge-conflict markers
+/// (`<<<<<<<` / `>>>>>>>` at line start). Phase 5.6: called after patch
+/// application and before branch creation — markers abort the branch instead
+/// of committing a conflicted tree.
+pub fn ensure_no_conflict_markers(repo_path: &Path, diff: &str) -> Result<()> {
+    let files = diff_files(diff);
+    let mut bad = Vec::new();
+    for f in &files {
+        let path = repo_path.join(f);
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let marked = text
+            .lines()
+            .any(|l| l.starts_with("<<<<<<< ") || l.starts_with(">>>>>>> "));
+        if marked {
+            bad.push(f.clone());
         }
+    }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "unresolved conflict markers in {} — refusing to commit",
+            bad.join(", ")
+        ))
     }
 }
 
 /// Normalize a unified diff: unify CRLF→LF line endings and guarantee a trailing
 /// newline. `git apply` treats a patch ending mid-line (no final newline) as a
 /// "corrupt patch" at the last context line.
-fn normalize_patch(patch: &str) -> String {
+///
+/// Phase 5.1: the single shared helper — the former per-backend copies in
+/// `sandbox/docker.rs` and `sandbox/worktree.rs` delegate here.
+pub(crate) fn normalize_patch(patch: &str) -> String {
     let mut s = patch.replace("\r\n", "\n");
     if !s.ends_with('\n') {
         s.push('\n');
@@ -217,6 +284,14 @@ mod tests {
     }
 
     #[test]
+    fn normalize_patch_unifies_endings_and_trailing_newline() {
+        // Phase 5.1: the single shared normalizer both backends use.
+        assert_eq!(normalize_patch("a\r\nb"), "a\nb\n");
+        assert_eq!(normalize_patch("a\n"), "a\n");
+        assert_eq!(normalize_patch(""), "\n");
+    }
+
+    #[test]
     fn empty_diff_creates_no_branch_and_leaves_head() {
         let dir = std::env::temp_dir().join(format!("niki-empty-branch-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -248,6 +323,27 @@ mod tests {
         let out = run(&["rev-parse", "--abbrev-ref", "HEAD"]);
         let head_after = String::from_utf8_lossy(&out.stdout).trim().to_string();
         assert_eq!(head_before, head_after);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn conflict_markers_abort_before_commit() {
+        // Phase 5.6: a file with merge markers fails the check (cli blocks
+        // the branch); a clean file passes.
+        let dir = std::env::temp_dir().join(format!("niki-markers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("clean.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(
+            dir.join("conflicted.rs"),
+            "fn a() {}\n<<<<<<< HEAD\nfn b() {}\n=======\nfn c() {}\n>>>>>>> other\n",
+        )
+        .unwrap();
+        let diff = "diff --git a/conflicted.rs b/conflicted.rs\n--- a/conflicted.rs\n+++ b/conflicted.rs\n@@\n";
+        let err = ensure_no_conflict_markers(&dir, diff).unwrap_err();
+        assert!(err.to_string().contains("conflicted.rs"), "{err:?}");
+        let clean_diff = "diff --git a/clean.rs b/clean.rs\n--- a/clean.rs\n+++ b/clean.rs\n@@\n";
+        assert!(ensure_no_conflict_markers(&dir, clean_diff).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

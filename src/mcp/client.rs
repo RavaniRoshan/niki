@@ -202,6 +202,11 @@ impl McpConnection {
                                 .to_string(),
                             server_name: self.name.clone(),
                             input_schema: t.get("inputSchema").cloned(),
+                            read_only: t
+                                .get("annotations")
+                                .and_then(|a| a.get("readOnlyHint"))
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false),
                         })
                     })
                     .collect()
