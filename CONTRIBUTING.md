@@ -10,7 +10,7 @@ cd niki
 cargo build --release
 ```
 
-NIKI requires **Rust 1.85+** (edition 2024) and a container runtime
+NIKI requires **Rust 1.88+** (edition 2024) and a container runtime
 (**Podman** recommended, or **Docker**) for the default sandbox backend.
 The `--backend worktree` path needs neither.
 

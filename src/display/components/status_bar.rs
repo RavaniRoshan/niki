@@ -20,7 +20,7 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     let mut left_spans = vec![];
     if width >= 40 {
         let model_display = if state.model.len() > 12 {
-            format!("{:.12}…", &state.model)
+            format!("{:.12}…", state.model)
         } else {
             state.model.clone()
         };

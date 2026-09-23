@@ -178,7 +178,7 @@ Build: `dist-workspace.toml` (cargo-dist v0.32.0)
 
 | Problem | Impact | Fix |
 |---|---|---|
-| Requires Rust toolchain (1.85+) | Blocks non-Rust users | Binary releases exist but not promoted as primary |
+| Requires Rust toolchain (1.88+) | Blocks non-Rust users | Binary releases exist but not promoted as primary |
 | Requires Podman/Docker running | Blocks users without containers | `niki doctor` checks but doesn't install |
 | Sandbox image build required | `podman build -t niki-sandbox:24.04` is a manual step | Could be automated in installer or documented prominently |
 | No Windows support | Blocks ~40% of developers | Scoop/Winget manifests exist but are stale v0.3.1 |
