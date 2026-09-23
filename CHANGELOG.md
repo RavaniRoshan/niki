@@ -6,6 +6,16 @@ All notable changes to NIKI are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-23
+
+Agent-harness + runtime release (36 commits since 0.7.0): repo
+intelligence, risk-gated Critic pipeline, provenance/KB/history/structural
+index, agent runtime rework with sessions/checkpoints/resume, converged
+store + project skills, unified run budget, TUI performance/search/input
+hardening, five ready gateways, reliability/honesty fixes, and CI/visual
+gate repairs. Claims below are backed by tests, mock-LLM e2e, or the VHS
+visual gate unless noted as docs/launch material.
+
 ### Added
 - Repository intelligence (`[repo_intel]`, `niki inspect [--json]`):
   deterministic `RepoManifest` (languages, entry points, tests, build
@@ -37,10 +47,160 @@ All notable changes to NIKI are documented here. The format is based on
   `.niki/learnings.jsonl`, flowing back to the Planner via the KB.
 - Reviewer test-evidence gate: failures/skips (or zero executed tests) on
   business-logic tests must yield `revision_needed`, never `approved`.
+- Agent runtime rework (`src/runtime/`): `AgentSession` / `AgentTurn` /
+  `AgentStep` execution loop, bounded priority-sorted `ContextStore` with
+  compaction, typed `AgentEvent` stream, `ToolPolicy` + tool registry
+  split (`tools.rs`), cancellation tokens, and session checkpoints under
+  `.niki/sessions/`.
+- `niki resume <session-id>`: resume an interrupted agent session from a
+  checkpoint (role/turn/step, artifacts, context fragments, active branch).
+- `niki skills` (`list|candidates|promote|retire|show|diff`): two-step
+  distillation — Approved green run stages a candidate, human promotes to
+  a versioned skill (`SKILL.md` + `metadata.json` + `skills-lock.json`).
+  Nothing auto-activates; stale source snapshots are flagged, never served
+  as fresh. Served via `skill_list` / `skill_load` alongside
+  `~/.agents/skills/`.
+- Converged store (`src/store/`, ADR-002): rebuildable hybrid index over
+  learnings + role/user memory + run records — keyword (0.45) + trigram
+  vector cosine (0.35) + recency (0.10) + authority (0.10). File-backed,
+  zero new deps; index size honors `[repo_intel] disk_budget_mb`; deleting
+  `<output_dir>/store/` is always safe (live-scan fallback).
+- Unified run hysteresis budget (`[budget]` / `RunBudget`): one
+  step/cost/wallclock ceiling across retries, repairs, revisions, tool-loop
+  steps, and goal iterations. Exhaustion → typed `BudgetExhausted` recorded
+  in `task.json`. CLI overrides: `niki run --max-steps --max-usd
+  --max-wallclock-secs`. `max_usd` falls back to `spend_cap_usd` when unset.
+- Optional executable tool loop (`[tools] experimental_tool_loop`,
+  default off): one bounded research step through `run_tool_loop` before
+  the Planner; inherits `[permissions] mode` (Ask tools fail closed
+  headless).
+- MCP end-to-end path: `from_config` loads `[[mcp.servers]]` + governance;
+  live connections retained for `call_tool`; `annotations.readOnlyHint` →
+  `read_only` (unmarked tools denied under default read-only governance);
+  domain allowlist applies to web-fetch-shaped tools.
+- Failover structured-output routing: `FailoverProvider` now propagates
+  `supports_structured_output` and routes `request_structured` through the
+  chain (structured output no longer silently degrades on failover).
+- Hook timeouts: `[hooks] timeout_seconds` (default 30); overlong hooks
+  are killed and treated as Noop with a warning (0 = wait forever).
+- TUI (goal c81d04): central keybinding table with `[ui.keybindings]`
+  overrides + conflict report; transcript search (Ctrl+F); fuzzy `@files`
+  ranking with Tab apply; shared `ScrollState` (fixes stuck auto-scroll,
+  wires tool-detail modal); `NIKI_TUI_DEBUG` per-frame log; headless
+  `tests/tui_perf.rs` render budgets; stage-markdown + processed-diff
+  memos; fleet refresh throttle (500ms); mouse motion/SGR always-on with
+  Ctrl+E toggle; width-aware markdown tables; OSC-8 hyperlinks gated by
+  terminal caps / `NIKI_HYPERLINKS`. Optional `[ui]`, `[ui.tips]`,
+  `[ui.transcript]` tables.
+- Providers / onboarding: five ready gateways — Ollama first-class
+  keyless (wizard option 0, live `/api/tags` probe, auth/doctor
+  reachability) plus Zen / Kimi / Kilo (OpenAI-compatible, named
+  constructors, `OPENCODE`/`KIMI`/`KILO_API_KEY` env wiring); single-pick
+  init wizard that rewrites all four `[agents.*]` provider lines and
+  preselects an installed Ollama model; headless `chat --message`
+  plain-text reply (was silent TUI teardown).
+- `niki smoke --backend`: local smoke path selectable without a container
+  runtime (Path A quick-start: Ollama + worktree, no key/container).
+- Cinematic README demo: deterministic frame-rendered 80s TUI walkthrough
+  (`scripts/render_demo_cinematic.py`); theme `sand()` fixed to warm
+  SAND_500 (was cyan), `theme::cyan()` for INFO_BLUE.
+- Launch material: PH kit (`docs/launch/` checklist, maker first-comment,
+  gallery), social assets (`assets/social/ph-thumbnail.png`,
+  `ph-gallery-run.gif`), launch playbook (`plans/noctty-launch-playbook.md`)
+  with trust-boundary-aligned copy; TUI extraction plan status
+  (`docs/tui/pi-extraction-plan.md`).
+- Eval grades: four seeded defect cases graded (100% maintainer agreement).
+- CI gates: MSRV (1.85) + `--no-default-features` jobs; clippy `-D
+  warnings`; artifact-contract + run-lifecycle tests required before the
+  full suite; `STATE_LAYOUT.md` file contract; agent-harness plan docs
+  (`plans/niki-agent-harness-plan.md`, ADRs 001/002).
 
 ### Fixed
+- Hooks: payload write ignores EPIPE so a fast hook that exits without
+  reading stdin can no longer mask Block as Noop/Allow (exit-code
+  interpretation always runs); 100× stress regression test.
 - `[general] max_diff_lines` from `niki.toml` is now honored (it was parsed
   but never merged into the active config).
+- TUI: multi-byte cursor panics/caret corruption (char-boundary clamp +
+  byte↔char click mapping); 1-column click offset; fleet refresh no longer
+  `block_on`s Tokio locks every frame; long-transcript auto-scroll stuck at
+  top (write-only `auto_scroll` / bottom-anchored selection math); tool
+  detail modal state existed but never painted; permission-modal option
+  rows off-by-2+ and clipped (content-driven height); command-menu
+  hit-test drift vs filtered count; byte-slice panics on tool cards, stage
+  error headers, and chat input echo; long commands truncated to modal
+  width.
+- Empty-diff runs no longer leave HEAD on an empty `niki/<id>` branch;
+  worktree teardown no longer leaks `git fatal()` noise to stderr.
+- Version/logo strings use `CARGO_PKG_VERSION` (showed stale `v0.4.0`).
+- `providers check`: all OpenAI-compatible slugs use named constructors
+  (groq/together/deepepseek previously reported `OPENAI_API_KEY`); Ollama
+  health check resolves an installed model (was permanent 400 + empty model).
+- Init wizard rewrites all four `[agents.*]` provider lines to the picked
+  provider (template Anthropic defaults no longer survive and break fresh
+  machines); Ollama pick preselects an installed coding model (was
+  hardcoded `qwen2.5-coder`, which 404s when only tagged variants exist).
+- Solo coder gets one bounded repair attempt on patch-apply failure
+  (exact error + verbatim-SEARCH rules; same spend-cap/hooks/metrics
+  accounting as the first attempt); `code_diff` search/replace schema bans
+  regex/anchors/paraphrase (propagates to all coder prompts).
+- Artifacts writer keeps every attempt (`coder.json`, `coder-2.json`, …)
+  instead of overwriting — failed attempts stay inspectable.
+- Failover no longer reports `supports_structured_output = false` (trait
+  default); structured output routed through the chain with circuit
+  breakers.
+- VHS/visual CI: onboarding tapes force the modal via
+  `NIKI_FORCE_ONBOARDING` (CI auto-suppress broke references); ttyd +
+  ffmpeg installed for tape rendering; render engine tests headless
+  (`TestBackend` — no TTY on runners).
+- Release/CI plumbing: package manifests (Homebrew/Scoop/Winget) pinned to
+  v0.7.0 with real sha256 (v0.4.0 Windows zip never existed / 404);
+  artifact actions aligned to v7 (v8 tag does not exist); `cargo dist`
+  `allow-dirty` for hand-maintained artifact pins; `@niki` review workflow
+  `needs-keys` gate moved off job-level `if:` (workflow failed to load);
+  `audit` job restored after being swallowed into a comment; VHS/pillow
+  install order fixed for runners.
+- Mock-pipeline e2e (kb_pipeline / critic path) drops the `nodejs` binary
+  alias from the sandbox tool check (CI has `node` only).
+
+### Changed
+- README / trust copy: sequential stages intentionally share one execution
+  sandbox so the diff persists Coder → Tester → Reviewer; independence is
+  at the LLM-session layer. Committed branches are never repointed or
+  rewritten; the host working tree receives the finished diff for review.
+  `readonly_rootfs` documented as optional and off by default; sandbox
+  claim narrowed to CapDrop ALL + network disabled + optional read-only
+  rootfs.
+- `extra_packages` clarified: despite the name, nothing is installed —
+  entries extend the startup `command -v` checklist against the pre-baked
+  image.
+- `network_allowlist` honesty: per-domain filtering is NOT implemented —
+  container egress is all-or-nothing; only `"*"` opens egress; a non-empty
+  domain list warns at startup and behaves as block-all.
+- Init wizard rewritten as a single-pick menu (was 11 sequential prompts).
+- Config examples: `[ui]` tips/transcript nested tables; `[compaction]`
+  default threshold 80% + `auto_compact`; pipeline topology values
+  lowercased (`auto`/`multiagent`/`singleagent`).
+- Launch copy aligned with trust boundaries (`docs/launch-audit.md`,
+  first-comment).
+
+### Security
+- Deny-list always wins over overlapping allow entries (coder `rm` still
+  cannot `rm -rf /`; `git diff` allow no longer bypasses a `git` deny).
+- Diffs scoped to agent-produced changes: pre-existing dirty/untracked
+  host files stay out of `changes.patch` and the commit; new agent files
+  appear via scoped intent-to-add (both backends); edit-format application
+  is all-or-nothing per stage.
+- Same-task worktree collision fails loudly instead of deleting a
+  concurrent run's directory; Drop/panic paths still tear down worktrees
+  and containers (best-effort); stale prune never removes a live worktree.
+- Failed runs create no `niki/*` branch and leave `task.json` Failed with
+  the error; conflict markers abort branch creation instead of committing.
+- MCP: unmarked tools denied under default read-only governance (deny-by-
+  default, never assumed safe); web-fetch tools gated by domain allowlist;
+  untrusted servers error instead of connecting implicitly.
+- Hooks timeout kills overlong processes so a hung hook cannot stall or
+  mask a Block decision forever.
 
 ## [0.7.0] - 2026-09-08
 

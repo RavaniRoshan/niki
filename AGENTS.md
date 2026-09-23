@@ -12,6 +12,22 @@ Rust CLI (edition 2024, MSRV 1.85). Multi-agent coding pipeline: Planner → Cod
 - Single test: `cargo test <test_name>`.
 - `git2` uses `vendored-libgit2`, so no system libgit2 is required to build.
 
+## Low-RAM / constrained machines
+
+This box can have only a few GiB free. Never run the full pipeline (clippy + all tests + release) concurrently — serialize stages and cap parallelism so peak RSS stays bounded.
+
+- Limit compile jobs: `CARGO_BUILD_JOBS=2` (or `cargo … -j 2`) for `build`/`clippy`/`test`. Default jobs = nproc and will OOM on 8 GiB-class hosts.
+- Prefer `cargo check` / `cargo clippy` over `cargo build --release` while iterating; only build release for the final verify (release codegen is the largest single peak).
+- Do **not** run `cargo test` (whole suite) when RAM is tight. Prefer:
+  - one integration binary: `cargo test --test run_lifecycle -j 2 -- --test-threads=1`
+  - unit only: `cargo test --lib -j 2 -- --test-threads=1`
+  - a single case: `cargo test <test_name> -- --exact --nocapture`
+- Cap test threads: always pass `-- --test-threads=1` (or `2` max) on low-RAM hosts; default threads ≈ nproc and each test binary + fixture repo multiplies RSS.
+- Never parallelize separate cargo commands (e.g. clippy and test at once); they contend on the target dir lock *and* double peak memory.
+- Heavy suites to avoid in full parallel (`--test-threads` high): `tui_navigation`, `tui_perf`, `visual_layout_check`, `kb_pipeline`, `runtime_benchmarks` — run them alone, serially.
+- If a cargo/rustc process is near OOM: drop `-j`, drop `--all-targets`, re-run the smallest failing `--test <bin>`; do not re-run the full suite.
+- Mock e2e (`mock_llm.py` + one `niki run`) is fine; do not stack multiple mock runs or extra `cargo build` in the same shell.
+
 ## Critical quirk: prompts and schemas are baked into the binary
 
 `src/lib.rs:138-139` compiles `prompts/` and `schemas/` into the binary at build time via `include_dir!`. Editing `prompts/*.md` or `schemas/*.json` has **no effect until you rebuild** (`cargo build`/`cargo run`). If your prompt/schema change "doesn't take", rebuild first. Runtime reads from embedded copies, not the source files.
