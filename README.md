@@ -140,7 +140,7 @@ with API providers, add a container runtime and a key.
 
 ```bash
 # 1 · Prerequisites
-# [Rust](https://www.rust-lang.org/tools/install) (1.85+) ·
+# [Rust](https://www.rust-lang.org/tools/install) (1.88+) ·
 # [Podman](https://podman.io/getting-started/installation) (recommended) or
 # [Docker](https://docs.docker.com/get-docker/) · an API key for one LLM provider.
 

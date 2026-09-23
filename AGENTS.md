@@ -1,6 +1,6 @@
 # AGENTS.md — NIKI
 
-Rust CLI (edition 2024, MSRV 1.85). Multi-agent coding pipeline: Planner → Coder → Tester → Reviewer run in hermetic sandboxes and hand back a `niki/<id>` git branch. Binary is `niki`.
+Rust CLI (edition 2024, MSRV 1.88). Multi-agent coding pipeline: Planner → Coder → Tester → Reviewer run in hermetic sandboxes and hand back a `niki/<id>` git branch. Binary is `niki`.
 
 ## Build & verify
 

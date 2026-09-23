@@ -27,15 +27,15 @@ jobs:
       - name: Clippy lints (fatal)
         run: cargo clippy --all-targets -- -D warnings
 
-  # ── Phase 1-msrv: Minimum Supported Rust Version (1.85) ─────────────
+  # ── Phase 1-msrv: Minimum Supported Rust Version (1.88) ─────────────
   msrv:
-    name: MSRV (1.85)
+    name: MSRV (1.88)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.85.0"
+          toolchain: "1.88.0"
       - uses: actions/setup-node@v7
       - name: Check MSRV build
         run: cargo check --all-targets

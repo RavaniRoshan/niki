@@ -95,7 +95,7 @@ pub fn pulse_phase(tick: usize, half_period_ticks: usize, is_reduced: bool) -> b
     if is_reduced || half_period_ticks == 0 {
         return false;
     }
-    (tick / half_period_ticks) % 2 == 0
+    (tick / half_period_ticks).is_multiple_of(2)
 }
 
 #[cfg(test)]
