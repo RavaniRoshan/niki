@@ -1,0 +1,46 @@
+name = "Product Workflows"
+description = "Golden scenarios for E2E product testing"
+
+[[scenario]]
+id = "add_endpoint"
+name = "Add a feature"
+description = "Agent successfully adds a health endpoint"
+task = "Add a /health endpoint to this application"
+expected_files = ["index.js"]
+expected_exit_status = 0
+failure_conditions = ["process crash", "malformed patch", "unrelated files changed"]
+
+[[scenario]]
+id = "dirty_repo_handling"
+name = "Handle dirty repository"
+description = "Agent does not overwrite unrelated dirty changes"
+task = "Add a /status endpoint"
+setup_script = "echo 'unrelated' > unrelated.txt"
+expected_files = ["index.js"]
+expected_exit_status = 0
+failure_conditions = ["unrelated.txt is modified or staged"]
+
+[[scenario]]
+id = "provider_failure_recovery"
+name = "Provider failure recovery"
+description = "Agent fails gracefully or recovers when provider throws 500"
+task = "Refactor this code"
+provider_mock_status = 500
+expected_exit_status = 1
+failure_conditions = ["panic", "corrupt state file"]
+
+[[scenario]]
+id = "cancellation"
+name = "Cancellation"
+description = "Agent cancels smoothly when Ctrl+C is sent"
+task = "Generate a very large file"
+expected_exit_status = 130
+failure_conditions = ["process hang", "zombie processes"]
+
+[[scenario]]
+id = "resume"
+name = "Resume workflow"
+description = "Agent resumes from previous checkpoint"
+task = "Generate something, exit, resume"
+expected_exit_status = 0
+failure_conditions = ["corrupt state", "duplicate work"]
