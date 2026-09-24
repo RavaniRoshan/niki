@@ -295,3 +295,33 @@ jobs:
       - name: Cleanup
         if: always()
         run: kill $(cat /tmp/mock_pid 2>/dev/null) 2>/dev/null || true
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: product-verify-artifacts
+          path: |
+            /tmp/test-project/.niki/
+            tests/visual/frames/
+          retention-days: 14
+
+  # ── Phase 6: Full Product Acceptance Suite ───────────────────────
+  product-verify:
+    name: Product Acceptance Suite
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-dejavu-core python3-pip
+          curl -fsSL -o /tmp/vhs.deb https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_amd64.deb
+          sudo dpkg -i /tmp/vhs.deb
+          sudo curl -fsSL -o /usr/local/bin/ttyd https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
+          sudo chmod +x /usr/local/bin/ttyd
+          python3 -m pip install --quiet --break-system-packages pillow pytest tuiwright
+      - name: Run Product Verification
+        run: ./scripts/product-verify.sh
