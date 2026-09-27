@@ -24,6 +24,7 @@ pub mod onboarding;
 pub mod pages;
 pub mod persistence;
 pub mod pipeline_status;
+pub mod sanitize;
 pub mod scroll;
 pub mod search;
 pub mod state;

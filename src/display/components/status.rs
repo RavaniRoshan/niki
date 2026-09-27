@@ -136,7 +136,15 @@ mod tests {
     fn running_and_paused_differ() {
         // The fleet bug: Running and Paused shared `●`. Never again.
         assert_ne!(glyph(UnifiedStatus::Running), glyph(UnifiedStatus::Paused));
-        assert_ne!(color(UnifiedStatus::Running), color(UnifiedStatus::Paused));
+        // Compared on the theme tokens rather than `color()`, which routes
+        // through the NO_COLOR override and returns `Reset` for every status
+        // — making this assertion vacuous, and failing outright whenever
+        // NO_COLOR was set in the developer's or CI's environment.
+        let p = theme::palette();
+        assert_ne!(
+            p.accent, p.warning,
+            "Running and Paused must not share a color"
+        );
     }
 
     #[test]

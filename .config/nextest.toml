@@ -1,0 +1,37 @@
+# cargo-nextest configuration.
+#
+# Rationale: NIKI's suite has a documented RAM ceiling (AGENTS.md). The previous
+# guidance was "always pass --test-threads=1", which serialises the ~700 cheap
+# unit tests along with the handful of genuinely heavy integration binaries and
+# makes the suite take far longer than it needs to.
+#
+# nextest lets us be precise instead: heavy binaries get max-threads = 1, the
+# rest stay parallel. Process-per-test isolation also removes cross-test
+# contamination through shared process state, which is a real flakiness source.
+#
+# The serial path must still work without nextest installed — see
+# scripts/test-layer.sh, which this config mirrors.
+
+[profile.default]
+# Retries: one transient failure should not fail a whole CI run outright.
+retries = 0
+
+# A test that has not finished in 90s is wedged. terminate-after gives it 30s
+# more to unwind before it is killed, so a leaked child process still gets
+# reaped rather than orphaned.
+slow-timeout = { period = "90s", terminate-after = 30 }
+
+# ── Heavy binaries: one test at a time ────────────────────────────────
+# Each of these builds git fixture repos, worktrees, or measures wall-clock
+# render budgets. Running them concurrently starves the timing assertions and
+# multiplies peak RSS.
+[test-groups.heavy]
+max-threads = 1
+
+# KB + structural index tests build large in-memory indexes.
+[test-groups.heap]
+max-threads = 1
+
+# ── Default for everything else ───────────────────────────────────────
+[profile.ci]
+retries = 1

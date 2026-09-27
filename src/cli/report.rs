@@ -46,7 +46,13 @@ pub async fn handle(args: &ReportArgs) -> Result<()> {
 
     let report_path = tasks_dir.join(&task_id).join("report.md");
     match std::fs::read_to_string(&report_path) {
-        Ok(content) => print!("{}", content),
+        // report.md embeds the task description and the final diff, both of
+        // which originate outside the program (the user's prompt, the model,
+        // and the repository). Sanitise before it reaches the terminal.
+        Ok(content) => print!(
+            "{}",
+            crate::display::sanitize::sanitize_for_terminal(content)
+        ),
         Err(_) => eprintln!("Report not found: {}", report_path.display()),
     }
 

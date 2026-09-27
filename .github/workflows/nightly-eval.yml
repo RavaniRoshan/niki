@@ -15,6 +15,39 @@ permissions:
   contents: read
 
 jobs:
+  # The price table is a frozen snapshot of vendor rates and it will rot. It
+  # used to be enforced by an unconditional wall-clock assert inside a unit
+  # test, which meant `cargo test` started failing on a fixed date (2027-03-05
+  # for the 0.8.0 table) whether or not anyone was watching. Staleness is now
+  # reported rather than asserted, and gated here on a schedule a human sees.
+  price-table:
+    name: Price table freshness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Fail if the price table is stale
+        run: |
+          set -euo pipefail
+          cargo test --lib cost:: -- --nocapture
+          python3 - <<'PY'
+          import datetime, re, sys
+          src = open("src/cost.rs").read()
+          as_of = re.search(r'PRICE_TABLE_AS_OF: &str = "(\d{4}-\d{2}-\d{2})"', src)
+          max_age = re.search(r'PRICE_TABLE_MAX_AGE_DAYS: i64 = (\d+)', src)
+          if not as_of or not max_age:
+              sys.exit("FAIL: could not parse price-table constants from src/cost.rs")
+          age = (datetime.date.today() - datetime.date.fromisoformat(as_of.group(1))).days
+          limit = int(max_age.group(1))
+          print(f"price table as of {as_of.group(1)} — {age} days old (limit {limit})")
+          if age > limit:
+              sys.exit(
+                  f"FAIL: price table is {age} days old (limit {limit}). "
+                  f"Re-verify vendor rates and bump PRICE_TABLE_AS_OF in src/cost.rs."
+              )
+          PY
+
   eval-replay:
     name: Eval replay + manifest
     runs-on: ubuntu-latest
@@ -28,8 +61,25 @@ jobs:
         run: ./target/debug/niki eval --out .niki/eval-nightly
       - name: Verify disclosure manifest exists
         run: |
+          set -euo pipefail
           test -f .niki/eval-nightly/eval-manifest.json || { echo "eval-manifest.json missing"; exit 1; }
           python3 -c "import json; m=json.load(open('.niki/eval-nightly/eval-manifest.json')); assert m['mode']=='replay', m; print('manifest ok:', m['n_cases'], 'cases,', m['niki_version'])"
+      # The manifest check above only asserted `mode == 'replay'`. A run that
+      # silently dropped every case still produced a valid manifest and passed.
+      - name: The eval must have actually scored cases
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          m = json.load(open('.niki/eval-nightly/eval-manifest.json'))
+          n = m.get('n_cases', 0)
+          print(f"n_cases={n}")
+          if n <= 0:
+              raise SystemExit(
+                  "FAIL: the eval scored zero cases. Missing or unpopulated fixtures "
+                  "previously caused a silent pass; see the fixture_warnings in the report."
+              )
+          PY
       - name: Upload eval artifacts
         uses: actions/upload-artifact@v7
         with:

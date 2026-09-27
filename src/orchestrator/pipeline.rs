@@ -51,6 +51,9 @@ pub struct PipelineResult {
     pub state: super::state::PipelineState,
     pub final_diff: String,
     pub verdict: Verdict,
+    /// Who produced `verdict` — `reviewer`, `security-auditor`, or the Solo
+    /// fast path's self-approval. `None` on the early-return path.
+    pub verdict_source: Option<String>,
     pub revision_rounds: u32,
     /// Raw JSON artifacts produced by each agent, in execution order.
     pub artifacts: Vec<(AgentRole, String)>,
@@ -874,10 +877,16 @@ async fn run_stage(
     )
     .await?;
     let latency_ms = start.elapsed().as_millis() as u64;
-    let cost_usd = compute_cost(provider, model, &usage);
+    // Price against the provider that actually served. When the request fell
+    // through to a fallback, `provider`/`model` are still the primary's, so
+    // pricing with them charged fallback usage at the primary's rate — which
+    // feeds the spend cap, the Cost page, the report and the JSON envelope.
+    let served = llm.served_by();
+    let served_provider: &str = served.as_deref().unwrap_or(provider);
+    let cost_usd = compute_cost(served_provider, model, &usage);
     metrics.push(StageMetric {
         role,
-        provider: provider.to_string(),
+        provider: served_provider.to_string(),
         model: model.to_string(),
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
@@ -892,7 +901,11 @@ async fn run_stage(
 }
 
 /// Prompt template + JSON schema for a given role.
-fn role_prompt(role: AgentRole) -> (&'static str, &'static str) {
+///
+/// Public so `tests/embedded_assets.rs` can assert that every role's prompt and
+/// schema actually resolve through `load_asset`. A typo in either path is
+/// invisible until an agent silently receives an empty prompt in production.
+pub fn role_prompt(role: AgentRole) -> (&'static str, &'static str) {
     match role {
         AgentRole::Planner => ("planner.md", "schemas/task_spec.schema.json"),
         AgentRole::Coder => ("coder.md", "schemas/code_diff.schema.json"),
@@ -1730,6 +1743,8 @@ pub async fn execute_pipeline(
             final_diff: String::new(),
             diff_guardwarn: None,
             verdict: Verdict::Approved,
+            // Nothing was reviewed on this early-return path either.
+            verdict_source: Some("planner-only (no review performed)".to_string()),
             revision_rounds: 0,
             artifacts,
             metrics,
@@ -1817,6 +1832,9 @@ pub async fn execute_pipeline(
     // stays in the artifacts trail.
     let mut review_feedback: Option<String> = None;
     let mut verdict = Verdict::Approved;
+    // Set whenever a Reviewer actually produces the verdict. Overwritten by the
+    // Solo fast path below, which has no Reviewer.
+    let mut verdict_source: Option<String> = None;
     let mut round = 0;
 
     match topology {
@@ -2035,6 +2053,7 @@ pub async fn execute_pipeline(
                         }
                         RoleOutput::Reviewer(v) => {
                             verdict = v.verdict;
+                            verdict_source = Some("reviewer".to_string());
                             reviewer_json = json;
                         }
                         RoleOutput::SecurityAuditor(_) => {}
@@ -2202,6 +2221,7 @@ pub async fn execute_pipeline(
                                 // explicit Rejected with no reviewer overrides to a revision.
                                 if matches!(v.verdict, Verdict::Rejected) && !has_reviewer {
                                     verdict = Verdict::RevisionNeeded;
+                                    verdict_source = Some("security-auditor".to_string());
                                 }
                             }
                             RoleOutput::Planner(_) => unreachable!("planner is handled separately"),
@@ -2395,6 +2415,10 @@ pub async fn execute_pipeline(
                 }
             }
             verdict = Verdict::Approved;
+            // The Solo fast path never runs a Reviewer: this is the Coder
+            // approving its own patch. Record that provenance so "Approved"
+            // cannot be read as an independent check.
+            verdict_source = Some("solo-coder (no independent review)".to_string());
             round = 0;
         }
     }
@@ -2667,6 +2691,7 @@ pub async fn execute_pipeline(
         final_diff,
         diff_guardwarn,
         verdict,
+        verdict_source,
         revision_rounds: round,
         artifacts,
         metrics,

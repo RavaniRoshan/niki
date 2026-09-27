@@ -149,6 +149,14 @@ pub async fn run_agent(
                 display.stream_token(&token);
             }
             Ok(StreamChunk::Usage(u)) => {
+                // `.max()` is correct *within a single stream*: every usage
+                // chunk here describes the same request. Anthropic emits two
+                // disjoint chunks for one call (message_start carries
+                // input_tokens, message_delta carries output_tokens), and
+                // OpenAI-style providers emit a final cumulative snapshot, so
+                // taking the per-field max avoids double counting. Summing
+                // across separate requests is what would be wrong — see the
+                // repair-retry path below.
                 let input_tokens = u
                     .input_tokens
                     .max(usage.map(|x| x.input_tokens).unwrap_or(0));
@@ -305,24 +313,17 @@ pub async fn run_agent(
                         Ok(repaired) => json_content = repaired,
                         Err(_) => json_content = full_content.clone(),
                     }
-                    // Update usage
+                    // The repair retry is a *second* request, so its usage
+                    // adds to the first attempt's rather than being maxed
+                    // against it. `.max()` here under-reported a repair by
+                    // reporting only the more expensive of the two attempts.
+                    let prev = usage.unwrap_or_default();
                     usage = Some(TokenUsage {
-                        input_tokens: response
-                            .usage
-                            .input_tokens
-                            .max(usage.map(|x| x.input_tokens).unwrap_or(0)),
-                        output_tokens: response
-                            .usage
-                            .output_tokens
-                            .max(usage.map(|x| x.output_tokens).unwrap_or(0)),
-                        cached_input_tokens: response
-                            .usage
-                            .cached_input_tokens
-                            .max(usage.map(|x| x.cached_input_tokens).unwrap_or(0)),
-                        reasoning_tokens: response
-                            .usage
-                            .reasoning_tokens
-                            .max(usage.map(|x| x.reasoning_tokens).unwrap_or(0)),
+                        input_tokens: prev.input_tokens + response.usage.input_tokens,
+                        output_tokens: prev.output_tokens + response.usage.output_tokens,
+                        cached_input_tokens: prev.cached_input_tokens
+                            + response.usage.cached_input_tokens,
+                        reasoning_tokens: prev.reasoning_tokens + response.usage.reasoning_tokens,
                     });
                 }
                 Err(e) => {

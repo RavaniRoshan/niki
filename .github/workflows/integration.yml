@@ -30,12 +30,24 @@ jobs:
         run: |
           python3 tests/integration/mock_llm.py &
           MOCK_PID=$!
-          for i in $(seq 1 20); do
-            curl -s http://localhost:8080/health > /dev/null 2>&1 && break
+          echo $MOCK_PID > /tmp/mock_pid
+          # This loop used to fall through silently when the server never came
+          # up, leaving the following steps to fail against a dead port. A
+          # mock that is not ready is a hard error.
+          ready=0
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:8080/health > /dev/null 2>&1; then
+              ready=1
+              break
+            fi
             sleep 0.5
           done
+          if [ "$ready" -ne 1 ]; then
+            echo "FAIL: mock LLM server did not become healthy on :8080 after 20s"
+            cat /tmp/mock_llm.log 2>/dev/null || true
+            exit 1
+          fi
           echo "Mock server ready"
-          echo $MOCK_PID > /tmp/mock_pid
 
       - name: Prepare test project
         run: |
@@ -50,6 +62,7 @@ jobs:
           cp ${{ github.workspace }}/tests/integration/niki.test.toml /tmp/test-project/niki.toml
 
       - name: Run full pipeline (Planner → Coder → Tester → Reviewer)
+        id: pipeline
         run: |
           cd /tmp/test-project
           /home/runner/work/niki/niki/target/release/niki run \
@@ -60,17 +73,72 @@ jobs:
         env:
           MOCK_LLM_PORT: 8080
 
+      # This step used to be pure `echo`/`cat ... || echo "No report.md"`, which
+      # is green whether or not the pipeline produced anything, and its
+      # `=== Exit code: $? ===` read the previous echo's status rather than the
+      # run's. It now asserts the run's actual deliverables.
       - name: Verify pipeline artifacts
         run: |
-          echo "=== Exit code: $? ==="
+          set -euo pipefail
+          PROJ=/tmp/test-project
+
           echo "=== Git branches ==="
-          git -C /tmp/test-project branch
-          echo "=== .niki directory ==="
-          find /tmp/test-project/.niki -type f
+          git -C "$PROJ" branch
+
+          # 1. A niki/* branch must exist and be checked out-able.
+          BRANCH="$(git -C "$PROJ" branch --list 'niki/*' | tr -d ' *' | head -1)"
+          if [ -z "$BRANCH" ]; then
+            echo "FAIL: the run created no niki/* branch."
+            git -C "$PROJ" branch
+            exit 1
+          fi
+          git -C "$PROJ" rev-parse --verify --quiet "refs/heads/$BRANCH"
+          echo "ok: branch $BRANCH exists"
+
+          # 2. Locate the task dir and require the evidence files.
+          TASKDIR="$(find "$PROJ/.niki/tasks" -maxdepth 1 -mindepth 1 -type d | head -1)"
+          if [ -z "$TASKDIR" ]; then
+            echo "FAIL: no task directory under $PROJ/.niki/tasks"
+            exit 1
+          fi
+          echo "=== .niki artifacts under $TASKDIR ==="
+          find "$TASKDIR" -type f | sort
+
+          for f in changes.patch report.md task.json; do
+            if [ ! -s "$TASKDIR/$f" ]; then
+              echo "FAIL: $TASKDIR/$f is missing or empty"
+              exit 1
+            fi
+          done
+          echo "ok: changes.patch, report.md and task.json are present and non-empty"
+
+          if ! grep -q 'diff --git' "$TASKDIR/changes.patch"; then
+            echo "FAIL: changes.patch contains no unified diff"
+            cat "$TASKDIR/changes.patch"
+            exit 1
+          fi
+          echo "ok: changes.patch is a unified diff"
+
+          # 3. INV-BRANCH-STATUS: a Completed record must name a branch that
+          #    resolves. This is the assertion the old echo-only step omitted.
+          python3 - "$TASKDIR/task.json" "$BRANCH" <<'PY'
+          import json, sys
+          rec = json.load(open(sys.argv[1]))
+          status = str(rec.get("status", ""))
+          branch = rec.get("branch")
+          print(f"task.json status={status!r} branch={branch!r}")
+          if "Completed" in status:
+              if not branch:
+                  sys.exit("FAIL: task.json says Completed but records no branch")
+              if branch != sys.argv[2]:
+                  sys.exit(f"FAIL: task.json branch {branch!r} != created branch {sys.argv[2]!r}")
+          elif branch is not None:
+              sys.exit(f"FAIL: non-Completed run records a branch: {branch!r}")
+          print("ok: branch status and recorded branch agree")
+          PY
+
           echo "=== Report ==="
-          cat /tmp/test-project/.niki/report.md 2>/dev/null || echo "No report.md"
-          echo "=== Changes patch ==="
-          cat /tmp/test-project/.niki/changes.patch 2>/dev/null || echo "No changes.patch"
+          cat "$TASKDIR/report.md"
 
       - name: Cleanup mock server
         if: always()

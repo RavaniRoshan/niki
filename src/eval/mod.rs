@@ -199,6 +199,10 @@ pub fn check_fixture_integrity(
 
 /// Load all maintainer grades from `<dataset-dir>/grades/*.json`.
 /// Missing dir (or unreadable files) yields an empty map — grading is opt-in.
+///
+/// A grade file that exists but cannot be parsed is reported rather than
+/// dropped: silently discarding it lowered the `grader_agreement` denominator
+/// and made the metric agree with itself.
 pub fn load_grades(
     dataset_dir: &std::path::Path,
 ) -> std::collections::HashMap<String, MaintainerGrade> {
@@ -210,10 +214,24 @@ pub fn load_grades(
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        if let Ok(content) = std::fs::read_to_string(&path)
-            && let Ok(grade) = serde_json::from_str::<MaintainerGrade>(&content)
-        {
-            grades.insert(grade.case_id.clone(), grade);
+        match std::fs::read_to_string(&path) {
+            Ok(content) => match serde_json::from_str::<MaintainerGrade>(&content) {
+                Ok(grade) => {
+                    grades.insert(grade.case_id.clone(), grade);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "warning: ignoring unparseable maintainer grade {}: {e}",
+                        path.display()
+                    );
+                }
+            },
+            Err(e) => {
+                eprintln!(
+                    "warning: unreadable maintainer grade {}: {e}",
+                    path.display()
+                );
+            }
         }
     }
     grades
@@ -460,27 +478,10 @@ pub fn score_result(result: &PipelineResult, defect: &SeededDefect) -> RunOutcom
 
 // ── Replay (offline, deterministic) ──────────────────────────────
 
-fn empty_result() -> PipelineResult {
-    let id = Uuid::new_v4();
-    PipelineResult {
-        diff_guardwarn: None,
-        task_id: id,
-        context_budget: PipelineState::new(id).context_budget,
-        state: PipelineState::new(id),
-        final_diff: String::new(),
-        verdict: Verdict::Approved,
-        revision_rounds: 0,
-        artifacts: Vec::new(),
-        metrics: Vec::new(),
-        safety_proof: None,
-        isolation: Vec::new(),
-        topology: TopologyMode::MultiAgent,
-        topology_reason: String::new(),
-        risk_level: String::new(),
-        risk_rationale: String::new(),
-        test_execution: None,
-    }
-}
+// `empty_result()` used to live here. It manufactured an Approved, zero-issue
+// PipelineResult and was used as the fallback whenever a fixture failed to
+// replay, which is precisely why a corrupt fixture scored as a clean pass
+// instead of a broken harness. Replay failures are now errors.
 
 fn replay_result(dir: &Path) -> Result<PipelineResult> {
     let art_dir = dir.join("artifacts");
@@ -514,6 +515,7 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
             state: PipelineState::new(id),
             final_diff: String::new(),
             verdict: Verdict::Approved,
+            verdict_source: Some("replay-fixture".to_string()),
             revision_rounds: 1,
             artifacts: artifacts.clone(),
             metrics: Vec::new(),
@@ -537,6 +539,9 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
         state: PipelineState::new(id),
         final_diff: String::new(),
         verdict,
+        // Replayed from a recorded reviewer artifact, or defaulted to Approved
+        // when that artifact is absent — which is itself worth seeing.
+        verdict_source: Some("replay-fixture".to_string()),
         revision_rounds: 1,
         artifacts,
         metrics: Vec::new(),
@@ -552,16 +557,24 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
 
 /// Replay a case from its recorded NIKI and baseline artifact sets.
 /// Returns None if neither NIKI nor baseline fixtures exist (case not yet populated).
+///
+/// A fixture directory that *does* exist but cannot be replayed is an error,
+/// not an empty result. The previous `unwrap_or_else(|_| empty_result())`
+/// turned an unreadable or corrupt fixture into an Approved, zero-issue run —
+/// making an I/O error indistinguishable from "the reviewer rubber-stamped it",
+/// and scoring it as a miss rather than a broken harness.
 pub fn replay_case(case: &EvalCase, dataset_dir: &Path) -> Result<Option<CaseResult>> {
     let base = dataset_dir.join(case.replay_dir.as_deref().unwrap_or("."));
     let niki_dir = base.join("niki");
     let baseline_dir = base.join("baseline");
-    // Skip cases where no fixtures exist yet
+    // Genuinely unpopulated case: neither side has been recorded yet.
     if !niki_dir.exists() && !baseline_dir.exists() {
         return Ok(None);
     }
-    let niki = replay_result(&niki_dir).unwrap_or_else(|_| empty_result());
-    let baseline = replay_result(&baseline_dir).unwrap_or_else(|_| empty_result());
+    let niki = replay_result(&niki_dir)
+        .with_context(|| format!("replaying NIKI fixtures for case `{}`", case.id))?;
+    let baseline = replay_result(&baseline_dir)
+        .with_context(|| format!("replaying baseline fixtures for case `{}`", case.id))?;
     Ok(Some(CaseResult {
         case_id: case.id.clone(),
         defect_category: case.seeded_defect.category,
@@ -666,6 +679,10 @@ pub async fn run_eval(dataset_path: &Path, live: bool, project_dir: &Path) -> Re
     };
 
     let mut cases = Vec::new();
+    // Cases with no recorded fixtures are legitimate, but they used to vanish
+    // from the report entirely: `n_cases` shrank, the regression gate saw 0
+    // regressions, and `niki eval` exited 0. Name every one of them.
+    let mut unpopulated: Vec<String> = Vec::new();
     for case in &ds.cases {
         let cr = if live {
             let cfg = base_cfg
@@ -675,13 +692,23 @@ pub async fn run_eval(dataset_path: &Path, live: bool, project_dir: &Path) -> Re
         } else {
             replay_case(case, &dataset_dir)?
         };
-        if let Some(cr) = cr {
-            cases.push(cr);
+        match cr {
+            Some(cr) => cases.push(cr),
+            None => unpopulated.push(case.id.clone()),
         }
     }
     let grades = load_grades(&dataset_dir);
     let mut report = build_report(&ds, &cases, live, &grades);
     report.fixture_warnings = check_fixture_integrity(&ds, &dataset_dir, &grades);
+    if !unpopulated.is_empty() {
+        report.fixture_warnings.push(format!(
+            "{} of {} dataset cases have no recorded fixtures and were excluded from every rate: {}. \
+             These cases contribute to no denominator — populate them or remove them from the dataset.",
+            unpopulated.len(),
+            ds.cases.len(),
+            unpopulated.join(", ")
+        ));
+    }
     for w in &report.fixture_warnings {
         eprintln!("{w}");
     }
@@ -949,6 +976,7 @@ mod tests {
             state: PipelineState::new(id),
             final_diff: String::new(),
             verdict: Verdict::Approved,
+            verdict_source: Some("replay-fixture".to_string()),
             revision_rounds: 1,
             artifacts: parts.iter().map(|(r, j)| (*r, j.to_string())).collect(),
             metrics: Vec::new(),

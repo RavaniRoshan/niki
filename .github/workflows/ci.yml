@@ -119,16 +119,57 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v7
-      - name: Run artifact contracts and lifecycle tests
-        run: cargo test --test artifact_contracts --test run_lifecycle --verbose
+      # nextest gives per-test process isolation (a real flakiness source when
+      # tests share process state) plus the test-groups in .config/nextest.toml
+      # that keep the heavy binaries serialized without flattening the rest.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
       - name: Run unit + integration tests
-        run: cargo test --verbose
+        run: cargo nextest run --profile default
       - name: Build release binary
         run: cargo build --release
       - name: Verify binary runs
         run: |
           ./target/release/niki --version
           ./target/release/niki --help
+
+  # ── Phase 2b: the documented install path must actually work ─────
+  # The README and the marketing site both advertise a one-line installer.
+  # It shipped requesting `.tar.gz`/`checksums.txt` when dist publishes
+  # `.tar.xz`/`sha256.sum`, matching a checksum regex that could not match
+  # dist's BSD-style `*name` lines, and assuming a flat archive when dist
+  # nests the binary under `niki-<target>/`. A stranger could not install
+  # niki at all. This job is the gate that keeps it working.
+  install:
+    name: Install path
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the latest release from the published script
+        run: |
+          set -euo pipefail
+          export INSTALL_DIR="$RUNNER_TEMP/niki-bin"
+          mkdir -p "$INSTALL_DIR"
+          bash scripts/install.sh --version "${TAG:-v0.8.0}" --install-dir "$INSTALL_DIR"
+      - name: The installed binary must run
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/niki-bin/niki" --version
+          "$RUNNER_TEMP/niki-bin/niki" --help
+
+  # ── Phase 2c: release-packaging contract ──────────────────────────
+  dist-contract:
+    name: Release packaging contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Installer / formula / dist-config agreement
+        run: cargo test --test dist_install --verbose
+      - name: User-facing claims match the code
+        run: cargo test --test claims --verbose
 
   # ── Phase 3: Multi-platform build verification ────────────────────
   build-matrix:
@@ -175,12 +216,24 @@ jobs:
         run: cargo build --release
       - name: Start mock LLM
         run: |
-          python3 tests/integration/mock_llm.py &
+          python3 tests/integration/mock_llm.py > /tmp/mock_llm.log 2>&1 &
           echo $! > /tmp/mock_pid
-          for i in $(seq 1 20); do
-            curl -s http://localhost:8080/health > /dev/null 2>&1 && break
+          # Previously this loop fell through silently when the server never
+          # came up, so every later step failed against a dead port with a
+          # misleading error. A mock that is not ready is a hard error.
+          ready=0
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:8080/health > /dev/null 2>&1; then
+              ready=1
+              break
+            fi
             sleep 0.5
           done
+          if [ "$ready" -ne 1 ]; then
+            echo "FAIL: mock LLM server did not become healthy on :8080 after 20s"
+            cat /tmp/mock_llm.log || true
+            exit 1
+          fi
       - name: Prepare test project
         run: |
           export TEST_DIR=$(mktemp -d)
@@ -191,22 +244,81 @@ jobs:
           echo 'console.log("hello");' > index.js
           echo 'node_modules/' > .gitignore
           git add . && git commit -m "initial"
-          sed 's|base_url = "http://localhost:8080"|base_url = "http://localhost:8080"|' \
-            ${{ github.workspace }}/tests/integration/niki.test.toml > niki.toml
+          cp ${{ github.workspace }}/tests/integration/niki.test.toml niki.toml
           echo "TEST_DIR=$TEST_DIR" >> $GITHUB_ENV
       - name: Run pipeline
         run: |
           ./target/release/niki run 'Add health endpoint' \
             --backend worktree --quiet --project $TEST_DIR
+      # Was two `echo`s: green whether or not the pipeline produced anything.
       - name: Verify artifacts
         run: |
+          set -euo pipefail
           echo "=== Branches ==="
-          git -C $TEST_DIR branch
+          git -C "$TEST_DIR" branch
           echo "=== .niki contents ==="
-          find $TEST_DIR/.niki -type f 2>/dev/null
+          find "$TEST_DIR/.niki" -type f 2>/dev/null | sort
+
+          BRANCH="$(git -C "$TEST_DIR" branch --list 'niki/*' | tr -d ' *' | head -1)"
+          if [ -z "$BRANCH" ]; then
+            echo "FAIL: the run created no niki/* branch"
+            exit 1
+          fi
+
+          TASKDIR="$(find "$TEST_DIR/.niki/tasks" -maxdepth 1 -mindepth 1 -type d | head -1)"
+          if [ -z "$TASKDIR" ]; then
+            echo "FAIL: no task directory under $TEST_DIR/.niki/tasks"
+            exit 1
+          fi
+          for f in changes.patch report.md task.json; do
+            if [ ! -s "$TASKDIR/$f" ]; then
+              echo "FAIL: $TASKDIR/$f is missing or empty"
+              exit 1
+            fi
+          done
+          if ! grep -q 'diff --git' "$TASKDIR/changes.patch"; then
+            echo "FAIL: changes.patch contains no unified diff"
+            exit 1
+          fi
+          echo "ok: branch $BRANCH + non-empty changes.patch, report.md, task.json"
       - name: Cleanup
         if: always()
         run: kill $(cat /tmp/mock_pid 2>/dev/null) 2>/dev/null || true
+
+  # ── Phase 2d: headless PTY TUI gate ───────────────────────────────
+  # tests/headless_tui.py drives the real `niki chat` binary under a real
+  # pseudo-terminal and asserts on the rendered cell grid: mouse scroll,
+  # click-to-position, the scrollbar, kill-ring yank, undo, multi-line input,
+  # slash commands, the command palette, the status bar. It was written, worked,
+  # and was never wired to anything — 11 passing tests nobody ran.
+  tui-headless:
+    name: Headless PTY TUI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --upgrade pip
+          python3 -m pip install --quiet "tuiwright==0.2.1" pytest pytest-asyncio
+      - name: Build release binary
+        run: cargo build --release
+      - name: Run headless PTY suite
+        run: python3 -m pytest -c pytest_headless.ini -v
+      - name: Fail if the whole suite was skipped
+        # A dependency problem must not present as a green TUI gate.
+        run: |
+          set -euo pipefail
+          python3 -m pytest -c pytest_headless.ini -q 2>&1 | tee /tmp/tui.txt
+          grep -qE '^[0-9]+ passed' /tmp/tui.txt || {
+            echo "FAIL: no headless TUI test passed — the gate must not pass vacuously"
+            exit 1
+          }
 
   # ── Phase 4b: Visual regression gate (VHS reference frames) ──────────
   visual:

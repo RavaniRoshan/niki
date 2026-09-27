@@ -30,6 +30,16 @@ pub trait LlmProvider: Send + Sync {
         false
     }
 
+    /// The provider that actually served the most recent call, when this
+    /// provider is a chain rather than a single endpoint.
+    ///
+    /// Cost is priced per provider, so a stage served by a fallback must be
+    /// priced with the fallback's table. Default: `None`, meaning "the caller
+    /// already knows the provider and should use its own name".
+    fn served_by(&self) -> Option<String> {
+        None
+    }
+
     /// Request a structured completion constrained to a JSON schema.
     /// Default: delegates to `complete()` (no schema enforcement).
     async fn request_structured(
