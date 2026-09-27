@@ -356,10 +356,20 @@ pub async fn run_agent(
     // Final validation — fail-loud: invalid artifacts never degrade silently.
     if let Err(e) = validate_artifact(&json_content, schema_path) {
         let err_msg = e.to_string();
+        // A user who hits this needs to know the two things that actually fix
+        // it. Without this the message is a schema dump and the run just stops:
+        // in practice the cause is almost always a model too small to emit a
+        // conformant artifact, which is invisible unless it is named.
+        let hint = "The response was valid JSON but did not satisfy the artifact requirements.\n\
+             Most often the model is too small to emit a conformant artifact — \
+             `qwen2.5-coder:3b` fails here on ordinary tasks.\n\
+             Try: a larger model (7b+), or run ./scripts/dogfood.sh to see where your \
+             model stops.";
         display.agent_failed(role, &format!("Validation failed: {}", err_msg));
         return Err(crate::NikiError::ArtifactValidation {
             agent: role,
             errors: err_msg,
+            hint: hint.to_string(),
         }
         .into());
     }
