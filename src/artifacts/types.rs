@@ -204,12 +204,91 @@ pub struct ReviewVerdict {
     pub red_reconciliation: Option<Vec<RedReconciliation>>,
 }
 
+/// What a reviewing stage decided.
+///
+/// Note what is *absent*: there is no "nobody looked" variant, and
+/// `Default` is not derived. `Verdict` alone cannot distinguish a Reviewer's
+/// approval from a value that was never assigned — the pipeline used to
+/// initialise it to `Approved`, so a topology with no Reviewer produced a
+/// clean approval that nothing had ever earned. [`super::RunOutcome`] carries
+/// the missing provenance.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
     Approved,
     RevisionNeeded,
     Rejected,
+}
+
+/// Who produced a verdict, and whether anything checked the work at all.
+///
+/// This is the type that makes "Approved" mean something. A run can only
+/// report [`RunOutcome::Reviewed`] if a Reviewer or the SecurityAuditor
+/// actually ran and actually decided; the Solo fast path reports
+/// [`RunOutcome::SelfVerified`]; a topology that was misconfigured to omit
+/// every reviewer reports [`RunOutcome::NotEvaluated`] rather than a
+/// fabricated pass.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum RunOutcome {
+    /// An independent reviewer approved the work.
+    Reviewed {
+        verdict: Verdict,
+        /// The stage that decided: `reviewer` or `security-auditor`.
+        by: String,
+    },
+    /// A reviewer asked for changes.
+    RevisionRequested {
+        by: String,
+    },
+    /// The run produced work but no independent stage evaluated it. The Single
+    /// Agent fast path lands here: the Coder approved its own patch.
+    SelfVerified {
+        note: String,
+    },
+    /// No review stage ran, and none was configured. Never a pass.
+    NotEvaluated {
+        reason: String,
+    },
+    /// A gate refused to cut a branch.
+    Blocked {
+        reason: String,
+    },
+    Cancelled,
+    Failed {
+        error: String,
+    },
+}
+
+impl RunOutcome {
+    /// Whether a user may treat this run as independently reviewed.
+    pub fn is_independently_reviewed(&self) -> bool {
+        matches!(
+            self,
+            RunOutcome::Reviewed { .. } | RunOutcome::RevisionRequested { .. }
+        )
+    }
+
+    /// True only when a reviewer approved. `SelfVerified` and `NotEvaluated` are
+    /// deliberately excluded.
+    pub fn is_approved(&self) -> bool {
+        matches!(
+            self,
+            RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                ..
+            }
+        )
+    }
+
+    /// The bare verdict, for display. `None` when nothing decided one.
+    pub fn verdict(&self) -> Option<Verdict> {
+        match self {
+            RunOutcome::Reviewed { verdict, .. } => Some(*verdict),
+            RunOutcome::RevisionRequested { .. } => Some(Verdict::RevisionNeeded),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
