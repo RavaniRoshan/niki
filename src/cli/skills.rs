@@ -94,12 +94,15 @@ fn cmd_list(project: Option<PathBuf>) -> Result<()> {
         } else {
             ""
         };
+        // Skill metadata is read from files in the project, so every field is
+        // untrusted and must be filtered before it reaches the terminal.
+        use crate::display::sanitize::sanitize_line as s;
         println!(
             "- {} v{} (from {}, snapshot {}){}",
-            meta.name,
+            s(&meta.name),
             meta.version,
-            meta.source_runs.join(","),
-            meta.snapshot_ref,
+            s(meta.source_runs.join(",")),
+            s(&meta.snapshot_ref),
             stale,
         );
     }
@@ -115,7 +118,11 @@ fn cmd_candidates(project: Option<PathBuf>) -> Result<()> {
         return Ok(());
     }
     for (id, task) in cands {
-        println!("- {id}: {task}");
+        println!(
+            "- {}: {}",
+            crate::display::sanitize::sanitize_line(id),
+            crate::display::sanitize::sanitize_line(task)
+        );
     }
     Ok(())
 }
@@ -124,7 +131,10 @@ fn cmd_promote(project: Option<PathBuf>, candidate: &str) -> Result<()> {
     let dir = project_or_cwd(project);
     let config = load(&dir);
     let name = crate::skills::promote_candidate(&dir, &config, candidate)?;
-    println!("Promoted skill '{name}'.");
+    println!(
+        "Promoted skill '{}'.",
+        crate::display::sanitize::sanitize_line(name)
+    );
     Ok(())
 }
 
@@ -132,7 +142,11 @@ fn cmd_retire(project: Option<PathBuf>, name: &str, reason: &str) -> Result<()> 
     let dir = project_or_cwd(project);
     let config = load(&dir);
     crate::skills::retire_skill(&dir, &config, name, reason)?;
-    println!("Retired skill '{name}': {reason}");
+    println!(
+        "Retired skill '{}': {}",
+        crate::display::sanitize::sanitize_line(name),
+        crate::display::sanitize::sanitize_line(reason)
+    );
     Ok(())
 }
 
@@ -141,7 +155,11 @@ fn cmd_show(project: Option<PathBuf>, name: &str) -> Result<()> {
     let config = load(&dir);
     match crate::skills::load_project_skill(&dir, &config, name) {
         Some((body, source)) => {
-            println!("--- {source} ---\n{body}");
+            println!(
+                "--- {} ---\n{}",
+                crate::display::sanitize::sanitize_line(source),
+                crate::display::sanitize::sanitize_line(body)
+            );
             Ok(())
         }
         None => anyhow::bail!("skill '{name}' is not promoted"),
@@ -160,7 +178,11 @@ fn cmd_diff(project: Option<PathBuf>, candidate: &str) -> Result<()> {
         .map(|(b, _)| b)
         .unwrap_or_else(|| "(not yet promoted — everything below is new)\n".to_string());
     let staged = crate::skills::render_skill_md(&cand, &name);
-    println!("--- promoted: {name}\n+++ candidate: {candidate}");
+    println!(
+        "--- promoted: {}\n+++ candidate: {}",
+        crate::display::sanitize::sanitize_line(name),
+        crate::display::sanitize::sanitize_line(candidate)
+    );
     let diff = similar::TextDiff::from_lines(&promoted, &staged);
     for change in diff.iter_all_changes() {
         let sign = match change.tag() {
@@ -168,7 +190,10 @@ fn cmd_diff(project: Option<PathBuf>, candidate: &str) -> Result<()> {
             similar::ChangeTag::Insert => "+",
             similar::ChangeTag::Equal => " ",
         };
-        print!("{sign}{change}");
+        print!(
+            "{sign}{}",
+            crate::display::sanitize::sanitize_for_terminal(change.to_string())
+        );
     }
     Ok(())
 }

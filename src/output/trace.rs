@@ -116,6 +116,7 @@ mod tests {
             final_diff: String::new(),
             diff_guardwarn: None,
             verdict: crate::artifacts::types::Verdict::Approved,
+            verdict_source: Some("test-fixture".to_string()),
             revision_rounds: 1,
             artifacts: vec![],
             metrics,

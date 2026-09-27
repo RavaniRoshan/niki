@@ -109,6 +109,14 @@ pub struct TaskRecord {
     pub branch: Option<String>,
     pub verdict: Option<String>,
     pub revision_rounds: u32,
+    /// Who produced `verdict`.
+    ///
+    /// The SingleAgent fast path assigns `Verdict::Approved` without running a
+    /// Reviewer, so "Approved" alone does not tell a reader whether anything
+    /// independently checked the work. This makes the difference explicit and
+    /// machine-readable instead of implied.
+    #[serde(default)]
+    pub verdict_source: Option<String>,
     pub created_at: DateTime<Utc>,
     /// Per-agent cost & latency, in execution order.
     pub agent_metrics: Vec<StageMetric>,
@@ -145,6 +153,7 @@ impl TaskRecord {
             branch: None,
             verdict: None,
             revision_rounds: 0,
+            verdict_source: None,
             created_at: Utc::now(),
             agent_metrics: Vec::new(),
             total_input_tokens: 0,

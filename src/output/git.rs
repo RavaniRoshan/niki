@@ -191,12 +191,20 @@ pub(crate) fn normalize_patch(patch: &str) -> String {
     s
 }
 
+/// Creates `branch_name` at the current HEAD and commits the files touched by
+/// `diff` onto it.
+///
+/// Returns `Ok(true)` only when a branch was actually created. The two
+/// no-op paths return `Ok(false)`: an empty diff, and a diff that carries
+/// content but no parseable `+++ b/<path>` header. Callers must not treat
+/// `Ok(false)` as success — recording a `Completed` run with a branch that
+/// was never created is exactly the failure this signature exists to prevent.
 pub fn create_branch_and_commit(
     repo_path: &Path,
     branch_name: &str,
     diff: &str,
     task_id: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let repo = Repository::open(repo_path)?;
     let head = repo.head()?;
     let target = head
@@ -208,7 +216,7 @@ pub fn create_branch_and_commit(
     // creating the branch — otherwise the user's HEAD is moved onto a stray
     // empty `niki/<id>` branch for a run that produced nothing.
     if diff_files(diff).is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
     // Create a fresh branch for this task pointing at the current HEAD commit, then
@@ -224,7 +232,7 @@ pub fn create_branch_and_commit(
     // pre-existing uncommitted user changes, contaminating the task commit.
     let files = diff_files(diff);
     if files.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     let mut args = vec!["add", "--"];
     for f in &files {
@@ -241,9 +249,11 @@ pub fn create_branch_and_commit(
     // If the staged tree is identical to the parent commit's tree, there is nothing
     // to commit. (`index.is_empty()` is the wrong check — after `add -A` the index
     // always contains the tracked files, so it never reports "no change".)
+    // The branch ref already exists at this point, so this is still a created
+    // branch — it simply carries no new commit.
     let parent_tree = commit.tree()?;
     if tree.id() == parent_tree.id() {
-        return Ok(());
+        return Ok(true);
     }
 
     let sig = Signature::now("NIKI", "niki@localhost")?;
@@ -258,7 +268,7 @@ pub fn create_branch_and_commit(
     );
     repo.commit(Some("HEAD"), &sig, &sig, &commit_msg, &tree, &[&parent])?;
 
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]

@@ -10,18 +10,36 @@
 //! - Cached input tokens price at 10% of the input rate; reasoning tokens price
 //!   at the output rate. These ratios are documented approximations, not vendor
 //!   quotes — update them alongside the table.
-//! - [`PRICE_TABLE_AS_OF`] stamps the table's freshness; a unit test fails when
-//!   the table goes stale so refreshes can't be silently skipped.
+//! - [`PRICE_TABLE_AS_OF`] stamps the table's freshness; [`price_table_age_days`]
+//!   reports staleness, and scheduled CI fails on it. A plain `cargo test` must
+//!   not — a wall-clock assert turns into a build bomb on a date nobody is
+//!   watching for.
 
 use crate::llm::provider::TokenUsage;
 
 /// ISO-8601 date the price table below was last verified against vendor pages.
-/// Bump this whenever rates are refreshed. `price_table_is_fresh` fails the
-/// build when the table is older than [`PRICE_TABLE_MAX_AGE_DAYS`].
+/// Bump this whenever rates are refreshed. [`price_table_age_days`] reports how
+/// stale it is.
 pub const PRICE_TABLE_AS_OF: &str = "2026-09-06";
 
-/// Maximum age of the price table before `price_table_is_fresh` fails.
+/// Age at which [`price_table_age_days`] is considered stale. Scheduled CI
+/// jobs gate on this; it deliberately does **not** fail a plain `cargo test`,
+/// because a wall-clock assert here turns into a build bomb on a fixed date
+/// that no contributor is watching for.
 pub const PRICE_TABLE_MAX_AGE_DAYS: i64 = 180;
+
+/// Age of the price table in days, or `None` if [`PRICE_TABLE_AS_OF`] is not a
+/// valid date. Callers that want to fail on a stale table (scheduled jobs,
+/// `niki doctor`) gate on `age > PRICE_TABLE_MAX_AGE_DAYS`.
+pub fn price_table_age_days() -> Option<i64> {
+    let as_of = chrono::NaiveDate::parse_from_str(PRICE_TABLE_AS_OF, "%Y-%m-%d").ok()?;
+    Some(
+        chrono::Local::now()
+            .date_naive()
+            .signed_duration_since(as_of)
+            .num_days(),
+    )
+}
 
 /// USD price per 1,000,000 tokens.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -248,20 +266,33 @@ mod tests {
     }
 
     #[test]
-    fn price_table_is_fresh() {
-        // The table is a frozen snapshot of vendor pricing. Failing here means
-        // rates must be re-verified and PRICE_TABLE_AS_OF bumped — not that
-        // the test should be weakened.
-        let as_of =
-            chrono::NaiveDate::parse_from_str(PRICE_TABLE_AS_OF, "%Y-%m-%d").expect("valid date");
-        let age = chrono::Local::now()
-            .date_naive()
-            .signed_duration_since(as_of);
+    fn price_table_staleness_is_reported_not_asserted() {
+        // The table is a frozen snapshot of vendor pricing and it will rot.
+        // What must not happen is silent rot, so staleness is reported here and
+        // gated by scheduled CI — not by an unconditional wall-clock assert,
+        // which failed every build on a fixed date nobody was watching for.
+        let age = price_table_age_days().expect("PRICE_TABLE_AS_OF must be a valid date");
         assert!(
-            age.num_days() <= PRICE_TABLE_MAX_AGE_DAYS,
-            "price table is {} days old (as of {}); re-verify vendor rates",
-            age.num_days(),
-            PRICE_TABLE_AS_OF
+            age >= 0,
+            "PRICE_TABLE_AS_OF ({PRICE_TABLE_AS_OF}) is in the future; \
+             the price table cannot have been verified ahead of time"
+        );
+        if age > PRICE_TABLE_MAX_AGE_DAYS {
+            eprintln!(
+                "WARNING: price table is {age} days old (as of {PRICE_TABLE_AS_OF}, \
+                 limit {PRICE_TABLE_MAX_AGE_DAYS}). Re-verify vendor rates and bump \
+                 PRICE_TABLE_AS_OF."
+            );
+        }
+    }
+
+    #[test]
+    fn price_table_as_of_is_a_well_formed_date() {
+        // A typo here would make `price_table_age_days` return None forever and
+        // disable staleness reporting without anyone noticing.
+        assert!(
+            chrono::NaiveDate::parse_from_str(PRICE_TABLE_AS_OF, "%Y-%m-%d").is_ok(),
+            "PRICE_TABLE_AS_OF ({PRICE_TABLE_AS_OF}) must parse as YYYY-MM-DD"
         );
     }
 

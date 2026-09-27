@@ -72,12 +72,18 @@ pub fn handle(args: &CommandsArgs) -> Result<()> {
             let key = name.trim_start_matches('/');
             match registry.get(key) {
                 Some(cmd) => {
-                    println!("/{} — {}", cmd.name, cmd.description);
+                    // Command names, descriptions, aliases and templates all
+                    // come from `<project>/.niki/commands/*.md`, which the user
+                    // did not necessarily write — a cloned repository supplies
+                    // them. Treat every field as untrusted.
+                    use crate::display::sanitize::sanitize_for_terminal as sanitize;
+                    println!("/{} — {}", sanitize(&cmd.name), sanitize(&cmd.description));
                     if !cmd.aliases.is_empty() {
-                        println!("aliases: {}", cmd.aliases.join(", "));
+                        let aliases: Vec<String> = cmd.aliases.iter().map(sanitize).collect();
+                        println!("aliases: {}", sanitize(aliases.join(", ")));
                     }
                     println!();
-                    println!("{}", cmd.template);
+                    println!("{}", sanitize(&cmd.template));
                     Ok(())
                 }
                 None => {
@@ -91,7 +97,9 @@ pub fn handle(args: &CommandsArgs) -> Result<()> {
             let key = name.trim_start_matches('/');
             match registry.expand(key, &args.join(" ")) {
                 Some(text) => {
-                    print!("{}", text);
+                    // Command bodies are repository-controllable markdown, so
+                    // they are untrusted input like any other repo content.
+                    print!("{}", crate::display::sanitize::sanitize_for_terminal(text));
                     Ok(())
                 }
                 None => {

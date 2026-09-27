@@ -159,6 +159,11 @@ type ProviderEntry = (
 /// open, we skip straight to the next available provider.
 pub struct FailoverProvider {
     chain: Vec<ProviderEntry>,
+    /// Name of the entry that served the most recent successful call. Used to
+    /// price the call against the provider that actually answered — pricing a
+    /// fallback-served stage with the primary's table understates or overstates
+    /// real spend, and the spend cap reads those same numbers.
+    last_served: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl FailoverProvider {
@@ -195,12 +200,24 @@ impl FailoverProvider {
             ));
         }
 
-        Ok(Self { chain })
+        Ok(Self {
+            chain,
+            last_served: Arc::new(std::sync::Mutex::new(None)),
+        })
+    }
+
+    /// The chain entry that served the most recent successful call, if any.
+    pub fn last_served_provider(&self) -> Option<String> {
+        self.last_served.lock().ok().and_then(|g| g.clone())
     }
 }
 
 #[async_trait]
 impl LlmProvider for FailoverProvider {
+    fn served_by(&self) -> Option<String> {
+        self.last_served_provider()
+    }
+
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse> {
         let mut last_err = None;
 
@@ -235,14 +252,26 @@ impl LlmProvider for FailoverProvider {
                         provider = name.as_str(),
                         "Request succeeded"
                     );
+                    if let Ok(mut served) = self.last_served.lock() {
+                        *served = Some(name.clone());
+                    }
                     return Ok(response);
                 }
                 Err(e) => {
                     let err_str = e.to_string().to_lowercase();
-                    let is_transient = err_str.contains("timeout")
+                    // Whole-class HTTP status matching, not just 429/503: any
+                    // 5xx is an upstream fault and a different provider is
+                    // exactly the remedy. Previously a 500 from the primary
+                    // returned immediately, so a single upstream error defeated
+                    // the entire failover chain — the feature silently did
+                    // nothing for the most common server-side failure.
+                    let status_is_transient = ["http 500", "http 502", "http 503", "http 504"]
+                        .iter()
+                        .any(|s| err_str.contains(s));
+                    let is_transient = status_is_transient
+                        || err_str.contains("timeout")
                         || err_str.contains("rate")
                         || err_str.contains("429")
-                        || err_str.contains("503")
                         || err_str.contains("overloaded")
                         || err_str.contains("connection")
                         || err_str.contains("network");

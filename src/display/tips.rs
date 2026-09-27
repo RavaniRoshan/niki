@@ -28,9 +28,9 @@ const TIPS: &[&str] = &[
     "Enable [security].enabled=true for an independent security audit pass",
     "Toggle [red_blue].enabled to control adversarial verification (default: on)",
     // Safety features
-    "Hermetic proof: all changes happen in isolated git worktrees — your working tree is never modified",
+    "Agent work happens in an isolated git worktree; on a successful run the diff is committed to a niki/<id> branch",
     "Scope lock: NIKI only touches files within its declared scope — no surprise edits",
-    "The pipeline auto-rolls back on failure, leaving your repo clean",
+    "A failed test suite or a blocked gate means no branch is created — but some failure paths apply the diff first, so check `git status`",
     "Diff review: always inspect the final diff before approving changes",
     "Token budget: check the Cost page to monitor spending during long runs",
     // Goal system

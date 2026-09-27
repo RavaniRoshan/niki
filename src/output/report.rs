@@ -766,6 +766,7 @@ mod tests {
     fn result_with_proof(proof: Option<SafetyProof>) -> PipelineResult {
         PipelineResult {
             diff_guardwarn: None,
+            verdict_source: Some("test-fixture".to_string()),
             task_id: Uuid::nil(),
             context_budget: PipelineState::new(Uuid::nil()).context_budget,
             state: PipelineState::new(Uuid::nil()),
@@ -929,6 +930,7 @@ mod tests {
 
         let result = PipelineResult {
             diff_guardwarn: None,
+            verdict_source: Some("test-fixture".to_string()),
             task_id: Uuid::nil(),
             context_budget: PipelineState::new(Uuid::nil()).context_budget,
             state: PipelineState::new(Uuid::nil()),
@@ -967,6 +969,7 @@ mod tests {
     fn renders_isolation_section_with_proof() {
         let result = PipelineResult {
             diff_guardwarn: None,
+            verdict_source: Some("test-fixture".to_string()),
             task_id: Uuid::nil(),
             context_budget: PipelineState::new(Uuid::nil()).context_budget,
             state: PipelineState::new(Uuid::nil()),
@@ -1060,6 +1063,7 @@ mod tests {
         }
         PipelineResult {
             diff_guardwarn: None,
+            verdict_source: Some("test-fixture".to_string()),
             task_id: Uuid::nil(),
             context_budget: PipelineState::new(Uuid::nil()).context_budget,
             state: PipelineState::new(Uuid::nil()),
@@ -1159,6 +1163,7 @@ index 3333333..4444444 100644
     fn cost_result(metrics: Vec<StageMetric>) -> PipelineResult {
         PipelineResult {
             diff_guardwarn: None,
+            verdict_source: Some("test-fixture".to_string()),
             task_id: Uuid::nil(),
             context_budget: PipelineState::new(Uuid::nil()).context_budget,
             state: PipelineState::new(Uuid::nil()),

@@ -206,6 +206,7 @@ mod tests {
         let id = Uuid::new_v4();
         PipelineResult {
             task_id: id,
+            verdict_source: Some("test-fixture".to_string()),
             context_budget: ContextBudget::new(200_000),
             state: PipelineState::new(id),
             final_diff: String::new(),

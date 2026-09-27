@@ -870,14 +870,40 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
             branch_block_note = Some(format!("Branch blocked: {e}."));
         }
     }
+    // `branch_created` is the ground truth for the recorded status. It stays
+    // false for a dry run, an empty diff, a blocked branch, and a failed
+    // `create_branch_and_commit` — all of which previously fell through to
+    // `Completed { branch: Some(...) }` and reported a branch that did not exist.
+    let mut branch_created = false;
+    let mut branch_creation_error: Option<String> = None;
     if branch_block_note.is_none() && !args.dry_run {
-        if let Err(e) = crate::output::git::create_branch_and_commit(
-            &project_dir,
-            &branch_name,
-            &result.final_diff,
-            &task.id.to_string(),
-        ) {
-            eprintln!("Warning: git branch/commit failed: {}", e);
+        if !result.final_diff.trim().is_empty() {
+            match crate::output::git::create_branch_and_commit(
+                &project_dir,
+                &branch_name,
+                &result.final_diff,
+                &task.id.to_string(),
+            ) {
+                // `false` means the diff carried no committable content, so no
+                // ref was created. That is not a successful run.
+                Ok(true) => branch_created = true,
+                Ok(false) => {
+                    branch_creation_error = Some(
+                        "Branch not created: the diff carried no committable file changes."
+                            .to_string(),
+                    );
+                }
+                Err(e) => {
+                    // Not a warning: the run's whole deliverable is this branch.
+                    // Swallowing it here reported success for a run that changed
+                    // nothing reviewable.
+                    branch_creation_error = Some(format!("Branch creation failed: {e}."));
+                    eprintln!(
+                        "Error: {}",
+                        branch_creation_error.as_deref().unwrap_or_default()
+                    );
+                }
+            }
         }
     }
 
@@ -947,16 +973,40 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     record.topology_reason = Some(result.topology_reason.clone());
     record.risk_level = Some(result.risk_level.clone());
     record.risk_rationale = Some(result.risk_rationale.clone());
-    if let Some(note) = &branch_block_note {
-        record.status = TaskStatus::Failed {
-            error: note.clone(),
-        };
-        record.branch = None;
-    } else {
-        record.status = TaskStatus::Completed;
-        record.branch = Some(branch_name.clone());
+    // A run is only `Completed` when it actually produced its branch. A blocked
+    // branch, a failed commit, a dry run and an empty diff are all recorded as
+    // Failed with `branch: None`, so `niki status` and the JSON envelope can
+    // never advertise a branch that does not exist on disk.
+    let status_error = branch_creation_error
+        .or_else(|| branch_block_note.clone())
+        .or_else(|| {
+            if branch_created {
+                None
+            } else if args.dry_run {
+                Some(format!(
+                    "Dry run: no branch created. Review {}/plan.md, then re-run without --dry-run.",
+                    task_dir.display()
+                ))
+            } else {
+                Some("No branch created: the run produced an empty diff.".to_string())
+            }
+        });
+    match &status_error {
+        Some(error) => {
+            record.status = TaskStatus::Failed {
+                error: error.clone(),
+            };
+            record.branch = None;
+        }
+        None => {
+            record.status = TaskStatus::Completed;
+            record.branch = Some(branch_name.clone());
+        }
     }
     record.verdict = Some(format!("{:?}", result.verdict));
+    // Record who produced the verdict. The Solo fast path approves its own
+    // patch, and "Approved" on its own reads as an independent check.
+    record.verdict_source = result.verdict_source.clone();
     record.revision_rounds = result.revision_rounds;
     record.add_metrics(&result.metrics);
     if let Err(e) = record.save_to_disk(&task_dir) {

@@ -316,7 +316,11 @@ impl AgenticDisplay {
         }
         let newlines = token.chars().filter(|c| *c == '\n').count();
         self.current_streaming_lines += newlines;
-        print!("{}", token);
+        // Model tokens are influenced by repository content and by artifact
+        // fields, so they are untrusted input. A raw ESC ] 52 would overwrite
+        // the user's clipboard; ESC [ 2 J would clear their scrollback. Strip
+        // terminal control sequences before they reach the terminal.
+        print!("{}", crate::display::sanitize::sanitize_for_terminal(token));
         use std::io::Write;
         let _ = std::io::stdout().flush();
     }

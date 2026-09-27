@@ -352,3 +352,125 @@ async fn failing_test_suite_creates_no_branch_and_marks_task_failed() {
     assert!(entries[0].path().join("changes.patch").is_file());
     assert!(entries[0].path().join("report.md").is_file());
 }
+
+// --- INV-BRANCH-STATUS canary ------------------------------------------------
+//
+// The recorded status used to be derived from `branch_block_note` alone, so
+// three separate paths fell through to `Completed { branch: Some(name) }` while
+// no branch existed: an empty diff, a `create_branch_and_commit` error that
+// was only warned about, and `--dry-run`. `niki status` and the JSON envelope
+// then advertised a branch a user could not check out.
+//
+// The invariant is one-directional and absolute: Completed implies the branch
+// exists on disk. It does not require the converse — a Forced run deliberately
+// records a branch that was never verified.
+
+fn read_task_record(project: &std::path::Path) -> serde_json::Value {
+    let tasks_dir = project.join(".niki").join("tasks");
+    let entries: Vec<_> = std::fs::read_dir(&tasks_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(entries.len(), 1, "one task record expected");
+    let task_json =
+        std::fs::read_to_string(entries[0].path().join("task.json")).expect("task.json written");
+    serde_json::from_str(&task_json).unwrap()
+}
+
+fn status_of(record: &serde_json::Value) -> String {
+    record
+        .get("status")
+        .cloned()
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn niki_branches(project: &std::path::Path) -> Vec<String> {
+    git(project, &["branch", "--list", "niki/*"])
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn completed_status_requires_a_branch_that_exists_on_disk() {
+    let repo = create_fixture_repo();
+    let project = repo.dir.path().to_path_buf();
+    let script_path = project.join(".niki-mock-script.json");
+    successful_script(&script_path);
+    std::fs::write(
+        project.join("niki.toml"),
+        minimal_mock_toml(&script_path, Some("true")),
+    )
+    .unwrap();
+
+    let res = niki::cli::run::handle(&run_args(project.clone())).await;
+    assert!(res.is_ok(), "passing run should succeed, got: {res:?}");
+
+    let record = read_task_record(&project);
+    let status = status_of(&record);
+    let recorded_branch = record.get("branch").cloned();
+
+    if status.contains("Completed") {
+        let name = recorded_branch
+            .as_ref()
+            .and_then(|b| b.as_str())
+            .unwrap_or_else(|| panic!("Completed run must record a branch name"));
+        let exists = std::process::Command::new("git")
+            .args([
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{name}"),
+            ])
+            .current_dir(&project)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        assert!(
+            exists,
+            "task.json reports Completed on branch `{name}`, but refs/heads/{name} does not \
+             exist. A Completed status must always be backed by a real branch."
+        );
+    } else {
+        // A non-Completed run must not advertise a branch either.
+        assert!(
+            recorded_branch.is_none() || recorded_branch == Some(serde_json::Value::Null),
+            "a non-Completed run must record branch: null, got {recorded_branch:?}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dry_run_never_records_completed() {
+    let repo = create_fixture_repo();
+    let project = repo.dir.path().to_path_buf();
+    let script_path = project.join(".niki-mock-script.json");
+    successful_script(&script_path);
+    std::fs::write(
+        project.join("niki.toml"),
+        minimal_mock_toml(&script_path, Some("true")),
+    )
+    .unwrap();
+
+    let mut args = run_args(project.clone());
+    args.dry_run = true;
+    let _ = niki::cli::run::handle(&args).await;
+
+    let record = read_task_record(&project);
+    let status = status_of(&record);
+    assert!(
+        !status.contains("Completed"),
+        "a dry run produces a plan, not a result. It must not record Completed, got: {status}"
+    );
+    assert!(
+        niki_branches(&project).is_empty(),
+        "a dry run must not create a branch"
+    );
+    assert!(
+        record.get("branch").is_none() || record.get("branch") == Some(&serde_json::Value::Null),
+        "a dry run must record branch: null, got {:?}",
+        record.get("branch")
+    );
+}

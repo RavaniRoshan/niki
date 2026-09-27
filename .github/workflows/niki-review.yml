@@ -106,6 +106,19 @@ jobs:
           [ -n "${{ secrets.OPENAI_API_KEY }}" ] && have=true
           [ -n "${{ secrets.GOOGLE_API_KEY }}" ] && have=true
           echo "have=$have" >> "$GITHUB_OUTPUT"
+      # Previously every step below was gated on `have == 'true'` and the job
+      # still reported SUCCESS when no provider key was present — a green check
+      # that had executed nothing, which is the worst possible CI signal. On a
+      # fork (where `secrets.*` always resolve to empty) that happened on every
+      # single PR. This step makes the absence of secrets an explicit, visible
+      # failure instead.
+      - name: Require a provider key
+        if: steps.keys.outputs.have != 'true'
+        run: |
+          echo "::error::No provider API key is available to this run."
+          echo "This job must not report success without executing anything."
+          echo "On a fork, secrets are never exposed — the live-provider job cannot run there."
+          exit 1
       - uses: actions/checkout@v7
         if: steps.keys.outputs.have == 'true'
         with:

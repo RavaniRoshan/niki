@@ -23,11 +23,20 @@ BIN = os.environ.get("NIKI_BIN", "target/release/niki")
 COLS = int(os.environ.get("NIKI_COLS", "120"))
 ROWS = int(os.environ.get("NIKI_ROWS", "30"))
 
+# `tuiwright` is an optional dependency and is not installed by any CI job or
+# requirements file, so this suite has never actually run. Previously the
+# import lived inside `_session()`, which meant a run without tuiwright
+# reported a collection of ERRORs rather than an honest "skipped" — easy to
+# mistake for a broken TUI, and equally easy to never notice at all.
+tuiwright = pytest.importorskip(
+    "tuiwright",
+    reason="tuiwright is not installed — see tests/headless_tui.py; "
+    "the TUI's PTY boundary is covered by tests/tui_smoke/",
+)
+
 
 def _session():
-    from tuiwright import TuiSession
-
-    return TuiSession()
+    return tuiwright.TuiSession()
 
 
 async def _dismiss_onboarding(s) -> None:

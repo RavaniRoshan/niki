@@ -313,7 +313,7 @@ pub const LIGHT: Palette = Palette {
 
 /// Get the current palette based on the resolved theme mode.
 #[inline]
-fn palette() -> &'static Palette {
+pub(crate) fn palette() -> &'static Palette {
     match resolved_mode() {
         ThemeMode::Light => &LIGHT,
         _ => &DARK, // Dark + Auto-without-detection fallback
@@ -729,6 +729,15 @@ pub fn role_color(role: crate::artifacts::types::AgentRole) -> Color {
     if no_color() {
         return Color::Reset;
     }
+    raw_role_color(role)
+}
+
+/// The role's palette token, bypassing the `NO_COLOR` override.
+///
+/// Every public color accessor collapses to `Color::Reset` when `NO_COLOR` is
+/// set, so a test asserting through one of them tests the developer's terminal
+/// rather than the palette — and fails for anyone with `NO_COLOR` exported.
+pub(crate) fn raw_role_color(role: crate::artifacts::types::AgentRole) -> Color {
     let p = palette();
     match role {
         crate::artifacts::types::AgentRole::Planner => p.agent_blue,
@@ -956,26 +965,40 @@ mod tests {
         let _guard = MODE_TEST_LOCK.lock().unwrap();
         let original = current_mode();
 
+        // Assert on `palette()` rather than `bg_color()`/`fg_color()`. The
+        // public accessors return `Color::Reset` whenever `NO_COLOR` is set, so
+        // asserting through them tested the ambient environment — these five
+        // tests failed for every contributor with `NO_COLOR=1` exported, on a
+        // perfectly correct palette.
         set_mode(ThemeMode::Dark);
-        let dark_bg = bg_color();
-        let dark_fg = fg_color();
+        let dark_bg = format!("{:?}", palette().bg);
+        let dark_fg = format!("{:?}", palette().fg);
 
         set_mode(ThemeMode::Light);
-        let light_bg = bg_color();
-        let light_fg = fg_color();
+        let light_bg = format!("{:?}", palette().bg);
+        let light_fg = format!("{:?}", palette().fg);
 
-        assert_ne!(
-            format!("{:?}", dark_bg),
-            format!("{:?}", light_bg),
-            "bg must differ between dark and light"
-        );
-        assert_ne!(
-            format!("{:?}", dark_fg),
-            format!("{:?}", light_fg),
-            "fg must differ between dark and light"
-        );
+        assert_ne!(dark_bg, light_bg, "bg must differ between dark and light");
+        assert_ne!(dark_fg, light_fg, "fg must differ between dark and light");
 
         set_mode(original);
+    }
+
+    /// The `NO_COLOR` contract itself, which is a real behaviour worth pinning:
+    /// every public accessor collapses to `Reset` when the variable is present.
+    #[test]
+    fn no_color_collapses_public_accessors_to_reset() {
+        let _guard = MODE_TEST_LOCK.lock();
+        // `no_color()` reads the process env, which the suite must not mutate
+        // (it is shared with every other test in this binary). Assert the
+        // contract holds for the current environment in whichever direction it
+        // is, rather than forcing NO_COLOR on or off.
+        let expected = if no_color() {
+            Color::Reset
+        } else {
+            palette().bg
+        };
+        assert_eq!(bg_color(), expected);
     }
 
     #[test]
@@ -1017,24 +1040,21 @@ mod tests {
         // Regression: sand() once returned cyan, painting Planner, spinner
         // verbs, and the assistant icon blue. token.md Tier-1 fixes sand at
         // SAND_500 (#d4a373); INFO_BLUE (#6a9bcc) is a separate token.
+        // Asserted on the palette token, not `sand()`/`cyan()`, which collapse
+        // to `Reset` under NO_COLOR and made this test environment-dependent.
         let original = current_mode();
         set_mode(ThemeMode::Dark);
         assert_eq!(
-            format!("{:?}", sand()),
+            format!("{:?}", palette().agent_blue),
             format!("{:?}", Color::Rgb(0xd4, 0xa3, 0x73)),
-            "sand() must be warm sand, not cyan"
+            "the agent_blue token must be warm sand, not cyan"
         );
         assert_ne!(
-            format!("{:?}", sand()),
-            format!("{:?}", cyan()),
-            "sand() and cyan() must differ"
+            format!("{:?}", palette().agent_blue),
+            format!("{:?}", palette().cyan),
+            "sand and cyan must differ"
         );
         set_mode(original);
-    }
-
-    #[test]
-    fn no_color_env_respected() {
-        let _ = no_color();
     }
 
     #[test]
@@ -1049,9 +1069,12 @@ mod tests {
             crate::artifacts::types::AgentRole::Red,
             crate::artifacts::types::AgentRole::Critic,
         ];
+        // `raw_role_color`, not `role_color`: the public accessor returns Reset
+        // for every role under NO_COLOR, so this test degenerated to
+        // "8 identical colors" and failed on any NO_COLOR machine.
         let mut colors = std::collections::HashSet::new();
         for role in &roles {
-            colors.insert(format!("{:?}", role_color(*role)));
+            colors.insert(format!("{:?}", raw_role_color(*role)));
         }
         assert_eq!(colors.len(), 8, "All role colors should be distinct");
     }
