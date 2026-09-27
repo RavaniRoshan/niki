@@ -1,0 +1,13 @@
+# Development/test dependencies that are NOT cargo crates.
+#
+# `tuiwright` is the one that matters most: tests/headless_tui.py drives the
+# real binary under a real pseudo-terminal and reads the rendered cell grid
+# back. It is the only layer that can catch a key bound in the table but never
+# dispatched, and it caught exactly that — `tui.rs` has two event loops and the
+# `niki chat` one never reached the navigation handler, so arrows and digit
+# jumps were advertised in the footer and did nothing.
+#
+# Pinned so CI and a local run test the same thing.
+tuiwright==0.2.1
+pytest>=8.0
+pytest-asyncio>=0.24
