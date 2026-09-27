@@ -12,6 +12,7 @@
 
 pub mod autocomplete;
 pub mod command_menu;
+pub mod footer;
 pub mod input_box;
 pub mod list_cursor;
 pub mod permission;
