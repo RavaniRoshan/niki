@@ -100,14 +100,39 @@ pub fn snapshot_header(commit_sha: Option<&str>, generated_by: &str) -> String {
 
 /// Atomic write: temp file in the same directory + rename, so readers never
 /// see a half-written file.
+///
+/// The temp name keeps the *whole* file name and adds a pid + counter. It used
+/// to be `with_extension("tmp-niki-atomic")`, which replaced the extension
+/// rather than appending to it — so `task.json` became `task.tmp-niki-atomic`
+/// and a sibling `task` became the same path. Two writers, or two files that
+/// happened to share a stem, would clobber each other's partial write and then
+/// rename a truncated file into place. That is the exact failure an atomic
+/// write exists to prevent.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let stem = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "niki".to_string());
+    let tmp = parent.join(format!(
+        ".{stem}.{}.{}.tmp-niki-atomic",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    // A failed write must not leave the temp file behind for the next run to
+    // trip over, and it must not be renamed into place either.
+    let result = (|| -> std::io::Result<()> {
+        std::fs::write(&tmp, bytes)?;
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    let tmp = path.with_extension("tmp-niki-atomic");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
+    Ok(result?)
 }
 
 /// Write a Markdown KB file with the snapshot stamp as its first line.
