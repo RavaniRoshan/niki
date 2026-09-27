@@ -54,6 +54,14 @@ pub fn summary_shimmer(
     // inside a test binary — so the blend path was completely untestable. The
     // capability is a parameter here, and this wrapper is the only place that
     // reads the real terminal.
+    // NO_COLOR is a property of the *terminal*, not of the effect, so it is
+    // resolved here — the one place that reads the real environment. Previously
+    // the check sat inside the capability-driven form, which made the test
+    // suite's result depend on whether the developer (or CI) had NO_COLOR
+    // exported: green here, two failures without it.
+    if crate::display::theme::no_color() {
+        return vec![ratatui::text::Span::raw(text.to_string())];
+    }
     let truecolor = crate::display::theme::supports_truecolor();
     summary_shimmer_with(text, elapsed_secs, is_reduced, truecolor)
 }
@@ -71,9 +79,7 @@ pub fn summary_shimmer_with(
     use ratatui::style::{Modifier, Style, Stylize as _};
     use ratatui::text::Span;
 
-    // NO_COLOR means no colour at all, not "dim colour" — so this is checked
-    // before anything else and returns completely unstyled text.
-    if is_reduced || text.is_empty() || crate::display::theme::no_color() {
+    if is_reduced || text.is_empty() {
         return vec![Span::raw(text.to_string())];
     }
     if !truecolor {
@@ -357,22 +363,15 @@ mod tests {
         }
     }
 
+    // These three exercise the blend path directly. They used to call the
+    // wrapper, which probes the real terminal — so they passed here (where
+    // NO_COLOR made the wrapper return a flat span) and FAILED on CI, where
+    // NO_COLOR is unset. The suite's result depended on ambient terminal
+    // state, which is exactly what a test must never do.
     #[test]
     fn the_band_moves_over_time() {
-        // Uses the raw-palette path directly so the assertion is meaningful
-        // regardless of the ambient NO_COLOR.
-        if crate::display::theme::no_color() {
-            // Under NO_COLOR there is no colour channel to move; the static
-            // fallback is the correct and only behaviour.
-            let out = summary_shimmer("working", 0.1, false);
-            let out2 = summary_shimmer("working", 0.9, false);
-            assert_eq!(shimmer_text(&out), shimmer_text(&out2));
-            return;
-        }
-        // A shimmer that does not move is a bug that looks like a style
-        // choice, so it has to be asserted.
-        let a = summary_shimmer("working on it", 0.0, false);
-        let b = summary_shimmer("working on it", 0.9, false);
+        let a = summary_shimmer_with("working on it", 0.0, false, true);
+        let b = summary_shimmer_with("working on it", 0.9, false, true);
         assert_ne!(
             a.iter().map(|s| s.style).collect::<Vec<_>>(),
             b.iter().map(|s| s.style).collect::<Vec<_>>(),
@@ -382,13 +381,10 @@ mod tests {
 
     #[test]
     fn the_band_returns_to_its_start_after_one_period() {
-        if crate::display::theme::no_color() {
-            return;
-        }
         // Phase comes from elapsed time, so a full period must be a no-op.
         // Without this the sweep would drift every frame.
-        let a = summary_shimmer("planning", 0.0, false);
-        let b = summary_shimmer("planning", SHIMMER_PERIOD_SECS, false);
+        let a = summary_shimmer_with("planning", 0.0, false, true);
+        let b = summary_shimmer_with("planning", SHIMMER_PERIOD_SECS, false, true);
         assert_eq!(
             a.iter().map(|s| s.style).collect::<Vec<_>>(),
             b.iter().map(|s| s.style).collect::<Vec<_>>(),
@@ -398,16 +394,14 @@ mod tests {
 
     #[test]
     fn every_character_is_styled_at_some_point_in_the_cycle() {
-        if crate::display::theme::no_color() {
-            return;
-        }
         // The band is wider than one column precisely so short labels do not
         // flash a single letter; if some character is never inside the band it
         // is dead weight.
         let text = "abcdefghij";
         let mut lit = vec![false; text.chars().count()];
         for step in 0..40 {
-            let out = summary_shimmer(text, step as f64 * SHIMMER_PERIOD_SECS / 40.0, false);
+            let out =
+                summary_shimmer_with(text, step as f64 * SHIMMER_PERIOD_SECS / 40.0, false, true);
             for (i, s) in out.iter().enumerate() {
                 if !lit[i] && s.style.fg.is_some_and(|c| c != Color::Reset) {
                     lit[i] = true;
