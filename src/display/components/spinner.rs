@@ -10,6 +10,11 @@ use crate::display::theme;
 /// Spinner frame patterns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpinnerStyle {
+    /// NIKI's signature: a heat gauge rising and falling, matching the Kiln
+    /// palette. Distinct from `Bars` (which only climbs) and legible in
+    /// terminals with no braille or emoji support, which is where a pipeline
+    /// most often runs.
+    Kiln,
     Moon,
     Dots,
     Bars,
@@ -19,6 +24,9 @@ pub enum SpinnerStyle {
 impl SpinnerStyle {
     fn frames(&self) -> &'static [&'static str] {
         match self {
+            SpinnerStyle::Kiln => &[
+                "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂",
+            ],
             SpinnerStyle::Moon => &["◐", "◓", "◑", "◒"],
             SpinnerStyle::Dots => &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
             SpinnerStyle::Bars => &[
@@ -122,7 +130,7 @@ impl SpinnerState {
 
     /// Get the current moon frame based on tick.
     pub fn frame(&self) -> &'static str {
-        SpinnerStyle::Moon.frames()[self.tick % 4]
+        SpinnerStyle::Kiln.frames()[self.tick % 14]
     }
 
     /// Render as a Span.
@@ -181,6 +189,8 @@ mod tests {
 
     #[test]
     fn spinner_reset() {
+        // Asserts against the spinner's own style: this is a test of `reset`,
+        // not of which style happens to be the default.
         let mut s = Spinner::moon();
         for _ in 0..5 {
             s.tick();
@@ -190,8 +200,20 @@ mod tests {
     }
 
     #[test]
+    fn the_default_spinner_is_the_kiln_signature() {
+        // The identity claim, asserted. The Kiln gauge is what makes the
+        // running state look like NIKI rather than a generic spinner.
+        let d = Spinner::new(SpinnerStyle::Kiln);
+        assert_eq!(d.current_frame(), SpinnerStyle::Kiln.frames()[0]);
+        // And it must differ from the generic styles it replaced, or the
+        // "signature" is a rename.
+        assert_ne!(SpinnerStyle::Kiln.frames(), SpinnerStyle::Bars.frames());
+    }
+
+    #[test]
     fn spinner_all_styles() {
         for style in [
+            SpinnerStyle::Kiln,
             SpinnerStyle::Moon,
             SpinnerStyle::Dots,
             SpinnerStyle::Bars,

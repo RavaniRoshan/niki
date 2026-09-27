@@ -260,14 +260,25 @@ pub const DARK: Palette = Palette {
     diff_del_fg: Color::Rgb(0xe7, 0x6f, 0x51),  // #e76f51
     diff_hunk: Color::Rgb(0xe0, 0x9f, 0x3e),    // #e09f3e
 
-    agent_red: Color::Rgb(0xd6, 0x28, 0x28),    // crimson red
-    agent_blue: Color::Rgb(0xd4, 0xa3, 0x73),   // sand (Planner)
-    agent_green: Color::Rgb(0x4e, 0xbe, 0x82),  // thinking green
-    agent_yellow: Color::Rgb(0xe0, 0x9f, 0x3e), // amber (Reviewer)
-    agent_purple: Color::Rgb(0x96, 0x82, 0xc8), // purple (Coder)
-    agent_orange: Color::Rgb(0xcc, 0x78, 0x5c), // terracotta
-    agent_pink: Color::Rgb(0xe2, 0x95, 0x78),   // peach
-    agent_cyan: Color::Rgb(0x6a, 0x9b, 0xcc),   // sky cyan
+    // ── Kiln role palette ────────────────────────────────────────────
+    // Eight roles need eight colours a reader can tell apart at a glance.
+    // The set is deliberately warm-earth plus verdigris: no blue, no purple,
+    // no neon. Those two hue bands are what every other AI coding tool reaches
+    // for (Codex's accent is #63A8F8, Cursor and Copilot are blue-violet), so
+    // avoiding them is most of what makes this palette identifiable.
+    //
+    // Hues are spread across 172°(verdigris) → 88°(sage) → 7°(vermillion),
+    // and neighbours inside that arc are separated by lightness as well as
+    // hue, because ochre/ember/bronze sit within 20° of each other.
+    // `role_colors_are_perceptually_distinct` enforces it.
+    agent_red: Color::Rgb(0xf2, 0x49, 0x5a), // bright vermillion (Red)
+    agent_blue: Color::Rgb(0xd9, 0xa8, 0x6a), // pale ochre     (Planner)
+    agent_green: Color::Rgb(0x6f, 0xb0, 0x5c), // leaf          (Tester)
+    agent_yellow: Color::Rgb(0x3f, 0xa3, 0x96), // verdigris     (Reviewer)
+    agent_purple: Color::Rgb(0xb8, 0x5c, 0x1a), // deep ember     (Coder)
+    agent_orange: Color::Rgb(0x7d, 0x2b, 0x2b), // dark oxblood  (SecurityAuditor)
+    agent_pink: Color::Rgb(0xc8, 0xd6, 0x9c), // pale straw    (Synthesizer)
+    agent_cyan: Color::Rgb(0x4d, 0x5c, 0x2e), // dark olive    (Critic)
 };
 
 /// Light palette — Warm Paper & Espresso light (#fdfcfc base, terracotta clay accent).
@@ -301,14 +312,17 @@ pub const LIGHT: Palette = Palette {
     diff_del_fg: Color::Rgb(0xc9, 0x4a, 0x29),  // #c94a29
     diff_hunk: Color::Rgb(0xb5, 0x83, 0x52),    // #b58352
 
-    agent_red: Color::Rgb(0xb7, 0x1c, 0x1c),
-    agent_blue: Color::Rgb(0xb5, 0x83, 0x52),
-    agent_green: Color::Rgb(0x05, 0x96, 0x69),
-    agent_yellow: Color::Rgb(0xc6, 0x7d, 0x16),
-    agent_purple: Color::Rgb(0x7c, 0x5f, 0xc0),
-    agent_orange: Color::Rgb(0xb8, 0x5c, 0x38),
-    agent_pink: Color::Rgb(0xbe, 0x18, 0x5d),
-    agent_cyan: Color::Rgb(0x0e, 0x74, 0x90),
+    // Kiln on warm paper: the same hues, darkened for legibility on a light
+    // background. Kept in one-to-one correspondence with DARK so a role does
+    // not change identity between themes.
+    agent_red: Color::Rgb(0xa8, 0x24, 0x33), // bright vermillion
+    agent_blue: Color::Rgb(0x8f, 0x66, 0x2e), // pale ochre
+    agent_green: Color::Rgb(0x3f, 0x6b, 0x33), // leaf
+    agent_yellow: Color::Rgb(0x25, 0x6b, 0x60), // verdigris
+    agent_purple: Color::Rgb(0x8a, 0x40, 0x0c), // deep ember
+    agent_orange: Color::Rgb(0x5c, 0x1a, 0x1a), // dark oxblood
+    agent_pink: Color::Rgb(0x6e, 0x7a, 0x2e), // pale straw
+    agent_cyan: Color::Rgb(0x33, 0x3d, 0x18), // dark olive
 };
 
 /// Get the current palette based on the resolved theme mode.
@@ -1046,8 +1060,8 @@ mod tests {
         set_mode(ThemeMode::Dark);
         assert_eq!(
             format!("{:?}", palette().agent_blue),
-            format!("{:?}", Color::Rgb(0xd4, 0xa3, 0x73)),
-            "the agent_blue token must be warm sand, not cyan"
+            format!("{:?}", Color::Rgb(0xd9, 0xa8, 0x6a)),
+            "the agent_blue token must be warm sand (pale ochre in the Kiln palette), not cyan"
         );
         assert_ne!(
             format!("{:?}", palette().agent_blue),
@@ -1055,6 +1069,182 @@ mod tests {
             "sand and cyan must differ"
         );
         set_mode(original);
+    }
+
+    /// Perceptual distance, not raw RGB distance.
+    ///
+    /// Two colours can be far apart in RGB and still look identical, and two
+    /// can be close in RGB and look nothing alike once they are rendered. This
+    /// uses the CIE76 weighted RGB metric (a cheap stand-in for a proper
+    /// Lab conversion) with weights that approximate human sensitivity: the
+    /// eye is far more sensitive to green than to blue.
+    fn perceptual_distance(a: ratatui::style::Color, b: ratatui::style::Color) -> f64 {
+        let rgb = |c: ratatui::style::Color| match c {
+            ratatui::style::Color::Rgb(r, g, bl) => (r as f64, g as f64, bl as f64),
+            _ => panic!("expected an Rgb colour, got {c:?}"),
+        };
+        let (r1, g1, b1) = rgb(a);
+        let (r2, g2, b2) = rgb(b);
+        let dr = r1 - r2;
+        let dg = g1 - g2;
+        let db = b1 - b2;
+        (2.0 * dr * dr + 4.0 * dg * dg + 3.0 * db * db).sqrt()
+    }
+
+    /// Every role must be tellable apart at a glance.
+    ///
+    /// "Different hex values" is not the property anyone needs — being able to
+    /// say which agent is which while a run is scrolling is. Two roles that
+    /// render near-identically make the whole colour coding decorative, and it
+    /// is the kind of thing that survives review because the hex values *are*
+    /// different.
+    #[test]
+    fn role_colors_are_perceptually_distinct() {
+        use crate::artifacts::types::AgentRole;
+        let roles = [
+            AgentRole::Planner,
+            AgentRole::Coder,
+            AgentRole::Tester,
+            AgentRole::Reviewer,
+            AgentRole::Synthesizer,
+            AgentRole::SecurityAuditor,
+            AgentRole::Red,
+            AgentRole::Critic,
+        ];
+        // Anything closer than this reads as the same colour on a terminal.
+        const MIN_DISTANCE: f64 = 60.0;
+
+        for palette in [&DARK, &LIGHT] {
+            let mut too_close: Vec<String> = Vec::new();
+            for (i, a) in roles.iter().enumerate() {
+                for b in roles.iter().skip(i + 1) {
+                    let d = perceptual_distance(
+                        raw_role_color_for(*a, palette),
+                        raw_role_color_for(*b, palette),
+                    );
+                    if d < MIN_DISTANCE {
+                        too_close.push(format!(
+                            "  {a:?} vs {b:?}: distance {d:.0} < {MIN_DISTANCE:.0}"
+                        ));
+                    }
+                }
+            }
+            assert!(
+                too_close.is_empty(),
+                "these roles are too close to tell apart at a glance:\n{}",
+                too_close.join("\n")
+            );
+        }
+    }
+
+    /// The palette's identity claim, asserted rather than asserted-in-a-comment.
+    ///
+    /// Every other AI coding tool reaches for blue and violet — Codex's accent
+    /// is #63A8F8, Cursor and Copilot are blue-violet. The Kiln palette is
+    /// built by explicitly refusing those hue bands, so if a future edit drifts
+    /// back toward them this fails.
+    #[test]
+    fn the_palette_avoids_the_blue_and_violet_bands() {
+        use crate::artifacts::types::AgentRole;
+        for palette in [&DARK, &LIGHT] {
+            for role in [
+                AgentRole::Planner,
+                AgentRole::Coder,
+                AgentRole::Tester,
+                AgentRole::Reviewer,
+                AgentRole::Synthesizer,
+                AgentRole::SecurityAuditor,
+                AgentRole::Red,
+                AgentRole::Critic,
+            ] {
+                let c = raw_role_color_for(role, palette);
+                let ratatui::style::Color::Rgb(r, g, b) = c else {
+                    panic!("expected Rgb, got {c:?}");
+                };
+                let max = r.max(g).max(b);
+                let min = r.min(g).min(b);
+                let delta = max.saturating_sub(min);
+                if delta == 0 {
+                    continue; // achromatic: no hue to judge
+                }
+                let hue = hue_degrees(r, g, b);
+                let in_blue_violet = (190.0..=310.0).contains(&hue);
+                assert!(
+                    !(in_blue_violet && delta > 40),
+                    "{role:?} is {c:?} — hue {hue:.0}° lands in the blue/violet band every \
+                     other AI coding tool uses. The Kiln palette is defined by refusing it."
+                );
+            }
+        }
+    }
+
+    fn hue_degrees(r: u8, g: u8, b: u8) -> f64 {
+        let (r, g, b) = (r as f64, g as f64, b as f64);
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        let d = max - min;
+        if d == 0.0 {
+            return 0.0;
+        }
+        let h = if max == r {
+            60.0 * (((g - b) / d) % 6.0)
+        } else if max == g {
+            60.0 * ((b - r) / d + 2.0)
+        } else {
+            60.0 * ((r - g) / d + 4.0)
+        };
+        if h < 0.0 { h + 360.0 } else { h }
+    }
+
+    /// The same role must keep its identity across themes — the Kiln hues map
+    /// one-to-one, so a role that changes colour when the theme flips is a bug
+    /// in the mapping, not a design choice.
+    #[test]
+    fn role_hue_is_stable_across_themes() {
+        use crate::artifacts::types::AgentRole;
+        for role in [
+            AgentRole::Planner,
+            AgentRole::Coder,
+            AgentRole::Tester,
+            AgentRole::Reviewer,
+            AgentRole::Synthesizer,
+            AgentRole::SecurityAuditor,
+            AgentRole::Red,
+            AgentRole::Critic,
+        ] {
+            let d = hue_degrees_of(raw_role_color_for(role, &DARK));
+            let l = hue_degrees_of(raw_role_color_for(role, &LIGHT));
+            let delta = (d - l).abs().min(360.0 - (d - l).abs());
+            assert!(
+                delta < 25.0,
+                "{role:?} shifts {delta:.0}° of hue between themes ({d:.0}° -> {l:.0}°); \
+                 a role should keep its identity when the theme flips"
+            );
+        }
+    }
+
+    fn hue_degrees_of(c: ratatui::style::Color) -> f64 {
+        match c {
+            ratatui::style::Color::Rgb(r, g, b) => hue_degrees(r, g, b),
+            _ => 0.0,
+        }
+    }
+
+    fn raw_role_color_for(
+        role: crate::artifacts::types::AgentRole,
+        p: &Palette,
+    ) -> ratatui::style::Color {
+        use crate::artifacts::types::AgentRole;
+        match role {
+            AgentRole::Planner => p.agent_blue,
+            AgentRole::Coder => p.agent_purple,
+            AgentRole::Tester => p.agent_green,
+            AgentRole::Reviewer => p.agent_yellow,
+            AgentRole::Synthesizer => p.agent_pink,
+            AgentRole::SecurityAuditor => p.agent_orange,
+            AgentRole::Red => p.agent_red,
+            AgentRole::Critic => p.agent_cyan,
+        }
     }
 
     #[test]
