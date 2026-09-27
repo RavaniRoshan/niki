@@ -24,8 +24,21 @@ cd "$REPO_ROOT"
 
 CANARIES="mutants/canaries.toml"
 RESULTS="canaries/results.json"
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
-MIN_FREE_MB="${NIKI_MIN_FREE_MB:-1200}"
+# The gate rebuilds the crate once per canary. Linking a 66k-LOC test binary is
+# the single largest allocation in the whole project and is what actually
+# exhausts memory -- not the test run. So the gate defaults to a single job:
+# two concurrent rustc/linker processes on a 7.5 GiB host is how the box died
+# the first time this ran unattended.
+#
+# Override only on a machine with headroom: NIKI_CANARY_JOBS=2 ./scripts/canary-gate.sh
+export CARGO_BUILD_JOBS="${NIKI_CANARY_JOBS:-1}"
+MIN_FREE_MB="${NIKI_MIN_FREE_MB:-2600}"
+# Free memory required before a canary starts, and how long to wait for it.
+RECOVER_MB="${NIKI_CANARY_RECOVER_MB:-2600}"
+RECOVER_WAIT_S="${NIKI_CANARY_RECOVER_WAIT:-180}"
+# Hard ceiling on a single cargo invocation, so a runaway build dies with a
+# clear message instead of taking the whole machine down with it.
+CARGO_MEMORY_LIMIT_MB="${NIKI_CANARY_MEM_LIMIT:-5000}"
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -42,6 +55,28 @@ for c in d['canary']:
 PY
   exit 0
 fi
+
+# Block until free memory clears the threshold, or give up. Waiting is the
+# right response: cargo's page cache holds a large share of "used" memory
+# after a build and releases it within seconds, so refusing outright would
+# fail on a machine that is merely still settling.
+wait_for_memory() {
+  local need="$1" waited=0
+  while :; do
+    local avail
+    avail="$(free_mb)"
+    if [ "${avail:-0}" -ge "$need" ]; then
+      return 0
+    fi
+    if [ "$waited" -ge "$RECOVER_WAIT_S" ]; then
+      red "only ${avail} MiB free after ${waited}s (need ${need} MiB)"
+      return 1
+    fi
+    [ "$waited" -eq 0 ] && info "waiting for memory: ${avail} MiB free, need ${need} MiB"
+    sleep 5
+    waited=$((waited + 5))
+  done
+}
 
 # ── Preflight ─────────────────────────────────────────────────────────────
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
@@ -120,8 +155,18 @@ PY
     exit 5
   fi
 
+  # Every canary rebuilds. Check memory before each one rather than only at
+  # the start: the first canary is cheap, the fifth is where the page cache
+  # from four prior builds is still resident.
+  if ! wait_for_memory "$RECOVER_MB"; then
+    red "aborting before $id rather than risking the machine"
+    git checkout -- .
+    exit 4
+  fi
+  info "  memory before build: $(free_mb) MiB free"
+
   # shellcheck disable=SC2086
-  if timeout 900 cargo test $probe -j 2 -- --test-threads=1 > /tmp/canary-run.log 2>&1; then
+  if timeout 900 cargo test $probe -j 1 -- --test-threads=1 > /tmp/canary-run.log 2>&1; then
     outcome="survived"
     red "  SURVIVED — the suite passed with the defect injected"
   else
@@ -135,6 +180,7 @@ PY
   # went empty, and results.json reported zero canaries for a run that had
   # just printed eight. A TSV line cannot be mangled that way.
   printf '%s\t%s\n' "$id" "$outcome" >> "$OUTCOMES"
+  info "  memory after run: $(free_mb) MiB free"
   git checkout -- .
 done < <(python3 -c "
 import json,sys
