@@ -155,12 +155,34 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     // static badge at the far right of a wide bar is the least-looked-at pixel
     // on screen.
     let badge_label = badge_text.trim();
-    let shimmered = crate::display::motion::summary_shimmer_with(
-        badge_label,
-        state.tick as f64 / 30.0, // 30fps idle loop
-        state.config.ui.reduced_motion || std::env::var_os("NIKI_REDUCED_MOTION").is_some(),
-        crate::display::theme::supports_truecolor(),
-    );
+    // Animate only while the run is actually doing something.
+    //
+    // The shimmer used to run on every frame, unconditionally — so a chat
+    // sitting idle with a static permission badge repainted at 30fps forever.
+    // Two costs: it burns CPU and battery to animate a permission the user
+    // can already see, and it means the screen never goes quiescent, which
+    // makes "wait until the UI settles" untestable. The headless PTY suite
+    // asserted on exactly that and failed on CI while passing on any machine
+    // with `NO_COLOR` set — the same env-dependence the Rust suite had.
+    //
+    // Motion should mean "something is happening". A permission badge at rest
+    // is a fact, not an event.
+    let animating = !matches!(state.run_state, crate::display::state::RunState::Idle);
+    let shimmered = if animating {
+        crate::display::motion::summary_shimmer_with(
+            badge_label,
+            state.tick as f64 / 30.0, // 30fps idle loop
+            state.config.ui.reduced_motion || std::env::var_os("NIKI_REDUCED_MOTION").is_some(),
+            crate::display::theme::supports_truecolor(),
+        )
+    } else {
+        vec![ratatui::text::Span::styled(
+            badge_label,
+            Style::default()
+                .fg(badge_color)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        )]
+    };
     // The shimmer spans carry their own foreground, so a hovered badge would
     // otherwise lose its background and the hover would vanish. Re-apply the
     // badge background on top of each shimmer span.
