@@ -1300,15 +1300,25 @@ async fn run_bookkept_stage(
         ),
         saw_other_reasoning: false,
     });
-    let m = metrics
+    // Copy the values out: `metrics` is about to be borrowed mutably below,
+    // and the old code held a reference to its last element across that call.
+    // An empty metrics list was an `unreachable!` panic; it is now a zero-cost
+    // stage, which is the honest reading.
+    let (usage, cost) = metrics
         .last()
-        .unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
-    display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
-    display.update_pipeline_status();
-    enforce_spend_cap(config.general.spend_cap_usd, metrics)?;
-    state.accrue_budget(metrics)?;
-    update_context_budget(metrics, state, project_path, task_dir, config)?;
-    save_task_record(task, metrics, TaskStatus::Running, task_dir, round)?;
+        .map(|m| (m.usage(), m.cost_usd))
+        .unwrap_or((crate::llm::provider::TokenUsage::default(), 0.0));
+    display.agent_done(stage.role, summary, usage, cost);
+    finish_stage(
+        display,
+        metrics,
+        state,
+        config,
+        task,
+        task_dir,
+        project_path,
+        round,
+    )?;
     Ok((json, output))
 }
 
@@ -1437,6 +1447,56 @@ fn update_context_budget(
             task_dir.join("context.json").display()
         )
     })
+}
+
+/// The bookkeeping every finished stage owes the run, in one place.
+///
+/// Seven call sites spelled this out separately, in two different orders, and
+/// two of them — the Planner's and the Synthesizer's — had dropped
+/// `enforce_spend_cap` entirely. Those paths did not bypass the cap; they
+/// enforced it one stage late, so a run could overshoot by the cost of a whole
+/// stage before anything noticed. "What counts as complete for a stage" also
+/// had as many answers as there were call sites, which is how cost and usage
+/// drift out of agreement with what actually ran.
+///
+/// `round` is the revision round to record; stages that run outside a loop
+/// pass 0.
+#[allow(clippy::too_many_arguments)]
+fn finish_stage(
+    display: &mut crate::display::agent_stream::AgenticDisplay,
+    metrics: &mut Vec<StageMetric>,
+    state: &mut super::state::PipelineState,
+    config: &NikiConfig,
+    task: &Task,
+    task_dir: &Path,
+    project_path: &Path,
+    round: u32,
+) -> Result<()> {
+    display.update_pipeline_status();
+    enforce_spend_cap(config.general.spend_cap_usd, metrics)?;
+    state.accrue_budget(metrics)?;
+    update_context_budget(metrics, state, project_path, task_dir, config)?;
+    save_task_record(task, metrics, TaskStatus::Running, task_dir, round)?;
+    Ok(())
+}
+
+/// Record one stage's isolation provenance.
+///
+/// Part of the same duplication: every stage site rebuilt the identical
+/// record, so the table in the report was assembled by copy-paste and a
+/// stage that forgot it would silently drop out of the isolation proof.
+fn record_isolation(
+    isolation: &mut Vec<IsolationRecord>,
+    role: AgentRole,
+    config: &NikiConfig,
+    security_enabled: bool,
+) {
+    isolation.push(IsolationRecord {
+        role,
+        backend: config.docker.backend,
+        context_sources: isolation_sources_for(role, config.red_blue.enabled, security_enabled),
+        saw_other_reasoning: false,
+    });
 }
 
 /// T8: Save an incremental TaskRecord snapshot to disk.
@@ -1800,11 +1860,16 @@ pub async fn execute_pipeline(
             agent_hook_payload(AgentRole::Planner, &task.id, 0),
         )?;
     }
-    display.update_pipeline_status();
-
-    // T7+T8: Update context budget and save incremental task record after Planner.
-    update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config)?;
-    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
+    finish_stage(
+        display,
+        &mut metrics,
+        &mut state,
+        config,
+        task,
+        task_dir,
+        &task.project_path,
+        0,
+    )?;
 
     // Decide the agent topology from the task shape (BUILD_PLAN 3.2, P2.2).
     // The Planner has already derived `estimated_complexity`, so we can pick
@@ -1968,13 +2033,7 @@ pub async fn execute_pipeline(
     let mut provider_cache: HashMap<String, Arc<dyn LlmProvider>> = HashMap::new();
     for s in &body_stages {
         // Cache key includes fallbacks so different failover chains don't collide.
-        let cache_key = if s.fallbacks.is_empty() {
-            s.provider.clone()
-        } else {
-            let mut parts = vec![s.provider.clone()];
-            parts.extend(s.fallbacks.iter().cloned());
-            parts.join(":")
-        };
+        let cache_key = provider_cache_key(s);
         if let std::collections::hash_map::Entry::Vacant(e) = provider_cache.entry(cache_key) {
             let llm = provider_for(&s.provider, &s.fallbacks, config)?;
             e.insert(Arc::from(llm));
@@ -2020,13 +2079,7 @@ pub async fn execute_pipeline(
                     .iter()
                     .find(|s| s.role == AgentRole::Coder)
                     .expect("parallel mode requires a Coder stage");
-                let coder_cache_key = if coder_stage.fallbacks.is_empty() {
-                    coder_stage.provider.clone()
-                } else {
-                    let mut parts = vec![coder_stage.provider.clone()];
-                    parts.extend(coder_stage.fallbacks.iter().cloned());
-                    parts.join(":")
-                };
+                let coder_cache_key = provider_cache_key(coder_stage);
                 let per_coder = run_parallel_coders(
                     config.parallel.coder_count,
                     provider_cache
@@ -2080,13 +2133,7 @@ pub async fn execute_pipeline(
                     .iter()
                     .find(|s| s.role == AgentRole::Synthesizer)
                     .expect("parallel mode requires a Synthesizer stage");
-                let synth_cache_key = if synth_stage.fallbacks.is_empty() {
-                    synth_stage.provider.clone()
-                } else {
-                    let mut parts = vec![synth_stage.provider.clone()];
-                    parts.extend(synth_stage.fallbacks.iter().cloned());
-                    parts.join(":")
-                };
+                let synth_cache_key = provider_cache_key(synth_stage);
                 let synth_llm = provider_cache.get(&synth_cache_key).ok_or_else(|| {
                     anyhow::anyhow!("Provider '{}' not found in cache", synth_stage.provider)
                 })?;
@@ -2119,24 +2166,26 @@ pub async fn execute_pipeline(
                 )
                 .await?;
                 artifacts.push((AgentRole::Synthesizer, json.clone()));
-                isolation.push(IsolationRecord {
-                    role: AgentRole::Synthesizer,
-                    backend: config.docker.backend,
-                    context_sources: isolation_sources_for(
-                        AgentRole::Synthesizer,
-                        config.red_blue.enabled,
-                        security_enabled,
-                    ),
-                    saw_other_reasoning: false,
-                });
+                record_isolation(
+                    &mut isolation,
+                    AgentRole::Synthesizer,
+                    config,
+                    security_enabled,
+                );
                 let m = metrics.last().unwrap_or_else(|| {
                     unreachable!("metrics always has at least one entry after push")
                 });
                 display.agent_done(AgentRole::Synthesizer, summary, m.usage(), m.cost_usd);
-                display.update_pipeline_status();
-
-                update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config)?;
-                save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
+                finish_stage(
+                    display,
+                    &mut metrics,
+                    &mut state,
+                    config,
+                    task,
+                    task_dir,
+                    &task.project_path,
+                    0,
+                )?;
 
                 let merged = match role_output {
                     RoleOutput::Synthesizer(s) => s.merged,
@@ -2168,13 +2217,7 @@ pub async fn execute_pipeline(
                         save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, 0)?;
                         return Err(crate::NikiError::Cancelled.into());
                     }
-                    let cache_key = if stage.fallbacks.is_empty() {
-                        stage.provider.clone()
-                    } else {
-                        let mut parts = vec![stage.provider.clone()];
-                        parts.extend(stage.fallbacks.iter().cloned());
-                        parts.join(":")
-                    };
+                    let cache_key = provider_cache_key(stage);
                     let llm = provider_cache.get(&cache_key).ok_or_else(|| {
                         anyhow::anyhow!("Provider '{}' not found in cache", stage.provider)
                     })?;
@@ -2220,18 +2263,16 @@ pub async fn execute_pipeline(
                         unreachable!("metrics always has at least one entry after push")
                     });
                     display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
-                    display.update_pipeline_status();
-                    enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
-                    state.accrue_budget(&metrics)?;
-
-                    update_context_budget(
-                        &metrics,
+                    finish_stage(
+                        display,
+                        &mut metrics,
                         &mut state,
-                        &task.project_path,
-                        task_dir,
                         config,
+                        task,
+                        task_dir,
+                        &task.project_path,
+                        0,
                     )?;
-                    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
 
                     match role_output {
                         RoleOutput::Tester(_) => {
@@ -2288,13 +2329,7 @@ pub async fn execute_pipeline(
                             )?;
                             return Err(crate::NikiError::Cancelled.into());
                         }
-                        let cache_key = if stage.fallbacks.is_empty() {
-                            stage.provider.clone()
-                        } else {
-                            let mut parts = vec![stage.provider.clone()];
-                            parts.extend(stage.fallbacks.iter().cloned());
-                            parts.join(":")
-                        };
+                        let cache_key = provider_cache_key(stage);
                         let llm = provider_cache.get(&cache_key).ok_or_else(|| {
                             anyhow::anyhow!("Provider '{}' not found in cache", stage.provider)
                         })?;
@@ -2383,18 +2418,16 @@ pub async fn execute_pipeline(
                             unreachable!("metrics always has at least one entry after push")
                         });
                         display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
-                        display.update_pipeline_status();
-                        enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
-                        state.accrue_budget(&metrics)?;
-
-                        update_context_budget(
-                            &metrics,
+                        finish_stage(
+                            display,
+                            &mut metrics,
                             &mut state,
-                            &task.project_path,
-                            task_dir,
                             config,
+                            task,
+                            task_dir,
+                            &task.project_path,
+                            round,
                         )?;
-                        save_task_record(task, &metrics, TaskStatus::Running, task_dir, round)?;
 
                         match role_output {
                             RoleOutput::Coder(diff) => {
@@ -2513,13 +2546,7 @@ pub async fn execute_pipeline(
                 .iter()
                 .find(|s| s.role == AgentRole::Coder)
                 .expect("single-agent mode requires a Coder stage");
-            let coder_cache_key = if coder_stage.fallbacks.is_empty() {
-                coder_stage.provider.clone()
-            } else {
-                let mut parts = vec![coder_stage.provider.clone()];
-                parts.extend(coder_stage.fallbacks.iter().cloned());
-                parts.join(":")
-            };
+            let coder_cache_key = provider_cache_key(coder_stage);
             let coder_llm = provider_cache.get(&coder_cache_key).ok_or_else(|| {
                 anyhow::anyhow!("Provider '{}' not found in cache", coder_stage.provider)
             })?;
@@ -2555,31 +2582,31 @@ pub async fn execute_pipeline(
                 crate::audit::HookEvent::PostAgentStop,
                 agent_hook_payload(AgentRole::Coder, &task.id, 0),
             )?;
-            isolation.push(IsolationRecord {
-                role: AgentRole::Coder,
-                backend: config.docker.backend,
-                context_sources: isolation_sources_for(
-                    AgentRole::Coder,
-                    config.red_blue.enabled,
-                    security_enabled,
-                ),
-                saw_other_reasoning: false,
-            });
-            let m = metrics.last().unwrap_or_else(|| {
-                unreachable!("metrics always has at least one entry after push")
-            });
+            record_isolation(&mut isolation, AgentRole::Coder, config, security_enabled);
+            // Copy the values out: `metrics` is about to be borrowed mutably
+            // below, and the old code held a reference to its last element
+            // across that call. An empty metrics list was an `unreachable!`
+            // panic; it is now a zero-cost stage, which is the honest reading.
+            let (usage, cost) = metrics
+                .last()
+                .map(|m| (m.usage(), m.cost_usd))
+                .unwrap_or((crate::llm::provider::TokenUsage::default(), 0.0));
             display.agent_done(
                 AgentRole::Coder,
                 vec!["solo code diff produced".to_string()],
-                m.usage(),
-                m.cost_usd,
+                usage,
+                cost,
             );
-            display.update_pipeline_status();
-            enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
-            state.accrue_budget(&metrics)?;
-
-            update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config)?;
-            save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
+            finish_stage(
+                display,
+                &mut metrics,
+                &mut state,
+                config,
+                task,
+                task_dir,
+                &task.project_path,
+                0,
+            )?;
 
             // The solo Coder returns a CodeDiff; apply it so the downstream diff
             // read picks up the change.
@@ -2607,11 +2634,15 @@ pub async fn execute_pipeline(
                 // often fix themselves when shown the failure (e.g. regex
                 // anchors instead of verbatim text). Same spend-cap and audit
                 // accounting as the first attempt — never silent, never unbounded.
+                let (usage, cost) = metrics
+                    .last()
+                    .map(|m| (m.usage(), m.cost_usd))
+                    .unwrap_or((crate::llm::provider::TokenUsage::default(), 0.0));
                 display.agent_done(
                     AgentRole::Coder,
                     vec![format!("patch did not apply ({apply_err}) — repairing")],
-                    m.usage(),
-                    m.cost_usd,
+                    usage,
+                    cost,
                 );
                 fire_hook(
                     &hook_bus,
@@ -2647,16 +2678,7 @@ pub async fn execute_pipeline(
                     crate::audit::HookEvent::PostAgentStop,
                     agent_hook_payload(AgentRole::Coder, &task.id, 1),
                 )?;
-                isolation.push(IsolationRecord {
-                    role: AgentRole::Coder,
-                    backend: config.docker.backend,
-                    context_sources: isolation_sources_for(
-                        AgentRole::Coder,
-                        config.red_blue.enabled,
-                        security_enabled,
-                    ),
-                    saw_other_reasoning: false,
-                });
+                record_isolation(&mut isolation, AgentRole::Coder, config, security_enabled);
                 let rm = metrics.last().unwrap_or_else(|| {
                     unreachable!("metrics always has at least one entry after push")
                 });
@@ -2666,12 +2688,16 @@ pub async fn execute_pipeline(
                     rm.usage(),
                     rm.cost_usd,
                 );
-                display.update_pipeline_status();
-                enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
-                state.accrue_budget(&metrics)?;
-
-                update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config)?;
-                save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
+                finish_stage(
+                    display,
+                    &mut metrics,
+                    &mut state,
+                    config,
+                    task,
+                    task_dir,
+                    &task.project_path,
+                    0,
+                )?;
 
                 coder_json = repair_json;
                 let repaired: CodeDiff = serde_json::from_str(&coder_json).with_context(|| {
