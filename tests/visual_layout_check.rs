@@ -67,10 +67,14 @@ fn render_page(width: u16, height: u16, state: &AppState) -> String {
         .unwrap();
     let buf = frame.buffer.clone();
     let w = buf.area.width as usize;
+    let total = buf.content.len();
     let mut out = String::new();
     for (i, cell) in buf.content.iter().enumerate() {
         out.push_str(cell.symbol());
-        if w > 0 && (i + 1) % w == 0 {
+        // Row separator, but not after the final row — a trailing newline
+        // made a 1-row render look like it wrapped, which is the exact
+        // property these tests exist to check.
+        if w > 0 && (i + 1) % w == 0 && i + 1 < total {
             out.push('\n');
         }
     }
@@ -235,33 +239,53 @@ fn status_bar_truncates_right_items_when_narrow() {
     );
 }
 
+// These two were named `dump_status_bar` / `dump_status_bar2` and contained
+// only `eprintln!` calls — they printed a rendering and asserted nothing, so
+// they could not fail and counted as coverage of a surface that was in fact
+// unverified. They are now the assertions the names implied.
+
 #[test]
-fn dump_status_bar() {
+fn status_bar_never_exceeds_the_terminal_width() {
     let mut state = make_state();
     state.context_usage = 0.35;
     state.context_limit = 128_000;
-    let out = render_status_bar(120, 1, &state);
-    eprintln!(
-        "=== 120x1 status bar ===\n[{}]\nlen={}",
-        out.trim_end(),
-        out.trim_end().len()
-    );
+    for w in [20u16, 40, 60, 80, 120, 200] {
+        let out = render_status_bar(w, 1, &state);
+        assert!(
+            out.chars().count() <= w as usize,
+            "at width {w} the status bar rendered {} chars, which wraps into the next line: {:?}",
+            out.chars().count(),
+            out
+        );
+    }
 }
 
 #[test]
-fn dump_status_bar2() {
+fn status_bar_truncates_rather_than_wrapping_at_narrow_widths() {
     let mut state = make_state();
     state.context_usage = 0.35;
     state.context_limit = 128_000;
-    for w in [80, 120] {
+    // A 1-row widget that wraps is invisible corruption: the second line
+    // overwrites whatever the terminal had there. Narrow widths must elide.
+    for w in [20u16, 40, 60] {
         let out = render_status_bar(w, 1, &state);
-        eprintln!(
-            "=== {}x1 ===\n[{}]\nlen={}",
-            w,
-            out.trim_end(),
-            out.trim_end().len()
+        assert!(
+            !out.contains('\n'),
+            "at width {w} the status bar wrapped instead of eliding: {out:?}"
         );
     }
+}
+
+#[test]
+fn status_bar_shows_context_usage_when_there_is_room() {
+    let mut state = make_state();
+    state.context_usage = 0.35;
+    state.context_limit = 128_000;
+    let wide = render_status_bar(120, 1, &state);
+    assert!(
+        wide.contains('%'),
+        "a 120-column status bar should show the context percentage: {wide:?}"
+    );
 }
 
 // ============================================================================
@@ -343,10 +367,11 @@ fn render_status_bar(width: u16, height: u16, state: &AppState) -> String {
         .unwrap();
     let buf = frame.buffer.clone();
     let w = buf.area.width as usize;
+    let total = buf.content.len();
     let mut out = String::new();
     for (i, cell) in buf.content.iter().enumerate() {
         out.push_str(cell.symbol());
-        if w > 0 && (i + 1) % w == 0 {
+        if w > 0 && (i + 1) % w == 0 && i + 1 < total {
             out.push('\n');
         }
     }

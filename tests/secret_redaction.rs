@@ -102,14 +102,31 @@ fn redact_secrets_replaces_multiple_keys() {
 }
 
 #[test]
-fn redact_secrets_ignores_short_strings() {
+fn a_too_short_string_is_left_alone_rather_than_mangled() {
+    // The old assertion was `assert!(!result.is_empty())`, which cannot fail:
+    // the function always returns a String. The documented behaviour is that
+    // `sk-` needs a real key body after it, so a 5-character tail is not a
+    // credential and must survive untouched — redacting it would corrupt
+    // ordinary prose.
     let input = "sk-short";
     let result = redact_secrets(input);
-    // Short strings matching the pattern should still be handled, but
-    // the regex for sk- requires at least 20 chars after the prefix.
-    // This key only has 5 chars after "sk-", so it won't match.
-    // The important thing is no panic.
-    assert!(!result.is_empty());
+    assert_eq!(
+        result, input,
+        "a string too short to be a key must be returned unchanged"
+    );
+}
+
+#[test]
+fn a_real_length_key_is_redacted() {
+    // The positive counterpart, so the test above cannot pass by redacting
+    // everything.
+    let key = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAA";
+    let out = redact_secrets(&format!("using {key} now"));
+    assert!(!out.contains("AAAAAAAAAAAAAAAAAAAAAAAA"), "{out:?}");
+    assert!(
+        out.contains("using "),
+        "surrounding text must survive: {out:?}"
+    );
 }
 
 #[test]
