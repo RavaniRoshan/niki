@@ -380,31 +380,37 @@ impl Sandbox for WorktreeSandbox {
         let cmd: Vec<String> = cmd.iter().map(|s| s.to_string()).collect();
         let timeout = std::time::Duration::from_secs(self.policy.max_exec_seconds);
         // F3: Enforce exec timeout and process group isolation.
-        tokio::time::timeout(
+        //
+        // The deadline is enforced by `exec_with_timeout`, which signals the
+        // whole process group. Wrapping `Command::output()` in
+        // `spawn_blocking` and dropping the handle on timeout cancelled
+        // nothing: a timed-out `cargo build` kept running in the user's
+        // worktree, holding the tree and outliving the run that started it.
+        match crate::sandbox::exec::exec_with_timeout(
+            &cmd,
+            &wt,
             timeout,
-            tokio::task::spawn_blocking(move || -> Result<ExecOutput> {
-                let mut c = Command::new(&cmd[0]);
-                c.args(&cmd[1..]).current_dir(&wt);
-                #[cfg(unix)]
-                {
-                    use std::os::unix::process::CommandExt;
-                    c.process_group(0);
-                }
-                let output = c.output()?;
-                let raw_stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let raw_stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let stdout = crate::sandbox::truncate_head_tail(&raw_stdout, 1500, 65536);
-                let stderr = crate::sandbox::truncate_head_tail(&raw_stderr, 1500, 65536);
-                Ok(ExecOutput {
-                    exit_code: output.status.code().unwrap_or(0) as i64,
-                    stdout,
-                    stderr,
-                })
-            }),
+            self.policy.max_exec_seconds,
+            crate::sandbox::truncate_head_tail,
         )
-        .await
-        .map_err(|_| anyhow!("exec timed out after {}s", self.policy.max_exec_seconds))?
-        .map_err(|e| anyhow!("exec spawn failed: {e}"))?
+        .await?
+        {
+            Ok(out) => Ok(ExecOutput {
+                exit_code: out.exit_code,
+                stdout: out.stdout,
+                stderr: out.stderr,
+            }),
+            Err(t) => {
+                if !t.killed {
+                    eprintln!(
+                        "warning: {t} — the process group could not be signalled and a child may \
+                         still be running in {}",
+                        wt.display()
+                    );
+                }
+                Err(anyhow!("{t}"))
+            }
+        }
     }
 
     async fn destroy(&self) -> Result<()> {

@@ -90,6 +90,7 @@ fn parse_permission_mode(s: &str) -> crate::permissions::PermissionMode {
 
 pub mod docker;
 pub mod edit_format;
+pub mod exec;
 pub mod worktree;
 
 pub use docker::{ActiveContainers, DockerSandbox, ExecOutput};
