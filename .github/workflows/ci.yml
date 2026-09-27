@@ -329,7 +329,16 @@ jobs:
       - name: Build release binary
         run: cargo build --release
       - name: Run headless PTY suite
-        run: python3 -m pytest -c pytest_headless.ini -v
+        # Both colour states, deliberately. The Rust suite learned this the
+        # hard way: a shimmer test passed only because the developer's shell
+        # exported NO_COLOR, and the same env-dependence then hid a TUI that
+        # repainted forever and could never be waited on. The Python suite had
+        # the same blind spot and failed on CI for the same reason. Running one
+        # state would let it come back.
+        run: |
+          set -euo pipefail
+          python3 -m pytest -c pytest_headless.ini -v
+          env -u NO_COLOR python3 -m pytest -c pytest_headless.ini -v
       - name: Fail if the whole suite was skipped
         # A dependency problem must not present as a green TUI gate.
         run: |
