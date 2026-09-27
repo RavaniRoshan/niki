@@ -76,7 +76,10 @@ print(json.dumps([
         "id": c["id"],
         "file": c["file"],
         "patch": c["patch"],
-        "replace_with": c["replace_with"],
+        # Optional: an equivalence canary declares a patch with no
+        # replacement, i.e. the "mutation" changes nothing observable. Default
+        # to the patch itself so the entry still round-trips.
+        "replace_with": c.get("replace_with", c["patch"]),
         "category": c["category"],
         "invariant": c["invariant"],
         "expect_kill": c.get("expect_kill", True),

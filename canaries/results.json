@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "canaries": [],
+  "totals": {
+    "total": 0,
+    "killed": 0,
+    "survived": 0,
+    "holdout_total": 0,
+    "holdout_killed": 0
+  }
+}
