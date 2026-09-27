@@ -107,7 +107,9 @@ pub enum RoleOutput {
 /// The ordered stages to run, honoring a user-defined `[pipeline]` topology when
 /// present, otherwise the classic Planner → Coder → Tester → Reviewer wiring.
 /// When `[security] enabled = true`, an independent `SecurityAuditor` stage is
-/// appended after the Reviewer (#4).
+/// injected ahead of the Reviewer (#4). Ahead, not after: an auditor whose
+/// findings arrive once the reviewing agent has already finished are a check
+/// that cannot influence the thing it checked.
 pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
     let mut stages = if !config.pipeline.stages.is_empty() {
         config.pipeline.stages.clone()
@@ -137,7 +139,7 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
         let (provider, model) = security_stage_target(config);
         if !stages.iter().any(|s| s.role == AgentRole::SecurityAuditor) {
             let agent = &config.agents.security_auditor;
-            stages.push(PipelineStageConfig {
+            let stage = PipelineStageConfig {
                 role: AgentRole::SecurityAuditor,
                 provider: if provider.is_empty() {
                     agent.provider.clone()
@@ -153,7 +155,15 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
                 max_tokens: agent.effective_max_tokens(),
                 temperature: agent.effective_temperature(),
                 fallbacks: agent.fallbacks.clone(),
-            });
+            };
+            // Ahead of the Reviewer, not after it. An auditor whose findings
+            // arrive after the reviewing agent has finished are a footnote the
+            // Reviewer never reads — the check happens, and the checking
+            // cannot influence the thing it checked.
+            match stages.iter().position(|s| s.role == AgentRole::Reviewer) {
+                Some(pos) => stages.insert(pos, stage),
+                None => stages.push(stage),
+            }
         }
     }
 
@@ -283,7 +293,7 @@ pub fn apply_risk_stages(
     {
         let (provider, model) = security_stage_target(config);
         let agent = &config.agents.security_auditor;
-        out.push(PipelineStageConfig {
+        let stage = PipelineStageConfig {
             role: AgentRole::SecurityAuditor,
             provider,
             model,
@@ -291,7 +301,13 @@ pub fn apply_risk_stages(
             max_tokens: agent.effective_max_tokens(),
             temperature: agent.effective_temperature(),
             fallbacks: agent.fallbacks.clone(),
-        });
+        };
+        // Ahead of the Reviewer, for the same reason as in `resolve_stages`:
+        // a risk-injected auditor that runs last is a check nothing reads.
+        match out.iter().position(|s| s.role == AgentRole::Reviewer) {
+            Some(pos) => out.insert(pos, stage),
+            None => out.push(stage),
+        }
     }
     if config.critic.enabled && !out.iter().any(|s| s.role == AgentRole::Critic) {
         let (provider, model) = critic_stage_target(config, &out);
@@ -379,7 +395,7 @@ fn red_evidence_json(coder_json: &str) -> String {
 /// one exception: Red receives an evidence-only projection of the Coder diff
 /// (see [`red_evidence_json`]). Withholding rationale everywhere remains a
 /// follow-up; the record below describes wiring truthfully, not aspiration.
-fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
+fn isolation_sources_for(role: AgentRole, with_red: bool, with_security: bool) -> Vec<AgentRole> {
     use AgentRole::*;
     match role {
         Planner => vec![],
@@ -391,12 +407,20 @@ fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
             if with_red {
                 v.push(Red);
             }
+            // The auditor runs first and its verdict is a Reviewer input, so
+            // the record has to name it. Understating the wiring here would
+            // make the isolation table a worse description of the run than the
+            // run itself.
+            if with_security {
+                v.push(SecurityAuditor);
+            }
             v
         }
         Synthesizer => vec![Planner, Coder],
         // The auditor's prompt is rendered with spec + coder diff only — it
         // never receives Tester/Reviewer/Red artifacts, so the record says so
-        // even though that narrowness is itself a follow-up decision.
+        // even though that narrowness is itself a follow-up decision. It
+        // runs *before* the Reviewer, so it never sees one.
         SecurityAuditor => vec![Planner, Coder],
         // The critic checks the Reviewer's verdict against the same evidence
         // the Reviewer saw (plus Red, when that pass ran).
@@ -405,9 +429,57 @@ fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
             if with_red {
                 v.push(Red);
             }
+            if with_security {
+                v.push(SecurityAuditor);
+            }
             v
         }
     }
+}
+
+/// Fold a SecurityAuditor verdict into the run's verdict.
+///
+/// Only an explicit `Rejected` acts. `Approved` and `RevisionNeeded` from the
+/// auditor are advisory — the Reviewer owns the ordinary quality gate — but a
+/// security rejection is not a matter of taste: it forces the run to revise and
+/// names the security auditor as the source, so the record shows the run was
+/// stopped by security rather than by style.
+///
+/// It used to apply only when there was *no* reviewer, on the theory that the
+/// Reviewer owns the gate. In the normal configuration a Reviewer is always
+/// present, so a SecurityAuditor `Rejected` was computed, recorded as an
+/// artifact, displayed in the report — and had no effect on the run.
+fn apply_security_verdict(
+    security_verdict: Verdict,
+    verdict: &mut Verdict,
+    verdict_source: &mut Option<String>,
+    security_hold: &mut bool,
+) {
+    if matches!(security_verdict, Verdict::Rejected) {
+        *security_hold = true;
+        *verdict = Verdict::RevisionNeeded;
+        *verdict_source = Some("security-auditor".to_string());
+    }
+}
+
+/// Record a Reviewer's verdict without letting it clear a security hold.
+///
+/// The SecurityAuditor runs first so the Reviewer can reconcile its findings,
+/// which means a well-behaved Reviewer withholds approval on its own. This is
+/// the backstop for the case where it does not: a plain `Approved` must not
+/// quietly overturn a security rejection that the auditor already raised.
+fn apply_reviewer_verdict(
+    reviewer_verdict: Verdict,
+    verdict: &mut Verdict,
+    verdict_source: &mut Option<String>,
+    security_hold: bool,
+) {
+    if security_hold {
+        // Leave the verdict and the source where security put them.
+        return;
+    }
+    *verdict = reviewer_verdict;
+    *verdict_source = Some("reviewer".to_string());
 }
 
 /// Fire one lifecycle hook, failing the run closed on Block.
@@ -705,6 +777,7 @@ async fn run_parallel_coders(
                 "",
                 "",
                 "",
+                "",
                 0,
                 &knowledge,
                 &project_path,
@@ -939,6 +1012,7 @@ async fn run_role(
     tester_json: &str,
     red_json: &str,
     reviewer_json: &str,
+    security_json: &str,
     round: u32,
     knowledge_str: &str,
     project_path: &Path,
@@ -990,6 +1064,11 @@ async fn run_role(
             // challenge. We append the Red artifact as a 4th input so the
             // Reviewer is forced to engage with the adversarial critique instead
             // of ratifying the Coder (guards sycophantic convergence, #1.2).
+            //
+            // The SecurityAuditor's findings go in the same way, and for the
+            // same reason: an independent check that a reviewing agent cannot
+            // see is not a check. The auditor runs first precisely so this is
+            // populated by the time the Reviewer is called.
             let mut artifacts = vec![
                 task_spec_json.clone(),
                 coder_json.to_string(),
@@ -1011,6 +1090,13 @@ async fn run_role(
             });
             context! {
                 input_artifacts => artifacts,
+                // Red and Security ride as named optional artifacts, not as
+                // positional entries. Appending to `input_artifacts` made the
+                // prompt's `input_artifacts[3]` mean "Red" only when Red ran
+                // and nothing else did — so a fourth artifact silently
+                // re-pointed the template at the wrong JSON.
+                red_artifact => red_json.to_string(),
+                security_artifact => security_json.to_string(),
                 project_knowledge => knowledge_str.to_string(),
                 project_memory => memory_str,
                 diff_guardrail_hint => diff_guardrail_hint.clone(),
@@ -1057,6 +1143,8 @@ async fn run_role(
             }
             context! {
                 input_artifacts => artifacts,
+                red_artifact => red_json.to_string(),
+                security_artifact => security_json.to_string(),
                 project_knowledge => knowledge_str.to_string(),
                 project_memory => memory_str,
                 mcp_tools => mcp_tools.to_string(),
@@ -1140,6 +1228,7 @@ async fn run_bookkept_stage(
     tester_json: &str,
     red_json: &str,
     reviewer_json: &str,
+    security_json: &str,
     round: u32,
     knowledge_str: &str,
     project_path: &Path,
@@ -1156,6 +1245,12 @@ async fn run_bookkept_stage(
     task_dir: &Path,
     state: &mut super::state::PipelineState,
     bare: bool,
+    // Whether this run actually has a SecurityAuditor stage. Taken from the
+    // resolved stage list rather than `config.security.enabled` because a
+    // High/Security-risk task gets one injected whether or not the config
+    // asked for it — the isolation record has to reflect the run, not the
+    // request.
+    security_enabled: bool,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<(String, RoleOutput)> {
     let (json, summary, output) = run_role(
@@ -1168,6 +1263,7 @@ async fn run_bookkept_stage(
         tester_json,
         red_json,
         reviewer_json,
+        security_json,
         round,
         knowledge_str,
         project_path,
@@ -1188,7 +1284,11 @@ async fn run_bookkept_stage(
     isolation.push(IsolationRecord {
         role: stage.role,
         backend: config.docker.backend,
-        context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
+        context_sources: isolation_sources_for(
+            stage.role,
+            config.red_blue.enabled,
+            security_enabled,
+        ),
         saw_other_reasoning: false,
     });
     let m = metrics
@@ -1630,7 +1730,11 @@ pub async fn execute_pipeline(
     isolation.push(IsolationRecord {
         role: AgentRole::Planner,
         backend: config.docker.backend,
-        context_sources: isolation_sources_for(AgentRole::Planner, config.red_blue.enabled),
+        // The Planner is the entry point and sees nothing, so its isolation
+        // record is empty regardless; `security_enabled` is not yet computed
+        // this early, and passing a value the arm ignores would only invite
+        // someone to start believing it.
+        context_sources: isolation_sources_for(AgentRole::Planner, config.red_blue.enabled, false),
         saw_other_reasoning: false,
     });
     // Approved-plan runs skip the Planner LLM call, so no metric exists for
@@ -1678,6 +1782,10 @@ pub async fn execute_pipeline(
     // away). Explicit `[pipeline].stages` topologies are never rewritten.
     let task_risk = crate::risk::classify(&task_spec, config);
     let stages = apply_risk_stages(stages, &task_risk, config);
+    // Whether a SecurityAuditor is actually part of *this* run. A High/Security
+    // risk tier injects one even when `[security] enabled` is false, so this
+    // is read off the resolved stage list rather than the config flag.
+    let security_enabled = stages.iter().any(|s| s.role == AgentRole::SecurityAuditor);
     let mut topology = select_topology(&task_spec, config);
     let mut topology_reason = topology_reason(&task_spec, config);
     if force_multiagent_for_high_risk(topology, config.pipeline.topology, task_risk.level)
@@ -1834,6 +1942,14 @@ pub async fn execute_pipeline(
     let mut red_json = String::new();
     // Latest Reviewer verdict JSON, fed to the post-loop Critic pass.
     let mut reviewer_json = String::new();
+    // Latest SecurityAuditor verdict JSON. The auditor runs *before* the
+    // Reviewer so its findings are something the Reviewer can reconcile
+    // rather than a footnote it never sees.
+    let mut security_json = String::new();
+    // Set by a SecurityAuditor `Rejected`. While it is set, no Reviewer
+    // approval can end the run — the auditor's rejection stands until the work
+    // is actually revised.
+    let mut security_hold = false;
     // Revision feedback is intentionally latest-round-only: each Reviewer
     // verdict OVERWRITES (never appends), so a retrying Coder sees the
     // current critique, not an accumulation of stale guidance. Full history
@@ -1903,6 +2019,7 @@ pub async fn execute_pipeline(
                     context_sources: isolation_sources_for(
                         AgentRole::Coder,
                         config.red_blue.enabled,
+                        security_enabled,
                     ),
                     saw_other_reasoning: false,
                 });
@@ -1934,6 +2051,7 @@ pub async fn execute_pipeline(
                     "",
                     "",
                     "",
+                    "",
                     0,
                     &knowledge_str,
                     &task.project_path,
@@ -1957,6 +2075,7 @@ pub async fn execute_pipeline(
                     context_sources: isolation_sources_for(
                         AgentRole::Synthesizer,
                         config.red_blue.enabled,
+                        security_enabled,
                     ),
                     saw_other_reasoning: false,
                 });
@@ -2010,6 +2129,7 @@ pub async fn execute_pipeline(
                         &tester_json,
                         &red_json,
                         &reviewer_json,
+                        &security_json,
                         0,
                         &knowledge_str,
                         &task.project_path,
@@ -2030,7 +2150,11 @@ pub async fn execute_pipeline(
                     isolation.push(IsolationRecord {
                         role: stage.role,
                         backend: config.docker.backend,
-                        context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
+                        context_sources: isolation_sources_for(
+                            stage.role,
+                            config.red_blue.enabled,
+                            security_enabled,
+                        ),
                         saw_other_reasoning: false,
                     });
                     let m = metrics.last().unwrap_or_else(|| {
@@ -2060,11 +2184,23 @@ pub async fn execute_pipeline(
                             red_json = json;
                         }
                         RoleOutput::Reviewer(v) => {
-                            verdict = v.verdict;
-                            verdict_source = Some("reviewer".to_string());
+                            apply_reviewer_verdict(
+                                v.verdict,
+                                &mut verdict,
+                                &mut verdict_source,
+                                security_hold,
+                            );
                             reviewer_json = json;
                         }
-                        RoleOutput::SecurityAuditor(_) => {}
+                        RoleOutput::SecurityAuditor(v) => {
+                            apply_security_verdict(
+                                v.verdict,
+                                &mut verdict,
+                                &mut verdict_source,
+                                &mut security_hold,
+                            );
+                            security_json = json;
+                        }
                         _ => unreachable!("only Tester/Red/Reviewer/SecurityAuditor remain"),
                     }
                 }
@@ -2097,6 +2233,7 @@ pub async fn execute_pipeline(
                             &tester_json,
                             &red_json,
                             &reviewer_json,
+                            &security_json,
                             round,
                             &knowledge_str,
                             &task.project_path,
@@ -2163,6 +2300,7 @@ pub async fn execute_pipeline(
                             context_sources: isolation_sources_for(
                                 stage.role,
                                 config.red_blue.enabled,
+                                security_enabled,
                             ),
                             saw_other_reasoning: false,
                         });
@@ -2202,15 +2340,12 @@ pub async fn execute_pipeline(
                                 red_json = json;
                             }
                             RoleOutput::Reviewer(v) => {
-                                verdict = v.verdict;
-                                // `verdict_source` names who decided. This arm
-                                // never set it, so a genuine multi-agent run
-                                // produced a verdict with no provenance — and
-                                // `verdict_source` is exactly the field a
-                                // consumer reads to tell a review from a
-                                // default. It was silently `None` on the very
-                                // path that runs the Reviewer.
-                                verdict_source = Some("reviewer".to_string());
+                                apply_reviewer_verdict(
+                                    v.verdict,
+                                    &mut verdict,
+                                    &mut verdict_source,
+                                    security_hold,
+                                );
                                 reviewer_json = json.clone();
                                 review_feedback = match v.feedback {
                                     Some(f) => Some(serde_json::to_string_pretty(&f)?),
@@ -2232,13 +2367,20 @@ pub async fn execute_pipeline(
                                 }
                             }
                             RoleOutput::SecurityAuditor(v) => {
-                                // The security verdict is recorded as an artifact. By default it
-                                // does not gate the revision loop (the Reviewer owns the gate); an
-                                // explicit Rejected with no reviewer overrides to a revision.
-                                if matches!(v.verdict, Verdict::Rejected) && !has_reviewer {
-                                    verdict = Verdict::RevisionNeeded;
-                                    verdict_source = Some("security-auditor".to_string());
-                                }
+                                // A security rejection gates the run. It used to
+                                // apply only when there was *no* reviewer, on
+                                // the theory that the Reviewer owns the gate —
+                                // which meant that in the normal configuration,
+                                // with a Reviewer present, a SecurityAuditor
+                                // verdict of Rejected was computed, recorded,
+                                // and then had no effect on the run at all.
+                                apply_security_verdict(
+                                    v.verdict,
+                                    &mut verdict,
+                                    &mut verdict_source,
+                                    &mut security_hold,
+                                );
+                                security_json = json.clone();
                             }
                             RoleOutput::Planner(_) => unreachable!("planner is handled separately"),
                             // The Critic is filtered from loop iteration and
@@ -2254,7 +2396,12 @@ pub async fn execute_pipeline(
                     }
 
                     if has_reviewer {
-                        if matches!(verdict, Verdict::Approved | Verdict::Rejected) {
+                        // A security rejection keeps the loop going even if a
+                        // Reviewer went on to approve: the run is not done
+                        // until the finding is actually addressed.
+                        if !security_hold
+                            && matches!(verdict, Verdict::Approved | Verdict::Rejected)
+                        {
                             break;
                         }
                     } else {
@@ -2324,7 +2471,11 @@ pub async fn execute_pipeline(
             isolation.push(IsolationRecord {
                 role: AgentRole::Coder,
                 backend: config.docker.backend,
-                context_sources: isolation_sources_for(AgentRole::Coder, config.red_blue.enabled),
+                context_sources: isolation_sources_for(
+                    AgentRole::Coder,
+                    config.red_blue.enabled,
+                    security_enabled,
+                ),
                 saw_other_reasoning: false,
             });
             let m = metrics.last().unwrap_or_else(|| {
@@ -2402,6 +2553,7 @@ pub async fn execute_pipeline(
                     context_sources: isolation_sources_for(
                         AgentRole::Coder,
                         config.red_blue.enabled,
+                        security_enabled,
                     ),
                     saw_other_reasoning: false,
                 });
@@ -2470,6 +2622,7 @@ pub async fn execute_pipeline(
                 &tester_json,
                 &red_json,
                 &reviewer_json,
+                &security_json,
                 round,
                 &knowledge_str,
                 &task.project_path,
@@ -2486,6 +2639,7 @@ pub async fn execute_pipeline(
                 task_dir,
                 &mut state,
                 bare,
+                security_enabled,
                 steer_rx,
             )
             .await?;
@@ -2515,6 +2669,7 @@ pub async fn execute_pipeline(
                     &tester_json,
                     &red_json,
                     &reviewer_json,
+                    &security_json,
                     round,
                     &knowledge_str,
                     &task.project_path,
@@ -2531,11 +2686,17 @@ pub async fn execute_pipeline(
                     task_dir,
                     &mut state,
                     bare,
+                    security_enabled,
                     steer_rx,
                 )
                 .await?;
                 if let RoleOutput::Reviewer(v) = retry_output {
-                    verdict = v.verdict;
+                    apply_reviewer_verdict(
+                        v.verdict,
+                        &mut verdict,
+                        &mut verdict_source,
+                        security_hold,
+                    );
                     reviewer_json = retry_json;
                     // No further rounds exist post-loop, so the retried
                     // verdict's feedback has nowhere to go — the verdict
@@ -2552,6 +2713,7 @@ pub async fn execute_pipeline(
                     &tester_json,
                     &red_json,
                     &reviewer_json,
+                    &security_json,
                     round,
                     &knowledge_str,
                     &task.project_path,
@@ -2568,6 +2730,7 @@ pub async fn execute_pipeline(
                     task_dir,
                     &mut state,
                     bare,
+                    security_enabled,
                     steer_rx,
                 )
                 .await?;
@@ -3008,8 +3171,14 @@ mod tests {
         env.add_template("reviewer.md", &content).unwrap();
         let tmpl = env.get_template("reviewer.md").unwrap();
 
+        // Red and Security are named optional artifacts, not positional
+        // entries. Keying the template off `input_artifacts | length` meant a
+        // fourth artifact silently re-pointed `input_artifacts[3]` at whatever
+        // arrived next.
         let ctx3 = minijinja::context! {
             input_artifacts => vec!["spec", "diff", "tests"],
+            red_artifact => "",
+            security_artifact => "",
             project_knowledge => "",
             artifact_schema => "{}",
         };
@@ -3020,7 +3189,9 @@ mod tests {
         );
 
         let ctx4 = minijinja::context! {
-            input_artifacts => vec!["spec", "diff", "tests", "red-challenge"],
+            input_artifacts => vec!["spec", "diff", "tests"],
+            red_artifact => "red-challenge",
+            security_artifact => "",
             project_knowledge => "",
             artifact_schema => "{}",
         };
@@ -3028,6 +3199,161 @@ mod tests {
         assert!(
             rendered4.contains("RECONCILE THIS"),
             "Red block must appear when the Red artifact is present"
+        );
+    }
+
+    /// The security block is independent of the Red block. They used to share
+    /// one positional slot, so enabling the auditor displaced Red rather than
+    /// joining it — and a run with both silently lost one of the two reviews.
+    #[test]
+    fn reviewer_template_renders_red_and_security_independently() {
+        use minijinja::Environment;
+        let content = crate::load_asset("prompts/reviewer.md").unwrap();
+        let mut env = Environment::new();
+        env.add_template("reviewer.md", &content).unwrap();
+        let tmpl = env.get_template("reviewer.md").unwrap();
+
+        let ctx = minijinja::context! {
+            input_artifacts => vec!["spec", "diff", "tests"],
+            red_artifact => "RED-PAYLOAD",
+            security_artifact => "SECURITY-PAYLOAD",
+            project_knowledge => "",
+            artifact_schema => "{}",
+        };
+        let rendered = tmpl.render(ctx).unwrap();
+        assert!(rendered.contains("RED-PAYLOAD"), "red payload missing");
+        assert!(
+            rendered.contains("SECURITY-PAYLOAD"),
+            "security payload missing: a security audit that is not shown to \
+             the Reviewer cannot be reconciled by it"
+        );
+        assert!(rendered.contains("Independent Security Audit"));
+
+        // Security alone, with no Red pass.
+        let ctx_sec = minijinja::context! {
+            input_artifacts => vec!["spec", "diff", "tests"],
+            red_artifact => "",
+            security_artifact => "SECURITY-PAYLOAD",
+            project_knowledge => "",
+            artifact_schema => "{}",
+        };
+        let rendered_sec = tmpl.render(ctx_sec).unwrap();
+        assert!(rendered_sec.contains("SECURITY-PAYLOAD"));
+        assert!(!rendered_sec.contains("Adversarial Red Challenge"));
+    }
+
+    /// The auditor must be injected *ahead* of the Reviewer. It used to be
+    /// appended, so in every run with `[security] enabled` the Reviewer
+    /// finished before the auditor produced anything — the audit could never
+    /// reach the reviewing agent it exists to inform.
+    #[test]
+    fn security_auditor_is_ordered_before_the_reviewer() {
+        let mut c = NikiConfig::default();
+        c.security.enabled = true;
+        let s = resolve_stages(&c);
+        let sec = s
+            .iter()
+            .position(|x| x.role == AgentRole::SecurityAuditor)
+            .expect("security stage injected");
+        let rev = s
+            .iter()
+            .position(|x| x.role == AgentRole::Reviewer)
+            .expect("reviewer present");
+        assert!(
+            sec < rev,
+            "SecurityAuditor must run before Reviewer, got order {s:?}"
+        );
+    }
+
+    /// Same ordering guarantee when the auditor is injected by a High/Security
+    /// risk tier rather than by config.
+    #[test]
+    fn risk_injected_security_auditor_precedes_the_reviewer() {
+        fn risk_spec_for_auth_change() -> TaskSpec {
+            let json = serde_json::json!({
+                "summary": "Harden auth",
+                "approach": "Validate tokens",
+                "files_to_modify": [
+                    {"path": "src/auth.rs", "action": "modify", "description": "validate tokens"}
+                ],
+                "acceptance_criteria": ["tokens are validated"],
+                "constraints": [],
+                "estimated_complexity": "medium",
+                "uncertainties": null,
+            });
+            serde_json::from_value(json).expect("spec parses")
+        }
+        let mut c = NikiConfig::default();
+        c.security.enabled = false;
+        // Force the tier rather than trying to coax it out of the classifier's
+        // heuristics — the assertion is about *ordering*, not about what makes
+        // a task risky.
+        c.risk.mode = crate::config::types::RiskMode::High;
+        let base = resolve_stages(&c);
+        let risk = crate::risk::classify(&risk_spec_for_auth_change(), &c);
+        let s = apply_risk_stages(base, &risk, &c);
+        let sec = s
+            .iter()
+            .position(|x| x.role == AgentRole::SecurityAuditor)
+            .expect("risk tier injects a security stage");
+        let rev = s
+            .iter()
+            .position(|x| x.role == AgentRole::Reviewer)
+            .expect("reviewer present");
+        assert!(sec < rev, "risk-injected auditor must precede the reviewer");
+    }
+
+    /// A security rejection has to survive a later Reviewer approval.
+    #[test]
+    fn a_security_rejection_is_not_overturned_by_a_reviewer_approval() {
+        let (mut verdict, mut source) = (Verdict::Approved, None);
+        let mut hold = false;
+
+        apply_security_verdict(Verdict::Rejected, &mut verdict, &mut source, &mut hold);
+        assert!(hold, "a rejection must set the hold");
+        assert_eq!(verdict, Verdict::RevisionNeeded);
+        assert_eq!(source.as_deref(), Some("security-auditor"));
+
+        // The Reviewer then approves. The security rejection stands.
+        apply_reviewer_verdict(Verdict::Approved, &mut verdict, &mut source, hold);
+        assert_eq!(
+            verdict,
+            Verdict::RevisionNeeded,
+            "a security rejection must not be overturned by a later approval"
+        );
+        assert_eq!(
+            source.as_deref(),
+            Some("security-auditor"),
+            "the record must still show security as the reason"
+        );
+    }
+
+    #[test]
+    fn an_advisory_security_verdict_does_not_take_the_gate() {
+        let (mut verdict, mut source) = (Verdict::RevisionNeeded, None);
+        let mut hold = false;
+        apply_security_verdict(Verdict::Approved, &mut verdict, &mut source, &mut hold);
+        assert!(!hold, "an advisory pass must not hold the run");
+        assert_eq!(source, None, "an advisory pass names nobody as the source");
+
+        // And the Reviewer is then free to set the verdict normally.
+        apply_reviewer_verdict(Verdict::Approved, &mut verdict, &mut source, hold);
+        assert_eq!(verdict, Verdict::Approved);
+        assert_eq!(source.as_deref(), Some("reviewer"));
+    }
+
+    /// The isolation record is a description of the run. When the Reviewer is
+    /// given the security artifact, the table has to say so.
+    #[test]
+    fn isolation_record_names_the_security_auditor_when_it_ran() {
+        assert!(
+            !isolation_sources_for(AgentRole::Reviewer, false, false)
+                .contains(&AgentRole::SecurityAuditor)
+        );
+        assert!(
+            isolation_sources_for(AgentRole::Reviewer, false, true)
+                .contains(&AgentRole::SecurityAuditor),
+            "a Reviewer that saw the security audit must record it as a source"
         );
     }
 
@@ -3157,11 +3483,11 @@ mod tests {
         // Synthesizer reconciles concatenated coder diffs; the auditor sees
         // spec + coder diff only (never Tester/Reviewer/Red).
         assert_eq!(
-            isolation_sources_for(AgentRole::Synthesizer, false),
+            isolation_sources_for(AgentRole::Synthesizer, false, false),
             vec![AgentRole::Planner, AgentRole::Coder]
         );
         assert_eq!(
-            isolation_sources_for(AgentRole::SecurityAuditor, true),
+            isolation_sources_for(AgentRole::SecurityAuditor, true, false),
             vec![AgentRole::Planner, AgentRole::Coder]
         );
     }
