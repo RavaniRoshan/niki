@@ -26,7 +26,10 @@ pub struct NikiConfig {
     #[serde(default)]
     pub knowledge: KnowledgeConfig,
     /// Optional independent security audit pass (#4). When enabled, a
-    /// SecurityAuditor stage is injected after the Reviewer.
+    /// SecurityAuditor stage is injected *before* the Reviewer, so its
+    /// findings are something the Reviewer can reconcile. An explicit
+    /// `Rejected` from the auditor gates the run: it forces a revision round
+    /// and a later Reviewer approval cannot overturn it.
     #[serde(default)]
     pub security: SecurityConfig,
     /// Optional parallel-coder mode (#3). When enabled with `coder_count > 1`,
