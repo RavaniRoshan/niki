@@ -826,6 +826,10 @@ pub struct AppState {
     /// Whether terminal mouse capture is enabled (toggle with Ctrl+E so native
     /// drag-to-select works). Defaults to true.
     pub mouse_capture: bool,
+    /// Row selected within the current page, driven by Up/Down and j/k.
+    /// Clamped against the page's item count on every use, because the count
+    /// can shrink under a stale index (a filter, a refresh).
+    pub page_selection: usize,
     /// Conversation messages.
     pub messages: Vec<Message>,
     /// Current input state.
@@ -1097,6 +1101,7 @@ impl AppState {
             current_page: PageId::Run,
             chat_scroll: crate::display::scroll::ScrollState::follow_end(),
             mouse_capture: true,
+            page_selection: 0,
             messages: Vec::new(),
             input_state: InputState::new(),
             show_command_menu: false,

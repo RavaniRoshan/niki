@@ -257,12 +257,43 @@ pub static BINDING_TABLE: &[BindingDef] = &[
         action: None,
         defaults: &[("ctrl+r", CTRL, NONE)],
     },
+    // Navigation rows. `doc_nav_page` and `doc_nav_select` are the arrows and
+    // hjkl; they are handled by `display::nav` rather than matched through this
+    // table, but they are listed here so `?` documents them. A key the help
+    // overlay does not mention is a key nobody finds.
+    BindingDef {
+        id: "doc_nav_page",
+        description: "Previous / next page",
+        action: None,
+        defaults: &[("left", NONE, NONE)],
+    },
+    BindingDef {
+        id: "doc_nav_select",
+        description: "Move selection up / down",
+        action: None,
+        defaults: &[("up", NONE, NONE)],
+    },
+    BindingDef {
+        id: "doc_nav_goto",
+        description: "Jump to page by number",
+        action: None,
+        defaults: &[("1", NONE, NONE)],
+    },
+    BindingDef {
+        id: "doc_quit",
+        description: "Quit (cancels a running stage first)",
+        action: None,
+        defaults: &[("q", NONE, NONE)],
+    },
 ];
 
 /// Documentary rows whose label differs from the combo display.
 fn doc_label(id: &str, combos: &[KeyCombo]) -> String {
     match id {
         "doc_history" => "↑ / ↓".to_string(),
+        "doc_nav_page" => "← / →  ·  h / l  ·  [ / ]".to_string(),
+        "doc_nav_select" => "↑ / ↓  ·  j / k".to_string(),
+        "doc_nav_goto" => "1 – 9".to_string(),
         "doc_line" => "Ctrl+A / E".to_string(),
         "doc_kill" => "Ctrl+W / U / K".to_string(),
         "doc_prefix" => "@ / / / !".to_string(),
