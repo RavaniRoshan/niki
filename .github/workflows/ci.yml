@@ -89,7 +89,12 @@ jobs:
       - name: Check manifest download URLs resolve
         run: |
           set -euo pipefail
-          urls=$(grep -rhoE 'https://github\.com/[^ "]*\.tar\.gz' homebrew/ ; grep -rhoE 'https://github\.com/[^ "]*\.zip' scoop/ winget/)
+          # Both archive extensions dist actually publishes. This grepped for
+          # `.tar.gz` alone, which no manifest has contained since the
+          # install-path fix moved Homebrew to `.tar.xz` — so the job had been
+          # checking only the Windows .zip URLs and reporting success while
+          # four of the six release URLs went unverified.
+          urls=$(grep -rhoE 'https://github\.com/[^ "]*\.(tar\.gz|tar\.xz|zip)' homebrew/ scoop/ winget/)
           echo "$urls"
           fail=0
           for u in $urls; do
@@ -99,8 +104,23 @@ jobs:
             esac
             if curl -fIsS --max-time 30 "$u" -o /dev/null; then
               echo "OK   $u"
+              continue
+            fi
+            # A 404 on an asset is only a manifest bug if the release it names
+            # actually exists. A release-preparation branch legitimately points
+            # at a version whose tag has not been pushed yet, and treating that
+            # as a dead link makes every version bump fail CI until the tag
+            # lands — which is backwards.
+            #
+            # So distinguish the two: if the release tag is published, a
+            # missing asset is a real failure and stays one. If the tag does
+            # not exist, the URL is not wrong yet, just early.
+            tag=$(echo "$u" | sed -n 's|.*/releases/download/\([^/]*\)/.*|\1|p')
+            if [ -n "$tag" ] && curl -fIsS --max-time 30 \
+                 "https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag" -o /dev/null; then
+              echo "DEAD $u  (release $tag exists but the asset does not)"; fail=1
             else
-              echo "DEAD $u"; fail=1
+              echo "PENDING $u  (release $tag is not published yet)"
             fi
           done
           exit $fail
