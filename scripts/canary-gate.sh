@@ -66,7 +66,7 @@ info "canary gate: preflight ok (${avail} MiB free, tree clean)"
 
 # ── Run ───────────────────────────────────────────────────────────────────
 TMP_OUT="$(mktemp)"
-trap 'rm -f "$TMP_OUT"; git checkout -- . 2>/dev/null' EXIT
+trap 'rm -f "$TMP_OUT" "$OUTCOMES"; git checkout -- . 2>/dev/null' EXIT
 
 python3 - "$CANARIES" > "$TMP_OUT" <<'PY'
 import json, sys, tomllib
@@ -93,7 +93,8 @@ print(json.dumps([
 ]))
 PY
 
-records="[]"
+OUTCOMES="$(mktemp)"
+: > "$OUTCOMES"
 
 while IFS=$'\t' read -r id file patch replace_with probe; do
   [ -n "$id" ] || continue
@@ -128,25 +129,12 @@ PY
     green "  killed"
   fi
 
-  # One Python call does the whole lookup. The previous version shelled out
-  # five times per canary and, worse, never carried `known_surviving` or
-  # `equivalent` into the report -- so the summary classified two declared
-  # blind spots as unexpected.
-  records=$(python3 -c "
-import json,sys
-recs, meta = json.loads(sys.argv[1]), json.loads(sys.argv[2])
-c = next(c for c in meta if c['id'] == sys.argv[3])
-recs.append({
-    'id': c['id'], 'category': c['category'], 'invariant': c['invariant'],
-    'split': c.get('split','gate'), 'probe': c.get('probe','--lib'),
-    'outcome': sys.argv[4],
-    'expect_kill': c.get('expect_kill', True),
-    'known_surviving': c.get('known_surviving', False),
-    'equivalent': c.get('equivalent', False),
-})
-print(json.dumps(recs))
-" "$records" "$(cat "$TMP_OUT")" "$id" "$outcome")
-
+  # Record the outcome as a TSV line. Earlier versions carried the whole
+  # accumulating record as a JSON string in a shell variable and re-parsed it
+  # with Python on every canary. The quoting broke silently: the assignment
+  # went empty, and results.json reported zero canaries for a run that had
+  # just printed eight. A TSV line cannot be mangled that way.
+  printf '%s\t%s\n' "$id" "$outcome" >> "$OUTCOMES"
   git checkout -- .
 done < <(python3 -c "
 import json,sys
@@ -163,29 +151,49 @@ if [ "$START_TREE" != "$END_TREE" ]; then
 fi
 
 mkdir -p "$(dirname "$RESULTS")"
-# Totals are derived from the canary list, not from shell counters carried
-# through the loop. The counters version wrote zeros: a report claiming
-# 0 canaries ran while the run above it printed 8 is exactly the kind of
-# self-contradiction this harness exists to catch.
+# Totals and per-canary metadata are read from the corpus and the outcomes
+# file. Nothing is carried across the loop in a shell variable, so the report
+# cannot contradict the run that produced it.
 python3 -c "
-import json,sys
-canaries = json.loads(sys.argv[1])
-holdout = [c for c in canaries if c.get('split') == 'holdout' and not c.get('equivalent')]
-print(json.dumps({
-  'schema': 1,
-  'canaries': canaries,
-  'totals': {
-    'total': len(canaries),
-    'killed': sum(1 for c in canaries if c['outcome'] == 'killed'),
-    'survived': sum(1 for c in canaries if c['outcome'] == 'survived'),
-    'holdout_total': len(holdout),
-    'holdout_killed': sum(1 for c in holdout if c['outcome'] == 'killed'),
-  },
-}, indent=2))
-" "$records" > "$RESULTS"
+import json, sys, tomllib
 
-echo
-info "========================================"
+corpus = {c['id']: c for c in tomllib.load(open(sys.argv[1], 'rb'))['canary']}
+outcomes = {}
+for line in open(sys.argv[2]):
+    line = line.strip()
+    if line:
+        cid, outcome = line.split('\t', 1)
+        outcomes[cid] = outcome
+
+missing = [cid for cid in corpus if cid not in outcomes]
+if missing:
+    sys.exit('canaries declared in the corpus never ran: ' + ', '.join(sorted(missing)))
+
+canaries = []
+for cid, outcome in outcomes.items():
+    c = corpus[cid]
+    canaries.append({
+        'id': cid, 'category': c['category'], 'invariant': c['invariant'],
+        'split': c.get('split', 'gate'), 'probe': c.get('probe', '--lib'),
+        'outcome': outcome, 'expect_kill': c.get('expect_kill', True),
+        'known_surviving': c.get('known_surviving', False),
+        'equivalent': c.get('equivalent', False),
+    })
+
+holdout = [c for c in canaries if c['split'] == 'holdout' and not c['equivalent']]
+print(json.dumps({
+    'schema': 1,
+    'canaries': canaries,
+    'totals': {
+        'total': len(canaries),
+        'killed': sum(1 for c in canaries if c['outcome'] == 'killed'),
+        'survived': sum(1 for c in canaries if c['outcome'] == 'survived'),
+        'holdout_total': len(holdout),
+        'holdout_killed': sum(1 for c in holdout if c['outcome'] == 'killed'),
+    },
+}, indent=2))
+" "$CANARIES" "$OUTCOMES" > "$RESULTS" || exit 8
+
 python3 -c "
 import json,sys
 t = json.load(open(sys.argv[1]))['totals']
