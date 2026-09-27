@@ -122,11 +122,9 @@ PY
   # shellcheck disable=SC2086
   if timeout 900 cargo test $probe -j 2 -- --test-threads=1 > /tmp/canary-run.log 2>&1; then
     outcome="survived"
-    survived=$((survived + 1))
     red "  SURVIVED — the suite passed with the defect injected"
   else
     outcome="killed"
-    killed=$((killed + 1))
     green "  killed"
   fi
 
