@@ -1342,10 +1342,18 @@ pub fn run_chat(
                     continue;
                 }
                 if state.show_command_palette {
-                    if command_palette.handle_key(key, &mut state) {
+                    let closed = command_palette.handle_key(key, &mut state);
+                    if closed {
                         state.show_command_palette = false;
-                        needs_render = true;
                     }
+                    // `run_tui` mirrors the palette's cursor into
+                    // `state.command_selected`; without it the status bar keeps
+                    // naming the first command while the highlight is on the
+                    // fourth. The highlight itself was fine — that reads the
+                    // palette's own cursor — so this was a status bar lying
+                    // about what was selected.
+                    state.command_selected = command_palette.cursor.selected;
+                    needs_render = true;
                     continue;
                 }
 
