@@ -628,6 +628,55 @@ fn run_tui(
                                 state.current_page = page;
                                 engine.mark_dirty();
                             }
+                        } else if let Some(intent) = crate::display::nav::intent_from_key(
+                            &key,
+                            crate::display::nav::text_focus_active(&state),
+                        ) {
+                            // Arrow / hjkl / digit navigation. Placed after the
+                            // page-specific router above so a page's own keys
+                            // still win, and gated on text focus so the composer
+                            // keeps its arrows.
+                            use crate::display::nav::{Dir, NavIntent};
+                            match intent {
+                                NavIntent::Page(Dir::Next) => {
+                                    state.current_page =
+                                        crate::display::nav::next_page(state.current_page);
+                                    engine.mark_dirty();
+                                }
+                                NavIntent::Page(Dir::Prev) => {
+                                    state.current_page =
+                                        crate::display::nav::prev_page(state.current_page);
+                                    engine.mark_dirty();
+                                }
+                                NavIntent::Select(dir) => {
+                                    let len = crate::display::nav::page_item_count(&state);
+                                    let next = crate::display::nav::step_index(
+                                        len,
+                                        state.page_selection,
+                                        dir,
+                                    );
+                                    if next != state.page_selection {
+                                        state.page_selection = next;
+                                        engine.mark_dirty();
+                                    }
+                                }
+                                NavIntent::GotoPage(n) => {
+                                    if let Some(page) = crate::display::nav::goto_page(n) {
+                                        state.current_page = page;
+                                        engine.mark_dirty();
+                                    }
+                                }
+                                NavIntent::Quit => {
+                                    // Mirror the Ctrl+C exit path: signal the
+                                    // run to stop first, so quitting does not
+                                    // leave a stage running.
+                                    if let Some(c) = state.cancel.clone() {
+                                        c.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    }
+                                    engine.mark_dirty();
+                                    break;
+                                }
+                            }
                         } else if state.keybindings.resolve(&key) == Some(GlobalAction::GotoFleet) {
                             // 'g' jumps to the Fleet grid from any page.
                             state.current_page = PageId::Fleet;
