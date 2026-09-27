@@ -4,7 +4,7 @@ use crate::orchestrator::pipeline::{PipelineResult, Task, execute_pipeline};
 use crate::orchestrator::state::{TaskRecord, TaskStatus};
 use crate::sandbox::SandboxBackend;
 use crate::sandbox::docker::ActiveContainers;
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use bollard::Docker;
 use clap::Args;
 use std::env;
@@ -260,6 +260,119 @@ fn write_plan_md(task_dir: &std::path::Path, task: &Task, result: &PipelineResul
     if let Err(e) = crate::util::write_restricted(&task_dir.join("plan.md"), out) {
         eprintln!("Warning: could not write plan.md: {}", e);
     }
+}
+
+/// Cross-check the three things a run publishes about itself.
+///
+/// The pipeline result, `task.json`, and `manifest.json` are produced by
+/// different code paths at different moments. Nothing forced them to agree, so
+/// a run could finish with a `task.json` recording a different cost than the
+/// report rendered, or a manifest naming a branch the record says was never
+/// created. Every one of those is a claim a user would act on.
+///
+/// This is deliberately a hard error rather than a warning: the artefacts are
+/// already on disk by the time it runs, so warning would mean shipping a run
+/// that is known to be self-contradictory and telling the user so in a log
+/// line they may never read.
+fn reconcile_result_record_manifest(
+    result: &crate::orchestrator::pipeline::PipelineResult,
+    record: &TaskRecord,
+    task_dir: &std::path::Path,
+) -> Result<()> {
+    use crate::artifacts::types::RunOutcome;
+
+    // 1. The persisted record must carry the same verdict, and the same
+    //    provenance, as the result it was derived from.
+    let recorded_verdict = record.verdict.as_deref().unwrap_or("");
+    let expected_verdict = format!("{:?}", result.verdict);
+    anyhow::ensure!(
+        recorded_verdict == expected_verdict,
+        "task.json records verdict {recorded_verdict:?} but the run produced \
+         {expected_verdict:?} — the stored run and this process disagree"
+    );
+
+    let recorded_outcome = record.outcome.as_ref().ok_or_else(|| {
+        anyhow!(
+            "task.json records no outcome, so nothing says \
+             whether this run was independently reviewed"
+        )
+    })?;
+    let expected_outcome = serde_json::to_value(&result.outcome)?;
+    anyhow::ensure!(
+        *recorded_outcome == expected_outcome,
+        "task.json records outcome {recorded_outcome} but the run produced \
+         {expected_outcome}"
+    );
+
+    // 2. An approval must be earned, in the record as much as in the result.
+    //    Defense in depth: `RunOutcome` already forbids it structurally, and
+    //    this catches a record assembled by a path that never went through
+    //    the type.
+    if record
+        .outcome
+        .as_ref()
+        .and_then(|o| o.get("outcome"))
+        .and_then(|o| o.as_str())
+        == Some("reviewed")
+        && expected_verdict == "Approved"
+    {
+        let by = recorded_outcome
+            .get("by")
+            .and_then(|b| b.as_str())
+            .unwrap_or_default();
+        anyhow::ensure!(
+            !by.is_empty(),
+            "task.json reports a reviewed approval with no reviewer named"
+        );
+    }
+
+    // 3. Costs must agree. The record accumulates from the same metrics, so a
+    //    mismatch means one of the two is reading a different slice.
+    let expected_cost: f64 = result.metrics.iter().map(|m| m.cost_usd).sum();
+    let recorded_cost = record.total_cost_usd;
+    anyhow::ensure!(
+        (recorded_cost - expected_cost).abs() < 1e-6,
+        "task.json records ${recorded_cost:.6} but the run's stages cost \
+         ${expected_cost:.6}"
+    );
+
+    // 4. The manifest, when it exists, must not name a branch the run did not
+    //    produce, or cost the run never incurred.
+    // A manifest that exists but cannot be parsed is itself a contradiction —
+    // silently skipping the comparison on a read error would let exactly the
+    // runs with the most broken provenance through unchecked.
+    let manifest_path = task_dir.join("manifest.json");
+    if manifest_path.is_file() {
+        let manifest = crate::orchestrator::provenance::read_manifest(task_dir)
+            .with_context(|| format!("could not read {}", manifest_path.display()))?;
+        if let Some(branch) = &manifest.branch {
+            anyhow::ensure!(
+                record.branch.as_deref() == Some(branch.as_str()),
+                "manifest.json names branch {branch} but task.json records {:?}",
+                record.branch
+            );
+        }
+        if !manifest.dry_run {
+            anyhow::ensure!(
+                (manifest.total_cost_usd - expected_cost).abs() < 1e-6,
+                "manifest.json records ${:.6} but the run's stages cost ${expected_cost:.6}",
+                manifest.total_cost_usd
+            );
+        }
+    }
+
+    // 5. A run whose outcome is a failure must not be recorded as completed.
+    if matches!(
+        result.outcome,
+        RunOutcome::Failed { .. } | RunOutcome::Cancelled
+    ) {
+        anyhow::ensure!(
+            record.status != TaskStatus::Completed,
+            "task.json reports a completed run whose outcome is {:?}",
+            result.outcome
+        );
+    }
+    Ok(())
 }
 
 /// Machine-readable result envelope for `--output-format json` (CI/scripts).
@@ -1021,17 +1134,22 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     record.verdict = Some(format!("{:?}", result.verdict));
     // Persist the outcome, not just the bare verdict. Without this the record
     // cannot distinguish "a reviewer approved" from "nothing reviewed it" —
-    // which is the whole defect.
+    // which is the whole defect. `verdict_source` also names the producer: the
+    // Solo fast path approves its own patch, and "Approved" on its own reads
+    // as an independent check.
     record.verdict_source = result.verdict_source.clone();
-    record.outcome = Some(serde_json::to_value(&result.outcome).unwrap_or_default());
-    // Record who produced the verdict. The Solo fast path approves its own
-    // patch, and "Approved" on its own reads as an independent check.
-    record.verdict_source = result.verdict_source.clone();
+    record.outcome = serde_json::to_value(&result.outcome).ok();
     record.revision_rounds = result.revision_rounds;
     record.add_metrics(&result.metrics);
-    if let Err(e) = record.save_to_disk(&task_dir) {
-        eprintln!("Warning: could not save final task state: {}", e);
-    }
+    // The *final* state write, and it used to warn. A run whose closing record
+    // cannot be written ends with a report describing a run the store has no
+    // record of — the report is the artefact a human reads.
+    record.save_to_disk(&task_dir).with_context(|| {
+        format!(
+            "could not save the final task state to {}",
+            task_dir.join("task.json").display()
+        )
+    })?;
 
     // Provenance completion: stamp the result branch, its commit, artifact
     // roles, and summed cost onto manifest.json. Best-effort (warns, never
@@ -1051,6 +1169,15 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
             total_cost,
         );
     }
+
+    // Reconcile the three artefacts a user can consult before believing
+    // anything this run produced. The in-memory result is the source of truth;
+    // `task.json` and `manifest.json` are written independently, and the
+    // markdown report is rendered separately. A disagreement between them is
+    // not cosmetic — it is the run telling two different stories about
+    // whether the work was reviewed and what it cost — so it is caught here
+    // rather than discovered by whoever reads the report next.
+    reconcile_result_record_manifest(&result, &record, &task_dir)?;
 
     // Post-run reflection: derive durable learnings (verification failures,
     // review corrections, security fixes) into learnings.jsonl. Gated on
@@ -1134,4 +1261,274 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     display.finish_tui();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod reconcile_tests {
+    use super::*;
+    use crate::artifacts::types::{RunOutcome, Verdict};
+    use crate::orchestrator::pipeline::PipelineResult;
+    use crate::orchestrator::state::{PipelineState, TaskStatus};
+    use uuid::Uuid;
+
+    fn result_with(outcome: RunOutcome, verdict: Verdict, cost: f64) -> PipelineResult {
+        let id = Uuid::new_v4();
+        let metrics = vec![crate::orchestrator::state::StageMetric {
+            role: crate::artifacts::types::AgentRole::Planner,
+            provider: "mock".into(),
+            model: "m".into(),
+            input_tokens: 1,
+            output_tokens: 1,
+            cached_input_tokens: 0,
+            reasoning_tokens: 0,
+            latency_ms: 0,
+            cost_usd: cost,
+            retry_count: 0,
+            ttft_ms: 0,
+        }];
+        PipelineResult {
+            task_id: id,
+            context_budget: PipelineState::new(id).context_budget,
+            state: PipelineState::new(id),
+            final_diff: String::new(),
+            diff_guardwarn: None,
+            outcome,
+            verdict,
+            verdict_source: Some("reviewer".into()),
+            revision_rounds: 0,
+            artifacts: vec![],
+            metrics,
+            safety_proof: None,
+            isolation: vec![],
+            topology: crate::config::types::TopologyMode::MultiAgent,
+            topology_reason: String::new(),
+            risk_level: "low".into(),
+            risk_rationale: String::new(),
+            test_execution: None,
+        }
+    }
+
+    /// Build the record the way the run does, then let a test corrupt one field.
+    fn record_from(result: &PipelineResult) -> TaskRecord {
+        let mut rec = TaskRecord::new(result.task_id, "t");
+        rec.verdict = Some(format!("{:?}", result.verdict));
+        rec.verdict_source = result.verdict_source.clone();
+        rec.outcome = serde_json::to_value(&result.outcome).ok();
+        rec.add_metrics(&result.metrics);
+        rec.status = TaskStatus::Completed;
+        rec
+    }
+
+    fn dir() -> tempfile::TempDir {
+        tempfile::TempDir::new().unwrap()
+    }
+
+    /// Round-trip a real `RunManifest` through the crate's own serde
+    /// definitions, so a test fixture cannot drift from the struct.
+    fn write_manifest_for_test(
+        task_dir: &std::path::Path,
+        run_id: Uuid,
+        branch: Option<&str>,
+        total_cost_usd: f64,
+    ) {
+        use crate::orchestrator::provenance::{
+            ConfigFingerprint, RepoIdentity, RunManifest, SnapshotRef, ToolchainVersions,
+        };
+        let manifest = RunManifest {
+            run_id,
+            agent_roles: vec![],
+            created_at: chrono::Utc::now(),
+            repo_identity: RepoIdentity {
+                commit_sha: None,
+                branch: None,
+                remote_url: None,
+                dirty: false,
+                workdir_fingerprint: None,
+            },
+            active_snapshot: SnapshotRef {
+                commit_sha: None,
+                kind: "nongit".into(),
+                snapshot_id: "niki-task-test".into(),
+            },
+            config_fingerprint: ConfigFingerprint {
+                path: None,
+                content_hash: None,
+            },
+            toolchain: ToolchainVersions {
+                niki: "test".into(),
+                rustc: None,
+            },
+            branch: branch.map(|b| b.to_string()),
+            commit_sha: None,
+            artifact_roles: vec![],
+            total_cost_usd,
+            dry_run: false,
+        };
+        std::fs::write(
+            task_dir.join("manifest.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_consistent_run_reconciles() {
+        let result = result_with(
+            RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "reviewer".into(),
+            },
+            Verdict::Approved,
+            0.25,
+        );
+        let record = record_from(&result);
+        let d = dir();
+        reconcile_result_record_manifest(&result, &record, d.path()).unwrap();
+    }
+
+    #[test]
+    fn a_record_carrying_a_different_verdict_is_caught() {
+        let result = result_with(
+            RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "reviewer".into(),
+            },
+            Verdict::Approved,
+            0.25,
+        );
+        let mut record = record_from(&result);
+        record.verdict = Some("RevisionNeeded".into());
+        let d = dir();
+        let err = reconcile_result_record_manifest(&result, &record, d.path())
+            .expect_err("a stored verdict that differs from the run must not pass");
+        assert!(err.to_string().contains("disagree"), "{err}");
+    }
+
+    #[test]
+    fn a_record_with_no_outcome_is_caught() {
+        let result = result_with(
+            RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "reviewer".into(),
+            },
+            Verdict::Approved,
+            0.25,
+        );
+        let mut record = record_from(&result);
+        record.outcome = None;
+        let d = dir();
+        let err = reconcile_result_record_manifest(&result, &record, d.path())
+            .expect_err("a record with no outcome cannot say whether it was reviewed");
+        assert!(err.to_string().contains("no outcome"), "{err}");
+    }
+
+    #[test]
+    fn a_reviewed_approval_with_no_reviewer_named_is_caught() {
+        let result = result_with(
+            RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: String::new(),
+            },
+            Verdict::Approved,
+            0.25,
+        );
+        let record = record_from(&result);
+        let d = dir();
+        let err = reconcile_result_record_manifest(&result, &record, d.path())
+            .expect_err("an approval with no reviewer is exactly the fabricated pass");
+        assert!(err.to_string().contains("no reviewer named"), "{err}");
+    }
+
+    #[test]
+    fn a_record_whose_cost_disagrees_is_caught() {
+        let result = result_with(
+            RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "reviewer".into(),
+            },
+            Verdict::Approved,
+            0.25,
+        );
+        let mut record = record_from(&result);
+        record.total_cost_usd = 0.01;
+        let d = dir();
+        let err = reconcile_result_record_manifest(&result, &record, d.path())
+            .expect_err("a cost that does not match the stages must not pass");
+        assert!(err.to_string().contains("cost"), "{err}");
+    }
+
+    #[test]
+    fn a_failed_outcome_recorded_as_completed_is_caught() {
+        let result = result_with(
+            RunOutcome::Failed {
+                error: "boom".into(),
+            },
+            Verdict::RevisionNeeded,
+            0.0,
+        );
+        let mut record = record_from(&result);
+        record.status = TaskStatus::Completed;
+        let d = dir();
+        let err = reconcile_result_record_manifest(&result, &record, d.path())
+            .expect_err("a failed run must not be stored as completed");
+        assert!(err.to_string().contains("completed"), "{err}");
+    }
+
+    #[test]
+    fn a_manifest_naming_a_branch_the_record_does_not_have_is_caught() {
+        let result = result_with(
+            RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "reviewer".into(),
+            },
+            Verdict::Approved,
+            0.25,
+        );
+        let mut record = record_from(&result);
+        record.branch = None;
+        let d = dir();
+        // Written through the crate's own serialiser, so this test exercises
+        // the comparison rather than my ability to guess the field list.
+        write_manifest_for_test(d.path(), result.task_id, Some("niki/some-branch"), 0.25);
+        let err = reconcile_result_record_manifest(&result, &record, d.path())
+            .expect_err("a manifest naming a branch the record denies must not pass");
+        assert!(err.to_string().contains("niki/some-branch"), "{err}");
+    }
+
+    #[test]
+    fn a_manifest_naming_a_different_cost_is_caught() {
+        let result = result_with(
+            RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "reviewer".into(),
+            },
+            Verdict::Approved,
+            0.25,
+        );
+        let mut record = record_from(&result);
+        record.branch = Some("niki/abc".into());
+        let d = dir();
+        write_manifest_for_test(d.path(), result.task_id, Some("niki/abc"), 9.99);
+        let err = reconcile_result_record_manifest(&result, &record, d.path())
+            .expect_err("a manifest cost the run never incurred must not pass");
+        assert!(err.to_string().contains("9.99"), "{err}");
+    }
+
+    #[test]
+    fn a_manifest_that_cannot_be_parsed_is_not_silently_skipped() {
+        let result = result_with(
+            RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "reviewer".into(),
+            },
+            Verdict::Approved,
+            0.25,
+        );
+        let record = record_from(&result);
+        let d = dir();
+        std::fs::write(d.path().join("manifest.json"), "{ not json").unwrap();
+        let err = reconcile_result_record_manifest(&result, &record, d.path())
+            .expect_err("a corrupt manifest must be reported, not skipped");
+        assert!(err.to_string().contains("manifest.json"), "{err:#}");
+    }
 }
