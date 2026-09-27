@@ -12,10 +12,10 @@ f2605d3f9310ad6b  prompts/coder.md
 430fc3bb13c3e158  prompts/solo.md
 45702b977687d4a6  prompts/synthesizer.md
 a092c493e44b4f59  prompts/tester.md
-a73055a252a5e0f4  schemas/code_diff.schema.json
+396862b356691ea7  schemas/code_diff.schema.json
 ffce8f5bbf2ff332  schemas/critique.schema.json
 bc406f90df3a6551  schemas/red_challenge.schema.json
-e8d7eca06a29963e  schemas/review_verdict.schema.json
+b44e6a8176e0a39b  schemas/review_verdict.schema.json
 ceee51684139f0b5  schemas/security_audit.schema.json
 87117303792b2590  schemas/synthesis.schema.json
 17b54e1d7984d905  schemas/task_spec.schema.json

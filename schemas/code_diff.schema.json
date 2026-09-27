@@ -9,38 +9,69 @@
         "properties": {
           "search": {
             "type": "string",
-            "description": "Verbatim text copied EXACTLY from the Current File Contents (whitespace and indentation included, 3-5+ lines so the match is unique). Never regex, anchors (^ $), ellipsis, line numbers, or paraphrase. To insert at the top of a file, use its first 3-5 actual lines here and put the new lines before them in 'replace'."
+            "description": "Verbatim text copied EXACTLY from the Current File Contents (whitespace and indentation included, 3-5+ lines so the match is unique). Never regex, anchors (^ $), ellipsis, line numbers, or paraphrase. To insert at the top of a file, use its first 3-5 actual lines here and put the new lines before them in 'replace'.",
+            "minLength": 1
           },
           "replace": {
             "type": "string",
-            "description": "Replacement text that takes the place of 'search' verbatim."
+            "description": "Replacement text that takes the place of 'search' verbatim.",
+            "minLength": 1
           }
         },
-        "required": ["search", "replace"]
-      }
+        "required": [
+          "search",
+          "replace"
+        ]
+      },
+      "minItems": 1,
+      "description": "At least one edit. An empty edits array with an empty files_changed is a no-op, and a no-op is not an implementation."
     },
     "files_changed": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "path": { "type": "string" },
+          "path": {
+            "type": "string"
+          },
           "action": {
             "type": "string",
-            "enum": ["create", "modify", "delete"]
+            "enum": [
+              "create",
+              "modify",
+              "delete"
+            ]
           },
           "language": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
-        "required": ["path", "action"]
-      }
+        "required": [
+          "path",
+          "action"
+        ]
+      },
+      "minItems": 1
     },
-    "implementation_notes": { "type": "string" },
-    "spec_adherence": { "type": "string" },
+    "implementation_notes": {
+      "type": "string",
+      "minLength": 1
+    },
+    "spec_adherence": {
+      "type": "string",
+      "minLength": 1
+    },
     "uncertainties": {
-      "type": ["array", "null"],
-      "items": { "type": "string" },
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
       "description": "Risks, open questions, or assumptions made under time pressure."
     }
   },
