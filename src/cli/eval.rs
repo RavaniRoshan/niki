@@ -217,6 +217,41 @@ pub async fn handle(args: &EvalArgs) -> Result<()> {
         std::process::exit(1);
     }
 
+    // And the other direction. A recall-only gate cannot distinguish a precise
+    // reviewer from one that flags everything, because flagging everything is
+    // perfect recall. The negative controls are what give the eval a precision
+    // denominator; without checking them they are decoration.
+    if report.n_negative_controls == 0 {
+        eprintln!(
+            "ERROR: the dataset has no negative controls, so precision is unmeasured. A reviewer \
+             that flags every change would score 100%."
+        );
+        std::process::exit(1);
+    }
+    if report.niki_false_positives > 0 {
+        let ids: Vec<&str> = report
+            .cases
+            .iter()
+            .filter(|c| !c.expected_caught && c.niki.caught)
+            .map(|c| c.case_id.as_str())
+            .collect();
+        eprintln!(
+            "ERROR: {} false positive(s) on clean changes ({}) — the reviewer flagged \
+             correct code",
+            report.niki_false_positives,
+            ids.join(", ")
+        );
+        std::process::exit(1);
+    }
+
+    eprintln!(
+        "recall {:.0}% on {} seeded defects · precision {:.0}% false positives on {} clean changes",
+        report.niki_catch_rate * 100.0,
+        report.cases.iter().filter(|c| c.expected_caught).count(),
+        report.niki_false_positive_rate * 100.0,
+        report.n_negative_controls
+    );
+
     Ok(())
 }
 

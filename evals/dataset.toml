@@ -7,6 +7,20 @@
 
 name = "seeded-defect-comprehensive"
 
+# ── Negative controls ───────────────────────────────────────────────────
+#
+# Every case below is `expected_caught = false`: the change is correct and a
+# reviewer that flags it is producing a false positive.
+#
+# These exist because the dataset was 23 cases, all `expected_caught = true`.
+# With no negative denominator, a reviewer that flagged *everything* scored
+# 100%, and the headline "false approval reduction" metric could not
+# distinguish a precise reviewer from a trigger-happy one. Recall was
+# measurable; precision was not measurable at all.
+#
+# The report now publishes both rates, and the gate fails when a reviewer
+# flags a clean change.
+
 # ── Security defects ─────────────────────────────────────────────────
 
 [[cases]]
@@ -290,3 +304,51 @@ label = "Negative index causing out-of-bounds access"
 category = "boundary"
 keyword = "negative"
 expected_caught = true
+
+[[cases]]
+id = "clean-string-helper"
+description = "Add a helper that trims and lowercases a display name"
+replay_dir = "fixtures/clean-string-helper"
+difficulty = "easy"
+
+[cases.seeded_defect]
+label = "Routine string normalisation with no defect to find"
+category = "style"
+keyword = "rename"
+expected_caught = false
+
+[[cases]]
+id = "clean-typed-config"
+description = "Add a typed config struct with defaults and validation"
+replay_dir = "fixtures/clean-typed-config"
+difficulty = "easy"
+
+[cases.seeded_defect]
+label = "A plain data type with a validating constructor"
+category = "logic"
+keyword = "defaults"
+expected_caught = false
+
+[[cases]]
+id = "clean-paginated-query"
+description = "Add a paginated list endpoint returning page metadata"
+replay_dir = "fixtures/clean-paginated-query"
+difficulty = "medium"
+
+[cases.seeded_defect]
+label = "Correct offset/limit pagination with bounds checks"
+category = "boundary"
+keyword = "limit"
+expected_caught = false
+
+[[cases]]
+id = "clean-error-enum"
+description = "Add a typed error enum mapping domain failures to messages"
+replay_dir = "fixtures/clean-error-enum"
+difficulty = "easy"
+
+[cases.seeded_defect]
+label = "Exhaustive error mapping with no unreachable branch"
+category = "logic"
+keyword = "variant"
+expected_caught = false

@@ -284,6 +284,23 @@ pub struct EvalReport {
     /// Count of expected-caught defects the baseline run failed to surface
     /// (i.e. the baseline's reviewer false-approvals).
     pub baseline_false_approvals: u32,
+    /// Number of *negative control* cases: changes with no seeded defect,
+    /// which a correct reviewer must not flag.
+    ///
+    /// The dataset was 23 cases, every one `expected_caught = true`. With no
+    /// negative denominator a reviewer that flagged everything scored 100%,
+    /// so the headline reduction metric could not tell a precise reviewer
+    /// from a trigger-happy one. Recall was measurable; precision was not
+    /// measurable at all.
+    pub n_negative_controls: u32,
+    /// Negative controls the NIKI run wrongly flagged.
+    pub niki_false_positives: u32,
+    /// Negative controls the baseline run wrongly flagged.
+    pub baseline_false_positives: u32,
+    /// `niki_false_positives / n_negative_controls`. 0.0 when there are no
+    /// negative controls, which is itself worth seeing: it means precision is
+    /// unmeasured rather than perfect.
+    pub niki_false_positive_rate: f64,
     /// `(baseline_fa - niki_fa) / baseline_fa * 100` — the headline metric.
     pub false_approval_reduction_pct: f64,
     /// Per-category breakdown.
@@ -429,13 +446,21 @@ pub fn score_result(result: &PipelineResult, defect: &SeededDefect) -> RunOutcom
                     .iter()
                     .any(|i| i.category == cat && kw_match(&i.description, kw))
             });
-        // Fuzzy recall: keyword appearing in the overall assessment still counts.
-        let assess_hit = kw.as_ref().is_some_and(|k| {
-            rv.overall_assessment
-                .to_lowercase()
-                .contains(&k.to_lowercase())
-        });
-        caught_by_reviewer = issue_hit || assess_hit;
+        // The reviewer counts as having caught the defect only when it raised
+        // an *issue* (or critical feedback) of the matching category that
+        // mentions the keyword.
+        //
+        // A keyword appearing anywhere in the free-text `overall_assessment`
+        // used to count as a catch. That made the eval unable to express a
+        // false positive: a reviewer describing correct code in passing — "the
+        // limit is bounds-checked" — scored as having caught a seeded `limit`
+        // bug. The four negative controls added to the dataset flagged three
+        // clean changes the moment this dataset was exercised, which is how
+        // the defect surfaced.
+        //
+        // A summary is prose, not evidence. Evidence is an issue the reviewer
+        // committed to.
+        caught_by_reviewer = issue_hit;
     }
 
     let mut caught_by_red = false;
@@ -748,6 +773,16 @@ pub fn build_report(
     grades: &std::collections::HashMap<String, MaintainerGrade>,
 ) -> EvalReport {
     let expected: Vec<&CaseResult> = cases.iter().filter(|c| c.expected_caught).collect();
+    // Negative controls: no seeded defect, so `caught == true` is a false
+    // positive. Reported alongside recall, never instead of it.
+    let negatives: Vec<&CaseResult> = cases.iter().filter(|c| !c.expected_caught).collect();
+    let niki_fp = negatives.iter().filter(|c| c.niki.caught).count() as u32;
+    let baseline_fp = negatives.iter().filter(|c| c.baseline.caught).count() as u32;
+    let niki_false_positive_rate = if negatives.is_empty() {
+        0.0
+    } else {
+        niki_fp as f64 / negatives.len() as f64
+    };
     let n = expected.len().max(1) as f64;
     let niki_caught = expected.iter().filter(|c| c.niki.caught).count() as f64;
     let baseline_caught = expected.iter().filter(|c| c.baseline.caught).count() as f64;
@@ -813,6 +848,10 @@ pub fn build_report(
         baseline_catch_rate: baseline_caught / n,
         niki_false_approvals: niki_fa,
         baseline_false_approvals: baseline_fa,
+        n_negative_controls: negatives.len() as u32,
+        niki_false_positives: niki_fp,
+        baseline_false_positives: baseline_fp,
+        niki_false_positive_rate,
         false_approval_reduction_pct,
         categories,
         run_date,
@@ -853,6 +892,22 @@ pub fn render_report_md(report: &EvalReport) -> String {
     s.push_str(&format!(
         "| False-approval reduction | — | {:.0}% |\n",
         report.false_approval_reduction_pct
+    ));
+    // Precision row. Without negative controls this reads "0% false
+    // positives", which looks like a perfect result and means nothing — the
+    // denominator is zero. Say so explicitly.
+    let fp_cell = if report.n_negative_controls == 0 {
+        "unmeasured (no negative controls)".to_string()
+    } else {
+        format!(
+            "{:.0}% ({} of {})",
+            report.niki_false_positive_rate * 100.0,
+            report.niki_false_positives,
+            report.n_negative_controls
+        )
+    };
+    s.push_str(&format!(
+        "| False-positive rate (clean changes) | {fp_cell} |  |\n"
     ));
     if report.live {
         s.push_str(&format!(
@@ -1099,8 +1154,18 @@ mod tests {
             }
         }
         let rep = build_report(&ds, &cases, false, &std::collections::HashMap::new());
-        // All 23 fixture cases should be loaded
-        assert_eq!(rep.n_cases, 23, "expected all 23 fixture cases");
+        // Derived from the dataset, not hardcoded, so adding a case does not
+        // require editing this assertion (and cannot be forgotten).
+        assert_eq!(
+            rep.n_cases,
+            cases.len() as u32,
+            "every case in the dataset should have replayed"
+        );
+        assert_eq!(
+            rep.n_cases as usize,
+            ds.cases.len(),
+            "no dataset case may silently fail to replay"
+        );
         // NIKI catches every defect (reviewer or red surfaces the seeded defect)
         assert_eq!(rep.niki_catch_rate, 1.0);
         // Baselines miss all defects (approved with empty issues = false approvals)
@@ -1115,6 +1180,68 @@ mod tests {
         let sql = cases.iter().find(|c| c.case_id == "defect-sql").unwrap();
         assert!(!sql.baseline.caught);
         assert!(sql.niki.caught_by_red);
+    }
+
+    /// The dataset must carry BOTH polarities.
+    ///
+    /// It was 23 cases, all `expected_caught = true`. With no negative
+    /// denominator a reviewer that flagged every change scored 100%, so the
+    /// headline "false approval reduction" metric could not distinguish a
+    /// precise reviewer from a trigger-happy one. This assertion is what stops
+    /// that regression from being reintroduced by a future dataset edit.
+    #[test]
+    fn the_dataset_carries_negative_controls() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let ds = load_dataset(&dir.join("evals/dataset.toml")).unwrap();
+        let positives = ds
+            .cases
+            .iter()
+            .filter(|c| c.seeded_defect.expected_caught)
+            .count();
+        let negatives = ds.cases.len() - positives;
+
+        assert!(
+            negatives >= 3,
+            "the dataset has {positives} positive cases and {negatives} negative controls. A \
+             dataset with no negative cases cannot measure precision at all: flagging every \
+             change scores 100%."
+        );
+    }
+
+    #[test]
+    fn negative_controls_are_not_flagged() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let dataset_dir = dir.join("evals");
+        let ds = load_dataset(&dataset_dir.join("dataset.toml")).unwrap();
+        let mut cases = Vec::new();
+        for c in &ds.cases {
+            if let Ok(Some(cr)) = replay_case(c, &dataset_dir) {
+                cases.push(cr);
+            }
+        }
+        let rep = build_report(&ds, &cases, false, &std::collections::HashMap::new());
+
+        assert_eq!(
+            rep.n_negative_controls, 4,
+            "all four controls should replay"
+        );
+        assert_eq!(
+            rep.niki_false_positives, 0,
+            "NIKI flagged a clean change — that is a false positive, and it is the number this \
+             dataset previously could not express"
+        );
+        assert_eq!(rep.niki_false_positive_rate, 0.0);
+
+        // A zero denominator must read as unmeasured, not as a perfect score.
+        let md = render_report_md(&rep);
+        assert!(
+            md.contains("False-positive rate"),
+            "the report must publish a precision row: {md}"
+        );
+        assert!(
+            md.contains("0% (0 of 4)"),
+            "the precision cell must show its denominator, not just a percentage: {md}"
+        );
     }
 
     #[test]
