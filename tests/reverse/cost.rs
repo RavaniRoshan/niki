@@ -19,11 +19,14 @@
 use niki::llm::provider::TokenUsage;
 
 /// Accumulate one completed request into a running total.
+///
+/// This delegates to the production method rather than repeating the
+/// arithmetic. The original version of this file defined its own copy — and
+/// the canary gate caught it: injecting `.max()` back into the real tool loop
+/// and the real repair path left every test here green, because the tests were
+/// asserting the copy, not the product.
 fn accumulate(total: &mut TokenUsage, step: &TokenUsage) {
-    total.input_tokens += step.input_tokens;
-    total.output_tokens += step.output_tokens;
-    total.cached_input_tokens += step.cached_input_tokens;
-    total.reasoning_tokens += step.reasoning_tokens;
+    total.accumulate(step);
 }
 
 fn step(input: u32, output: u32) -> TokenUsage {

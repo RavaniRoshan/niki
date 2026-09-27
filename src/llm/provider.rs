@@ -177,6 +177,28 @@ pub struct TokenUsage {
     pub reasoning_tokens: u32,
 }
 
+impl TokenUsage {
+    /// Fold one completed request's usage into a running total.
+    ///
+    /// This exists as a named method, rather than as a `+=` written at each
+    /// call site, for a specific reason: the tool loop and the repair-retry
+    /// path once used `.max()` instead, and the tests that were supposed to
+    /// catch that asserted a *local copy* of the arithmetic rather than this
+    /// code. The canary corpus found it. Centralising the operation means the
+    /// test and the product cannot drift apart again.
+    ///
+    /// Note the scope: accumulation is correct **across** requests. Within a
+    /// single stream, usage chunks describe one request and must be maxed
+    /// instead — Anthropic emits two disjoint chunks (message_start carries
+    /// input tokens, message_delta carries output tokens).
+    pub fn accumulate(&mut self, step: &TokenUsage) {
+        self.input_tokens += step.input_tokens;
+        self.output_tokens += step.output_tokens;
+        self.cached_input_tokens += step.cached_input_tokens;
+        self.reasoning_tokens += step.reasoning_tokens;
+    }
+}
+
 pub fn create_provider(name: &str, config: &ProviderConfig) -> Result<Box<dyn LlmProvider>> {
     match name {
         "anthropic" => Ok(Box::new(super::anthropic::AnthropicProvider::new(config)?)),

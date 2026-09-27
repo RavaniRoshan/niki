@@ -1,50 +1,52 @@
 # Canary corpus — deliberately injected defects, each tied to a written rule.
 #
-# The point of this file is to answer one question with evidence: **does the
-# test suite actually fail when the product is broken?**
+# The question this file exists to answer: **does the test suite actually fail
+# when the product is broken?**
 #
-# A harness that only reports a pass rate cannot answer it. A suite that has
-# never been shown to fail on a broken product is consistent with a suite
-# that asserts nothing.
+# A harness that only reports a pass rate cannot answer it, and a suite never
+# shown failing on a broken product is consistent with one that asserts
+# nothing. Each entry injects one known defect; the runner records whether the
+# suite noticed.
 #
 # Rules for adding a canary:
 #
-#   * Every entry maps to a WRITTEN rule (in `invariant`), not to a line of
-#     code. A canary nobody can justify is noise.
-#   * `patch` is a literal text substitution. It must apply to exactly one
-#     site, so an ambiguous match is a hard error rather than a silent pass.
-#   * `equivalent = true` entries are KEPT, with a reason. They document known
+#   * Every entry maps to a WRITTEN rule (`invariant`), not to a line of code.
+#   * `patch` must match exactly one site. The runner refuses otherwise, since
+#     an unmatched patch scored as "survived" would quietly weaken the gate.
+#   * `equivalent = true` entries are KEPT, with a reason: they document known
 #     blind spots and stop the denominator being gamed by deleting hard cases.
-#   * `split = "holdout"` entries are the honest measurement. Optimising on the
-#     whole corpus reaches ~98% in-sample and ~95% held-out; the gap is real
-#     and the gate is computed on the holdout alone.
+#   * `known_surviving = true` marks a defect the suite genuinely cannot see
+#     today. Recording it is the honest move; omitting it is not.
+#   * The gate is computed on the HELD-OUT split alone. Optimising on the whole
+#     corpus reaches ~98% in-sample and ~95% held-out, and reporting only the
+#     in-sample number is how a harness ends up flattering itself.
 
 schema = 1
 
-# ── Pipeline logic ──────────────────────────────────────────────────────────
+# ── Pipeline logic / state ──────────────────────────────────────────────────
 
 [[canary]]
 id = "PL-1-branch-claimed-without-creation"
-probe = "--test run_lifecycle"
-scope = "lib"
 file = "src/cli/run.rs"
-patch = "Ok(true) => branch_created = true,"
-replace_with = "Ok(true) => branch_created = true, branch_created = true; /* canary */"
+patch = "                Ok(true) => branch_created = true,"
+replace_with = "                Ok(true) => branch_created = true, branch_created = true;"
 category = "state-resume"
 invariant = "INV-BRANCH-STATUS: a Completed run has a branch, and that branch exists on disk"
+probe = "--test run_lifecycle"
+scope = "integration"
 expect_kill = true
 split = "gate"
-origin = "a Completed status must never be recorded without a real ref"
+origin = "three separate paths recorded Completed with a branch that was never created"
 
 [[canary]]
 id = "PL-2-verdict-source-dropped"
-probe = "--test run_lifecycle"
-scope = "lib"
 file = "src/cli/run.rs"
-patch = "record.verdict_source = result.verdict_source.clone();"
-replace_with = "record.verdict_source = None; /* canary */"
+patch = "    record.verdict_source = result.verdict_source.clone();"
+replace_with = "    record.verdict_source = None;"
 category = "state-resume"
 invariant = "INV-VERDICT-NOT-FABRICATED: a verdict must name its source"
+probe = "--test run_lifecycle"
+scope = "integration"
 expect_kill = true
 split = "holdout"
 origin = "the SingleAgent fast path self-approves; the record must say so"
@@ -52,57 +54,71 @@ origin = "the SingleAgent fast path self-approves; the record must say so"
 # ── Cost / telemetry ────────────────────────────────────────────────────────
 
 [[canary]]
-id = "CT-1-tool-loop-max-instead-of-sum"
-probe = "--test reverse"
-scope = "lib"
-file = "src/runtime/tools.rs"
-patch = "usage.input_tokens += response.usage.input_tokens;"
-replace_with = "usage.input_tokens = usage.input_tokens.max(response.usage.input_tokens); /* canary */"
+id = "CT-1-accumulation-max-instead-of-sum"
+file = "src/llm/provider.rs"
+patch = "        self.input_tokens += step.input_tokens;"
+replace_with = "        self.input_tokens = self.input_tokens.max(step.input_tokens);"
 category = "cost-telemetry"
-invariant = "INV-COST-SUM: the run total equals the sum of per-stage costs"
+invariant = "a four-step tool loop is billed as four requests, not its largest step"
+probe = "--test reverse"
+scope = "integration"
 expect_kill = true
 split = "gate"
-origin = "a four-step tool loop was billed as its largest single step"
+origin = "the tool loop and repair retry once used .max() instead of +="
+#
+# Targets the shared `TokenUsage::accumulate`, not a call site. An earlier
+# draft pointed at `runtime/tools.rs` and the canary SURVIVED: the cost tests
+# exercised a local copy of the arithmetic, so changing the call site changed
+# nothing they could observe. Centralising the operation is what closed it.
 
 [[canary]]
-id = "CT-2-repair-retry-max-instead-of-sum"
-probe = "--test reverse"
-scope = "lib"
+id = "CT-2-repair-retry-usage-dropped"
 file = "src/agents/mod.rs"
-patch = "input_tokens: prev.input_tokens + response.usage.input_tokens,"
-replace_with = "input_tokens: prev.input_tokens.max(response.usage.input_tokens), /* canary */"
+patch = "                    prev.accumulate(&response.usage);"
+replace_with = "                    let _ = &response.usage;"
 category = "cost-telemetry"
-invariant = "INV-COST-SUM: the run total equals the sum of per-stage costs"
-expect_kill = true
+invariant = "a repair retry is a second billable request and must be charged"
+probe = "--test reverse"
+scope = "integration"
+expect_kill = false
+known_surviving = true
 split = "holdout"
 origin = "a repair retry is a second billable request"
+#
+# HONEST ENTRY — this canary survives today, and the corpus says so.
+# The repair-retry path runs inside a live stream, and no test drives a failed
+# parse followed by a successful repair, so mutating that one call is
+# invisible. Closing this needs an end-to-end fault: unparseable JSON on the
+# first attempt, valid JSON on the retry. The `prose_not_json` and
+# `valid_schema_empty_semantics` faults can already produce it once the retry
+# path is driven rather than unit-tested.
 
 # ── Sandbox / isolation ─────────────────────────────────────────────────────
 
 [[canary]]
 id = "SB-1-timeout-does-not-kill"
-probe = "--test exec_timeout"
-scope = "lib"
 file = "src/sandbox/exec.rs"
-patch = "let killed = kill_group(pid).await;"
-replace_with = "let killed = true; /* canary: never signals the group */"
+patch = "    let killed = kill_group(pid).await;"
+replace_with = "    let killed = true;"
 category = "sandbox-isolation"
 invariant = "a timed-out command leaves no orphan running"
+probe = "--test exec_timeout"
+scope = "integration"
 expect_kill = true
 split = "gate"
-origin = "the deadline must terminate the work, not just report the timeout"
+origin = "the deadline cancelled only the future, not the process"
 
 # ── Security / injection ────────────────────────────────────────────────────
 
 [[canary]]
 id = "SI-1-sanitizer-becomes-identity"
-probe = "--test reverse"
-scope = "lib"
 file = "src/display/sanitize.rs"
 patch = "pub fn sanitize_for_terminal(input: impl AsRef<str>) -> String {"
 replace_with = "pub fn sanitize_for_terminal(input: impl AsRef<str>) -> String { return input.as_ref().to_string(); #[allow(unreachable_code)]"
 category = "security-injection"
-invariant = "no terminal control sequence reaches the user from model or repo content"
+invariant = "no terminal control sequence reaches the user from model or repository content"
+probe = "--test reverse"
+scope = "integration"
 expect_kill = true
 split = "gate"
 origin = "OSC 52 writes the user's clipboard; the filter is the only defence"
@@ -111,37 +127,34 @@ origin = "OSC 52 writes the user's clipboard; the filter is the only defence"
 
 [[canary]]
 id = "AR-1-semantic-checks-removed"
-probe = "--lib"
-scope = "lib"
 file = "src/artifacts/validate.rs"
-patch = "check_semantics(&artifact_json, schema_path)"
-replace_with = "let _ = (&artifact_json, schema_path); Ok(()) /* canary */"
+patch = "    check_semantics(&artifact_json, schema_path)"
+replace_with = "    let _ = (&artifact_json, schema_path); Ok(())"
 category = "artifact-integrity"
 invariant = "a structurally valid artifact that says nothing is rejected"
+probe = "--lib"
+scope = "lib"
 expect_kill = true
 split = "holdout"
 origin = "an empty diff validated cleanly and was recorded as real work"
 
 # ── Documented blind spots ──────────────────────────────────────────────────
-# These are kept on purpose. Each is a real equivalence: the mutation changes
-# the code without changing any behaviour the suite can observe, so a "kill"
-# would be a false positive.
 
 [[canary]]
-id = "EQ-1-comment-only-change"
-probe = "--test exec_timeout"
-scope = "lib"
-file = "src/display/sanitize.rs"
+id = "EQ-1-poll-interval-unchanged"
+file = "src/sandbox/exec.rs"
 patch = "const POLL_INTERVAL: Duration = Duration::from_millis(20);"
 category = "sandbox-isolation"
-invariant = "process liveness (n/a — equivalence case)"
+invariant = "n/a — equivalence case, kept to document a known blind spot"
+probe = "--test exec_timeout"
+scope = "integration"
 expect_kill = false
 equivalent = true
 split = "gate"
 reason = """
 Changing the poll interval alters how promptly a deadline is noticed but not
 any observable outcome: a command that times out still times out, and one that
-does not still completes. The suite cannot distinguish 20ms from 200ms here.
-Kept so the mutation-score denominator reflects a known blind spot instead of
-being quietly reduced.
+does not still completes. Nothing in the suite can distinguish 20ms from
+200ms here, and a "kill" would be a false positive. Kept so the denominator
+reflects a real blind spot instead of being quietly reduced.
 """
