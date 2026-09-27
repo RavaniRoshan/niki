@@ -539,6 +539,9 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
             context_budget: PipelineState::new(id).context_budget,
             state: PipelineState::new(id),
             final_diff: String::new(),
+            outcome: crate::artifacts::types::RunOutcome::NotEvaluated {
+                reason: "replay fixture without a recorded reviewer verdict".into(),
+            },
             verdict: Verdict::Approved,
             verdict_source: Some("replay-fixture".to_string()),
             revision_rounds: 1,
@@ -563,6 +566,9 @@ fn replay_result(dir: &Path) -> Result<PipelineResult> {
         context_budget: PipelineState::new(id).context_budget,
         state: PipelineState::new(id),
         final_diff: String::new(),
+        outcome: crate::artifacts::types::RunOutcome::NotEvaluated {
+            reason: "replay fixture".into(),
+        },
         verdict,
         // Replayed from a recorded reviewer artifact, or defaulted to Approved
         // when that artifact is absent — which is itself worth seeing.
@@ -1030,6 +1036,9 @@ mod tests {
             context_budget: PipelineState::new(id).context_budget,
             state: PipelineState::new(id),
             final_diff: String::new(),
+            outcome: crate::artifacts::types::RunOutcome::NotEvaluated {
+                reason: "replay fixture without a recorded reviewer verdict".into(),
+            },
             verdict: Verdict::Approved,
             verdict_source: Some("replay-fixture".to_string()),
             revision_rounds: 1,

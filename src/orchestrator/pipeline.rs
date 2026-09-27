@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 
+use crate::artifacts::types::RunOutcome;
 use crate::artifacts::types::{
     AgentRole, CodeDiff, CriticDisposition, Critique, IsolationRecord, RedChallenge, ReviewVerdict,
     SecurityVerdict, Synthesis, TaskSpec, TestReport, Verdict,
@@ -50,9 +51,13 @@ pub struct PipelineResult {
     pub task_id: Uuid,
     pub state: super::state::PipelineState,
     pub final_diff: String,
+    /// The decision, and whether anything actually made it.
+    ///
+    /// `verdict` is derived from `outcome`; it can no longer be a value
+    /// nothing assigned. `verdict_source` is the human-readable form of the
+    /// same fact, kept for display and for the report.
+    pub outcome: RunOutcome,
     pub verdict: Verdict,
-    /// Who produced `verdict` — `reviewer`, `security-auditor`, or the Solo
-    /// fast path's self-approval. `None` on the early-return path.
     pub verdict_source: Option<String>,
     pub revision_rounds: u32,
     /// Raw JSON artifacts produced by each agent, in execution order.
@@ -1742,6 +1747,9 @@ pub async fn execute_pipeline(
             state,
             final_diff: String::new(),
             diff_guardwarn: None,
+            outcome: RunOutcome::NotEvaluated {
+                reason: "plan-only early return: the pipeline did not run".into(),
+            },
             verdict: Verdict::Approved,
             // Nothing was reviewed on this early-return path either.
             verdict_source: Some("planner-only (no review performed)".to_string()),
@@ -2195,6 +2203,14 @@ pub async fn execute_pipeline(
                             }
                             RoleOutput::Reviewer(v) => {
                                 verdict = v.verdict;
+                                // `verdict_source` names who decided. This arm
+                                // never set it, so a genuine multi-agent run
+                                // produced a verdict with no provenance — and
+                                // `verdict_source` is exactly the field a
+                                // consumer reads to tell a review from a
+                                // default. It was silently `None` on the very
+                                // path that runs the Reviewer.
+                                verdict_source = Some("reviewer".to_string());
                                 reviewer_json = json.clone();
                                 review_feedback = match v.feedback {
                                     Some(f) => Some(serde_json::to_string_pretty(&f)?),
@@ -2678,10 +2694,48 @@ pub async fn execute_pipeline(
             .await;
     }
 
+    // The one place a run's outcome is decided.
+    //
+    // `verdict` alone cannot express "nobody reviewed this", so the outcome is
+    // derived from what actually ran: a reviewer that produced a verdict, the
+    // Solo fast path that approved its own work, or neither.
+    let reviewer_ran = !reviewer_json.is_empty();
+    let outcome = if reviewer_ran && verdict_source.is_some() {
+        match verdict {
+            Verdict::Approved => RunOutcome::Reviewed {
+                verdict,
+                by: verdict_source.clone().unwrap_or_else(|| "reviewer".into()),
+            },
+            _ => RunOutcome::RevisionRequested {
+                by: verdict_source.clone().unwrap_or_else(|| "reviewer".into()),
+            },
+        }
+    } else if topology == TopologyMode::SingleAgent {
+        RunOutcome::SelfVerified {
+            note: "the SingleAgent fast path approves its own patch; no independent review \
+                   was performed"
+                .into(),
+        }
+    } else {
+        RunOutcome::NotEvaluated {
+            reason: "no review stage produced a verdict for this topology".into(),
+        }
+    };
+    // A SelfVerified or NotEvaluated run must not report a bare `Approved`
+    // that a consumer could mistake for a passed review.
+    let verdict = outcome.verdict().unwrap_or(Verdict::RevisionNeeded);
+
+    // Fired after the derivation so the payload carries the verdict a consumer
+    // will actually see, not the pre-derivation one.
     fire_hook(
         &hook_bus,
         crate::audit::HookEvent::PostTaskStop,
-        serde_json::json!({"task_id": task.id.to_string(), "verdict": format!("{:?}", verdict)}),
+        serde_json::json!({
+            "task_id": task.id.to_string(),
+            "verdict": format!("{:?}", verdict),
+            "outcome": &outcome,
+            "independently_reviewed": outcome.is_independently_reviewed(),
+        }),
     )?;
 
     Ok(PipelineResult {
@@ -2690,6 +2744,7 @@ pub async fn execute_pipeline(
         state,
         final_diff,
         diff_guardwarn,
+        outcome,
         verdict,
         verdict_source,
         revision_rounds: round,

@@ -772,6 +772,10 @@ mod tests {
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::from("+hello"),
             verdict: Verdict::Approved,
+            outcome: crate::artifacts::types::RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "test-fixture".into(),
+            },
             revision_rounds: 1,
             artifacts: vec![],
             metrics: vec![StageMetric {
@@ -936,6 +940,9 @@ mod tests {
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::from("+x"),
             verdict: Verdict::RevisionNeeded,
+            outcome: crate::artifacts::types::RunOutcome::RevisionRequested {
+                by: "test-fixture".into(),
+            },
             revision_rounds: 1,
             artifacts: vec![
                 (AgentRole::Red, red_artifact),
@@ -975,6 +982,10 @@ mod tests {
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::new(),
             verdict: Verdict::Approved,
+            outcome: crate::artifacts::types::RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "test-fixture".into(),
+            },
             revision_rounds: 1,
             artifacts: vec![],
             metrics: vec![],
@@ -1069,6 +1080,9 @@ mod tests {
             state: PipelineState::new(Uuid::nil()),
             final_diff: diff.to_string(),
             verdict: Verdict::RevisionNeeded,
+            outcome: crate::artifacts::types::RunOutcome::RevisionRequested {
+                by: "test-fixture".into(),
+            },
             revision_rounds: 1,
             artifacts,
             metrics: vec![],
@@ -1169,6 +1183,10 @@ index 3333333..4444444 100644
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::new(),
             verdict: Verdict::Approved,
+            outcome: crate::artifacts::types::RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "test-fixture".into(),
+            },
             revision_rounds: 1,
             artifacts: vec![],
             metrics,

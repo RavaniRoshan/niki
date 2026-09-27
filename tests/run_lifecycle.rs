@@ -140,7 +140,49 @@ fn wrap_json(text: &str) -> String {
     format!("```json\n{text}\n```")
 }
 
+/// A run that genuinely succeeds, all the way to an independent approval.
+///
+/// The reviewer response used to be missing here, which meant the pipeline
+/// finished with no reviewer artifact at all — and the tests then asserted
+/// `verdict == "Approved"` on a pass that nothing had ever granted. The suite
+/// was pinning the fabricated pass in place.
 fn successful_script(path: &std::path::Path) -> PathBuf {
+    let path = path.to_path_buf();
+    MockScriptBuilder::new()
+        .add_response(
+            "mock-planner",
+            &wrap_json(&common::mock_llm::task_spec_json()),
+            100,
+            100,
+        )
+        .add_response(
+            "mock-coder",
+            &wrap_json(&common::mock_llm::code_diff_json(
+                "let end = start + size - 1;",
+                "let end = start + size;",
+                "src/list.rs",
+            )),
+            200,
+            100,
+        )
+        .add_response(
+            "mock-tester",
+            &wrap_json(&common::mock_llm::test_report_json()),
+            100,
+            60,
+        )
+        .add_response(
+            "mock-reviewer",
+            &wrap_json(&common::mock_llm::review_verdict_approved_json()),
+            150,
+            50,
+        )
+        .write(&path)
+}
+
+/// The same run with the reviewer stage starved of a response, so nothing
+/// evaluates the work. Used to prove the verdict cannot be a bare pass.
+fn unreviewed_script(path: &std::path::Path) -> PathBuf {
     let path = path.to_path_buf();
     MockScriptBuilder::new()
         .add_response(
@@ -163,6 +205,11 @@ fn successful_script(path: &std::path::Path) -> PathBuf {
 }
 
 fn minimal_mock_toml(script_path: &std::path::Path, test_command: Option<&str>) -> String {
+    // `test_command` is a per-agent field, so the placeholder has to expand
+    // *inside* the `[agents.tester]` table below. It used to be a bare `{}`
+    // one line further down, which worked by accident and would have silently
+    // attached the command to whichever table came next if this string were
+    // ever reordered.
     let test_cmd_line = if let Some(cmd) = test_command {
         format!("test_command = \"{cmd}\"\n")
     } else {
@@ -191,7 +238,7 @@ model = "mock-coder"
 [agents.tester]
 provider = "mock"
 model = "mock-tester"
-{}
+{test_cmd_line}
 [agents.reviewer]
 provider = "mock"
 model = "mock-reviewer"
@@ -209,7 +256,7 @@ provider = "mock"
 model = "mock-security_auditor"
 "#,
         script_path.display(),
-        test_cmd_line
+        test_cmd_line = test_cmd_line
     )
 }
 
@@ -260,7 +307,23 @@ async fn output_envelope_json_mode_pure_stdout_and_single_patch() {
     assert!(json_val["branch"].as_str().unwrap().starts_with("niki/"));
     assert!(json_val["task_id"].is_string());
     assert_eq!(json_val["bare"], true);
-    assert_eq!(json_val["verdict"], "Approved");
+    // This config leaves `[pipeline].topology` at its default, and a
+    // low-complexity task collapses to the SingleAgent fast path — which runs
+    // no independent Reviewer at all. It used to report `verdict: "Approved"`
+    // here, and this test asserted that, so the fabricated pass was pinned in
+    // place by the very suite meant to catch it. The run is honest now: it
+    // says nothing reviewed it.
+    assert_eq!(json_val["outcome"]["outcome"], "self_verified");
+    assert_eq!(json_val["independently_reviewed"], false);
+    assert_ne!(json_val["verdict"], "Approved");
+    // The self-verification must carry a reason, so a user reading only the
+    // envelope can tell what kind of not-a-review this was.
+    assert!(
+        json_val["outcome"]["note"]
+            .as_str()
+            .is_some_and(|n| !n.trim().is_empty()),
+        "self_verified must explain itself: {json_val}"
+    );
 
     // Acceptance requirement: JSON envelope parses with `python3 -m json.tool`
     let mut py_child = std::process::Command::new("python3")
@@ -294,6 +357,132 @@ async fn output_envelope_json_mode_pure_stdout_and_single_patch() {
     assert!(
         patch_text.contains("src/list.rs"),
         "changes.patch must contain modified file"
+    );
+}
+
+/// The reverse of the test above: strip the reviewer response and the run must
+/// stop claiming an independent pass.
+///
+/// This is the test that should have existed before `verdict` defaulted to
+/// `Approved`. The failure it guards against is not a crash — it is a
+/// *quietly wrong answer* that a CI script would gate on, and that reads as
+/// success in every log line it produces.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_with_no_reviewer_never_reports_an_approved_verdict() {
+    let repo = create_fixture_repo();
+    let project = repo.dir.path().to_path_buf();
+    let script_path = project.join(".niki-mock-script.json");
+    unreviewed_script(&script_path);
+
+    std::fs::write(
+        project.join("niki.toml"),
+        minimal_mock_toml(&script_path, Some("true")),
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_niki"))
+        .args([
+            "run",
+            "--backend",
+            "worktree",
+            "--output-format",
+            "json",
+            "--tui",
+            "--bare",
+            "--project",
+            project.to_str().unwrap(),
+            "fix pagination",
+        ])
+        .output()
+        .expect("niki executable must run");
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let json_val: serde_json::Value =
+        serde_json::from_str(&stdout_str).expect("stdout must be valid JSON envelope");
+
+    assert_eq!(
+        json_val["independently_reviewed"], false,
+        "nothing reviewed this run, so it must not claim to have been reviewed"
+    );
+    assert_ne!(
+        json_val["verdict"], "Approved",
+        "a run that no reviewer examined must not report an approval: {}",
+        json_val["outcome"]
+    );
+    // Whatever it does claim, the outcome has to be one of the honest
+    // "nobody looked" states — not a Reviewed with an invented reviewer.
+    let outcome = json_val["outcome"]["outcome"].as_str().unwrap_or("");
+    assert!(
+        matches!(
+            outcome,
+            "not_evaluated" | "self_verified" | "revision_requested" | "failed"
+        ),
+        "unexpected outcome {outcome:?} in {json_val}"
+    );
+    if outcome == "reviewed" {
+        let by = json_val["outcome"]["by"].as_str().unwrap_or("");
+        assert!(
+            !by.is_empty(),
+            "a reviewed outcome must name who reviewed it"
+        );
+    }
+}
+
+/// The other half of the pair: force the full multi-agent chain, let a real
+/// Reviewer approve, and the run must now say so — and say *who*.
+///
+/// Without this, "never fabricates a pass" would be a goal the suite could
+/// satisfy by making every run a failure. `Approved` has to still be
+/// reachable, and reachable only with a reviewer attached to it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_independently_reviewed_run_reports_approved_and_names_its_reviewer() {
+    let repo = create_fixture_repo();
+    let project = repo.dir.path().to_path_buf();
+    let script_path = project.join(".niki-mock-script.json");
+    successful_script(&script_path);
+
+    let toml = format!(
+        "{}\n[pipeline]\ntopology = \"multiagent\"\n",
+        minimal_mock_toml(&script_path, Some("true"))
+    );
+    std::fs::write(project.join("niki.toml"), toml).unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_niki"))
+        .args([
+            "run",
+            "--backend",
+            "worktree",
+            "--output-format",
+            "json",
+            "--tui",
+            "--bare",
+            "--project",
+            project.to_str().unwrap(),
+            "fix pagination",
+        ])
+        .output()
+        .expect("niki executable must run");
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let json_val: serde_json::Value = serde_json::from_str(&stdout_str)
+        .unwrap_or_else(|e| panic!("stdout must be valid JSON: {e}\n{stdout_str}"));
+
+    assert_eq!(
+        json_val["independently_reviewed"], true,
+        "the full chain runs a Reviewer, so the run must report one: {}",
+        json_val["outcome"]
+    );
+    assert_eq!(json_val["outcome"]["outcome"], "reviewed");
+    assert_eq!(json_val["outcome"]["verdict"], "approved");
+    assert_eq!(json_val["verdict"], "Approved");
+
+    // The reviewer must be a *separate* stage from the one that wrote the
+    // code. A self-approval reported as independent review is the exact
+    // failure this whole change exists to make impossible.
+    let by = json_val["outcome"]["by"].as_str().unwrap_or("");
+    assert!(
+        !by.is_empty() && by != "solo-coder" && by != "coder",
+        "an independent review must not be credited to the coder: {by:?}"
     );
 }
 

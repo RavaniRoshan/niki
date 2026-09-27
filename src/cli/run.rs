@@ -275,16 +275,25 @@ fn result_envelope(
     bare: bool,
     task_dir: &std::path::Path,
 ) -> serde_json::Value {
-    let (verdict, revisions, tests_passed, mutation_passed) = match result {
+    let (verdict, outcome, reviewed, revisions, tests_passed, mutation_passed) = match result {
         Some(r) => (
             format!("{:?}", r.verdict),
+            serde_json::to_value(&r.outcome).unwrap_or(serde_json::Value::Null),
+            r.outcome.is_independently_reviewed(),
             r.revision_rounds,
             r.test_execution.as_ref().map(|te| te.passed),
             r.test_execution
                 .as_ref()
                 .and_then(|te| te.mutation.as_ref().map(|m| m.passed)),
         ),
-        None => ("unknown".to_string(), 0, None, None),
+        None => (
+            "unknown".to_string(),
+            serde_json::Value::Null,
+            false,
+            0,
+            None,
+            None,
+        ),
     };
     serde_json::json!({
         "task_id": task.id.to_string(),
@@ -299,7 +308,13 @@ fn result_envelope(
         "branch_blocked": branch_block,
         "forced_branch": forced_branch,
         "bare": bare,
+        // `verdict` alone cannot distinguish "a reviewer approved this" from
+        // "nothing ran, and the default is Approved". `outcome` and
+        // `independently_reviewed` say which, so a CI script that gates on
+        // `verdict == "Approved"` can tell a real pass from a fabricated one.
         "verdict": verdict,
+        "outcome": outcome,
+        "independently_reviewed": reviewed,
         "revision_rounds": revisions,
         "tests_passed": tests_passed,
         "mutation_passed": mutation_passed,
@@ -1004,6 +1019,11 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
         }
     }
     record.verdict = Some(format!("{:?}", result.verdict));
+    // Persist the outcome, not just the bare verdict. Without this the record
+    // cannot distinguish "a reviewer approved" from "nothing reviewed it" —
+    // which is the whole defect.
+    record.verdict_source = result.verdict_source.clone();
+    record.outcome = Some(serde_json::to_value(&result.outcome).unwrap_or_default());
     // Record who produced the verdict. The Solo fast path approves its own
     // patch, and "Approved" on its own reads as an independent check.
     record.verdict_source = result.verdict_source.clone();
