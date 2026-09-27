@@ -561,10 +561,25 @@ fn run_tui(
                     } else if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleChatPage)
                     {
                         // Toggle between the conversational chat view and the page view.
-                        state.current_page = if state.current_page == PageId::Chat {
-                            PageId::Run
-                        } else {
-                            PageId::Chat
+                        //
+                        // This has to move `view`, not just `current_page`. `view` is
+                        // what decides what is rendered; `current_page` alone left the
+                        // app permanently in the chat view, so the footer kept saying
+                        // "tab pages", Tab appeared to do nothing, and every page
+                        // navigation key silently changed an invisible field.
+                        state.view = match state.view {
+                            crate::display::state::ViewMode::Chat => {
+                                let page = if state.current_page == PageId::Chat {
+                                    PageId::Run
+                                } else {
+                                    state.current_page
+                                };
+                                state.current_page = page;
+                                crate::display::state::ViewMode::Page(page)
+                            }
+                            crate::display::state::ViewMode::Page(_) => {
+                                crate::display::state::ViewMode::Chat
+                            }
                         };
                         engine.mark_dirty();
                     } else if state.current_page == PageId::Chat {
@@ -1371,22 +1386,73 @@ pub fn run_chat(
                 }
 
                 if key.code == KeyCode::Tab {
-                    state.current_page = match state.current_page {
+                    // `niki chat` runs the second of two event loops in this
+                    // file, and this handler was a duplicate of the one in the
+                    // first loop — carrying the same defect, so the fix applied
+                    // there did not reach this path. Both `current_page`
+                    // (what is rendered) and `view` (what the footer label
+                    // reads) have to move together or the footer claims a
+                    // toggle that did not happen.
+                    let next = match state.current_page {
                         PageId::Chat => PageId::Run,
                         _ => PageId::Chat,
+                    };
+                    state.current_page = next;
+                    state.view = match next {
+                        PageId::Chat => crate::display::state::ViewMode::Chat,
+                        other => crate::display::state::ViewMode::Page(other),
                     };
                     needs_render = true;
                     continue;
                 }
 
+                // Page navigation, before the chat composer. `niki chat` runs
+                // this second event loop, so the handler added to the first
+                // loop did not apply here — arrows and digits were bound and
+                // advertised in the footer but did nothing. Page-scoped keys
+                // still win: this sits after the router and the Fleet/Session
+                // handlers below, and is skipped entirely in the composer.
+                if state.current_page != PageId::Chat
+                    && let Some(intent) = crate::display::nav::intent_from_key(
+                        &key,
+                        crate::display::nav::text_focus_active(&state),
+                    )
+                {
+                    use crate::display::nav::{self as nav, Dir, NavIntent};
+                    let before = state.current_page;
+                    match intent {
+                        NavIntent::Page(Dir::Next) => state.current_page = nav::next_page(before),
+                        NavIntent::Page(Dir::Prev) => state.current_page = nav::prev_page(before),
+                        NavIntent::Select(dir) => {
+                            let len = nav::page_item_count(&state);
+                            state.page_selection = nav::step_index(len, state.page_selection, dir);
+                        }
+                        NavIntent::GotoPage(n) => {
+                            if let Some(page) = nav::goto_page(n) {
+                                state.current_page = page;
+                                state.view = crate::display::state::ViewMode::Page(page);
+                            }
+                        }
+                        NavIntent::Quit => break,
+                    }
+                    state.view = match state.current_page {
+                        PageId::Chat => crate::display::state::ViewMode::Chat,
+                        other => crate::display::state::ViewMode::Page(other),
+                    };
+                    if state.current_page != before || matches!(intent, NavIntent::Select(_)) {
+                        needs_render = true;
+                    }
+                    continue;
+                }
+
                 if state.current_page == PageId::Chat {
-                    let before = state.chat_log.len();
+                    let before_len = state.chat_log.len();
                     let mut chat_page = chat::ChatPage::new();
                     chat_page.handle_key(key, &mut state);
                     needs_render = true;
                     // Forward any newly submitted user message to the session
                     // processor (Phase 6 — user messages mid-session).
-                    if state.chat_log.len() > before {
+                    if state.chat_log.len() > before_len {
                         if let Some((role, text)) = state.chat_log.last() {
                             if role == "user" {
                                 if let Some(tx) = &on_submit {

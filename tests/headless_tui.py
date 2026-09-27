@@ -181,3 +181,89 @@ async def test_session_exits_cleanly():
     await s.press("ctrl+c")
     code = await s.stop(timeout=5.0)
     assert code == 0
+
+# ── Navigation keys, verified in a real PTY ──────────────────────────────
+#
+# The navigation logic is unit-tested as a pure function in
+# `display::nav`, but a pure function passing says nothing about whether the key
+# reaches it through a real terminal. These drive the shipped binary under a
+# real pseudo-terminal and read the rendered cell grid back.
+#
+# This is the layer where a wiring bug is invisible to every other test in the
+# repo: a key bound correctly in the table but never dispatched would pass the
+# unit tests, pass the canary corpus, and do nothing for the user.
+
+
+async def _footer(s):
+    """The bottom line, which is where the key hints render."""
+    return s.screen.row(ROWS - 1)
+
+
+async def test_footer_advertises_the_new_navigation_keys(chat):
+    footer = await _footer(chat)
+    assert "page" in footer, f"footer must advertise page navigation: {footer!r}"
+    assert "keys" in footer, f"footer must advertise the key help: {footer!r}"
+
+
+async def test_right_and_left_arrows_change_page(chat):
+    # Tab toggles chat <-> page view; from the page view the arrows navigate.
+    await chat.press("tab")
+    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    before = chat.screen.text
+
+    await chat.press("right")
+    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    after_right = chat.screen.text
+    assert after_right != before, "Right must move to a different page"
+
+    await chat.press("left")
+    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    assert chat.screen.text == before, "Left must return to the previous page"
+
+
+async def test_h_and_l_navigate_like_the_arrows(chat):
+    await chat.press("tab")
+    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    start = chat.screen.text
+
+    await chat.type("l")
+    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    assert chat.screen.text != start, "l must move to the next page"
+
+    await chat.type("h")
+    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    assert chat.screen.text == start, "h must move to the previous page"
+
+
+async def test_digit_key_jumps_to_a_page(chat):
+    await chat.press("tab")
+    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    before = chat.screen.text
+    await chat.type("4")
+    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    assert chat.screen.text != before, "a digit must jump to a page"
+
+
+async def test_navigation_keys_are_letters_while_typing(chat):
+    """The regression that matters most.
+
+    `h`, `j`, `k` and `l` are navigation outside a text field and ordinary
+    characters inside one. A composer that loses them is unusable, and nothing
+    short of a real terminal would catch it.
+    """
+    await chat.type("hjkl")
+    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    assert chat.screen.contains("hjkl"), (
+        f"h/j/k/l must be typed literally into the composer, got: {chat.screen.row(ROWS - 2)!r}"
+    )
+
+
+async def test_arrow_keys_still_reach_the_composer(chat):
+    await chat.type("ab")
+    await chat.wait_for_stable(quiet_ms=150, timeout=4)
+    await chat.press("left")
+    await chat.type("X")
+    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    assert chat.screen.contains("aXb"), (
+        f"Left must move the caret inside the composer, not change page; screen: {chat.screen.text!r}"
+    )
