@@ -146,7 +146,40 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
             .fg(badge_color)
             .add_modifier(ratatui::style::Modifier::BOLD)
     };
-    right_spans.push(Span::styled(format!(" {} ", badge_text), badge_style));
+    // The permission badge is the one status element whose *text* changes
+    // rarely and whose meaning matters, so it gets the shimmer rather than the
+    // hint strip. Following Codex: the phase is derived from elapsed time, so
+    // two frames of the same text are in step rather than restarting.
+    //
+    // A mode like BYPASS is exactly the state a user wants to notice, and a
+    // static badge at the far right of a wide bar is the least-looked-at pixel
+    // on screen.
+    let badge_label = badge_text.trim();
+    let shimmered = crate::display::motion::summary_shimmer_with(
+        badge_label,
+        state.tick as f64 / 30.0, // 30fps idle loop
+        state.config.ui.reduced_motion || std::env::var_os("NIKI_REDUCED_MOTION").is_some(),
+        crate::display::theme::supports_truecolor(),
+    );
+    // The shimmer spans carry their own foreground, so a hovered badge would
+    // otherwise lose its background and the hover would vanish. Re-apply the
+    // badge background on top of each shimmer span.
+    let spans = if badge_hovered {
+        shimmered
+            .into_iter()
+            .map(|sp| {
+                Span::styled(
+                    sp.content,
+                    sp.style.bg(crate::display::theme::bg_elevated()),
+                )
+            })
+            .collect::<Vec<_>>()
+    } else {
+        shimmered
+    };
+    right_spans.push(Span::styled(" ", badge_style));
+    right_spans.extend(spans);
+    right_spans.push(Span::styled(" ", badge_style));
 
     if let Some(notice) = &state.notice {
         // Slide in over the first 150ms of life; static when reduced.

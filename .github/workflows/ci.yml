@@ -338,6 +338,46 @@ jobs:
       - name: Run consumer journeys
         run: cargo test --test journeys --verbose -- --nocapture --test-threads=1
 
+  # ── Real-PTY TUI gate ────────────────────────────────────────────────
+  # tests/headless_tui.py drives the shipped binary under a real pseudo
+  # terminal and reads the rendered cell grid back. It is the only layer that
+  # can catch a key bound in the table but never dispatched — and it caught
+  # exactly that: `tui.rs` has two event loops, and the one `niki chat` uses
+  # never reached the navigation handler, so arrows and digit jumps were
+  # advertised in the footer and did nothing. Every other suite passed.
+  tui-pty:
+    name: Real PTY TUI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PTY test dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --upgrade pip
+          python3 -m pip install --quiet -r requirements-dev.txt
+      - name: Build release binary
+        run: cargo build --release
+      - name: Drive the real TUI under a PTY
+        env:
+          NIKI_BIN: ${{ github.workspace }}/target/release/niki
+        run: python3 -m pytest -c pytest_headless.ini -v
+      - name: Fail if the suite collected nothing
+        # tuiwright is imported with importorskip, so a missing dependency
+        # turns the whole file into a skip and the job goes green having
+        # tested nothing — the same trap this repo has hit twice.
+        run: |
+          set -euo pipefail
+          python3 -m pytest -c pytest_headless.ini -q 2>&1 | tee /tmp/pty.txt
+          grep -qE '^[0-9]+ passed' /tmp/pty.txt || {
+            echo "FAIL: no PTY test passed — tuiwright is probably missing"
+            exit 1
+          }
+
   # ── Windows ──────────────────────────────────────────────────────────
   # niki ships a winget manifest and a cargo-dist `x86_64-pc-windows-msvc`
   # target, but no workflow ever built or ran anything on Windows. A manifest

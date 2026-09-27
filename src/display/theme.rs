@@ -219,14 +219,19 @@ pub struct Palette {
     pub diff_hunk: Color,
 
     // Agent role colors (darkened for light bg)
-    pub agent_red: Color,
-    pub agent_blue: Color,
-    pub agent_green: Color,
-    pub agent_yellow: Color,
-    pub agent_purple: Color,
-    pub agent_orange: Color,
-    pub agent_pink: Color,
-    pub agent_cyan: Color,
+    // ── Role palette ────────────────────────────────────────────────
+    // One token per pipeline role, named for the role rather than for a
+    // colour: the previous names were `agent_blue`, `agent_purple` and so on,
+    // left over from a palette that no longer existed, so `agent_blue` held
+    // ochre and every reader had to look up what it actually was.
+    pub role_red: Color,
+    pub role_planner: Color,
+    pub role_tester: Color,
+    pub role_reviewer: Color,
+    pub role_coder: Color,
+    pub role_security: Color,
+    pub role_synthesizer: Color,
+    pub role_critic: Color,
 }
 
 /// Dark palette — Warm Clay & Cream Studio (#1a1716 base, terracotta clay accent, cream text).
@@ -271,14 +276,14 @@ pub const DARK: Palette = Palette {
     // and neighbours inside that arc are separated by lightness as well as
     // hue, because ochre/ember/bronze sit within 20° of each other.
     // `role_colors_are_perceptually_distinct` enforces it.
-    agent_red: Color::Rgb(0xf2, 0x49, 0x5a), // bright vermillion (Red)
-    agent_blue: Color::Rgb(0xd9, 0xa8, 0x6a), // pale ochre     (Planner)
-    agent_green: Color::Rgb(0x6f, 0xb0, 0x5c), // leaf          (Tester)
-    agent_yellow: Color::Rgb(0x3f, 0xa3, 0x96), // verdigris     (Reviewer)
-    agent_purple: Color::Rgb(0xb8, 0x5c, 0x1a), // deep ember     (Coder)
-    agent_orange: Color::Rgb(0x7d, 0x2b, 0x2b), // dark oxblood  (SecurityAuditor)
-    agent_pink: Color::Rgb(0xc8, 0xd6, 0x9c), // pale straw    (Synthesizer)
-    agent_cyan: Color::Rgb(0x4d, 0x5c, 0x2e), // dark olive    (Critic)
+    role_red: Color::Rgb(0xf2, 0x49, 0x5a), // bright vermillion (Red)
+    role_planner: Color::Rgb(0xd9, 0xa8, 0x6a), // pale ochre     (Planner)
+    role_tester: Color::Rgb(0x6f, 0xb0, 0x5c), // leaf          (Tester)
+    role_reviewer: Color::Rgb(0x3f, 0xa3, 0x96), // verdigris     (Reviewer)
+    role_coder: Color::Rgb(0xb8, 0x5c, 0x1a), // deep ember     (Coder)
+    role_security: Color::Rgb(0x7d, 0x2b, 0x2b), // dark oxblood  (SecurityAuditor)
+    role_synthesizer: Color::Rgb(0xc8, 0xd6, 0x9c), // pale straw    (Synthesizer)
+    role_critic: Color::Rgb(0x4d, 0x5c, 0x2e), // dark olive    (Critic)
 };
 
 /// Light palette — Warm Paper & Espresso light (#fdfcfc base, terracotta clay accent).
@@ -315,18 +320,25 @@ pub const LIGHT: Palette = Palette {
     // Kiln on warm paper: the same hues, darkened for legibility on a light
     // background. Kept in one-to-one correspondence with DARK so a role does
     // not change identity between themes.
-    agent_red: Color::Rgb(0xa8, 0x24, 0x33), // bright vermillion
-    agent_blue: Color::Rgb(0x8f, 0x66, 0x2e), // pale ochre
-    agent_green: Color::Rgb(0x3f, 0x6b, 0x33), // leaf
-    agent_yellow: Color::Rgb(0x25, 0x6b, 0x60), // verdigris
-    agent_purple: Color::Rgb(0x8a, 0x40, 0x0c), // deep ember
-    agent_orange: Color::Rgb(0x5c, 0x1a, 0x1a), // dark oxblood
-    agent_pink: Color::Rgb(0x6e, 0x7a, 0x2e), // pale straw
-    agent_cyan: Color::Rgb(0x33, 0x3d, 0x18), // dark olive
+    role_red: Color::Rgb(0xa8, 0x24, 0x33), // bright vermillion
+    role_planner: Color::Rgb(0x8f, 0x66, 0x2e), // pale ochre
+    role_tester: Color::Rgb(0x3f, 0x6b, 0x33), // leaf
+    role_reviewer: Color::Rgb(0x25, 0x6b, 0x60), // verdigris
+    role_coder: Color::Rgb(0x8a, 0x40, 0x0c), // deep ember
+    role_security: Color::Rgb(0x5c, 0x1a, 0x1a), // dark oxblood
+    role_synthesizer: Color::Rgb(0x6e, 0x7a, 0x2e), // pale straw
+    role_critic: Color::Rgb(0x33, 0x3d, 0x18), // dark olive
 };
 
 /// Get the current palette based on the resolved theme mode.
 #[inline]
+/// The palette bypassing the `NO_COLOR` override. Colour *effects* — the
+/// shimmer — need the real values to blend against; ordinary accessors collapse
+/// to `Reset` under NO_COLOR, which would silently flatten them.
+pub(crate) fn raw_palette() -> &'static Palette {
+    palette()
+}
+
 pub(crate) fn palette() -> &'static Palette {
     match resolved_mode() {
         ThemeMode::Light => &LIGHT,
@@ -357,7 +369,7 @@ pub fn shell() -> Color {
 /// User message bullet color (gold).
 #[inline]
 pub fn role_user() -> Color {
-    fg(palette().agent_yellow)
+    fg(palette().role_reviewer)
 }
 
 /// Assistant message label color.
@@ -452,10 +464,10 @@ pub fn clay() -> Color {
 #[inline]
 pub fn sand() -> Color {
     // token.md Tier-1 SAND_500 (#d4a373) / SAND_600 (#b58352). NOTE: the
-    // `Palette::agent_blue` field carries this warm sand tone (its name is
+    // `Palette::role_planner` field carries this warm sand tone (its name is
     // historical) — do NOT point this at `cyan`; that rendered Planner,
     // spinner verbs, and the assistant icon blue.
-    fg(palette().agent_blue)
+    fg(palette().role_planner)
 }
 #[inline]
 pub fn cyan() -> Color {
@@ -654,7 +666,7 @@ pub fn AMBER() -> Color {
 }
 #[allow(non_snake_case)]
 pub fn BLUE() -> Color {
-    palette().agent_blue
+    palette().role_planner
 }
 #[allow(non_snake_case)]
 pub fn PURPLE() -> Color {
@@ -706,35 +718,35 @@ pub fn DIFF_HUNK() -> Color {
 // Agent color aliases
 #[allow(non_snake_case)]
 pub fn AGENT_RED() -> Color {
-    palette().agent_red
+    palette().role_red
 }
 #[allow(non_snake_case)]
 pub fn AGENT_BLUE() -> Color {
-    palette().agent_blue
+    palette().role_planner
 }
 #[allow(non_snake_case)]
 pub fn AGENT_GREEN() -> Color {
-    palette().agent_green
+    palette().role_tester
 }
 #[allow(non_snake_case)]
 pub fn AGENT_YELLOW() -> Color {
-    palette().agent_yellow
+    palette().role_reviewer
 }
 #[allow(non_snake_case)]
 pub fn AGENT_PURPLE() -> Color {
-    palette().agent_purple
+    palette().role_coder
 }
 #[allow(non_snake_case)]
 pub fn AGENT_ORANGE() -> Color {
-    palette().agent_orange
+    palette().role_security
 }
 #[allow(non_snake_case)]
 pub fn AGENT_PINK() -> Color {
-    palette().agent_pink
+    palette().role_synthesizer
 }
 #[allow(non_snake_case)]
 pub fn AGENT_CYAN() -> Color {
-    palette().agent_cyan
+    palette().role_critic
 }
 
 // ── Role colors ─────────────────────────────────────────────────────────
@@ -754,14 +766,14 @@ pub fn role_color(role: crate::artifacts::types::AgentRole) -> Color {
 pub(crate) fn raw_role_color(role: crate::artifacts::types::AgentRole) -> Color {
     let p = palette();
     match role {
-        crate::artifacts::types::AgentRole::Planner => p.agent_blue,
+        crate::artifacts::types::AgentRole::Planner => p.role_planner,
         crate::artifacts::types::AgentRole::Coder => p.purple,
-        crate::artifacts::types::AgentRole::Tester => p.agent_green,
+        crate::artifacts::types::AgentRole::Tester => p.role_tester,
         crate::artifacts::types::AgentRole::Reviewer => p.warning,
         crate::artifacts::types::AgentRole::Synthesizer => p.cyan,
         crate::artifacts::types::AgentRole::SecurityAuditor => p.error,
-        crate::artifacts::types::AgentRole::Red => p.agent_red,
-        crate::artifacts::types::AgentRole::Critic => p.agent_orange,
+        crate::artifacts::types::AgentRole::Red => p.role_red,
+        crate::artifacts::types::AgentRole::Critic => p.role_security,
     }
 }
 
@@ -1059,12 +1071,12 @@ mod tests {
         let original = current_mode();
         set_mode(ThemeMode::Dark);
         assert_eq!(
-            format!("{:?}", palette().agent_blue),
+            format!("{:?}", palette().role_planner),
             format!("{:?}", Color::Rgb(0xd9, 0xa8, 0x6a)),
-            "the agent_blue token must be warm sand (pale ochre in the Kiln palette), not cyan"
+            "the role_planner token must be warm sand (pale ochre in the Kiln palette), not cyan"
         );
         assert_ne!(
-            format!("{:?}", palette().agent_blue),
+            format!("{:?}", palette().role_planner),
             format!("{:?}", palette().cyan),
             "sand and cyan must differ"
         );
@@ -1236,14 +1248,14 @@ mod tests {
     ) -> ratatui::style::Color {
         use crate::artifacts::types::AgentRole;
         match role {
-            AgentRole::Planner => p.agent_blue,
-            AgentRole::Coder => p.agent_purple,
-            AgentRole::Tester => p.agent_green,
-            AgentRole::Reviewer => p.agent_yellow,
-            AgentRole::Synthesizer => p.agent_pink,
-            AgentRole::SecurityAuditor => p.agent_orange,
-            AgentRole::Red => p.agent_red,
-            AgentRole::Critic => p.agent_cyan,
+            AgentRole::Planner => p.role_planner,
+            AgentRole::Coder => p.role_coder,
+            AgentRole::Tester => p.role_tester,
+            AgentRole::Reviewer => p.role_reviewer,
+            AgentRole::Synthesizer => p.role_synthesizer,
+            AgentRole::SecurityAuditor => p.role_security,
+            AgentRole::Red => p.role_red,
+            AgentRole::Critic => p.role_critic,
         }
     }
 
@@ -1300,14 +1312,14 @@ mod tests {
     fn sub_agent_colors_are_distinct() {
         let p = &DARK;
         let colors = [
-            p.agent_red,
-            p.agent_blue,
-            p.agent_green,
-            p.agent_yellow,
-            p.agent_purple,
-            p.agent_orange,
-            p.agent_pink,
-            p.agent_cyan,
+            p.role_red,
+            p.role_planner,
+            p.role_tester,
+            p.role_reviewer,
+            p.role_coder,
+            p.role_security,
+            p.role_synthesizer,
+            p.role_critic,
         ];
         let mut set = std::collections::HashSet::new();
         for c in &colors {
