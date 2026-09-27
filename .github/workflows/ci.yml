@@ -320,6 +320,36 @@ jobs:
             exit 1
           }
 
+  # ── Windows ──────────────────────────────────────────────────────────
+  # niki ships a winget manifest and a cargo-dist `x86_64-pc-windows-msvc`
+  # target, but no workflow ever built or ran anything on Windows. A manifest
+  # nobody builds is a manifest that breaks silently at release time, and the
+  # platform differences that matter here (PTY behaviour, path handling,
+  # `kill_on_drop`) are exactly the ones a Linux runner cannot exercise.
+  windows:
+    name: Windows (build + smoke)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Enable long paths
+        shell: pwsh
+        run: git config --global core.longpaths true
+      - name: Build release
+        run: cargo build --release
+      - name: Verify binary runs
+        shell: pwsh
+        run: |
+          .\target\release\niki.exe --version
+          .\target\release\niki.exe --help
+      - name: Verify the installer script parses
+        shell: pwsh
+        run: |
+          # The POSIX installer is not runnable here, but a CRLF/encoding
+          # regression in the repo would be caught before it reaches a user.
+          bash -n ./scripts/install.sh
+
   # ── Phase 4b: Visual regression gate (VHS reference frames) ──────────
   visual:
     name: Visual regression (VHS)

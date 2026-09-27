@@ -12,21 +12,56 @@
 
 <br>
 
-**One sentence in, a verified pull request out.**
+**NIKI adds a security review pass automatically when your change touches auth, crypto, or
+network code** — and hands you a reviewable `niki/<id>` branch either way.
 
-Four independent LLM agents — **Planner → Coder → Tester → Reviewer** — run in a hermetic
-sandbox and hand you a reviewable `niki/<id>` branch with a full audit trail.
-Committed branches are never rewritten; the host working tree is updated to apply the finished diff for review.
+Four agents — **Planner → Coder → Tester → Reviewer** — run in an isolated sandbox. A risk
+classifier decides which of them run: a low-risk edit gets the fast path, anything touching
+auth, crypto or network is escalated to a dedicated security audit before the branch is cut.
+Committed branches are never rewritten.
+
+**Runs with no API key and no container runtime** — [Ollama](https://ollama.com) plus the
+worktree backend is enough to try the whole pipeline.
 
 <br>
 
 [![Built with Rust](https://img.shields.io/badge/built_with-Rust-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![CI](https://github.com/RavaniRoshan/niki/actions/workflows/ci.yml/badge.svg)](https://github.com/RavaniRoshan/niki/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-passing-007ec6)](CONTRIBUTING.md)
 [![Sandbox](https://img.shields.io/badge/sandbox-Podman_/_Docker-2496ED?logo=podman&logoColor=white)](#sandbox)
 [![BYOK · multi-provider](https://img.shields.io/badge/LLM-BYOK_·_multi--provider-58a6ff)](#configuration)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0_·_open_source-2da44f)](LICENSE)
 [![Status: beta](https://img.shields.io/badge/status-beta-58a6ff)](#roadmap)
+
+<sub>754 unit tests · 448 integration tests across 37 binaries · 69 adversarial-harness tests ·
+8 canaries that inject real defects to prove the suite fails when the product is broken ·
+Apache-2.0, no telemetry, your own keys</sub>
+
+<br>
+
+## Install
+
+```bash
+# macOS
+brew install niki
+
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/niki/master/scripts/install.sh | bash
+
+# Or grab a binary directly
+# https://github.com/RavaniRoshan/niki/releases/latest
+```
+
+Then, inside your project:
+
+```bash
+niki init --interactive          # guided setup; pick Ollama when offered — no API key needed
+niki run "Add a /health endpoint" --backend worktree
+```
+
+Full walkthrough in [Quick Start](#quick-start).
+
+<br>
+
 
 <a href="#quick-start"><b>Quick Start</b></a> ·
 <a href="#how-it-works"><b>How it works</b></a> ·
@@ -118,12 +153,6 @@ flowchart LR
 **Path A · Zero-setup (try it in ~2 minutes):** no container runtime, no API key.
 All you need is [Ollama](https://ollama.com) running locally with a coding model
 (`ollama pull qwen2.5-coder:3b`) — the wizard detects both and points every agent at them.
-
-```bash
-# 1 · Install (pick one)
-brew install niki                                                              # macOS
-curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/niki/master/scripts/install.sh | bash  # Linux/macOS
-# Or download a binary: https://github.com/RavaniRoshan/niki/releases/latest
 
 # 2 · Configure (guided — run it inside your project; pick Ollama when offered)
 cd ./my-app && niki init --interactive
