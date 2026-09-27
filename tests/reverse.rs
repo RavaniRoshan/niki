@@ -11,6 +11,9 @@
 //! - `injection`   — untrusted content reaching a terminal or a role.
 //! - `journeys`    — what a real user hits, on a throwaway profile.
 
+#[path = "reverse/metamorphic.rs"]
+pub mod metamorphic;
+
 #[path = "reverse/invariants.rs"]
 pub mod invariants;
 
