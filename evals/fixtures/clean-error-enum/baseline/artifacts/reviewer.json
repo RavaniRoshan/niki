@@ -1,0 +1,14 @@
+{
+  "verdict": "approved",
+  "overall_assessment": "Every domain failure maps to exactly one variant; the match is exhaustive.",
+  "quality_scores": {
+    "correctness": 8,
+    "code_quality": 8,
+    "test_coverage": 7,
+    "spec_adherence": 8
+  },
+  "issues": [],
+  "strengths": [
+    "Matches the requested behaviour."
+  ]
+}

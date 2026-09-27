@@ -1217,6 +1217,42 @@ mod tests {
         );
     }
 
+    /// The corpus has to be able to run from a fresh clone.
+    ///
+    /// `.gitignore` had an `evals/*` rule that excluded the four `clean-*`
+    /// negative-control fixtures, so CI checked out 23 of 27 cases and no
+    /// negative controls at all. The whole false-positive measurement depends
+    /// on those four: a corpus of only seeded defects can report a perfect
+    /// catch rate while saying nothing about how often NIKI condemns correct
+    /// work.
+    ///
+    /// It is worth stating what the ignore rule was for — keeping ad-hoc
+    /// eval output out of the repo — and why exempting the fixtures is
+    /// correct: they are inputs to a test, not output of a run.
+    #[test]
+    fn every_dataset_case_has_its_fixtures_in_the_repository() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let dataset_dir = dir.join("evals");
+        let ds = load_dataset(&dataset_dir.join("dataset.toml")).unwrap();
+
+        let missing: Vec<&str> = ds
+            .cases
+            .iter()
+            .filter(|c| {
+                let base = dataset_dir.join(c.replay_dir.as_deref().unwrap_or("."));
+                !base.join("niki").exists() || !base.join("baseline").exists()
+            })
+            .map(|c| c.id.as_str())
+            .collect();
+
+        assert!(
+            missing.is_empty(),
+            "these dataset cases have no committed fixtures, so they silently drop out of \
+             every replay: {missing:?}. A case without fixtures is not a smaller test, it is \
+             a case the corpus quietly stops measuring."
+        );
+    }
+
     #[test]
     fn negative_controls_are_not_flagged() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
