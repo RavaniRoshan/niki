@@ -110,7 +110,32 @@ info "canary gate: preflight ok (${avail} MiB free, tree clean)"
 
 # ── Run ───────────────────────────────────────────────────────────────────
 TMP_OUT="$(mktemp)"
-trap 'rm -f "$TMP_OUT" "$OUTCOMES"; git checkout -- . 2>/dev/null' EXIT
+# Restore ONLY the files this script mutates. An earlier trap did
+# `git checkout -- .`, which is broader than the script's footprint: it also
+# reverted canaries/results.json to whatever was committed, silently
+# overwriting the report the run had just written. The gate was destroying
+# its own output, and the console showed 8 canaries while the file on disk
+# said 0.
+#
+# The canary target files are read from the corpus itself, so the restore set
+# cannot drift from the set the script actually touched.
+CANARY_FILES="$(python3 -c "
+import sys, tomllib
+d = tomllib.load(open(sys.argv[1], 'rb'))
+seen = []
+for c in d['canary']:
+    if c['file'] not in seen:
+        seen.append(c['file'])
+print(' '.join(seen))
+" "$CANARIES" 2>/dev/null)"
+
+restore() {
+  # shellcheck disable=SC2086
+  [ -n "$CANARY_FILES" ] && git checkout -- $CANARY_FILES 2>/dev/null
+  return 0
+}
+
+trap 'rm -f "$TMP_OUT" "$OUTCOMES"; restore' EXIT
 
 python3 - "$CANARIES" > "$TMP_OUT" <<'PY'
 import json, sys, tomllib
@@ -160,7 +185,7 @@ print("OK")
 PY
   if [ $? -ne 0 ]; then
     red "  patch did not apply to exactly one site in $file — aborting"
-    git checkout -- .
+    restore
     exit 5
   fi
 
@@ -169,7 +194,7 @@ PY
   # from four prior builds is still resident.
   if ! wait_for_memory "$RECOVER_MB"; then
     red "aborting before $id rather than risking the machine"
-    git checkout -- .
+    restore
     exit 4
   fi
   info "  memory before build: $(free_mb) MiB free"
@@ -190,7 +215,7 @@ PY
   # just printed eight. A TSV line cannot be mangled that way.
   printf '%s\t%s\n' "$id" "$outcome" >> "$OUTCOMES"
   info "  memory after run: $(free_mb) MiB free"
-  git checkout -- .
+  restore
 done < <(python3 -c "
 import json,sys
 for c in json.load(open(sys.argv[1])):
@@ -201,7 +226,7 @@ for c in json.load(open(sys.argv[1])):
 END_TREE="$(git status --porcelain; git rev-parse HEAD)"
 if [ "$START_TREE" != "$END_TREE" ]; then
   red "the working tree was not restored — refusing to report a result"
-  git checkout -- .
+  restore
   exit 6
 fi
 
