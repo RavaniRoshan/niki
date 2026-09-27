@@ -4,15 +4,15 @@
 # Regenerate: cargo test --test embedded_assets -- --ignored --nocapture
 f8678078ec79e700  prompts/base.md
 f2605d3f9310ad6b  prompts/coder.md
-189ae25ea3df9f0d  prompts/critic.md
+22ed918b2811f15c  prompts/critic.md
 6fd7f9f37c5abe43  prompts/planner.md
 449503eb6fd46e3d  prompts/red.md
-364b853c4a1e9197  prompts/reviewer.md
+95cd26d88c3f64f9  prompts/reviewer.md
 81b3c96affd0660b  prompts/security_auditor.md
 430fc3bb13c3e158  prompts/solo.md
 45702b977687d4a6  prompts/synthesizer.md
 a092c493e44b4f59  prompts/tester.md
-396862b356691ea7  schemas/code_diff.schema.json
+c44aeb769dd72979  schemas/code_diff.schema.json
 ffce8f5bbf2ff332  schemas/critique.schema.json
 bc406f90df3a6551  schemas/red_challenge.schema.json
 b44e6a8176e0a39b  schemas/review_verdict.schema.json
