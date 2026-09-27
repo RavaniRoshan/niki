@@ -1280,20 +1280,27 @@ impl Tool for BashTool {
         }
         let timeout_ms = input.int("timeout_ms").unwrap_or(30_000) as u64;
 
-        let mut cmd = tokio::process::Command::new("sh");
-        cmd.arg("-c").arg(command).current_dir(&ctx.project_path);
-        #[cfg(unix)]
-        cmd.process_group(0);
-
-        let result = tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await;
+        // The deadline is enforced by `exec_with_timeout`, which signals the
+        // whole process group. Wrapping `Command::output()` in a timeout
+        // dropped the future without killing anything: `sleep 30` in an agent
+        // command kept running in the user's tree after the tool reported
+        // Timeout, and every background process it started outlived the run.
+        let argv = vec!["sh".to_string(), "-c".to_string(), command.to_string()];
+        let result = crate::sandbox::exec::exec_with_timeout(
+            &argv,
+            &ctx.project_path,
+            Duration::from_millis(timeout_ms),
+            timeout_ms / 1000,
+            crate::sandbox::truncate_head_tail,
+        )
+        .await;
 
         match result {
+            // Outer Err is a spawn failure; the inner Err is our own timeout.
             Ok(Ok(output)) => {
-                let raw_stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let raw_stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let stdout = crate::sandbox::truncate_head_tail(&raw_stdout, 1500, 65536);
-                let stderr = crate::sandbox::truncate_head_tail(&raw_stderr, 1500, 65536);
-                let exit_code = output.status.code().unwrap_or(-1);
+                let stdout = output.stdout;
+                let stderr = output.stderr;
+                let exit_code = output.exit_code as i32;
                 let status = if exit_code == 0 {
                     ToolStatus::Success
                 } else {
@@ -1321,18 +1328,30 @@ impl Tool for BashTool {
                     metadata: HashMap::new(),
                 }
             }
-            Ok(Err(e)) => make_error_result(&format!("exec error: {}", e)),
-            Err(_) => ToolResult {
-                tool_id: ToolId::generate(),
-                tool_name: "bash".into(),
-                status: ToolStatus::Timeout,
-                summary: format!("command timed out after {}ms", timeout_ms),
-                data: ToolData::None,
-                duration: Duration::from_millis(timeout_ms),
-                artifacts: Vec::new(),
-                diagnostics: vec!["timeout".into()],
-                metadata: HashMap::new(),
-            },
+            Err(e) => make_error_result(&format!("exec error: {e}")),
+            Ok(Err(e)) => {
+                // Distinguish a killed timeout from a failed spawn, and say so
+                // plainly when the process group could not be signalled — that
+                // means the caller's work is still running somewhere.
+                let mut diagnostics = vec!["timeout".into(), e.to_string()];
+                if !e.killed {
+                    diagnostics.push(
+                        "the process group could not be signalled; a child may still be running"
+                            .into(),
+                    );
+                }
+                ToolResult {
+                    tool_id: ToolId::generate(),
+                    tool_name: "bash".into(),
+                    status: ToolStatus::Timeout,
+                    summary: format!("{e} (limit {}ms)", timeout_ms),
+                    data: ToolData::None,
+                    duration: Duration::from_millis(timeout_ms),
+                    artifacts: Vec::new(),
+                    diagnostics,
+                    metadata: HashMap::new(),
+                }
+            }
         }
     }
 }
