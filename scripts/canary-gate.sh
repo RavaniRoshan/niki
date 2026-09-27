@@ -93,13 +93,10 @@ print(json.dumps([
 ]))
 PY
 
-total=0; killed=0; survived=0; build_failed=0
-holdout_killed=0; holdout_total=0
 records="[]"
 
 while IFS=$'\t' read -r id file patch replace_with probe; do
   [ -n "$id" ] || continue
-  total=$((total + 1))
   info "--- $id ($probe) ---"
 
   # Apply the textual patch, refusing an ambiguous match. A patch that matches
@@ -152,13 +149,6 @@ recs.append({
 print(json.dumps(recs))
 " "$records" "$(cat "$TMP_OUT")" "$id" "$outcome")
 
-  # Count the held-out split separately — that is the honest number.
-  is_holdout=$(python3 -c "import json,sys;print(next(c['split'] for c in json.load(open(sys.argv[1])) if c['id']==sys.argv[2]))" "$TMP_OUT" "$id")
-  if [ "$is_holdout" = "holdout" ]; then
-    holdout_total=$((holdout_total + 1))
-    [ "$outcome" = "killed" ] && holdout_killed=$((holdout_killed + 1))
-  fi
-
   git checkout -- .
 done < <(python3 -c "
 import json,sys
@@ -175,29 +165,38 @@ if [ "$START_TREE" != "$END_TREE" ]; then
 fi
 
 mkdir -p "$(dirname "$RESULTS")"
+# Totals are derived from the canary list, not from shell counters carried
+# through the loop. The counters version wrote zeros: a report claiming
+# 0 canaries ran while the run above it printed 8 is exactly the kind of
+# self-contradiction this harness exists to catch.
 python3 -c "
 import json,sys
+canaries = json.loads(sys.argv[1])
+holdout = [c for c in canaries if c.get('split') == 'holdout' and not c.get('equivalent')]
 print(json.dumps({
   'schema': 1,
-  'canaries': json.loads(sys.argv[1]),
+  'canaries': canaries,
   'totals': {
-    'total': int(sys.argv[2]), 'killed': int(sys.argv[3]),
-    'survived': int(sys.argv[4]),
-    'holdout_total': int(sys.argv[5]), 'holdout_killed': int(sys.argv[6]),
+    'total': len(canaries),
+    'killed': sum(1 for c in canaries if c['outcome'] == 'killed'),
+    'survived': sum(1 for c in canaries if c['outcome'] == 'survived'),
+    'holdout_total': len(holdout),
+    'holdout_killed': sum(1 for c in holdout if c['outcome'] == 'killed'),
   },
 }, indent=2))
-" "$records" "$total" "$killed" "$survived" "$holdout_total" "$holdout_killed" > "$RESULTS"
+" "$records" > "$RESULTS"
 
 echo
 info "========================================"
-printf '  canaries: %s   killed: %s   survived: %s\n' "$total" "$killed" "$survived"
-if [ "$holdout_total" -gt 0 ]; then
-  rate=$(python3 -c "print(f'{$holdout_killed / $holdout_total:.2f}')")
-  printf '  HELD-OUT kill rate: %s (%s/%s)\n' "$rate" "$holdout_killed" "$holdout_total"
-else
-  red "  no held-out canaries — the gate would be measuring nothing"
-  exit 7
-fi
+python3 -c "
+import json,sys
+t = json.load(open(sys.argv[1]))['totals']
+print(f\"  canaries: {t['total']}   killed: {t['killed']}   survived: {t['survived']}\")
+if t['holdout_total'] == 0:
+    print('  no held-out canaries — the gate would be measuring nothing')
+    sys.exit(7)
+print(f\"  HELD-OUT kill rate: {t['holdout_killed']/t['holdout_total']:.2f} ({t['holdout_killed']}/{t['holdout_total']})\")
+" "$RESULTS" || exit 7
 echo "  report: $RESULTS"
 
 # The gate. A survived canary means the suite cannot detect that defect --
