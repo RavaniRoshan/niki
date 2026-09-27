@@ -26,7 +26,14 @@ cd "$REPO_ROOT"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
 # Free RAM (MiB) required before a heavy/heap layer is allowed to start.
-MIN_FREE_MB="${NIKI_MIN_FREE_MB:-1200}"
+# 2600 MB, not 1200: linking a 66k-LOC test binary is the peak allocation in
+# this project, and at 1200 MB the check would pass moments before a build
+# exhausted the host.
+MIN_FREE_MB="${NIKI_MIN_FREE_MB:-2600}"
+# When memory is short, wait for it rather than refusing outright. Cargo
+# releases its page cache within seconds of a build finishing, so a hard
+# refusal fails on a machine that is merely settling.
+RECOVER_WAIT_S="${NIKI_RECOVER_WAIT:-180}"
 
 # Binaries that build git fixture repos, worktrees, or measure wall-clock
 # render budgets. Concurrent execution starves the timing assertions and
@@ -69,15 +76,31 @@ free_mb() {
   fi
 }
 
+# Block until free memory clears the threshold, or give up after
+# RECOVER_WAIT_S seconds.
+wait_for_memory() {
+  local need="$1" waited=0 avail
+  while :; do
+    avail="$(free_mb)"
+    [ "${avail:-0}" -ge "$need" ] && return 0
+    if [ "$waited" -ge "$RECOVER_WAIT_S" ]; then
+      red "only ${avail} MiB free after ${waited}s (need ${need} MiB)"
+      return 1
+    fi
+    [ "$waited" -eq 0 ] && info "waiting for memory: ${avail} MiB free, need ${need} MiB"
+    sleep 5
+    waited=$((waited + 5))
+  done
+}
+
 preflight() {
   local need="$1" label="$2" avail
-  avail="$(free_mb)"
-  if [ "${avail:-0}" -lt "$need" ]; then
-    red "refusing to run the '$label' layer: ${avail} MiB available, ${need} MiB required."
-    red "free memory, then retry. Override with NIKI_MIN_FREE_MB=<MiB> if this host is fine."
+  if ! wait_for_memory "$need"; then
+    red "refusing to run the '$label' layer."
+    red "Override with NIKI_MIN_FREE_MB=<MiB> if this host is fine."
     return 1
   fi
-  info "preflight ok: ${avail} MiB available (need ${need} MiB) for '$label'"
+  info "preflight ok: $(free_mb) MiB available (need ${need} MiB) for '$label'"
   return 0
 }
 
@@ -104,6 +127,7 @@ run_group() {
   local name failed=0
   preflight "$MIN_FREE_MB" "$1" || return 1
   for name in "$@"; do
+    preflight "$MIN_FREE_MB" "$name" || return 1
     run_binary "$name" "$threads" || failed=1
   done
   return $failed
