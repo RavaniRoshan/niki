@@ -69,10 +69,15 @@ impl OpenAiProvider {
     /// Construct with an explicit provider slug (used for named gateways whose
     /// base_url may be user-overridden, e.g. `zen`, `kimi`, `kilo`).
     pub fn new_named(config: &ProviderConfig, provider_name: &str) -> Result<Self> {
-        let _api_key = config
-            .api_key
-            .clone()
-            .ok_or_else(|| super::provider::missing_key_error(provider_name))?;
+        // Presence check only — the key itself is read later, at request
+        // time, out of the stored `config`. Cloning the secret to throw the
+        // copy away was pointless work, and it is what CodeQL's
+        // cleartext-logging rule has been flagging across every provider since
+        // August: a cloned credential on a line the taint analysis believes
+        // reaches a log sink. Borrowing removes the clone and the alert.
+        if config.api_key.is_none() {
+            return Err(super::provider::missing_key_error(provider_name));
+        }
         Ok(Self {
             config: config.clone(),
             client: super::provider::http_client()?,
