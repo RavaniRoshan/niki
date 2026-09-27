@@ -47,81 +47,36 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
         }
     }
 
-    let shortcut_spans = if width >= 80 {
-        vec![
-            Span::styled(
-                "tab ",
-                Style::default()
-                    .fg(theme::fg_bright())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("toggle view   ", Style::default().fg(theme::fg_subtle())),
-            Span::styled(
-                "ctrl-p ",
-                Style::default()
-                    .fg(theme::fg_bright())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("commands   ", Style::default().fg(theme::fg_subtle())),
-            Span::styled(
-                "esc ",
-                Style::default()
-                    .fg(theme::fg_bright())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "quit (run continues)",
-                Style::default().fg(theme::fg_subtle()),
-            ),
-        ]
-    } else if width >= 50 {
-        vec![
-            Span::styled(
-                "tab ",
-                Style::default()
-                    .fg(theme::fg_bright())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("view · ", Style::default().fg(theme::fg_subtle())),
-            Span::styled(
-                "^p ",
-                Style::default()
-                    .fg(theme::fg_bright())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("cmd · ", Style::default().fg(theme::fg_subtle())),
-            Span::styled(
-                "esc ",
-                Style::default()
-                    .fg(theme::fg_bright())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("exit", Style::default().fg(theme::fg_subtle())),
-        ]
-    } else {
-        vec![
-            Span::styled(
-                "tab",
-                Style::default()
-                    .fg(theme::fg_bright())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("·", Style::default().fg(theme::fg_subtle())),
-            Span::styled(
-                "^p",
-                Style::default()
-                    .fg(theme::fg_bright())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("·", Style::default().fg(theme::fg_subtle())),
-            Span::styled(
-                "esc",
-                Style::default()
-                    .fg(theme::fg_bright())
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]
-    };
+    // Key hints come from `footer::contextual_hints` and are fitted by the
+    // documented priority ladder, rather than being a fixed list chosen by
+    // three hand-tuned width tiers. That way a hint appears only when the
+    // action is available, and the footer degrades by dropping the least
+    // important hint instead of hard-switching wording at an arbitrary width.
+    // The old tiers also never mentioned the arrow keys.
+    //
+    // `LEFT_BUDGET` leaves room for the right-aligned status (branch, cost,
+    // notice) so hints cannot push it off the bar.
+    const LEFT_BUDGET: usize = 46;
+    let hint_budget = width.saturating_sub(LEFT_BUDGET);
+    let kept = super::footer::fit(&super::footer::contextual_hints(state), hint_budget);
+
+    let mut shortcut_spans: Vec<Span> = Vec::with_capacity(kept.len() * 2);
+    for (i, h) in kept.iter().enumerate() {
+        if i > 0 {
+            shortcut_spans.push(Span::styled("· ", Style::default().fg(theme::fg_subtle())));
+        }
+        shortcut_spans.push(Span::styled(
+            h.key,
+            Style::default()
+                .fg(theme::fg_bright())
+                .add_modifier(Modifier::BOLD),
+        ));
+        shortcut_spans.push(Span::styled(
+            format!(" {} ", h.label),
+            Style::default().fg(theme::fg_subtle()),
+        ));
+    }
+
     left_spans.extend(shortcut_spans);
 
     // Right-aligned status info
