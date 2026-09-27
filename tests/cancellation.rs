@@ -75,7 +75,14 @@ fn cancel_after_n_stages(tasks_dir: std::path::PathBuf, n: usize, flag: Arc<Atom
                     }
                 }
             }
-            std::thread::sleep(Duration::from_millis(5));
+            // Spin rather than sleep. A 5ms poll interval was a race against
+            // the pipeline: under load the run could finish all four stages
+            // before the watcher's next tick, and the test then failed on a
+            // machine slower than the one it was written on. Watching for a
+            // condition, not a duration, is the fix — this test passed alone
+            // and failed in the full suite, which is exactly the shape of bug
+            // a timing-based test hides.
+            std::hint::spin_loop();
         }
     });
 }
