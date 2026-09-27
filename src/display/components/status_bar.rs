@@ -155,7 +155,8 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     // static badge at the far right of a wide bar is the least-looked-at pixel
     // on screen.
     let badge_label = badge_text.trim();
-    // Animate only while the run is actually doing something.
+    // Animate only while the run is doing something. A permission badge at
+    // rest is a fact, not an event.
     //
     // The shimmer used to run on every frame, unconditionally — so a chat
     // sitting idle with a static permission badge repainted at 30fps forever.
@@ -165,24 +166,21 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     // asserted on exactly that and failed on CI while passing on any machine
     // with `NO_COLOR` set — the same env-dependence the Rust suite had.
     //
-    // Motion should mean "something is happening". A permission badge at rest
-    // is a fact, not an event.
-    let animating = !matches!(state.run_state, crate::display::state::RunState::Idle);
-    let shimmered = if animating {
-        crate::display::motion::summary_shimmer_with(
-            badge_label,
-            state.tick as f64 / 30.0, // 30fps idle loop
-            state.config.ui.reduced_motion || std::env::var_os("NIKI_REDUCED_MOTION").is_some(),
-            crate::display::theme::supports_truecolor(),
-        )
-    } else {
-        vec![ratatui::text::Span::styled(
-            badge_label,
-            Style::default()
-                .fg(badge_color)
-                .add_modifier(ratatui::style::Modifier::BOLD),
-        )]
-    };
+    // Reduced motion and "nothing is happening" mean the same thing to this
+    // element: draw the badge, do not move it. They have to take the *same*
+    // branch, or the two disagree about what a still badge looks like — which
+    // is how a still badge came out styled in one case and unstyled in the
+    // other.
+    let reduced_motion =
+        state.config.ui.reduced_motion || std::env::var_os("NIKI_REDUCED_MOTION").is_some();
+    let animating =
+        !reduced_motion && !matches!(state.run_state, crate::display::state::RunState::Idle);
+    let shimmered = crate::display::motion::summary_shimmer_with(
+        badge_label,
+        state.tick as f64 / 30.0, // 30fps idle loop
+        !animating,
+        crate::display::theme::supports_truecolor(),
+    );
     // The shimmer spans carry their own foreground, so a hovered badge would
     // otherwise lose its background and the hover would vanish. Re-apply the
     // badge background on top of each shimmer span.
