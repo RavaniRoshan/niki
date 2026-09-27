@@ -426,54 +426,12 @@ fn run_tui(
                             }
                             ModalAction::None => {}
                         }
-                    } else if state.show_permission_modal {
-                        // Permission modal uses the universal list cursor for
-                        // Up/Down; Enter confirms the highlighted option.
-                        let mut cursor = permission::cursor(&state);
-                        match key.code {
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                cursor.prev();
-                                state.permission_selected = cursor.selected;
-                                engine.mark_dirty();
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                cursor.next();
-                                state.permission_selected = cursor.selected;
-                                engine.mark_dirty();
-                            }
-                            KeyCode::Tab => {
-                                // Cycle scope: Turn → Session → Project → Turn
-                                state.permission_scope =
-                                    (state.permission_scope + 1) % permission::SCOPES.len();
-                                engine.mark_dirty();
-                            }
-                            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                // Toggle detail panel
-                                state.show_permission_detail = !state.show_permission_detail;
-                                engine.mark_dirty();
-                            }
-                            _ => {
-                                if let Some(req) = state.permission_request.take() {
-                                    let action = match key.code {
-                                        KeyCode::Char('y') | KeyCode::Char('Y') => {
-                                            PermissionAction::Allow
-                                        }
-                                        KeyCode::Enter => cursor
-                                            .submit()
-                                            .map(permission::action_for)
-                                            .unwrap_or(PermissionAction::Deny),
-                                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                                            PermissionAction::Deny
-                                        }
-                                        _ => PermissionAction::Deny,
-                                    };
-                                    let _ = req.response_tx.send(action);
-                                    state.show_permission_modal = false;
-                                    state.show_permission_detail = false;
-                                    engine.mark_dirty();
-                                }
-                            }
-                        }
+                    } else if permission::handle_key(&key, &mut state) {
+                        // The prompt owns input while it is up. This used to be
+                        // an inline copy of the same logic; `niki chat` had no
+                        // copy at all, so a permission request there rendered,
+                        // answered nothing, and expired into a Deny.
+                        engine.mark_dirty();
                     } else if state.show_command_palette {
                         // Command palette takes priority
                         if command_palette.handle_key(key, &mut state) {
@@ -1314,6 +1272,16 @@ pub fn run_chat(
                     continue;
                 }
 
+                // A permission prompt outranks everything below, including the
+                // global keys and the composer. It used to be handled in
+                // `run_tui` and nowhere else, so in `niki chat` the modal
+                // rendered with no key that could answer it and the sandbox's
+                // five-second timeout turned it into a `Deny` the user never
+                // chose — a permission question the program asked itself.
+                if permission::handle_key(&key, &mut state) {
+                    needs_render = true;
+                    continue;
+                }
                 // Global keys that work even inside chat input (TUI-003: the two
                 // keys run_chat shares with run_tui resolve through the table;
                 // run_chat's other literals (bare-t theme, q quit, Tab) stay

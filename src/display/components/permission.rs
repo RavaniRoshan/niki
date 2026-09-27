@@ -6,6 +6,7 @@
 //! Keybindings: ↑/↓ navigate · Enter/Y confirm · Esc/N cancel · Ctrl+E explanation · Ctrl+D raw params
 
 use ratatui::Frame;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -273,6 +274,82 @@ pub fn render_permission_options(selected: usize) -> String {
         .join("    ")
 }
 
+/// Answer a permission prompt from the keyboard.
+///
+/// Returns `true` when the key was consumed by the prompt. Callers must treat
+/// that as "the prompt owns input": every other handler is skipped, because a
+/// key that moves a permission cursor must not also type into the composer
+/// behind it.
+///
+/// This exists as one function because it used to exist as one copy inside
+/// `run_tui` and no copy at all inside `run_chat`. The prompt *renders* in
+/// both — it is drawn by the shared `render` — so in `niki chat` a user was
+/// shown a permission request, given no key that answered it, and watched it
+/// expire into `Deny` after five seconds. The failure looked like the program
+/// rejecting a command on its own.
+///
+/// The asymmetry with the mouse path is deliberate and shared: `y`/`n` answer
+/// the highlighted option's question directly, `Enter` submits whatever is
+/// highlighted, and any other key is *not* a silent `Deny` — it is ignored, so
+/// a stray keystroke cannot answer a question the user never read.
+pub fn handle_key(key: &KeyEvent, state: &mut AppState) -> bool {
+    if !state.show_permission_modal {
+        return false;
+    }
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            let mut cursor = cursor(state);
+            cursor.prev();
+            state.permission_selected = cursor.selected;
+            true
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let mut cursor = cursor(state);
+            cursor.next();
+            state.permission_selected = cursor.selected;
+            true
+        }
+        KeyCode::Tab => {
+            state.permission_scope = (state.permission_scope + 1) % SCOPES.len();
+            true
+        }
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.show_permission_detail = !state.show_permission_detail;
+            true
+        }
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            respond(state, action_for(state.permission_selected))
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            respond(state, PermissionAction::Deny)
+        }
+        KeyCode::Enter => {
+            let cursor = cursor(state);
+            respond(
+                state,
+                cursor
+                    .submit()
+                    .map(action_for)
+                    .unwrap_or(PermissionAction::Deny),
+            )
+        }
+        // Consumed, but not answered. Anything else is a key the user typed
+        // while a prompt was up; treating it as a denial would let a stray
+        // character decide a permission question.
+        _ => true,
+    }
+}
+
+/// Send `action` for the pending request and close the prompt.
+fn respond(state: &mut AppState, action: PermissionAction) -> bool {
+    if let Some(req) = state.permission_request.take() {
+        let _ = req.response_tx.send(action);
+    }
+    state.show_permission_modal = false;
+    state.show_permission_detail = false;
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,5 +507,103 @@ mod tests {
             .map(|c| c.symbol().to_string())
             .collect();
         assert!(text.contains("déploie"), "{text}");
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+    use crate::display::state::PermissionRequest;
+
+    fn state_with_request() -> (AppState, std::sync::mpsc::Receiver<PermissionAction>) {
+        let config = crate::config::NikiConfig::default();
+        let mut state = AppState::new("t".to_string(), config, ".".into());
+        let (tx, rx) = std::sync::mpsc::channel();
+        state.permission_request = Some(PermissionRequest {
+            tool_name: "sandbox_exec".into(),
+            command: "rm -rf /".into(),
+            description: String::new(),
+            params: None,
+            response_tx: tx,
+        });
+        state.show_permission_modal = true;
+        (state, rx)
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// The defect: `niki chat` rendered the prompt and had no key that could
+    /// answer it, so the sandbox's five-second timeout denied the command. A
+    /// user watching that had no way to have said no — and no way to have said
+    /// yes either.
+    #[test]
+    fn a_prompt_can_be_answered_with_y_and_n() {
+        let (mut state, rx) = state_with_request();
+        assert!(handle_key(&key(KeyCode::Char('y')), &mut state));
+        assert_eq!(rx.try_recv().unwrap(), PermissionAction::Allow);
+        assert!(!state.show_permission_modal, "the prompt must close");
+
+        let (mut state, rx) = state_with_request();
+        assert!(handle_key(&key(KeyCode::Char('n')), &mut state));
+        assert_eq!(rx.try_recv().unwrap(), PermissionAction::Deny);
+    }
+
+    #[test]
+    fn a_stray_key_answers_nothing() {
+        // The old inline handler mapped every unmatched key to `Deny`. A user
+        // typing into the composer behind an open prompt would silently
+        // refuse the command with one keystroke.
+        let (mut state, rx) = state_with_request();
+        assert!(
+            handle_key(&key(KeyCode::Char('x')), &mut state),
+            "the prompt still owns the key"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "an unrecognised key must not decide a permission question"
+        );
+        assert!(state.show_permission_modal, "and the prompt stays up");
+    }
+
+    #[test]
+    fn arrows_move_the_cursor_and_enter_submits_the_highlighted_option() {
+        let (mut state, rx) = state_with_request();
+        assert_eq!(state.permission_selected, 0);
+        handle_key(&key(KeyCode::Down), &mut state);
+        assert_eq!(state.permission_selected, 1);
+        // Option 1 is "Allow always", which resolves to Allow.
+        handle_key(&key(KeyCode::Enter), &mut state);
+        assert_eq!(rx.try_recv().unwrap(), PermissionAction::Allow);
+
+        // Deny is reachable, not just allow.
+        let (mut state, rx) = state_with_request();
+        handle_key(&key(KeyCode::Down), &mut state);
+        handle_key(&key(KeyCode::Down), &mut state);
+        assert_eq!(state.permission_selected, 2, "third option is Deny");
+        handle_key(&key(KeyCode::Enter), &mut state);
+        assert_eq!(rx.try_recv().unwrap(), PermissionAction::Deny);
+    }
+
+    #[test]
+    fn a_prompt_with_no_request_still_closes() {
+        // The detail flag can be left set; answering must clear it or the next
+        // prompt renders with a panel nobody asked for.
+        let (mut state, _rx) = state_with_request();
+        state.show_permission_detail = true;
+        handle_key(&key(KeyCode::Esc), &mut state);
+        assert!(!state.show_permission_modal);
+        assert!(!state.show_permission_detail);
+    }
+
+    #[test]
+    fn keys_pass_through_when_no_prompt_is_up() {
+        let config = crate::config::NikiConfig::default();
+        let mut state = AppState::new("t".to_string(), config, ".".into());
+        assert!(
+            !handle_key(&key(KeyCode::Char('y')), &mut state),
+            "a y with no prompt must reach the composer, not be swallowed"
+        );
     }
 }
