@@ -121,13 +121,20 @@ pub fn summary_shimmer_with(
         let intensity = 0.5 * (1.0 + (std::f64::consts::PI * distance).cos());
         // 0.5 (far) .. 1.0 (band centre): brightness only, never hue.
         let alpha = 0.5 + 0.5 * intensity as f32;
-        let (r, g, b) = mix(bg, fg, alpha);
+        // The channel bindings are named so they cannot shadow the character
+        // being styled. An earlier version used `(r, g, b)` while iterating
+        // `for g in text.chars()`, so `g.to_string()` rendered the *green
+        // channel* as the glyph and the status badge filled with decimals like
+        // `131153.2596206.96378`. The unit tests missed it because the
+        // text-preservation test took the non-truecolor fallback; the visual
+        // harness caught it on the first run.
+        let (ch_r, ch_g, ch_b) = mix(bg, fg, alpha);
         out.push(Span::styled(
             g.to_string(),
             Style::default().fg(Color::Rgb(
-                r.clamp(0.0, 255.0) as u8,
-                g.clamp(0.0, 255.0) as u8,
-                b.clamp(0.0, 255.0) as u8,
+                ch_r.clamp(0.0, 255.0) as u8,
+                ch_g.clamp(0.0, 255.0) as u8,
+                ch_b.clamp(0.0, 255.0) as u8,
             )),
         ));
         column += w;
@@ -308,11 +315,22 @@ mod tests {
 
     #[test]
     fn shimmer_preserves_the_exact_text() {
-        // A shimmer that drops or reorders a character corrupts the status
-        // line it is meant to decorate.
-        for text in ["MANUAL", "Planner · running", "", "a", "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"] {
-            let out = shimmer_text(&summary_shimmer(text, 0.4, false));
-            assert_eq!(out, text, "shimmer altered the text {text:?}");
+        // A shimmer that drops, reorders, or *substitutes* a character corrupts
+        // the status line it decorates. Run through the explicit-capability
+        // form so this exercises the blend path: with the fallback it passed
+        // while the real effect was rendering colour channels as glyphs.
+        for text in [
+            "MANUAL",
+            "Planner · running",
+            "a",
+            "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏",
+            "BYPASS",
+            "世界 wide",
+        ] {
+            for t in [0.0, 0.37, 1.13, 1.99] {
+                let out = shimmer_text(&summary_shimmer_with(text, t, false, true));
+                assert_eq!(out, text, "shimmer altered {text:?} at t={t}");
+            }
         }
     }
 
