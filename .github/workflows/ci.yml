@@ -320,6 +320,24 @@ jobs:
             exit 1
           }
 
+  # ── Consumer journeys ────────────────────────────────────────────────
+  # The other suites test modules. This runs the real binary the way a person
+  # would: on a throwaway HOME with no inherited config, no provider key, and
+  # a scrubbed environment. A journey that cannot run is recorded as skipped
+  # and fails the job unless it is explicitly allow-listed — this repo has
+  # already shipped CI jobs that went green while executing nothing.
+  journeys:
+    name: Consumer journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build release binary
+        run: cargo build --release
+      - name: Run consumer journeys
+        run: cargo test --test journeys --verbose -- --nocapture --test-threads=1
+
   # ── Windows ──────────────────────────────────────────────────────────
   # niki ships a winget manifest and a cargo-dist `x86_64-pc-windows-msvc`
   # target, but no workflow ever built or ran anything on Windows. A manifest
