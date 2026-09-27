@@ -445,6 +445,18 @@ jobs:
     timeout-minutes: 25
     env:
       NIKI_CI: "1"
+    # The render is environment-dependent: the same binary and the same
+    # DejaVu Sans Mono produce materially different pixels on this runner than
+    # on a developer machine — regenerating the references locally and pushing
+    # them left every frame still failing, by 6.6% to 9.4%. So references have
+    # to be blessed *here*. This input does it and uploads the result; a human
+    # reviews the frames before they are committed.
+    workflow_dispatch:
+      inputs:
+        regen:
+          description: "Re-bless reference frames and upload them as an artifact"
+          type: boolean
+          default: false
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -463,7 +475,19 @@ jobs:
       - name: Build release
         run: cargo build --release
       - name: Capture + compare reference frames
-        run: ./tests/visual/run.sh
+        run: |
+          if [ "${{ inputs.regen }}" = "true" ]; then
+            REGEN=1 ./tests/visual/run.sh
+          else
+            ./tests/visual/run.sh
+          fi
+      - name: Upload re-blessed frames for review
+        if: ${{ inputs.regen }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-reference-frames
+          path: tests/visual/reference/*.png
+          retention-days: 14
       - name: Upload frames on failure
         if: failure()
         uses: actions/upload-artifact@v7
