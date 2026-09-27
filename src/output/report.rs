@@ -1,4 +1,6 @@
-use crate::artifacts::types::{AgentRole, RedChallenge, ReviewVerdict, SecurityVerdict};
+use crate::artifacts::types::{
+    AgentRole, RedChallenge, ReviewVerdict, RunOutcome, SecurityVerdict,
+};
 use crate::config::NikiConfig;
 use crate::orchestrator::pipeline::{PipelineResult, Task, TopologyMode};
 use crate::safety::SafetyProof;
@@ -634,6 +636,7 @@ pub fn generate_report(
 
 ## Pipeline Result
 - Verdict: {{ verdict }}
+- Outcome: {{ outcome_line }}
 - Revision Rounds: {{ revision_rounds }}
 - Topology: {{ topology_line }}
 {{ model_sharing_note }}
@@ -659,6 +662,7 @@ pub fn generate_report(
         description => task.description.clone(),
         project_path => task.project_path.to_string_lossy().to_string(),
         verdict => format!("{:?}", result.verdict),
+        outcome_line => outcome_line(result),
         revision_rounds => result.revision_rounds,
         topology_line => topology_line(result),
         model_sharing_note => model_sharing_note(result).unwrap_or_default(),
@@ -714,6 +718,30 @@ pub fn topology_line(result: &PipelineResult) -> String {
         base
     } else {
         format!("{}\n- Topology reason: {}", base, result.topology_reason)
+    }
+}
+
+/// The one line that decides how the verdict above should be read.
+///
+/// The report is the artefact a human actually reads, and `Verdict: Approved`
+/// on its own is exactly the false signal this whole change exists to remove:
+/// a self-verified run and an independently reviewed one render identically.
+/// So the outcome, and who produced it, is stated on the same line.
+pub fn outcome_line(result: &PipelineResult) -> String {
+    match &result.outcome {
+        RunOutcome::Reviewed { by, verdict } => {
+            format!("independently reviewed by {by} — verdict: {verdict:?}")
+        }
+        RunOutcome::RevisionRequested { by } => format!("revision requested by {by}"),
+        RunOutcome::SelfVerified { note } => {
+            format!("SELF-VERIFIED — NOT independently reviewed. {note}")
+        }
+        RunOutcome::NotEvaluated { reason } => {
+            format!("NOT EVALUATED — no review stage ran. {reason}")
+        }
+        RunOutcome::Blocked { reason } => format!("blocked: {reason}"),
+        RunOutcome::Cancelled => "cancelled".to_string(),
+        RunOutcome::Failed { error } => format!("failed: {error}"),
     }
 }
 
