@@ -343,9 +343,30 @@ async fn failing_test_suite_creates_no_branch_and_marks_task_failed() {
         .cloned()
         .unwrap_or_default()
         .to_string();
+    // The original assertion accepted "BLOCKED by verification gate" OR any
+    // string containing "failed", so nearly any failure text satisfied it.
+    // What the user actually needs is the gate that blocked, the command that
+    // failed, and how to override it — so assert all three.
     assert!(
-        status_str.contains("BLOCKED by verification gate") || status_str.contains("failed"),
-        "task.json status must record verification failure, got: {status_str}"
+        status_str.contains("Branch blocked"),
+        "task.json must record that a gate blocked the branch, got: {status_str}"
+    );
+    assert!(
+        status_str.contains("`false`"),
+        "task.json must name the command that failed, got: {status_str}"
+    );
+    assert!(
+        status_str.contains("exit 1"),
+        "task.json must report the failing exit code, got: {status_str}"
+    );
+    assert!(
+        status_str.contains("--force"),
+        "task.json must say how to proceed, got: {status_str}"
+    );
+    assert!(
+        record.get("branch").is_none() || record.get("branch") == Some(&serde_json::Value::Null),
+        "a blocked run must record no branch, got {:?}",
+        record.get("branch")
     );
 
     // Evidence (report.md, changes.patch) is still preserved

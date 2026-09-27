@@ -348,10 +348,32 @@ model = "llama-3.1-70b-versatile"
     }
 
     #[test]
-    fn ollama_model_probe_never_panics_and_names_something() {
-        // Hits localhost:11434 when present, returns the default otherwise.
-        // Either way it must not panic and must name a non-empty model.
-        let (model, _) = crate::cli::auth::preferred_ollama_model();
-        assert!(!model.is_empty());
+    fn ollama_model_probe_returns_a_usable_model_either_way() {
+        // The old assertion was `assert!(!model.is_empty())`, which cannot
+        // fail: the fallback at the call site is a non-empty literal. What
+        // actually matters is that the returned name is one a user could pass
+        // to `ollama run`, and that the probe reports honestly about where it
+        // came from.
+        let (model, detected) = crate::cli::auth::preferred_ollama_model();
+        assert!(
+            !model.trim().is_empty(),
+            "the probe must always name a model to fall back on"
+        );
+        assert!(
+            !model.contains(char::is_whitespace),
+            "a model name with whitespace cannot be passed to `ollama run`: {model:?}"
+        );
+        // `detected` is the signal separating "found your installed model"
+        // from "guessed a default", and the fallback branch is fully
+        // determined: with nothing detected, the answer is the documented
+        // default. The detected branch deliberately asserts nothing about the
+        // name beyond usability — a locally installed model may legitimately
+        // share the default's name, so "detected != default" would be wrong.
+        if !detected {
+            assert_eq!(
+                model, "qwen2.5-coder:3b",
+                "with no Ollama detected the probe must return the documented default"
+            );
+        }
     }
 }
