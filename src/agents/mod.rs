@@ -198,11 +198,12 @@ pub async fn run_agent(
         }
     }
 
-    let token_usage = usage.unwrap_or(TokenUsage {
-        input_tokens: 0,
-        output_tokens: estimated_output_tokens,
-        ..Default::default()
-    });
+    // NB: the usage total is assembled at the *end* of this function, not
+    // here. It used to be frozen at this point — before the repair loop, which
+    // issues a second real request and accumulates its usage into `usage`.
+    // The repair was therefore billed to nobody: `token_usage` carried only
+    // the first attempt, so a stage that needed two rounds to produce a valid
+    // artifact under-reported its own cost to the user and to the spend cap.
 
     // ===== Phase 2: Resilient parsing + repair + re-prompt =====
     const MAX_REPAIR_RETRIES: u32 = 2;
@@ -327,7 +328,11 @@ pub async fn run_agent(
                     // adds to the first attempt's rather than being maxed
                     // against it. `.max()` here under-reported a repair by
                     // reporting only the more expensive of the two attempts.
-                    let mut prev = usage.unwrap_or_default();
+                    let mut prev = usage.unwrap_or(TokenUsage {
+                        input_tokens: 0,
+                        output_tokens: estimated_output_tokens,
+                        ..Default::default()
+                    });
                     prev.accumulate(&response.usage);
                     usage = Some(prev);
                 }
@@ -377,6 +382,12 @@ pub async fn run_agent(
     let ttft_ms = first_text_time
         .map(|t| t.duration_since(stream_start).as_millis() as u32)
         .unwrap_or(0);
+
+    let token_usage = usage.unwrap_or(TokenUsage {
+        input_tokens: 0,
+        output_tokens: estimated_output_tokens,
+        ..Default::default()
+    });
 
     Ok((json_content, token_usage, retry_count, ttft_ms))
 }

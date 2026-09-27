@@ -228,3 +228,77 @@ fn task_record_status_is_running_initially() {
     let record = TaskRecord::new(Uuid::new_v4(), "test task");
     assert_eq!(record.status, TaskStatus::Running);
 }
+
+/// A repair retry is a second real request, and it must be billed.
+///
+/// `run_agent` used to assemble its usage total *before* the repair loop, so
+/// the second request's tokens — which the loop itself accumulates into
+/// `usage` — were never reported. A stage that needed two rounds to produce a
+/// valid artifact silently under-reported its own cost to the user and to the
+/// spend cap, and it did so precisely on the runs that were most expensive.
+///
+/// The test drives the real function against a mock whose first response is
+/// unparseable, so the repair path is genuinely taken.
+#[tokio::test]
+async fn a_repair_retry_is_included_in_the_reported_usage() {
+    use niki::agents::run_agent;
+    use niki::artifacts::types::AgentRole;
+    use niki::llm::mock::MockProvider;
+
+    const FIRST_IN: u32 = 1_000;
+    const FIRST_OUT: u32 = 500;
+    const REPAIR_IN: u32 = 2_000;
+    const REPAIR_OUT: u32 = 700;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let script_path = dir.path().join("script.json");
+    let script = serde_json::json!({
+        "models": {
+            "m": {
+                "responses": [
+                    // Attempt 1: not JSON at all, so repair re-prompts.
+                    {"text": "I could not produce an artifact, sorry.", "input_tokens": FIRST_IN, "output_tokens": FIRST_OUT},
+                    // Attempt 2: a conformant artifact.
+                    {"text": format!("```json\n{}\n```", common::mock_llm::task_spec_json()), "input_tokens": REPAIR_IN, "output_tokens": REPAIR_OUT},
+                ]
+            }
+        }
+    });
+    std::fs::write(&script_path, serde_json::to_string_pretty(&script).unwrap()).unwrap();
+
+    let provider = MockProvider::new(Some(&script_path.to_string_lossy())).unwrap();
+    let mut display = niki::display::agent_stream::AgenticDisplay::new();
+    let ctx = minijinja::context! {
+        task_description => "Fix the off-by-one in paginate",
+        project_knowledge => "",
+        project_memory => "",
+        current_files => "",
+        mcp_tools => "",
+    };
+
+    let (_json, usage, _retries, _ttft) = run_agent(
+        AgentRole::Planner,
+        &provider,
+        "m",
+        "planner.md",
+        ctx,
+        "schemas/task_spec.schema.json",
+        &mut display,
+        4096,
+        0.2,
+        None,
+    )
+    .await
+    .expect("the second attempt is conformant, so the stage completes");
+
+    assert_eq!(
+        usage.input_tokens,
+        FIRST_IN + REPAIR_IN,
+        "both attempts must be billed: the repair request is a real request"
+    );
+    assert_eq!(
+        usage.output_tokens,
+        FIRST_OUT + REPAIR_OUT,
+        "both attempts' output must be billed"
+    );
+}
