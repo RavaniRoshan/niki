@@ -72,10 +72,11 @@ pub enum NikiError {
     #[error("LLM provider error ({provider}): {message}")]
     LlmProvider { provider: String, message: String },
 
-    #[error("Artifact validation failed for {agent:?}: {errors}")]
+    #[error("Artifact validation failed for {agent:?}: {errors}\n\n{hint}")]
     ArtifactValidation {
         agent: artifacts::types::AgentRole,
         errors: String,
+        hint: String,
     },
 
     #[error("Agent {agent:?} failed after {retries} retries: {message}")]
