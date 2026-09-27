@@ -14,6 +14,45 @@ use tokio::signal;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+/// Probe container runtime endpoints, in priority order, and return the first
+/// that answers.
+///
+/// Windows gets its own implementation rather than inheriting the Unix one.
+/// It previously had none: `connect_container_runtime` was `#[cfg(unix)]`, and
+/// the non-Unix arm hard-coded `docker = None`, so a Windows user who had
+/// Docker Desktop installed and running still got `None` — the container
+/// backend was unreachable on that platform regardless of their setup. The
+/// Unix path's candidates are all POSIX socket paths that cannot exist on
+/// Windows, so it could not simply be reused.
+#[cfg(windows)]
+pub(crate) async fn connect_container_runtime() -> Result<Docker> {
+    // 1. An explicit DOCKER_HOST wins. Docker Desktop sets this itself, and a
+    //    user pointing at a remote or VM-hosted engine relies on it.
+    if let Ok(host) = env::var("DOCKER_HOST")
+        && !host.is_empty()
+    {
+        if let Ok(d) = Docker::connect_with_http(host.as_str(), 120, bollard::API_DEFAULT_VERSION)
+            && d.ping().await.is_ok()
+        {
+            tracing::info!("Connected via DOCKER_HOST={host}");
+            return Ok(d);
+        }
+    }
+
+    // 2. Docker Desktop's named pipe — the default on Windows.
+    if let Ok(d) = Docker::connect_with_socket_defaults()
+        && d.ping().await.is_ok()
+    {
+        tracing::info!("Connected via the Docker Desktop named pipe");
+        return Ok(d);
+    }
+
+    Err(anyhow!(
+        "No container runtime found. Start Docker Desktop, or point DOCKER_HOST \
+         at a Podman machine endpoint (`podman machine inspect` prints it)."
+    ))
+}
+
 /// Probe container runtime sockets: Podman (rootless, then rootful) → Docker.
 /// Returns the first connection that pings successfully, or an error if none work.
 #[cfg(unix)]
@@ -602,7 +641,8 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
                 eprintln!("\n Shutting down — cleaning up...");
 
                 let ids = containers.lock().await.clone();
-                #[cfg(unix)]
+                // Not Unix-gated: on Windows this used to skip cleanup
+                // entirely, so Ctrl-C left every sandbox container running.
                 if !ids.is_empty()
                     && let Ok(docker) = connect_container_runtime().await
                 {
@@ -693,17 +733,27 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // Only connect to a container runtime when the Docker backend is in use. The
     // worktree backend never touches Podman/Docker, so it runs without a daemon.
     // The dry-run path also skips the daemon ping (it never creates a sandbox).
-    #[cfg(unix)]
+    //
+    // No `cfg` gate: the non-Unix arm used to bind `docker` to `None`, which
+    // meant a Windows user with Docker Desktop running was handed `None`
+    // anyway. Silently continuing would be worse than failing — the run would
+    // proceed with the *container* backend selected and no container, so the
+    // failure would surface later as a baffling sandbox error rather than
+    // here, where the message can say what to do.
     let docker = if uses_docker && !args.dry_run {
-        let d = connect_container_runtime()
-            .await
-            .map_err(|e| anyhow!("Container runtime error: {}", e))?;
+        let d = connect_container_runtime().await.map_err(|e| {
+            anyhow!(
+                "Container runtime error: {e}\n\n\
+                     NIKI selected the container backend, which requires a running \
+                     Podman or Docker daemon. To run without isolation instead, \
+                     pass --backend worktree — note that it executes agent \
+                     commands as local processes with YOUR privileges."
+            )
+        })?;
         Some(d)
     } else {
         None
     };
-    #[cfg(not(unix))]
-    let docker: Option<Docker> = None;
 
     // Borrow the connection for the pipeline; None for non-Docker backends.
     let docker_ref = docker.as_ref();
