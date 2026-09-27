@@ -2154,6 +2154,13 @@ pub async fn execute_pipeline(
                         && s.role != AgentRole::Synthesizer
                         && s.role != AgentRole::Critic
                 }) {
+                    // Same per-stage check as the sequential loop: this branch
+                    // has no outer revision loop to fall back on, so without it
+                    // the flag is never read at all.
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, 0)?;
+                        return Err(crate::NikiError::Cancelled.into());
+                    }
                     let cache_key = if stage.fallbacks.is_empty() {
                         stage.provider.clone()
                     } else {
@@ -2258,6 +2265,22 @@ pub async fn execute_pipeline(
                         return Err(crate::NikiError::Cancelled.into());
                     }
                     for stage in body_stages.iter().filter(|s| s.role != AgentRole::Critic) {
+                        // Checked per stage, not just per round. A round is
+                        // Tester → Red → SecurityAuditor → Reviewer, each a
+                        // sequential LLM call; on a slow model that is minutes
+                        // in which the cancel flag was never read. The user
+                        // pressed Esc and nothing happened until the round
+                        // happened to end.
+                        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                            save_task_record(
+                                task,
+                                &metrics,
+                                TaskStatus::Cancelled,
+                                task_dir,
+                                round,
+                            )?;
+                            return Err(crate::NikiError::Cancelled.into());
+                        }
                         let cache_key = if stage.fallbacks.is_empty() {
                             stage.provider.clone()
                         } else {
@@ -2469,6 +2492,16 @@ pub async fn execute_pipeline(
             // 3-4 large-context re-ingestion sessions that make up the multi-agent
             // token tax (slice 2.3). Trade-off (named in the report): there is no
             // independent Red/Blue adversarial review on this path.
+            // This arm has no revision loop, so nothing downstream would ever
+            // read the cancel flag. Check it before spending a full Coder
+            // session on work the user has already asked to stop.
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                // `&metrics`, not `&[]`: the Planner already ran and was
+                // billed, and a cancelled record that shows zero stages makes
+                // the user pay for a run that appears to have done nothing.
+                save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, 0)?;
+                return Err(crate::NikiError::Cancelled.into());
+            }
             let coder_stage = body_stages
                 .iter()
                 .find(|s| s.role == AgentRole::Coder)
@@ -2558,6 +2591,10 @@ pub async fn execute_pipeline(
                 )),
             };
             if let Err(apply_err) = first_apply {
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, 0)?;
+                    return Err(crate::NikiError::Cancelled.into());
+                }
                 // One bounded repair attempt: show the coder its exact apply
                 // error and ask for corrected SEARCH blocks. Weak/local models
                 // often fix themselves when shown the failure (e.g. regex
