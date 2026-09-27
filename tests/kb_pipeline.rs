@@ -118,11 +118,16 @@ async fn full_clean_run_updates_manifest_without_learnings() {
     // The SingleAgent fast path runs no Reviewer, so it cannot report an
     // independently-reviewed approval. It self-verifies, and says so.
     assert_eq!(format!("{:?}", result.topology), "SingleAgent");
+    // `RunOutcome` is a verdict enum (who reviewed, what they decided) printed
+    // into a failing test's assertion message. CodeQL's cleartext-logging rule
+    // matches the `{:?}` interpolation as a log sink, which it is not.
+    // codeql[rust/cleartext-logging] test assertion message, not a log
     assert!(
         !result.outcome.is_independently_reviewed(),
         "the solo fast path has no independent reviewer: {:?}",
         result.outcome
     );
+    // codeql[rust/cleartext-logging] test assertion message, not a log
     assert!(
         !result.outcome.is_approved(),
         "a self-verified run must not report a bare approval: {:?}",
