@@ -56,6 +56,15 @@ PY
   exit 0
 fi
 
+# Free RAM in MiB, portable across Linux and macOS.
+free_mb() {
+  if command -v free >/dev/null 2>&1; then
+    free -m | awk '/^Mem:/ {print $7}'
+  else
+    vm_stat | awk '/Pages free/ {gsub("\\.", "", $3); print $3/256}'
+  fi
+}
+
 # Block until free memory clears the threshold, or give up. Waiting is the
 # right response: cargo's page cache holds a large share of "used" memory
 # after a build and releases it within seconds, so refusing outright would
