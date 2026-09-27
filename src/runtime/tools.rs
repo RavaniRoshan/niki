@@ -2534,10 +2534,7 @@ pub async fn run_tool_loop(
         // four-step tool loop was billed as one. The same `.max()` is still
         // correct *within* a single stream (see `agents::call_agent`), where a
         // provider may emit disjoint or cumulative usage chunks for one call.
-        usage.input_tokens += response.usage.input_tokens;
-        usage.output_tokens += response.usage.output_tokens;
-        usage.cached_input_tokens += response.usage.cached_input_tokens;
-        usage.reasoning_tokens += response.usage.reasoning_tokens;
+        usage.accumulate(&response.usage);
         last_content = response.content.clone();
         // Phase 5.5: every loop iteration spends the unified run budget.
         // Exhaustion aborts the loop with a typed error — never a silent stop.

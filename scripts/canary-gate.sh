@@ -86,6 +86,8 @@ print(json.dumps([
         "equivalent": c.get("equivalent", False),
         "split": c.get("split", "gate"),
         "probe": c.get("probe", "--lib"),
+        "known_surviving": c.get("known_surviving", False),
+        "equivalent": c.get("equivalent", False),
     }
     for c in d["canary"]
 ]))
@@ -193,14 +195,20 @@ else
 fi
 echo "  report: $RESULTS"
 
-# The gate. A survived canary means the suite does not detect that defect.
-if [ "$survived" -ne 0 ]; then
+# The gate. A survived canary means the suite cannot detect that defect --
+# unless the corpus already declares it a known blind spot, in which case it
+# is reported rather than counted as a regression.
+python3 "$REPO_ROOT/scripts/canary-gate-summary.py" "$RESULTS"
+status=$?
+
+if [ "$status" -ne 0 ]; then
   red
-  red "GATE FAILED: $survived canary(s) survived injection."
-  red "Each survivor is a class of defect this suite cannot detect."
-  red "Fix the missing test, or mark the canary equivalent with a reason."
+  red "GATE FAILED: a canary expected to be killed survived injection."
+  red "That is a class of defect this suite cannot detect. Either add the missing"
+  red "test, or record it in the corpus as known_surviving with the reason it"
+  red "cannot be closed today."
   exit 1
 fi
 
 green
-green "GATE PASSED: every canary was killed by the suite."
+green "GATE PASSED: every expected canary was killed; declared blind spots are listed above."

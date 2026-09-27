@@ -317,14 +317,9 @@ pub async fn run_agent(
                     // adds to the first attempt's rather than being maxed
                     // against it. `.max()` here under-reported a repair by
                     // reporting only the more expensive of the two attempts.
-                    let prev = usage.unwrap_or_default();
-                    usage = Some(TokenUsage {
-                        input_tokens: prev.input_tokens + response.usage.input_tokens,
-                        output_tokens: prev.output_tokens + response.usage.output_tokens,
-                        cached_input_tokens: prev.cached_input_tokens
-                            + response.usage.cached_input_tokens,
-                        reasoning_tokens: prev.reasoning_tokens + response.usage.reasoning_tokens,
-                    });
+                    let mut prev = usage.unwrap_or_default();
+                    prev.accumulate(&response.usage);
+                    usage = Some(prev);
                 }
                 Err(e) => {
                     tracing::warn!(

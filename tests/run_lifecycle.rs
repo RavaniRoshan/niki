@@ -463,6 +463,47 @@ async fn completed_status_requires_a_branch_that_exists_on_disk() {
     }
 }
 
+/// PL-2 canary. The SingleAgent fast path assigns `Verdict::Approved`
+/// without a Reviewer, so `verdict_source` is the only thing distinguishing a
+/// self-approval from an independent review. The invariant checker only sees
+/// synthetic traces, so without this the field could be dropped and every
+/// other test would still pass.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_completed_run_records_where_its_verdict_came_from() {
+    let repo = create_fixture_repo();
+    let project = repo.dir.path().to_path_buf();
+    let script_path = project.join(".niki-mock-script.json");
+    successful_script(&script_path);
+    std::fs::write(
+        project.join("niki.toml"),
+        minimal_mock_toml(&script_path, Some("true")),
+    )
+    .unwrap();
+
+    niki::cli::run::handle(&run_args(project.clone()))
+        .await
+        .expect("passing run");
+
+    let record = read_task_record(&project);
+    let source = record
+        .get("verdict_source")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    assert!(
+        !source.is_empty(),
+        "task.json records a verdict with no source: a reader cannot tell an independent review \
+         from the SingleAgent fast path approving its own patch. Got: {:?}",
+        record.get("verdict_source")
+    );
+    // Whatever it says, it must not claim a review the run did not perform.
+    if source.contains("solo-coder") {
+        assert!(
+            source.contains("no independent review"),
+            "a self-approval must say so plainly: {source:?}"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn dry_run_never_records_completed() {
     let repo = create_fixture_repo();
