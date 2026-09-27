@@ -221,7 +221,11 @@ pub async fn run_agent(
 
     // Validate and retry if needed
     let mut validation_errors: Option<Vec<String>> = None;
-    let mut parse_error_detail: Option<String> = None;
+    // Set when the JSON is well-formed and field-valid but fails the stricter
+    // artifact checks (an empty diff, a contentless verdict). It is NOT a JSON
+    // parse error, and conflating the two makes the re-prompt tell the model
+    // its syntax is broken when its *content* is what is wrong.
+    let mut strict_error_detail: Option<String> = None;
 
     for repair_attempt in 0..=MAX_REPAIR_RETRIES {
         // Try to validate
@@ -229,8 +233,8 @@ pub async fn run_agent(
             Ok(()) => {
                 // Schema valid — also do strict validation
                 if let Err(e) = validate_artifact(&json_content, schema_path) {
-                    // Schema valid per field-level but strict validation failed
-                    parse_error_detail = Some(e.to_string());
+                    // Field-level valid, strict validation failed.
+                    strict_error_detail = Some(e.to_string());
                 } else {
                     // All validation passed — no need to clear state, we break
                     break;
@@ -245,7 +249,7 @@ pub async fn run_agent(
         let failure = classify_failure(
             &full_content,
             None, // stop_reason not available in our streaming model
-            parse_error_detail.as_deref(),
+            strict_error_detail.as_deref(),
             validation_errors.clone(),
         );
 
@@ -266,7 +270,7 @@ pub async fn run_agent(
         }
 
         // Phase 2a: Local repair (cheaper than LLM call)
-        if parse_error_detail.is_some() || validation_errors.is_some() {
+        if strict_error_detail.is_some() || validation_errors.is_some() {
             phase2_retries += 1;
             retry_count += 1;
 
@@ -291,11 +295,17 @@ pub async fn run_agent(
                      Please fix these errors and respond with valid JSON only, no markdown fences.",
                     fields.join(", ")
                 )
-            } else if let Some(ref detail) = parse_error_detail {
+            } else if let Some(ref detail) = strict_error_detail {
+                // The JSON parsed and matched the schema field-by-field; what
+                // failed is the content. Saying "invalid JSON" here told the
+                // model its syntax was broken, and a small model duly replied
+                // with the same empty artifact — a retry loop that could not
+                // possibly succeed.
                 format!(
-                    "Your previous response contained invalid JSON: {}. \
-                     Please fix the JSON and respond with valid JSON only, no markdown fences.",
-                    detail
+                    "Your previous response was valid JSON but did not satisfy the artifact \
+                     requirements: {detail}. Fix the *content*, not the syntax. An artifact with \
+                     no edits, no files changed, or empty notes is not acceptable — produce the \
+                     actual change as JSON, with no markdown fences."
                 )
             } else {
                 "Your previous response was invalid. Please respond with valid JSON only, no markdown fences.".to_string()
@@ -346,10 +356,20 @@ pub async fn run_agent(
     // Final validation — fail-loud: invalid artifacts never degrade silently.
     if let Err(e) = validate_artifact(&json_content, schema_path) {
         let err_msg = e.to_string();
+        // A user who hits this needs to know the two things that actually fix
+        // it. Without this the message is a schema dump and the run just stops:
+        // in practice the cause is almost always a model too small to emit a
+        // conformant artifact, which is invisible unless it is named.
+        let hint = "The response was valid JSON but did not satisfy the artifact requirements.\n\
+             Most often the model is too small to emit a conformant artifact — \
+             `qwen2.5-coder:3b` fails here on ordinary tasks.\n\
+             Try: a larger model (7b+), or run ./scripts/dogfood.sh to see where your \
+             model stops.";
         display.agent_failed(role, &format!("Validation failed: {}", err_msg));
         return Err(crate::NikiError::ArtifactValidation {
             agent: role,
             errors: err_msg,
+            hint: hint.to_string(),
         }
         .into());
     }

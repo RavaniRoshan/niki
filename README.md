@@ -20,8 +20,13 @@ classifier decides which of them run: a low-risk edit gets the fast path, anythi
 auth, crypto or network is escalated to a dedicated security audit before the branch is cut.
 Committed branches are never rewritten.
 
-**Runs with no API key and no container runtime** — [Ollama](https://ollama.com) plus the
-worktree backend is enough to try the whole pipeline.
+**No API key and no container runtime required** — [Ollama](https://ollama.com) plus the
+worktree backend runs the real pipeline. **Caveat, measured rather than assumed:** each stage
+must emit a schema-conformant JSON artifact, and a small local model often cannot.
+`qwen2.5-coder:3b` fails at the Coder stage on ordinary tasks. Run
+[`scripts/dogfood.sh`](scripts/dogfood.sh) to see where your model stops — it drives a real
+project with a real failing test and reports the stage, the reason, and whether a branch was
+produced.
 
 <br>
 
@@ -57,6 +62,9 @@ Then, inside your project:
 niki init --interactive          # guided setup; pick Ollama when offered — no API key needed
 niki run "Add a /health endpoint" --backend worktree
 ```
+
+With a small local model this may stop at a stage: each one must emit a schema-conformant
+JSON artifact. `./scripts/dogfood.sh` reproduces the check against a real project.
 
 Full walkthrough in [Quick Start](#quick-start).
 
