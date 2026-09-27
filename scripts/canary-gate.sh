@@ -133,19 +133,24 @@ PY
     green "  killed"
   fi
 
+  # One Python call does the whole lookup. The previous version shelled out
+  # five times per canary and, worse, never carried `known_surviving` or
+  # `equivalent` into the report -- so the summary classified two declared
+  # blind spots as unexpected.
   records=$(python3 -c "
 import json,sys
-r = json.loads(sys.argv[1])
-r.append({'id': sys.argv[2], 'category': sys.argv[3], 'invariant': sys.argv[4],
-          'split': sys.argv[5], 'probe': sys.argv[6], 'outcome': sys.argv[7],
-          'expect_kill': sys.argv[8] == 'true'})
-print(json.dumps(r))
-" "$records" "$id" \
-    "$(python3 -c "import json,sys;print(next(c['category'] for c in json.load(open(sys.argv[1])) if c['id']==sys.argv[2]))" "$TMP_OUT" "$id")" \
-    "$(python3 -c "import json,sys;print(next(c['invariant'] for c in json.load(open(sys.argv[1])) if c['id']==sys.argv[2]))" "$TMP_OUT" "$id")" \
-    "$(python3 -c "import json,sys;print(next(c['split'] for c in json.load(open(sys.argv[1])) if c['id']==sys.argv[2]))" "$TMP_OUT" "$id")" \
-    "$probe" "$outcome" \
-    "$(python3 -c "import json,sys;print(str(next(c['expect_kill'] for c in json.load(open(sys.argv[1])) if c['id']==sys.argv[2])).lower())" "$TMP_OUT" "$id")")
+recs, meta = json.loads(sys.argv[1]), json.loads(sys.argv[2])
+c = next(c for c in meta if c['id'] == sys.argv[3])
+recs.append({
+    'id': c['id'], 'category': c['category'], 'invariant': c['invariant'],
+    'split': c.get('split','gate'), 'probe': c.get('probe','--lib'),
+    'outcome': sys.argv[4],
+    'expect_kill': c.get('expect_kill', True),
+    'known_surviving': c.get('known_surviving', False),
+    'equivalent': c.get('equivalent', False),
+})
+print(json.dumps(recs))
+" "$records" "$(cat "$TMP_OUT")" "$id" "$outcome")
 
   # Count the held-out split separately — that is the honest number.
   is_holdout=$(python3 -c "import json,sys;print(next(c['split'] for c in json.load(open(sys.argv[1])) if c['id']==sys.argv[2]))" "$TMP_OUT" "$id")

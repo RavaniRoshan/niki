@@ -22,13 +22,14 @@ def main(path: str) -> int:
     def survived(c):
         return c["outcome"] == "survived"
 
-    unexpected = [
-        c for c in canaries
-        if survived(c)
-        and c.get("expect_kill", True)
-        and not c.get("known_surviving")
-        and not c.get("equivalent")
-    ]
+    # An expected survivor is one the corpus declared in advance: an
+    # equivalence (the mutation has no observable effect) or a known blind
+    # spot (recorded with the reason it cannot be closed today). Everything
+    # else is a regression: the suite was supposed to catch it and did not.
+    def is_declared(c):
+        return c.get("equivalent") or c.get("known_surviving") or not c.get("expect_kill", True)
+
+    unexpected = [c for c in canaries if survived(c) and not is_declared(c)]
     expected = [c for c in canaries if survived(c)]
 
     if expected:
@@ -38,7 +39,9 @@ def main(path: str) -> int:
             if c.get("equivalent"):
                 why = "declared equivalent — the mutation has no observable effect"
             elif c.get("known_surviving"):
-                why = "declared known blind spot — recorded in the corpus with the reason"
+                why = "declared known blind spot — recorded with the reason it cannot be closed"
+            elif not c.get("expect_kill", True):
+                why = "declared informational — not expected to be detected"
             else:
                 why = "UNEXPECTED — the suite does not detect this defect"
             print(f"    - {c['id']}  ({why})")
