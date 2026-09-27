@@ -25,5 +25,8 @@ pub mod invariants_ratchet;
 #[path = "reverse/injection.rs"]
 pub mod injection;
 
+#[path = "reverse/context_snapshot.rs"]
+pub mod context_snapshot;
+
 #[path = "reverse/cost.rs"]
 pub mod cost;
