@@ -52,6 +52,25 @@ jobs:
       - name: Run consumer journeys
         run: cargo test --test journeys --verbose -- --nocapture --test-threads=1
 
+  # ── Differential: the two backends are one contract ──────────────
+  # Where the worktree and container backends disagree, at least one is
+  # wrong, and the pair says which. Needs the pre-built sandbox image: a
+  # bare ubuntu:24.04 lacks git, node and python3 and fails the tool
+  # check, so the test skips rather than passing vacuously.
+  differential:
+    name: Backend differential
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the sandbox image
+        run: podman build -t niki-sandbox:24.04 -f docker/Dockerfile .
+      - name: Build release binary
+        run: cargo build --release
+      - name: Compare the worktree and container backends
+        run: cargo test --test differential --verbose -- --nocapture --test-threads=1
+
   # ── Coverage, as a report and never as a gate ─────────────────────
   # Coverage is a reachability lower bound: it says which lines ran, not
   # whether anything was asserted about them. It is published because it is
