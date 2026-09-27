@@ -1391,10 +1391,23 @@ impl AppState {
                 {
                     s.status = StageStatus::Failed;
                     s.summary = vec![error.clone()];
-                    s.error_message = Some(error);
+                    s.error_message = Some(error.clone());
                     s.stream.clear();
                 }
                 self.run_state = RunState::Failed;
+                // Surface the failure as a modal. It used to only mark the
+                // stage row red — `Modal::Error` existed, three tests drove it,
+                // and nothing in the product ever constructed it. A user whose
+                // run died on an API error had to notice a status line.
+                if self.modal.is_none() {
+                    self.modal = Some(Modal::Error {
+                        stage: format!("{role:?}"),
+                        message: error,
+                        hint: "Press [r] to retry the stage, [c] to open config, \
+                               or [Esc] to return to the transcript."
+                            .to_string(),
+                    });
+                }
             }
             DisplayEvent::Revision { round, max, issues } => {
                 self.revision_round = round;

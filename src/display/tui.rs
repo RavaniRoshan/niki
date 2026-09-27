@@ -424,10 +424,6 @@ fn run_tui(
                                 state.current_page = PageId::Config;
                                 engine.mark_dirty();
                             }
-                            ModalAction::Skip => {
-                                state.modal = None;
-                                engine.mark_dirty();
-                            }
                             ModalAction::None => {}
                         }
                     } else if state.show_permission_modal {
@@ -1003,7 +999,7 @@ fn run_tui(
                                     state.modal = None;
                                     engine.mark_dirty();
                                 }
-                                ModalAction::None | ModalAction::Skip => {}
+                                ModalAction::None => {}
                             }
                         }
                     }
@@ -1352,7 +1348,7 @@ pub fn run_chat(
 
                 if let Some(ref modal) = state.modal.clone() {
                     match modal::handle_modal_key(key, modal) {
-                        ModalAction::Dismiss | ModalAction::Skip => {
+                        ModalAction::Dismiss => {
                             state.modal = None;
                             needs_render = true;
                         }
