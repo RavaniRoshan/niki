@@ -593,16 +593,17 @@ pub fn topology_reason(spec: &TaskSpec, config: &NikiConfig) -> String {
 /// (if present) SecurityAuditor/Synthesizer stages are collapsed into the one
 /// solo Coder session, which is the whole point of the fast-path: it avoids the
 /// multi-agent token tax of re-ingesting shared context in every session.
-pub fn body_stages_for(
+pub fn body_stages_for<'a>(
     topology: TopologyMode,
-    stages: Vec<PipelineStageConfig>,
-) -> Vec<PipelineStageConfig> {
+    stages: &[&'a PipelineStageConfig],
+) -> Vec<&'a PipelineStageConfig> {
     match topology {
         TopologyMode::SingleAgent => stages
-            .into_iter()
+            .iter()
             .filter(|s| s.role == AgentRole::Coder)
+            .copied()
             .collect(),
-        TopologyMode::MultiAgent | TopologyMode::Auto => stages,
+        TopologyMode::MultiAgent | TopologyMode::Auto => stages.to_vec(),
     }
 }
 
@@ -1950,10 +1951,16 @@ pub async fn execute_pipeline(
     sandbox.ensure_tools(&required).await?;
 
     // --- Body stages (everything after the Planner), in configured order ---
-    let body_stages: Vec<&PipelineStageConfig> = stages
+    // The topology collapse goes through `body_stages_for` so the rule has one
+    // mechanism. It used to be open-coded as "everything but the Planner",
+    // which meant the SingleAgent collapse was satisfied only because that arm
+    // happens to look up the Coder by hand — change the arm to iterate the list
+    // and the full chain would run while the unit test still passed.
+    let all_body: Vec<&PipelineStageConfig> = stages
         .iter()
         .filter(|s| s.role != AgentRole::Planner && !s.skip)
         .collect();
+    let body_stages: Vec<&PipelineStageConfig> = body_stages_for(topology, &all_body);
 
     // Build one provider client per distinct provider+fallbacks combination.
     // Stored as `Arc` so the parallel-coder path can move a clone into a
@@ -3679,7 +3686,7 @@ mod tests {
 
     #[test]
     fn body_stages_for_single_agent_keeps_only_coder() {
-        let stages = vec![
+        let stages = [
             PipelineStageConfig {
                 role: AgentRole::Coder,
                 provider: "a".into(),
@@ -3709,13 +3716,15 @@ mod tests {
             },
         ];
         // Single-agent collapses everything but the Coder.
-        let solo = body_stages_for(TopologyMode::SingleAgent, stages.clone());
+        let refs: Vec<&PipelineStageConfig> = stages.iter().collect();
+
+        let solo = body_stages_for(TopologyMode::SingleAgent, &refs);
         assert_eq!(solo.len(), 1);
         assert_eq!(solo[0].role, AgentRole::Coder);
 
         // Multi-agent passes every body stage through unchanged.
-        let multi = body_stages_for(TopologyMode::MultiAgent, stages);
-        assert_eq!(multi.len(), 3);
+        let multi = body_stages_for(TopologyMode::MultiAgent, &refs);
+        assert_eq!(multi.len(), stages.len());
     }
 
     #[test]

@@ -1564,3 +1564,59 @@ fn chat_wheel_up_unpins_and_down_rearms() {
     assert!(state.chat_scroll.follow);
     assert!(rest > 0);
 }
+
+/// A stage failure must open the error modal.
+///
+/// This closes a gap where three tests drove `Modal::Error` — rendering,
+/// hit-testing, and the [r]etry / [c]onfig keys — by constructing the variant
+/// by hand, while nothing in the product ever constructed it. The affordance
+/// was fully "tested" and completely unreachable: a user whose run died on an
+/// API error saw a status line change colour and nothing else.
+#[test]
+fn a_stage_failure_opens_the_error_modal() {
+    let mut state = make_state();
+    assert!(state.modal.is_none(), "no modal before anything fails");
+
+    state.apply_event(DisplayEvent::StageFailed {
+        role: niki::artifacts::types::AgentRole::Coder,
+        error: "401 Unauthorized: check your API key".into(),
+    });
+
+    let modal = state
+        .modal
+        .clone()
+        .expect("a failed stage must surface a modal, not just a status line");
+    match &modal {
+        Modal::Error { message, hint, .. } => {
+            assert!(
+                message.contains("401"),
+                "the modal must show the actual error: {message}"
+            );
+            assert!(!hint.trim().is_empty(), "the modal must offer a next step");
+        }
+        other => panic!("expected an error modal, got {other:?}"),
+    }
+}
+
+/// A second failure must not stack a second modal on top of the first.
+#[test]
+fn a_second_stage_failure_does_not_replace_the_first_modal() {
+    let mut state = make_state();
+    state.apply_event(DisplayEvent::StageFailed {
+        role: niki::artifacts::types::AgentRole::Coder,
+        error: "first failure".into(),
+    });
+    let first = state.modal.clone().unwrap();
+
+    state.apply_event(DisplayEvent::StageFailed {
+        role: niki::artifacts::types::AgentRole::Reviewer,
+        error: "second failure".into(),
+    });
+
+    let now = state.modal.clone().expect("the modal stays open");
+    assert!(
+        matches!((&first, &now), (Modal::Error { message: a, .. }, Modal::Error { message: b, .. }) if a == b),
+        "a modal the user is reading must not be swapped out from under them: \
+         {first:?} became {now:?}"
+    );
+}

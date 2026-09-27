@@ -28,6 +28,12 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
     // Clear the popup area (on top of scrim)
     frame.render_widget(Clear, popup_area);
 
+    // The combined error text is owned here and dropped at the end of the
+    // frame. It used to be `Box::leak`ed to satisfy a `&'static str` the match
+    // produced — harmless while nothing ever constructed `Modal::Error`, and
+    // an unbounded leak once a stage failure actually opened this modal, since
+    // every redraw leaked the same text again.
+    let combined_error;
     let (title, message_str, border_color) = match modal {
         Modal::Confirm { title, message } => (title.as_str(), message.as_str(), theme::fg_color()),
         Modal::Error {
@@ -35,9 +41,8 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
             message,
             hint,
         } => {
-            let combined = format!("{}\n\n{}", message, hint);
-            let leaked: &'static str = Box::leak(combined.into_boxed_str());
-            (stage.as_str(), leaked, theme::RED())
+            combined_error = format!("{message}\n\n{hint}");
+            (stage.as_str(), combined_error.as_str(), theme::RED())
         }
     };
 
@@ -172,5 +177,4 @@ pub enum ModalAction {
     Confirm,
     Retry,
     Config,
-    Skip,
 }
