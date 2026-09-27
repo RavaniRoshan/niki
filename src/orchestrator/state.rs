@@ -190,10 +190,10 @@ impl TaskRecord {
     }
 
     pub fn save_to_disk(&self, task_dir: &Path) -> Result<()> {
-        std::fs::create_dir_all(task_dir)?;
-        let path = task_dir.join("task.json");
+        // Atomic: `task.json` is polled by the TUI while the run writes it, and
+        // a torn read there shows the user a half-written run record. It used
+        // to be a plain `fs::write`, which truncates before it writes.
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, json)?;
-        Ok(())
+        crate::knowledge::kb::write_atomic(&task_dir.join("task.json"), json.as_bytes())
     }
 }

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -799,13 +799,21 @@ async fn run_parallel_coders(
                 RoleOutput::Coder(d) => d,
                 _ => unreachable!("coder stage yields a CodeDiff"),
             };
-            // Apply to this coder's own worktree so `get_diff` reflects only its change.
-            if let Err(e) = sandbox
+            // Apply to this coder's own worktree so `get_diff` reflects only its
+            // change. A failed apply leaves the worktree holding nothing this
+            // coder produced, so the diff read below would return the tree
+            // unchanged and the synthesiser would merge an empty contribution
+            // as if it were real work.
+            sandbox
                 .apply_patch(&code_diff_to_edit_text(&diff), &project_path)
                 .await
-            {
-                eprintln!("Warning: coder worktree patch failed: {}", e);
-            }
+                .with_context(|| {
+                    format!(
+                        "a parallel Coder's patch did not apply to its own worktree \
+                         ({project_path:?}); its change was never written, so the run \
+                         is stopped rather than merging a diff that does not exist"
+                    )
+                })?;
             let _wt_diff = sandbox
                 .get_diff(
                     &diff
@@ -1298,8 +1306,8 @@ async fn run_bookkept_stage(
     display.update_pipeline_status();
     enforce_spend_cap(config.general.spend_cap_usd, metrics)?;
     state.accrue_budget(metrics)?;
-    update_context_budget(metrics, state, project_path, task_dir, config);
-    save_task_record(task, metrics, TaskStatus::Running, task_dir, round);
+    update_context_budget(metrics, state, project_path, task_dir, config)?;
+    save_task_record(task, metrics, TaskStatus::Running, task_dir, round)?;
     Ok((json, output))
 }
 
@@ -1348,7 +1356,7 @@ fn update_context_budget(
     project_path: &Path,
     task_dir: &Path,
     config: &NikiConfig,
-) {
+) -> Result<()> {
     let total: u32 = metrics.iter().map(|m| m.total_tokens()).sum();
     state.context_budget.used = total;
     let past_threshold = state.context_budget.needs_session_switch();
@@ -1383,12 +1391,16 @@ fn update_context_budget(
                 "compacted": true,
                 "dropped_sections": dropped,
             });
-            let _ = std::fs::create_dir_all(task_dir);
-            let _ = std::fs::write(
-                task_dir.join("context.json"),
-                serde_json::to_string_pretty(&ctx_json).unwrap_or_default(),
-            );
-            return;
+            return crate::knowledge::kb::write_atomic(
+                &task_dir.join("context.json"),
+                serde_json::to_string_pretty(&ctx_json)?.as_bytes(),
+            )
+            .with_context(|| {
+                format!(
+                    "could not write the context snapshot to {}",
+                    task_dir.join("context.json").display()
+                )
+            });
         }
         eprintln!(
             "Warning: context budget past threshold ({:.1}% of {} tokens) with compaction off — continuing without compression.",
@@ -1410,26 +1422,46 @@ fn update_context_budget(
         "needs_session_switch": past_threshold,
         "compacted": false,
     });
-    let _ = std::fs::create_dir_all(task_dir);
-    let _ = std::fs::write(
-        task_dir.join("context.json"),
-        serde_json::to_string_pretty(&ctx_json).unwrap_or_default(),
-    );
+    // Was two discarded `let _ =`s. `context.json` is what a run's context
+    // pressure story is reconstructed from, and a silent write failure left a
+    // stale or absent file that reads as "this run never used much context".
+    // Atomic, and propagated.
+    crate::knowledge::kb::write_atomic(
+        &task_dir.join("context.json"),
+        serde_json::to_string_pretty(&ctx_json)?.as_bytes(),
+    )
+    .with_context(|| {
+        format!(
+            "could not write the context snapshot to {}",
+            task_dir.join("context.json").display()
+        )
+    })
 }
 
 /// T8: Save an incremental TaskRecord snapshot to disk.
+///
+/// Fail-closed. This used to discard the write error (`let _ = ...`), so a run
+/// whose state could not be persisted carried on to completion and reported
+/// success — leaving the user a branch with no record of what produced it, no
+/// cost accounting, and nothing to resume from. Every caller now propagates.
 fn save_task_record(
     task: &Task,
     metrics: &[StageMetric],
     status: TaskStatus,
     task_dir: &Path,
     round: u32,
-) {
+) -> Result<()> {
     let mut rec = TaskRecord::new(task.id, &task.description);
     rec.status = status;
     rec.revision_rounds = round;
     rec.add_metrics(metrics);
-    let _ = rec.save_to_disk(task_dir);
+    rec.save_to_disk(task_dir).with_context(|| {
+        format!(
+            "could not persist the run record to {} — stopping rather than \
+             completing a run whose state cannot be read back",
+            task_dir.join("task.json").display()
+        )
+    })
 }
 
 /// Project memory for prompt injection: ambient history, present by default,
@@ -1562,7 +1594,7 @@ pub async fn execute_pipeline(
 
     // T8: Save an early TaskRecord (Running) so a crash mid-pipeline still
     // leaves a status file on disk.
-    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
 
     let mut artifacts: Vec<(AgentRole, String)> = Vec::new();
     // Per-agent context-isolation records (BUILD_PLAN 2.1). Populated as each
@@ -1770,8 +1802,8 @@ pub async fn execute_pipeline(
     display.update_pipeline_status();
 
     // T7+T8: Update context budget and save incremental task record after Planner.
-    update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
-    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+    update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config)?;
+    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
 
     // Decide the agent topology from the task shape (BUILD_PLAN 3.2, P2.2).
     // The Planner has already derived `estimated_complexity`, so we can pick
@@ -1875,12 +1907,23 @@ pub async fn execute_pipeline(
     }
 
     // T10: Create a checkpoint after the Planner stage so /undo and /rewind can restore.
+    // Both of these used to be discarded. A session directory that cannot be
+    // created, or a checkpoint that cannot be written, means `/undo` and
+    // `/rewind` silently do not work for the rest of the run — the user
+    // discovers it only when they reach for the undo they were promised.
     let session_mgr = crate::session::SessionManager::new(&task.project_path);
-    let _ = session_mgr.init();
-    let _ = session_mgr.create_checkpoint(
-        "after_planner",
-        crate::session::current_git_commit(&task.project_path),
-    );
+    session_mgr.init().with_context(|| {
+        format!(
+            "could not initialise sessions under {}",
+            task.project_path.display()
+        )
+    })?;
+    session_mgr
+        .create_checkpoint(
+            "after_planner",
+            crate::session::current_git_commit(&task.project_path),
+        )
+        .context("could not write the after_planner checkpoint; /undo and /rewind would not work for this run")?;
 
     // 2. Initialize Sandbox (backend chosen by config: docker / worktree)
     // `containers` is an Arc and is cloned here so the parallel-coder path below
@@ -2085,20 +2128,22 @@ pub async fn execute_pipeline(
                 display.agent_done(AgentRole::Synthesizer, summary, m.usage(), m.cost_usd);
                 display.update_pipeline_status();
 
-                update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
-                save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+                update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config)?;
+                save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
 
                 let merged = match role_output {
                     RoleOutput::Synthesizer(s) => s.merged,
                     _ => unreachable!("synthesizer stage yields a Synthesis"),
                 };
                 coder_json = serde_json::to_string_pretty(&merged)?;
-                if let Err(e) = sandbox
+                // The Tester runs against this tree. If the merged patch never
+                // lands, the Tester verifies a tree that does not contain the
+                // change, and a Reviewer then judges a verdict about code that
+                // was never written.
+                sandbox
                     .apply_patch(&code_diff_to_edit_text(&merged), &task.project_path)
                     .await
-                {
-                    eprintln!("Warning: Failed to apply synthesis patch: {}", e);
-                }
+                    .context("the Synthesizer's merged patch did not apply")?;
 
                 // 3) Run the remaining stages (Tester / Red / Reviewer / SecurityAuditor)
                 //    exactly once. In parallel mode the coders don't re-run on revision
@@ -2171,8 +2216,8 @@ pub async fn execute_pipeline(
                         &task.project_path,
                         task_dir,
                         config,
-                    );
-                    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+                    )?;
+                    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
 
                     match role_output {
                         RoleOutput::Tester(_) => {
@@ -2209,7 +2254,7 @@ pub async fn execute_pipeline(
                     // Cooperative cancellation: the TUI (or any holder of the
                     // flag) can abort the run between revision rounds.
                     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                        save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, round);
+                        save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, round)?;
                         return Err(crate::NikiError::Cancelled.into());
                     }
                     for stage in body_stages.iter().filter(|s| s.role != AgentRole::Critic) {
@@ -2318,18 +2363,22 @@ pub async fn execute_pipeline(
                             &task.project_path,
                             task_dir,
                             config,
-                        );
-                        save_task_record(task, &metrics, TaskStatus::Running, task_dir, round);
+                        )?;
+                        save_task_record(task, &metrics, TaskStatus::Running, task_dir, round)?;
 
                         match role_output {
                             RoleOutput::Coder(diff) => {
                                 coder_json = json;
-                                if let Err(e) = sandbox
+                                sandbox
                                     .apply_patch(&code_diff_to_edit_text(&diff), &task.project_path)
                                     .await
-                                {
-                                    eprintln!("Warning: Failed to apply coder patch: {}", e);
-                                }
+                                    .with_context(|| {
+                                        format!(
+                                            "the Coder's patch did not apply (round {round}); \
+                                             the Tester would otherwise verify a tree that \
+                                             does not contain the change"
+                                        )
+                                    })?;
                             }
                             RoleOutput::Tester(_) => {
                                 tester_json = json;
@@ -2356,15 +2405,13 @@ pub async fn execute_pipeline(
                                 // The reconciled change replaces the per-coder diffs for the
                                 // downstream Tester/Reviewer stages.
                                 coder_json = serde_json::to_string_pretty(&s.merged)?;
-                                if let Err(e) = sandbox
+                                sandbox
                                     .apply_patch(
                                         &code_diff_to_edit_text(&s.merged),
                                         &task.project_path,
                                     )
                                     .await
-                                {
-                                    eprintln!("Warning: Failed to apply synthesis patch: {}", e);
-                                }
+                                    .context("the Synthesizer's merged patch did not apply")?;
                             }
                             RoleOutput::SecurityAuditor(v) => {
                                 // A security rejection gates the run. It used to
@@ -2491,17 +2538,26 @@ pub async fn execute_pipeline(
             enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
             state.accrue_budget(&metrics)?;
 
-            update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
-            save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+            update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config)?;
+            save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
 
             // The solo Coder returns a CodeDiff; apply it so the downstream diff
             // read picks up the change.
             coder_json = solo_json;
-            if let Ok(parsed) = serde_json::from_str::<CodeDiff>(&coder_json)
-                && let Err(apply_err) = sandbox
-                    .apply_patch(&code_diff_to_edit_text(&parsed), &task.project_path)
-                    .await
-            {
+            // An unparseable artifact is treated as a failed apply, so it
+            // reaches the same bounded repair attempt rather than falling
+            // through to a self-approval of a change that was never written.
+            let first_apply: Result<()> = match serde_json::from_str::<CodeDiff>(&coder_json) {
+                Ok(parsed) => {
+                    sandbox
+                        .apply_patch(&code_diff_to_edit_text(&parsed), &task.project_path)
+                        .await
+                }
+                Err(parse_err) => Err(anyhow::anyhow!(
+                    "the solo Coder's artifact is not a valid code diff: {parse_err}"
+                )),
+            };
+            if let Err(apply_err) = first_apply {
                 // One bounded repair attempt: show the coder its exact apply
                 // error and ask for corrected SEARCH blocks. Weak/local models
                 // often fix themselves when shown the failure (e.g. regex
@@ -2570,17 +2626,31 @@ pub async fn execute_pipeline(
                 enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
                 state.accrue_budget(&metrics)?;
 
-                update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
-                save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+                update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config)?;
+                save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
 
                 coder_json = repair_json;
-                if let Ok(repaired) = serde_json::from_str::<CodeDiff>(&coder_json)
-                    && let Err(e) = sandbox
-                        .apply_patch(&code_diff_to_edit_text(&repaired), &task.project_path)
-                        .await
-                {
-                    eprintln!("Warning: Failed to apply repaired solo coder patch: {}", e);
-                }
+                let repaired: CodeDiff = serde_json::from_str(&coder_json).with_context(|| {
+                    format!(
+                        "the repair attempt did not return a valid code diff either: \
+                         {coder_json}"
+                    )
+                })?;
+                // The repair was the last chance. Falling through here used to
+                // set `verdict = Approved` and complete the run, handing back
+                // a branch containing no change whatsoever and reporting it as
+                // a success.
+                sandbox
+                    .apply_patch(&code_diff_to_edit_text(&repaired), &task.project_path)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "the repaired patch still did not apply ({:?}); the working \
+                             tree contains none of this run's work, so the run is \
+                             stopped instead of reporting an approval for it",
+                            task.project_path
+                        )
+                    })?;
             }
             verdict = Verdict::Approved;
             // The Solo fast path never runs a Reviewer: this is the Coder
@@ -2790,8 +2860,8 @@ pub async fn execute_pipeline(
 
     sandbox.destroy().await?;
 
-    update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
-    save_task_record(task, &metrics, TaskStatus::Running, task_dir, round);
+    update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config)?;
+    save_task_record(task, &metrics, TaskStatus::Running, task_dir, round)?;
 
     // Extract learnings from this run and save to memory
     extract_memory_from_artifacts(
