@@ -33,7 +33,11 @@ impl LlmProvider for OllamaProvider {
             .unwrap_or("http://localhost:11434");
         let url = format!("{}/api/chat", base_url.trim_end_matches('/'));
 
-        let payload = json!({
+        // Ollama's `/api/chat` takes tools in the OpenAI shape. Sending them
+        // conditionally keeps the request byte-identical to before for the
+        // callers that pass none, which is every stage that is not the Coder
+        // loop.
+        let mut payload = json!({
             "model": request.model,
             "messages": [
                 {
@@ -51,6 +55,25 @@ impl LlmProvider for OllamaProvider {
                 "num_predict": request.max_tokens,
             }
         });
+        if let Some(specs) = &request.tools
+            && !specs.is_empty()
+        {
+            payload["tools"] = serde_json::Value::Array(
+                specs
+                    .iter()
+                    .map(|t| {
+                        json!({
+                            "type": "function",
+                            "function": {
+                                "name": t.name,
+                                "description": t.description,
+                                "parameters": t.parameters,
+                            }
+                        })
+                    })
+                    .collect(),
+            );
+        }
 
         let mut request = self
             .client
@@ -92,9 +115,7 @@ impl LlmProvider for OllamaProvider {
                 output_tokens,
                 ..Default::default()
             },
-            // Phase 3.1: no native tool support on this provider —
-            // `tools` is ignored and `tool_calls` stays empty by design.
-            tool_calls: Vec::new(),
+            tool_calls: parse_tool_calls(&data),
         })
     }
 
@@ -214,4 +235,50 @@ impl LlmProvider for OllamaProvider {
     fn provider_name(&self) -> &str {
         "ollama"
     }
+}
+
+/// Read `message.tool_calls` out of an Ollama response.
+///
+/// This provider previously returned `tool_calls: Vec::new()` unconditionally,
+/// with a comment saying Ollama had no native tool support. It does — and this
+/// is the provider the README's zero-setup path uses (`ollama pull
+/// qwen2.5-coder:3b`), so the Coder's tool loop could never have run: the model
+/// was never shown the tools, and anything it did return was thrown away. The
+/// loop then always fell back to a single call, and the stage failed
+/// intermittently for reasons that had nothing to do with the model.
+///
+/// A malformed entry is skipped rather than fatal: one bad tool call should not
+/// discard the others the model got right.
+pub fn parse_tool_calls(data: &serde_json::Value) -> Vec<crate::llm::provider::ToolCall> {
+    let Some(calls) = crate::llm::json_path(data, &["message", "tool_calls"]) else {
+        return Vec::new();
+    };
+    let Some(calls) = calls.as_array() else {
+        return Vec::new();
+    };
+    calls
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| {
+            let name = crate::llm::json_path_str(c, &["function", "name"]);
+            if name.is_empty() {
+                return None;
+            }
+            // `arguments` is an object on current Ollama, but older builds sent
+            // it as a JSON *string*. Accept both rather than silently dropping
+            // every call on an older server.
+            let arguments = match crate::llm::json_path(c, &["function", "arguments"]) {
+                Some(v) if v.is_object() => v.clone(),
+                Some(serde_json::Value::String(s)) => {
+                    serde_json::from_str(s).unwrap_or_else(|_| serde_json::json!({}))
+                }
+                _ => serde_json::json!({}),
+            };
+            Some(crate::llm::provider::ToolCall {
+                id: format!("ollama-{i}"),
+                name: name.to_string(),
+                arguments,
+            })
+        })
+        .collect()
 }

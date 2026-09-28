@@ -268,3 +268,84 @@ fn a_loop_that_submits_nothing_falls_back_instead_of_failing() {
          one-shot path on exactly this signal"
     );
 }
+
+/// Ollama must surface tool calls, and send the tools.
+///
+/// This provider returned `tool_calls: Vec::new()` unconditionally, with a
+/// comment claiming Ollama has no native tool support. It does — and it is the
+/// provider the README's zero-setup path tells a first-time user to install
+/// (`ollama pull qwen2.5-coder:3b`). So the Coder's tool loop could never run
+/// for the product's headline setup: the model was never shown the tools, and
+/// anything it returned was discarded. The loop always fell back to a single
+/// call, and the stage failed intermittently for reasons that had nothing to do
+/// with the model's ability.
+///
+/// The whole rest of Phase 1 is downstream of this: a loop whose provider cannot
+/// express a tool call is a loop that never runs.
+#[test]
+fn ollama_sends_and_returns_tool_calls() {
+    let src = include_str!("../src/llm/ollama.rs");
+    assert!(
+        src.contains("payload[\"tools\"]"),
+        "the Ollama provider must send the tools it is given, or the model is never told \
+         they exist"
+    );
+    assert!(
+        src.contains("parse_tool_calls(&data)"),
+        "and must read the calls back instead of discarding them"
+    );
+    assert!(
+        !src.contains("no native tool support on this provider"),
+        "that claim was the bug's cover story; it is false and must not come back"
+    );
+}
+
+#[test]
+fn ollama_tool_calls_are_parsed_in_both_shapes() {
+    use niki::llm::ollama::parse_tool_calls;
+    // Current Ollama: `arguments` is an object.
+    let modern = serde_json::json!({
+        "message": {
+            "content": "",
+            "tool_calls": [
+                {"function": {"name": "read", "arguments": {"path": "src/lib.rs"}}}
+            ]
+        }
+    });
+    let calls = parse_tool_calls(&modern);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "read");
+    assert_eq!(calls[0].arguments["path"], "src/lib.rs");
+
+    // Older builds sent `arguments` as a JSON string.
+    let legacy = serde_json::json!({
+        "message": {
+            "tool_calls": [
+                {"function": {"name": "grep", "arguments": "{\"query\":\"fn\"}"}}
+            ]
+        }
+    });
+    let calls = parse_tool_calls(&legacy);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].arguments["query"], "fn");
+
+    // No tools, a malformed entry, and a non-array: none of them may panic, and
+    // a single bad entry must not discard the good ones beside it.
+    assert!(parse_tool_calls(&serde_json::json!({"message": {"content": "hi"}})).is_empty());
+    assert!(parse_tool_calls(&serde_json::json!({})).is_empty());
+    let mixed = serde_json::json!({
+        "message": {
+            "tool_calls": [
+                {"function": {"arguments": {}}},
+                {"function": {"name": "read", "arguments": {"path": "a"}}}
+            ]
+        }
+    });
+    let calls = parse_tool_calls(&mixed);
+    assert_eq!(
+        calls.len(),
+        1,
+        "one bad entry must not discard the good one"
+    );
+    assert_eq!(calls[0].name, "read");
+}
