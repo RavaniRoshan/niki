@@ -183,8 +183,12 @@ flowchart LR
 All you need is [Ollama](https://ollama.com) running locally with a coding model
 (`ollama pull qwen2.5-coder:3b`) — the wizard detects both and points every agent at them.
 
+```bash
+# 1 · Create and enter your project
+mkdir my-app && cd my-app && git init
+
 # 2 · Configure (guided — run it inside your project; pick Ollama when offered)
-cd ./my-app && niki init --interactive
+niki init --interactive
 
 # 3 · Run your first task: worktree backend needs no container, Ollama needs no key
 niki run "Add a /health endpoint" --backend worktree

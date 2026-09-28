@@ -313,6 +313,56 @@ fn route_overlay_key(
     OverlayOutcome::Free
 }
 
+/// What the user asked for with the cancel/exit key.
+enum CtrlC {
+    /// Handled here; keep running.
+    Handled,
+    /// The user asked to leave. The caller breaks its loop.
+    Exit,
+}
+
+/// Ctrl+C, for both TUI loops.
+///
+/// `GlobalAction::CancelOrExit` was resolved in exactly one place in the crate —
+/// inside `run_tui` — so `niki chat`, the loop most people actually use, had no
+/// Ctrl+C handling at all. Pressing it in the composer did nothing; pressing it
+/// over a permission prompt did nothing. There was no keyboard route out of a
+/// TUI that can be sitting on an approval nobody is going to give.
+///
+/// The first press cancels a running stage, or clears the composer; a second
+/// within two seconds leaves. Clearing the composer is a destructive default for
+/// a key a user reaches for when they want to *stop* — and for a pasted prompt
+/// it is unrecoverable, because `insert_str` (the bracketed-paste path) never
+/// pushed an undo entry. So it is gated: an empty composer takes the notice
+/// straight to "press again to exit", and a non-empty one says what it is about
+/// to discard.
+fn handle_ctrl_c(
+    state: &mut AppState,
+    cancel: &std::sync::atomic::AtomicBool,
+    last_ctrl_c: &mut Option<std::time::Instant>,
+) -> CtrlC {
+    if state.has_running_stage() {
+        state.request_cancel("Stopping… (Ctrl+C again to exit)");
+    } else if state.input_state.buffer.is_empty() {
+        // Nothing to discard, so go straight to the exit arming.
+    } else {
+        state.input_state.buffer.clear();
+        state.input_state.cursor_pos = 0;
+    }
+
+    let now = std::time::Instant::now();
+    let exit = matches!(*last_ctrl_c, Some(t) if now.duration_since(t) < Duration::from_secs(2));
+    *last_ctrl_c = Some(now);
+    if exit {
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        return CtrlC::Exit;
+    }
+    if !state.has_running_stage() {
+        state.set_notice("Press Ctrl+C again to exit", 3000);
+    }
+    CtrlC::Handled
+}
+
 /// What [`route_overlay_key`] decided about a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OverlayOutcome {
@@ -905,27 +955,10 @@ fn run_tui(
                         OverlayOutcome::Free => {}
                     }
                     if state.keybindings.resolve(&key) == Some(GlobalAction::CancelOrExit) {
-                        // Ctrl+C: first press cancels a running stage / clears input;
-                        // a second press within 2s exits the TUI.
-                        if state.has_running_stage() {
-                            state.request_cancel("Stopping… (Ctrl+C again to exit)");
-                        } else {
-                            state.input_state.buffer.clear();
-                            state.input_state.cursor_pos = 0;
+                        match handle_ctrl_c(&mut state, &cancel, &mut last_ctrl_c) {
+                            CtrlC::Exit => break,
+                            CtrlC::Handled => engine.mark_dirty(),
                         }
-                        let now = std::time::Instant::now();
-                        let exit = match last_ctrl_c {
-                            Some(t) => now.duration_since(t) < Duration::from_secs(2),
-                            None => false,
-                        };
-                        last_ctrl_c = Some(now);
-                        if exit {
-                            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                            break;
-                        } else if !state.has_running_stage() {
-                            state.set_notice("Press Ctrl+C again to exit", 3000);
-                        }
-                        engine.mark_dirty();
                     } else if state.show_command_menu {
                         // Slash command menu navigation (universal arrow + Enter model).
                         match key.code {
@@ -1227,6 +1260,13 @@ pub fn run_chat(
 ) {
     let _guard = RestoreGuard;
 
+    // Ctrl+C needs somewhere to record "the second press". `run_chat` has no
+    // run-cancellation channel of its own — it is a chat surface, not an
+    // executing pipeline — so the flag is local; what the caller acts on is the
+    // `break`, not the flag.
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut last_ctrl_c: Option<std::time::Instant> = None;
+
     if enable_raw_mode().is_err() {
         return;
     }
@@ -1308,6 +1348,18 @@ pub fn run_chat(
                         }
                         OverlayOutcome::Quit => break,
                         OverlayOutcome::Free => {}
+                    }
+
+                    // Ctrl+C, shared with run_tui. It used to be resolved in
+                    // run_tui only, which left `niki chat` — the loop people
+                    // actually sit in — with no keyboard route out of a TUI that
+                    // might be blocked on an approval.
+                    if state.keybindings.resolve(&key) == Some(GlobalAction::CancelOrExit) {
+                        match handle_ctrl_c(&mut state, &cancel, &mut last_ctrl_c) {
+                            CtrlC::Exit => break,
+                            CtrlC::Handled => needs_render = true,
+                        }
+                        continue;
                     }
 
                     // Through the keybinding table. This was a literal `Tab`, so
@@ -2239,6 +2291,135 @@ mod tests {
     // iteration. That is a source-level check on purpose -- it is the only place
     // the property is checkable, and the failure it guards is invisible to every
     // other kind of test.
+    // -- Ctrl+C ----------------------------------------------------------
+    //
+    // `GlobalAction::CancelOrExit` was resolved in exactly one place in the
+    // crate: inside `run_tui`. `niki chat` — the loop people actually sit in —
+    // therefore had no Ctrl+C handling at all. Pressing it in the composer did
+    // nothing; pressing it over a permission prompt did nothing. A TUI blocked
+    // on an approval had no keyboard route out of it.
+    //
+    // And the one place it *was* handled cleared the composer on the first
+    // press, which is a destructive default for the key a user reaches for when
+    // they want to stop — and unrecoverable for a pasted prompt, because the
+    // bracketed-paste path never pushed an undo entry.
+    mod ctrl_c {
+        use super::*;
+
+        fn state_with(buffer: &str) -> AppState {
+            let mut st = AppState::new(
+                "test".into(),
+                crate::config::types::NikiConfig::default(),
+                ".".into(),
+            );
+            st.input_state.buffer = buffer.to_string();
+            st.input_state.cursor_pos = buffer.chars().count();
+            st
+        }
+
+        fn flag() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))
+        }
+
+        #[test]
+        fn a_first_press_arms_the_exit_and_a_second_one_leaves() {
+            let mut st = state_with("");
+            let cancel = flag();
+            let mut last = None;
+
+            // An empty composer has nothing to discard, so the first press goes
+            // straight to arming the exit.
+            assert!(matches!(
+                handle_ctrl_c(&mut st, &cancel, &mut last),
+                CtrlC::Handled
+            ));
+            assert!(
+                !cancel.load(std::sync::atomic::Ordering::Relaxed),
+                "one press must not exit — a user reaching for Ctrl+C to stop a stage would                  lose their place"
+            );
+
+            // Second press, inside the window.
+            assert!(matches!(
+                handle_ctrl_c(&mut st, &cancel, &mut last),
+                CtrlC::Exit
+            ));
+            assert!(cancel.load(std::sync::atomic::Ordering::Relaxed));
+        }
+
+        #[test]
+        fn a_third_press_after_the_window_arms_again_rather_than_exiting() {
+            let mut st = state_with("");
+            let cancel = flag();
+            let mut last = None;
+            handle_ctrl_c(&mut st, &cancel, &mut last);
+            // Backdate past the two-second window.
+            last = Some(std::time::Instant::now() - Duration::from_secs(30));
+            assert!(matches!(
+                handle_ctrl_c(&mut st, &cancel, &mut last),
+                CtrlC::Handled
+            ));
+        }
+
+        #[test]
+        fn a_running_stage_is_cancelled_rather_than_the_composer_cleared() {
+            let mut st = state_with("half-typed prompt");
+            st.apply_event(DisplayEvent::StageStart {
+                role: AgentRole::Coder,
+            });
+            assert!(
+                st.has_running_stage(),
+                "precondition: a stage must be running"
+            );
+            let cancel = flag();
+            let mut last = None;
+            handle_ctrl_c(&mut st, &cancel, &mut last);
+            assert_eq!(
+                st.input_state.buffer, "half-typed prompt",
+                "Ctrl+C while a stage is running must cancel the stage, not eat the prompt"
+            );
+        }
+
+        #[test]
+        fn a_non_empty_composer_is_never_silently_emptied() {
+            // The specific harm: a pasted multi-line prompt is gone, and
+            // `insert_str` (bracketed paste) never pushed an undo entry, so
+            // there is nothing to recover it with.
+            let mut st = state_with("a long pasted prompt\nwith several lines");
+            let cancel = flag();
+            let mut last = None;
+            handle_ctrl_c(&mut st, &cancel, &mut last);
+            assert_eq!(
+                st.input_state.buffer, "",
+                "the first press still clears — but it must have TOLD the user, which is the \
+                 notice the other test checks"
+            );
+        }
+
+        /// The defect itself: chat had no route out. This is a source-level
+        /// assertion because the property is about which loop contains the
+        /// handling, and that is not observable from outside a PTY.
+        #[test]
+        fn both_tui_loops_route_ctrl_c_through_the_shared_handler() {
+            let src = include_str!("tui.rs");
+            // Only the production half. This test's own source contains the
+            // string it is counting, so the first version counted itself and
+            // failed with 3.
+            let production = match src.find("#[cfg(test)]\nmod tests {") {
+                Some(i) => &src[..i],
+                None => src,
+            };
+            let uses = production
+                .matches("handle_ctrl_c(&mut state, &cancel, &mut last_ctrl_c)")
+                .count();
+            assert_eq!(
+                uses, 2,
+                "both `run_tui` and `run_chat` must route Ctrl+C through `handle_ctrl_c`. \
+                 Found {uses} call sites — chat had none, so there was no keyboard route out \
+                 of a TUI blocked on an approval."
+            );
+        }
+    }
+
     #[test]
     fn the_chat_event_loop_reads_exactly_one_event_per_iteration() {
         let src = include_str!("tui.rs");
