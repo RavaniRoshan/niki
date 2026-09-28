@@ -137,12 +137,22 @@ async fn cancelling_mid_round_stops_at_the_next_stage_boundary() {
     );
 
     let stages = recorded_stage_count(&tasks_dir);
-    // Two stages had finished when the flag was set, so the next stage must not
-    // start. The full round records four (Planner + Tester + Reviewer + ...).
-    assert_eq!(
-        stages, 2,
-        "cancellation must land at the next stage boundary; the run recorded \
-         {stages} stages, so it ran the rest of the round anyway"
+    // The property is that the round was **cut short**, not that it stopped at
+    // a particular stage. The watcher sets the flag once it observes two
+    // completed stages, and on a loaded machine the pipeline can reach stage
+    // three before the watcher is scheduled — so the exact stop point varies
+    // between 2 and 3 while the meaning does not.
+    //
+    // I originally asserted `== 2`. It passed locally and failed on CI at 3,
+    // which is the failure mode of any test that pins a timing-derived number
+    // instead of the thing that number is evidence of.
+    //
+    // The full round records four stages, and that is what the pre-fix code
+    // produced: the flag was not read until the top of the next round.
+    assert!(
+        (2..4).contains(&stages),
+        "cancellation must cut the round short; the run recorded {stages} \
+         stages, so it ran the rest of the round anyway"
     );
 }
 
