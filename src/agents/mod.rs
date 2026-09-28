@@ -104,6 +104,9 @@ pub async fn run_agent(
     let mut estimated_output_tokens: u32 = 0;
     let mut first_text_time: Option<Instant> = None;
     let mut mid_stream_retries: u32 = 0;
+    // The message of the last mid-stream failure, so an unchanged repeat is
+    // recognised as the same problem rather than a new one.
+    let mut last_mid_stream_error: Option<String> = None;
     // Reported in the stage metric, so it outlives any single attempt. TTFT is
     // measured per attempt, and restarts with the stream below.
     let mut retry_count: u32 = 0;
@@ -196,7 +199,16 @@ pub async fn run_agent(
                 }
                 Err(e)
                     if is_mid_stream_retryable(&e)
-                        && mid_stream_retries < MAX_MID_STREAM_RETRIES =>
+                        && mid_stream_retries < MAX_MID_STREAM_RETRIES
+                        // A repeat of the SAME transport error means the
+                        // transport is down for this request, not that one
+                        // unlucky read was dropped. Measured: a live run whose
+                        // Tester stream kept dropping restarted the stage three
+                        // times and then failed with the identical error, having
+                        // spent three times the wall clock to learn nothing. A
+                        // *different* error is a different problem and still
+                        // gets its retry.
+                        && last_mid_stream_error.as_deref() != Some(&e.to_string()) =>
                 {
                     // The connection dropped partway through. Restart the request
                     // rather than ending the run: everything the model produced so
@@ -204,6 +216,7 @@ pub async fn run_agent(
                     // than throwing away a finished pipeline over a socket.
                     mid_stream_retries += 1;
                     retry_count += 1;
+                    last_mid_stream_error = Some(e.to_string());
                     tracing::warn!(
                         target: "niki::agent",
                         role = ?role,

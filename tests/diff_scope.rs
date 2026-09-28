@@ -297,6 +297,15 @@ fn the_retry_is_bounded_and_covers_the_transport_classes() {
         src.contains("continue 'attempt;"),
         "a mid-stream failure must re-establish the request, not just be noted"
     );
+    // A repeat of the SAME error is the transport being down, not one unlucky
+    // read. Measured: a live run restarted a stage three times on an identical
+    // error and then failed, having spent three times the wall clock to learn
+    // nothing. So the guard is on repetition, not on a count.
+    assert!(
+        src.contains("last_mid_stream_error"),
+        "an unchanged repeat must not be retried; a *different* error is a different problem \
+         and still gets its retry"
+    );
     assert!(
         src.contains("full_content.clear();"),
         "and must reset the partially-collected content, or the retry splices two \\
