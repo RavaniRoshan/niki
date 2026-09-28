@@ -235,31 +235,42 @@ impl Sandbox for WorktreeSandbox {
                     // the model was left guessing an anchor for a file that
                     // had no content to copy.
                     if block.search.trim().is_empty() {
+                        if block.replace.trim().is_empty() {
+                            return Err(anyhow!(
+                                "edit block is empty on both sides; it changes nothing"
+                            ));
+                        }
                         if let Some(target) = &block.file {
                             let path = wt.join(target);
-                            if let Some(parent) = path.parent() {
-                                std::fs::create_dir_all(parent)?;
-                            }
                             if !contents.contains_key(&path) {
+                                // The file does not exist, so this is a
+                                // creation: there was nothing to anchor to and
+                                // `replace` is the whole file.
+                                if let Some(parent) = path.parent() {
+                                    std::fs::create_dir_all(parent)?;
+                                }
                                 std::fs::write(&path, &block.replace)?;
                                 changed_files.insert(path);
                                 // `continue` skips the match bookkeeping below,
                                 // so this block is retired here.
                                 unmatched.retain(|&idx| idx != i);
-                            } else {
-                                // The file already exists — writing `replace`
-                                // over it would be a silent overwrite, not a
-                                // creation. Refuse.
-                                return Err(anyhow!(
-                                    "edit block claims to create {target}, which already exists"
-                                ));
+                                continue;
                             }
-                            continue;
+                            // The file exists, so an empty anchor is an append
+                            // — which is what a model means by "add this to the
+                            // file". It used to be refused here as a would-be
+                            // clobber, which refused the common case; and
+                            // before *that* it fell through to the exact-match
+                            // strategy, where the empty string matches at
+                            // offset 0 and the new code landed at the top.
+                            // Falling through now does the right thing, and
+                            // loses nothing either way.
+                        } else {
+                            return Err(anyhow!(
+                                "edit block has an empty `search` and no target file; it cannot \
+                                 say which file to append to"
+                            ));
                         }
-                        return Err(anyhow!(
-                            "edit block has an empty `search` and no target file; it cannot \
-                             say what it is creating"
-                        ));
                     }
                     // Bound blocks apply only to their target file; unbound blocks
                     // fall back to the cross-file search. See research report S4.

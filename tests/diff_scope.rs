@@ -356,10 +356,19 @@ fn the_retry_is_bounded_and_covers_the_transport_classes() {
 /// which is the `edits[0] has an empty search` failure four of five breadth
 /// runs died on.
 ///
-/// The relaxation is narrow: an empty `search` is still rejected unless the
-/// artifact declares a `create`.
+/// An empty `search` is allowed — it means create or append, not nothing.
+///
+/// It used to be refused outright, and refusing was actively harmful rather
+/// than merely strict: `apply_single_edit` matches an empty string at offset 0,
+/// so the edit would have been applied at the *top* of the file anyway. A model
+/// writing "add a function to this file" has no natural anchor to quote and
+/// puts the new code in `replace` — measured, and it was the single most common
+/// way a breadth run failed.
+///
+/// What is still refused is an edit with nothing on *either* side, which
+/// changes nothing at all.
 #[test]
-fn an_empty_search_is_only_allowed_for_a_file_being_created() {
+fn an_empty_search_is_allowed_because_it_means_create_or_append() {
     let create = serde_json::json!({
         "edits": [{ "search": "", "replace": "# Title\n\nBody." }],
         "files_changed": [
@@ -375,25 +384,20 @@ fn an_empty_search_is_only_allowed_for_a_file_being_created() {
     )
     .expect("a creation has no prior content to anchor to, and must be allowed");
 
-    let modify = serde_json::json!({
-        "edits": [{ "search": "", "replace": "fn total() {}" }],
+    let append = serde_json::json!({
+        "edits": [{ "search": "", "replace": "pub fn total() {}" }],
         "files_changed": [
             { "path": "src/lib.rs", "action": "modify", "language": "rust" }
         ],
-        "implementation_notes": "x",
-        "spec_adherence": "y",
+        "implementation_notes": "appended",
+        "spec_adherence": "as asked",
         "uncertainties": null
     });
-    let err = niki::artifacts::validate::validate_artifact(
-        &modify.to_string(),
+    niki::artifacts::validate::validate_artifact(
+        &append.to_string(),
         "schemas/code_diff.schema.json",
     )
-    .expect_err("an empty anchor in an existing file would apply at offset 0 and misapply");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("action \"create\""),
-        "the error must say how to express a creation, or the model repeats it: {msg}"
-    );
+    .expect("adding to a file has no anchor to quote, and must be allowed");
 }
 
 /// The patch text has to carry the file binding, or a creation has nowhere to
@@ -481,27 +485,146 @@ async fn a_create_edit_writes_the_file_it_names() {
     sb.destroy().await.unwrap();
 }
 
-/// A `create` block must refuse to overwrite a file that is already there.
+/// An empty anchor against a file that already exists appends; it never
+/// overwrites.
+///
+/// It used to be refused here, as a would-be creation against an existing
+/// file. Refusing lost the common case — "add this to the file" — without
+/// protecting anything, because what the model got instead was an empty anchor
+/// matched at offset 0, putting the new code at the *top* of the file.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_create_edit_will_not_clobber_an_existing_file() {
+async fn an_empty_anchor_against_an_existing_file_never_overwrites_it() {
     let dir = fixture_repo();
     let repo = dir.path();
     let sb = worktree_sandbox(repo).await;
     let before = std::fs::read_to_string(sb.worktree_path.join("tracked.rs")).unwrap();
 
     let patch = "FILE: tracked.rs\n<<<<<<< SEARCH\n\n=======\nfn a() { 999 }\n>>>>>>> REPLACE\n\n";
-    let err = sb
-        .apply_patch(patch, repo)
+    sb.apply_patch(patch, repo)
         .await
-        .expect_err("claiming to create a file that exists is a silent overwrite, not a creation");
+        .expect("an append to an existing file is an append, not a would-be creation");
+
+    let after = std::fs::read_to_string(sb.worktree_path.join("tracked.rs")).unwrap();
     assert!(
-        err.to_string().contains("already exists"),
-        "the error must say why: {err}"
+        after.starts_with(&before),
+        "nothing may be lost: the original must still be there, byte for byte, at the front. \
+         Got: {after:?}"
     );
-    assert_eq!(
-        std::fs::read_to_string(sb.worktree_path.join("tracked.rs")).unwrap(),
-        before,
-        "a refused creation must not have written anything"
+    assert!(
+        after.trim_end().ends_with("fn a() { 999 }"),
+        "and the new code must be at the end: {after:?}"
     );
     sb.destroy().await.unwrap();
+}
+
+/// An empty `search` means append — and it used to mean "insert at the top".
+///
+/// `apply_single_edit` matches the empty string at offset 0, so an empty
+/// anchor fell through to the exact-match strategy and the replacement landed
+/// at the *top* of the file. A model writing "add a function to this file" has
+/// no natural anchor to quote and puts the new code in `replace`; the result
+/// was new code above the imports and above the item it was meant to sit
+/// beside.
+///
+/// Appending is the only reading of an empty anchor that cannot scramble a
+/// file, and it is what the model meant. `refactor` and `add-function` both
+/// died on this, and it was the single most common way a breadth run failed.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_search_appends_instead_of_prepending() {
+    let dir = fixture_repo();
+    let repo = dir.path();
+    let sb = worktree_sandbox(repo).await;
+    let target = sb.worktree_path.join("tracked.rs");
+    let before = std::fs::read_to_string(&target).unwrap();
+
+    let appended = "fn added() {}\n";
+    let patch =
+        format!("FILE: tracked.rs\n<<<<<<< SEARCH\n\n=======\n{appended}>>>>>>> REPLACE\n\n");
+    sb.apply_patch(&patch, repo)
+        .await
+        .expect("an empty anchor is an append, not a failure");
+
+    let after = std::fs::read_to_string(&target).unwrap();
+    assert!(
+        after.starts_with(&before),
+        "the existing content must stay first; appending put it at the top: {after:?}"
+    );
+    assert!(
+        after.trim_end().ends_with("fn added() {}"),
+        "and the replacement must be at the end: {after:?}"
+    );
+    sb.destroy().await.unwrap();
+}
+
+/// An append to a file with no trailing newline still ends up well-formed.
+#[test]
+fn an_append_to_a_file_without_a_trailing_newline_still_produces_one() {
+    let out =
+        niki::sandbox::edit_format::apply_single_edit_block("fn a() { 1 }", "", "fn b() { 2 }")
+            .expect("append applies")
+            .expect("append produced content");
+    assert_eq!(out, "fn a() { 1 }\nfn b() { 2 }\n");
+}
+
+/// An empty anchor *and* an empty replacement is nothing, and is refused
+/// rather than being read as an append of the empty string.
+#[test]
+fn an_edit_with_nothing_on_either_side_is_refused() {
+    let err = niki::artifacts::validate::validate_artifact(
+        &serde_json::json!({
+            "edits": [{ "search": "", "replace": "" }],
+            "files_changed": [
+                { "path": "src/lib.rs", "action": "modify", "language": "rust" }
+            ],
+            "implementation_notes": "x",
+            "spec_adherence": "y",
+            "uncertainties": null
+        })
+        .to_string(),
+        "schemas/code_diff.schema.json",
+    )
+    .expect_err("an edit that changes nothing is not an edit");
+    assert!(
+        err.to_string().contains("changes nothing"),
+        "the error must say why: {err}"
+    );
+}
+
+/// A whitespace-only anchor is an append too.
+///
+/// A model that cannot think of an anchor writes `"   "` as readily as `""`,
+/// and the two mean the same thing. Only a *blank* anchor — nothing to search
+/// for — is an append; an anchor with any content in it is a real search and
+/// must match.
+#[test]
+fn a_whitespace_only_anchor_appends() {
+    let out = niki::sandbox::edit_format::apply_single_edit_block(
+        "fn a() { 1 }\n",
+        "   \n",
+        "fn b() { 2 }",
+    )
+    .expect("a blank anchor is an append")
+    .expect("and produces content");
+    assert!(
+        out.starts_with("fn a() { 1 }"),
+        "existing content first: {out:?}"
+    );
+    assert!(
+        out.trim_end().ends_with("fn b() { 2 }"),
+        "new content last: {out:?}"
+    );
+
+    // A real anchor still has to match: an anchor that is not in the file is
+    // "no match", which is `Ok(None)` — the applier reports it as unmatched
+    // rather than quietly appending.
+    assert_eq!(
+        niki::sandbox::edit_format::apply_single_edit_block(
+            "fn a() { 1 }\n",
+            "fn not_here() {}\n",
+            "x",
+        )
+        .expect("a missing anchor is not an error"),
+        None,
+        "an anchor that is not in the file must not be treated as an append"
+    );
 }

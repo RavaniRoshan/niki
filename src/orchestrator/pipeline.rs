@@ -51,8 +51,18 @@ pub fn code_diff_to_edit_text(diff: &CodeDiff) -> String {
 
     let mut out = String::new();
     for e in &diff.edits {
+        // An empty `search` is either a creation or an append, and the two
+        // need different targets. A creation names the file it is creating; an
+        // append has to name an existing one, so with a single changed file
+        // that is unambiguous and it binds there. Falling through to the
+        // cross-file search would append to whichever file happened to be
+        // enumerated first, which is the silent misapplication the binding
+        // exists to prevent.
         let target = if e.search.trim().is_empty() {
-            created.first().map(|p| (*p).to_string())
+            created
+                .first()
+                .map(|p| (*p).to_string())
+                .or_else(|| single.clone())
         } else {
             single.clone()
         };

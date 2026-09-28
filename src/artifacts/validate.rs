@@ -54,20 +54,6 @@ pub fn validate_artifact(json_str: &str, schema_path: &str) -> Result<()> {
 /// JSON Schema validates shape, not meaning. Before this existed, a model
 /// returning `{"edits": [], "files_changed": [], "notes": ""}` passed cleanly
 /// and the run was recorded as a successful implementation.
-/// Whether this artifact declares at least one file it is creating.
-///
-/// A creation has no prior content to anchor to, so it is the one case where
-/// an empty `search` is meaningful rather than a silent misapplication.
-fn creates_a_file(obj: &serde_json::Map<String, Value>) -> bool {
-    obj.get("files_changed")
-        .and_then(|f| f.as_array())
-        .is_some_and(|files| {
-            files
-                .iter()
-                .any(|f| f.get("action").and_then(|a| a.as_str()) == Some("create"))
-        })
-}
-
 fn check_semantics(artifact: &Value, schema_path: &str) -> Result<()> {
     let Some(obj) = artifact.as_object() else {
         return Ok(());
@@ -97,6 +83,15 @@ fn check_semantics(artifact: &Value, schema_path: &str) -> Result<()> {
                 .get("replace")
                 .and_then(|r| r.as_str())
                 .unwrap_or_default();
+            // Checked before the identical-pair rule, because two blank
+            // strings are also "identical" and the generic message would send
+            // someone looking for a repeated edit rather than one with nothing
+            // in it.
+            if search.trim().is_empty() && replace.trim().is_empty() {
+                return Err(anyhow::anyhow!(
+                    "{schema_path}: edits[{i}] changes nothing — it is empty on both sides."
+                ));
+            }
             if search == replace {
                 return Err(anyhow::anyhow!(
                     "{schema_path}: edits[{i}] has identical `search` and `replace`. A \
@@ -112,13 +107,17 @@ fn check_semantics(artifact: &Value, schema_path: &str) -> Result<()> {
             // just refused to be used. Rejecting it made the `docs` task
             // (write a README) unexpressible, and pushed the harness toward
             // asking a model for a search anchor on a file with no content.
-            if search.trim().is_empty() && !creates_a_file(obj) {
-                return Err(anyhow::anyhow!(
-                    "{schema_path}: edits[{i}] has an empty `search`, which cannot anchor to \
-                     anything in the file. For a new file, list it in files_changed with \
-                     action \"create\"."
-                ));
-            }
+            // An empty `search` is meaningful twice over, and the harness
+            // implements both: it appends `replace` to the end of the file
+            // (and `action: "create"` writes a file that does not exist yet).
+            //
+            // It was refused outright, and refusing it was actively harmful:
+            // `apply_single_edit` matches an empty string at offset 0, so the
+            // edit would have been applied at the *top* of the file anyway. A
+            // model writing "add a function to this file" has no natural
+            // anchor to quote and puts the new code in `replace` — measured, and
+            // it was the single most common way a run died, four breadth tasks
+            // out of five at one point.
         }
     }
 
@@ -354,13 +353,26 @@ mod tests {
         assert!(e.contains("no-op"), "{e}");
     }
 
+    /// A blank anchor is an append, not a rejection.
+    ///
+    /// It used to be refused with "cannot anchor", and the refusal was not
+    /// neutral: `apply_single_edit` matches the empty string at offset 0, so
+    /// the edit landed at the *top* of the file. A model writing "add a
+    /// function to this file" has no natural anchor to quote — and writes
+    /// `"   "` as readily as `""` — so this was the single most common way a
+    /// breadth run died.
     #[test]
-    fn an_edit_with_an_empty_anchor_is_rejected() {
-        let e = rejected(
+    fn an_edit_with_a_blank_anchor_is_an_append() {
+        ok(
             r#"{"edits": [{"search": "   ", "replace": "b"}], "files_changed": [{"path": "x", "action": "modify"}], "implementation_notes": "x", "spec_adherence": "y"}"#,
             DIFF,
         );
-        assert!(e.contains("cannot anchor"), "{e}");
+        // And blank on both sides is still nothing at all.
+        let e = rejected(
+            r#"{"edits": [{"search": "  ", "replace": ""}], "files_changed": [{"path": "x", "action": "modify"}], "implementation_notes": "x", "spec_adherence": "y"}"#,
+            DIFF,
+        );
+        assert!(e.contains("changes nothing"), "{e}");
     }
 
     #[test]

@@ -201,6 +201,33 @@ fn apply_single_edit(content: &str, edit: &EditBlock) -> Result<Option<String>> 
         return Ok(Some(content.to_string()));
     }
 
+    // A blank `search` means append.
+    //
+    // It used to fall through to Strategy 1, where `content.find("")` is
+    // `Some(0)` — so the replacement was silently inserted at the *top* of the
+    // file. A model writing "add a function to this file" puts the new
+    // function in `replace` and has no natural anchor to quote, which is
+    // exactly the empty-anchor case, and the result was new code above the
+    // imports and above the item it was supposed to be near.
+    //
+    // Appending is what an empty anchor means, and it is the only reading
+    // that cannot scramble a file. Guarded on `replace` being non-empty,
+    // because an empty anchor with an empty replacement is nothing at all.
+    // Blank rather than strictly empty: a model that cannot think of an anchor
+    // writes `"   "` as readily as `""`, and the two mean the same thing.
+    if edit.search.trim().is_empty() && !edit.replace.trim().is_empty() {
+        let mut result = String::with_capacity(content.len() + edit.replace.len() + 1);
+        result.push_str(content);
+        if !content.ends_with('\n') && !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str(&edit.replace);
+        if !edit.replace.ends_with('\n') {
+            result.push('\n');
+        }
+        return Ok(Some(result));
+    }
+
     // Strategy 1: Exact match
     if let Some(pos) = content.find(&edit.search) {
         let mut result = String::with_capacity(content.len() + edit.replace.len());
