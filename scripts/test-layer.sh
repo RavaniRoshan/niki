@@ -14,13 +14,18 @@
 #   ./scripts/test-layer.sh run_lifecycle # one named binary
 #   ./scripts/test-layer.sh lib           # unit tests only
 #
-# It works with plain cargo. When cargo-nextest is installed, prefer it — the
-# groups in .config/nextest.toml mirror the categories below and give
-# per-test process isolation on top.
+# It works with plain cargo. When cargo-nextest is installed, prefer it — it
+# reads the SAME list from .config/test-binary-groups (compiled into
+# .config/nextest.toml by scripts/gen-nextest-groups.py) and adds per-test
+# process isolation on top. tests/test_groups.rs fails if the two ever drift.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
+# Single source of truth for the heavy/heap categories.
+GROUPS_FILE="${NIKI_TEST_GROUPS:-.config/test-binary-groups}"
+[ -f "$GROUPS_FILE" ] || { echo "missing $GROUPS_FILE" >&2; exit 1; }
 
 # Never let cargo fan out. Default jobs = nproc, which is what OOMs the box.
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
@@ -35,33 +40,14 @@ MIN_FREE_MB="${NIKI_MIN_FREE_MB:-2600}"
 # refusal fails on a machine that is merely settling.
 RECOVER_WAIT_S="${NIKI_RECOVER_WAIT:-180}"
 
-# Binaries that build git fixture repos, worktrees, or measure wall-clock
-# render budgets. Concurrent execution starves the timing assertions and
-# multiplies peak RSS.
-HEAVY=(
-  tui_navigation
-  tui_perf
-  visual_layout_check
-  run_lifecycle
-  pipeline_guards
-  kb_pipeline
-  runtime_benchmarks
-  worktree_policy
-  diff_scope
-  sandbox_teardown
-  acp_server
-  resume_cli
-  hooks_lifecycle
-  agent_runtime
-)
-
-# Binaries that build large in-memory indexes.
-HEAP=(
-  structural_index
-  kb_store
-  history_cache
-  repo_intel
-)
+# Read the heavy/heap categories out of the shared list. One entry per line,
+# "<group> <binary>", `#` starts a comment.
+read_group() {
+  awk -v g="$1" '$1 == g && $2 != "" { print $2 }' "$GROUPS_FILE"
+}
+mapfile -t HEAVY < <(read_group heavy)
+mapfile -t HEAP  < <(read_group heap)
+[ "${#HEAVY[@]}" -gt 0 ] || { echo "no heavy binaries listed in $GROUPS_FILE" >&2; exit 1; }
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }

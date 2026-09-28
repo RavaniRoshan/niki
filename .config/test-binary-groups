@@ -1,0 +1,38 @@
+# Integration test binaries that must not run concurrently.
+#
+# This file is the single source of truth. It is consumed by
+# scripts/test-layer.sh (the plain-cargo runner) and, via
+# scripts/gen-nextest-groups.sh, by .config/nextest.toml (the nextest runner).
+# tests/test_groups.rs fails if the two ever disagree, if a listed binary does not
+# exist, or if a binary is listed twice — the exact drift that left
+# .config/nextest.toml's `heavy` and `heap` groups empty for their whole life.
+#
+# Format: <group> <binary>   — one per line, `#` starts a comment.
+#
+#   heavy — builds git fixture repos or worktrees, or measures wall-clock render
+#           budgets. Running two at once starves the timing assertions and
+#           multiplies peak RSS.
+#   heap  — builds large in-memory indexes.
+
+# Binaries that build git fixture repos, worktrees, or measure wall-clock
+# render budgets.
+heavy tui_navigation
+heavy tui_perf
+heavy visual_layout_check
+heavy run_lifecycle
+heavy pipeline_guards
+heavy kb_pipeline
+heavy runtime_benchmarks
+heavy worktree_policy
+heavy diff_scope
+heavy sandbox_teardown
+heavy acp_server
+heavy resume_cli
+heavy hooks_lifecycle
+heavy agent_runtime
+
+# Binaries that build large in-memory indexes.
+heap structural_index
+heap kb_store
+heap history_cache
+heap repo_intel
