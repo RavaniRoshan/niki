@@ -328,9 +328,30 @@ jobs:
   # slash commands, the command palette, the status bar. It was written, worked,
   # and was never wired to anything — 11 passing tests nobody ran.
   tui-headless:
-    name: Headless PTY TUI
+    name: Headless PTY TUI (${{ matrix.colour }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Both colour states, as separate jobs on separate runners — not as two
+    # invocations in one job. The suite is timing-sensitive by construction:
+    # every test ends in `wait_for_stable`, so it fails when the machine is
+    # loaded. Running it twice back-to-back in one job doubled that load and
+    # turned a strict gate into a flaky one, which is the opposite of what it
+    # was for. Separate runners give each state a clean machine.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - colour: "NO_COLOR=1"
+            label: "no colour"
+          - colour: "colour"
+            label: "truecolor"
+    env:
+      # `colour` runs the suite with NO_COLOR explicitly removed; `NO_COLOR=1`
+      # sets it. The Rust suite learned this the hard way: a shimmer test
+      # passed only because a developer's shell exported NO_COLOR, and the same
+      # env-dependence then hid a TUI that repainted forever and could never be
+      # waited on. The Python suite had the same blind spot.
+      FORCE_NO_COLOR: ${{ matrix.colour == 'NO_COLOR=1' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -345,21 +366,23 @@ jobs:
       - name: Build release binary
         run: cargo build --release
       - name: Run headless PTY suite
-        # Both colour states, deliberately. The Rust suite learned this the
-        # hard way: a shimmer test passed only because the developer's shell
-        # exported NO_COLOR, and the same env-dependence then hid a TUI that
-        # repainted forever and could never be waited on. The Python suite had
-        # the same blind spot and failed on CI for the same reason. Running one
-        # state would let it come back.
         run: |
           set -euo pipefail
-          python3 -m pytest -c pytest_headless.ini -v
-          env -u NO_COLOR python3 -m pytest -c pytest_headless.ini -v
+          if [ "$FORCE_NO_COLOR" = "true" ]; then
+            NO_COLOR=1 python3 -m pytest -c pytest_headless.ini -v
+          else
+            env -u NO_COLOR python3 -m pytest -c pytest_headless.ini -v
+          fi
       - name: Fail if the whole suite was skipped
         # A dependency problem must not present as a green TUI gate.
         run: |
           set -euo pipefail
-          python3 -m pytest -c pytest_headless.ini -q 2>&1 | tee /tmp/tui.txt
+          if [ "$FORCE_NO_COLOR" = "true" ]; then
+            NO_COLOR=1 python3 -m pytest -c pytest_headless.ini -q > /tmp/tui.txt 2>&1 || true
+          else
+            env -u NO_COLOR python3 -m pytest -c pytest_headless.ini -q > /tmp/tui.txt 2>&1 || true
+          fi
+          cat /tmp/tui.txt
           grep -qE '^[0-9]+ passed' /tmp/tui.txt || {
             echo "FAIL: no headless TUI test passed — the gate must not pass vacuously"
             exit 1
