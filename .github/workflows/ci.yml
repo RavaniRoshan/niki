@@ -2,6 +2,22 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      # The visual render is environment-dependent: the same binary and the
+      # same DejaVu Sans Mono produce materially different pixels on this
+      # runner than on a developer machine. Blessing references locally and
+      # pushing them left every frame still failing, by 6.6% to 9.4%. So they
+      # have to be blessed *here*, and a human reviews them before committing.
+      #
+      # This lives at workflow level because `workflow_dispatch` is a trigger,
+      # not a job key. I first wrote it inside the `visual:` job, where PyYAML
+      # accepted it and GitHub rejected the whole file — so `ci.yml` produced
+      # no jobs at all and the pull_request run stopped being created. The
+      # failure surfaced as a 0-second "workflow file issue" on push runs.
+      regen:
+        description: "Re-bless the visual reference frames on this runner"
+        type: boolean
+        default: false
   push:
     branches: [master, "goal/**"]
   pull_request:
@@ -445,18 +461,6 @@ jobs:
     timeout-minutes: 25
     env:
       NIKI_CI: "1"
-    # The render is environment-dependent: the same binary and the same
-    # DejaVu Sans Mono produce materially different pixels on this runner than
-    # on a developer machine — regenerating the references locally and pushing
-    # them left every frame still failing, by 6.6% to 9.4%. So references have
-    # to be blessed *here*. This input does it and uploads the result; a human
-    # reviews the frames before they are committed.
-    workflow_dispatch:
-      inputs:
-        regen:
-          description: "Re-bless reference frames and upload them as an artifact"
-          type: boolean
-          default: false
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
