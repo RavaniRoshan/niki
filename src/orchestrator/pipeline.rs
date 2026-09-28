@@ -1125,9 +1125,20 @@ async fn run_coder_tool_loop(
     };
 
     let start = Instant::now();
+    // Reject a bad submission *inside* the loop so the model can fix it with
+    // its exploration still in context, rather than throwing the whole
+    // exploration away and re-reading nothing in a fresh one-shot call.
+    let schema_for_validation = schema_path.to_string();
+    let validator: crate::runtime::ArtifactValidator =
+        std::sync::Arc::new(move |value: &serde_json::Value| {
+            let json = serde_json::to_string(value).map_err(|e| e.to_string())?;
+            crate::artifacts::validate::validate_artifact(&json, &schema_for_validation)
+                .map_err(|e| e.to_string())
+        });
     let out = crate::runtime::run_tool_loop_with(
         crate::runtime::LoopOptions {
             submit_artifact: Some(crate::runtime::submit_artifact_spec(schema_json)),
+            validate_artifact: Some(validator),
         },
         llm,
         model,
