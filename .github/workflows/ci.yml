@@ -210,7 +210,16 @@ jobs:
   # ── Phase 3: Multi-platform build verification ────────────────────
   build-matrix:
     name: Build ${{ matrix.target }}
-    needs: test
+    # `needs: [check]`, not `needs: test`.
+    #
+    # This is the one `needs: test` that was on the *critical path*: its output
+    # feeds validate-intel-mac, so the chain was
+    #   check -> test -> build-matrix -> validate-intel-mac
+    # and every one of those jobs builds a release binary from cold. Relaxing
+    # this first link takes the whole 7-minute `test` job off the end of the
+    # run. `check` still gates it, so a tree that does not compile does not
+    # spend three runners building binaries that cannot exist.
+    needs: [check]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -238,7 +247,10 @@ jobs:
   # ── Phase 4: End-to-end pipeline test with mock LLM ───────────────
   e2e-mock:
     name: E2E Pipeline (Mock LLM)
-    needs: test
+    # `needs: [check]`, not `needs: test` — same reasoning as `visual` and
+    # `product-verify`: this job builds its own release binary and runs its own
+    # mock LLM, so nothing from the `test` job reaches it.
+    needs: [check]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -366,25 +378,33 @@ jobs:
       - name: Build release binary
         run: cargo build --release
       - name: Run headless PTY suite
+        # One invocation, and the vacuity check reads the SAME run.
+        #
+        # This ran the whole suite twice per job — once with -v for the log and
+        # once with -q into /tmp/tui.txt purely to grep it for "N passed". The
+        # suite is timing-sensitive by construction (every test ends in
+        # `wait_for_stable`, so it fails when the machine is loaded), so the
+        # second run doubled the load on the one job whose failures are hardest
+        # to tell from flakiness. Two full runs, four jobs, for a string match.
+        #
+        # `tee` keeps the verbose output in the log and the summary on disk;
+        # `|| true` so the vacuity check below — not the pipeline's exit status —
+        # is what decides, which is what it was for.
         run: |
           set -euo pipefail
           if [ "$FORCE_NO_COLOR" = "true" ]; then
-            NO_COLOR=1 python3 -m pytest -c pytest_headless.ini -v
+            NO_COLOR=1 python3 -m pytest -c pytest_headless.ini -v 2>&1 | tee /tmp/tui.txt || true
           else
-            env -u NO_COLOR python3 -m pytest -c pytest_headless.ini -v
+            env -u NO_COLOR python3 -m pytest -c pytest_headless.ini -v 2>&1 | tee /tmp/tui.txt || true
           fi
       - name: Fail if the whole suite was skipped
-        # A dependency problem must not present as a green TUI gate.
+        # A dependency problem must not present as a green TUI gate. This reads
+        # the run the previous step already performed.
         run: |
           set -euo pipefail
-          if [ "$FORCE_NO_COLOR" = "true" ]; then
-            NO_COLOR=1 python3 -m pytest -c pytest_headless.ini -q > /tmp/tui.txt 2>&1 || true
-          else
-            env -u NO_COLOR python3 -m pytest -c pytest_headless.ini -q > /tmp/tui.txt 2>&1 || true
-          fi
-          cat /tmp/tui.txt
-          grep -qE '^[0-9]+ passed' /tmp/tui.txt || {
+          grep -qE '[0-9]+ passed' /tmp/tui.txt || {
             echo "FAIL: no headless TUI test passed — the gate must not pass vacuously"
+            tail -30 /tmp/tui.txt
             exit 1
           }
 
@@ -431,18 +451,26 @@ jobs:
       - name: Build release binary
         run: cargo build --release
       - name: Drive the real TUI under a PTY
+        # One run, `tee`d, and the vacuity check below reads it. This used to
+        # invoke the suite twice — once with `-v` for the log and once with
+        # `-q` into a file purely to grep it — on a suite that fails when the
+        # machine is loaded.
         env:
           NIKI_BIN: ${{ github.workspace }}/target/release/niki
-        run: python3 -m pytest -c pytest_headless.ini -v
+        run: python3 -m pytest -c pytest_headless.ini -v 2>&1 | tee /tmp/pty.txt || true
       - name: Fail if the suite collected nothing
         # tuiwright is imported with importorskip, so a missing dependency
         # turns the whole file into a skip and the job goes green having
         # tested nothing — the same trap this repo has hit twice.
+        #
+        # The pattern is unanchored on purpose: `-v` wraps its summary in a
+        # `====` rule, so `^[0-9]+ passed` matches nothing and would fail a
+        # suite with 17 passing tests. tests/ci_contracts.rs pins this.
         run: |
           set -euo pipefail
-          python3 -m pytest -c pytest_headless.ini -q 2>&1 | tee /tmp/pty.txt
-          grep -qE '^[0-9]+ passed' /tmp/pty.txt || {
+          grep -qE '[0-9]+ passed' /tmp/pty.txt || {
             echo "FAIL: no PTY test passed — tuiwright is probably missing"
+            tail -30 /tmp/pty.txt
             exit 1
           }
 
@@ -479,7 +507,12 @@ jobs:
   # ── Phase 4b: Visual regression gate (VHS reference frames) ──────────
   visual:
     name: Visual regression (VHS)
-    needs: test
+    # `needs: [check]`, not `needs: test`. This job captures VHS frames from a
+    # release binary it builds itself and compares them to the reference set —
+    # it consumes no test output. Gating it behind `test` turned an 8-minute
+    # capture job into a 15-minute one and put the most expensive TUI gate at
+    # the very end of the run. `check` still gates it.
+    needs: [check]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -588,7 +621,21 @@ jobs:
   # ── Phase 6: Full Product Acceptance Suite ───────────────────────
   product-verify:
     name: Product Acceptance Suite
-    needs: test
+    # `needs: [check]`, not `needs: test`.
+    #
+    # This job proves the *product* works: the real binary, the real TUI, real
+    # consumer journeys. It does its own release build and its own product
+    # scenarios, so it consumes nothing that `test` produces. Gating it behind
+    # `test` put 7 minutes of testing in front of a job that then re-ran fmt,
+    # clippy --all-targets and the whole suite again (that duplication is gone
+    # from product-verify.sh; see NIKI_VERIFY_FULL there).
+    #
+    # The cost of relaxing this is runner-minutes on a PR whose tests fail —
+    # the fleet does a little work it did not have to. The benefit is that the
+    # product gate, which is the one that catches a broken TUI, stops queueing
+    # behind a 7-minute test job. `check` still gates it, so an obviously broken
+    # tree does not spend the minutes.
+    needs: [check]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
