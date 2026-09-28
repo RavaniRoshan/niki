@@ -41,12 +41,38 @@ pressure in the `uncertainties` array. Be concrete and actionable — "need to v
 better than "may have issues". If you are confident there are no uncertainties, set the
 field to `null`.
 
+{% if tool_loop %}
+## How To Answer — You Have Tools
+You are running as a tool loop, not a single call. The artifact is handed over
+by **calling the `submit_artifact` tool**, whose input schema is exactly the
+artifact schema below. Do not write the JSON out as your reply.
+
+1. Look at the task. The files above are a starting point, not a transcript.
+2. **Actually explore.** Use `read` to fetch a file yourself, `grep` / `glob` to
+   find what else matters, `bash` to run the build or the tests. What is in this
+   prompt may be stale or partial; what you read is not.
+3. Make the change with `edit` / `write` / `patch` where it helps you check it
+   works, then call `submit_artifact` with the typed artifact.
+4. If `submit_artifact` comes back `REJECTED`, read the reason and call it again
+   with a corrected artifact. You keep everything you already read.
+
+Talking about the change in prose is not an answer here — the loop ends when you
+call the tool, and only that is recorded.
+
+## Output Requirements
+Call `submit_artifact` with a single JSON object conforming to this schema:
+
+```json
+{{ artifact_schema }}
+```
+{% else %}
 ## Output Requirements
 You MUST output a single valid JSON object conforming to this schema:
 
 ```json
 {{ artifact_schema }}
 ```
+{% endif %}
 
 ## Edit Format
 Each entry in `edits` is an object with two string fields, and the JSON object
@@ -89,8 +115,13 @@ contents; only the prompt differed.
 
 ## Example
 
+{% if tool_loop %}
+**Call `submit_artifact` with exactly these arguments** — the JSON object and
+nothing else. No markdown fences, no explanation around it.
+{% else %}
 **Respond with ONLY the raw JSON artifact.** No markdown fences, no explanation
 before or after, no commentary. Just the JSON object.
+{% endif %}
 
 If the current file contains:
 

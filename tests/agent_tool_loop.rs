@@ -532,3 +532,97 @@ fn a_loop_without_a_validator_accepts_the_first_submission() {
     assert_eq!(out.artifact, Some(artifact()));
     assert_eq!(out.steps, 1);
 }
+
+/// The prompt and the mechanism have to agree.
+///
+/// The Coder's system prompt ended with "Respond with ONLY the raw JSON
+/// artifact" — while the tool loop's actual protocol is a `submit_artifact`
+/// call, and the loop accepts nothing else. A model that obeyed the prompt
+/// produced prose, the loop returned no artifact, and the run fell back to the
+/// one-shot path *without saying so*, because the notice only covered a
+/// submission that failed validation and here nothing was ever submitted.
+///
+/// Measured: five breadth runs against qwen2.5-coder:3b, zero tool calls.
+///
+/// Rendered rather than grepped: the failure this guards against is the two
+/// disagreeing, and reading the rendered text is the only way to see that.
+fn render_coder_prompt(tool_loop: bool) -> String {
+    let template = niki::load_asset("prompts/coder.md").expect("coder.md is embedded");
+    let mut env = minijinja::Environment::new();
+    env.add_template("coder", &template)
+        .expect("template parses");
+    let ctx = minijinja::context! {
+        input_artifacts => vec![serde_json::json!({"summary": "add total()"}).to_string()],
+        revision_round => 0,
+        project_knowledge => "",
+        project_memory => "",
+        current_files => "src/lib.rs:\n    pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+        mcp_tools => "",
+        artifact_schema => "{\"type\":\"object\"}",
+        tool_loop => tool_loop,
+    };
+    env.get_template("coder")
+        .expect("template")
+        .render(ctx)
+        .expect("renders")
+}
+
+#[test]
+fn the_tool_loop_prompt_does_not_tell_the_model_to_reply_in_prose() {
+    let looped = render_coder_prompt(true);
+    assert!(
+        !looped.contains("Respond with ONLY the raw JSON artifact"),
+        "in the loop the answer is a tool call; telling the model to reply with JSON is what \\
+         made it produce prose the loop could not accept"
+    );
+    assert!(
+        looped.contains("submit_artifact"),
+        "the loop prompt must name the tool that ends the loop"
+    );
+    assert!(
+        looped.contains("REJECTED"),
+        "the loop prompt must tell the model that a rejection is recoverable and how to recover"
+    );
+}
+
+#[test]
+fn the_one_shot_prompt_still_asks_for_raw_json() {
+    // The fallback path is unchanged: it has no tools, so "reply with JSON" is
+    // the only correct instruction there.
+    let one_shot = render_coder_prompt(false);
+    assert!(
+        one_shot.contains("Respond with ONLY the raw JSON artifact"),
+        "without tools, the one-shot path must still ask for the raw artifact"
+    );
+    assert!(
+        !one_shot.contains("You are running as a tool loop"),
+        "the one-shot path must not be told it has tools it was not given"
+    );
+}
+
+/// A loop that produces nothing has to announce itself.
+///
+/// The notice used to cover only a *rejected* submission. A model that never
+/// called the tool at all returned empty with no message anywhere, so the run
+/// became the one-shot path and looked exactly like a build without the loop.
+#[test]
+fn a_loop_that_never_submits_is_announced_not_silent() {
+    let src = include_str!("../src/orchestrator/pipeline.rs");
+    let start = src
+        .find("fn run_coder_tool_loop")
+        .expect("the function exists");
+    let body = &src[start..];
+    let branch = body
+        .find("let Some(artifact) = out.artifact else")
+        .expect("the empty-loop branch exists");
+    let window = &body[branch..(branch + 1400).min(body.len())];
+    assert!(
+        window.contains("eprintln!"),
+        "a loop that returned nothing must be reported on stderr; a `tracing::warn!` alone is \\
+         invisible without RUST_LOG and this is a CLI"
+    );
+    assert!(
+        window.contains("never called submit_artifact"),
+        "the message must say what actually happened, not that something fell back"
+    );
+}
