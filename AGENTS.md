@@ -28,6 +28,36 @@ This box can have only a few GiB free. Never run the full pipeline (clippy + all
 - If a cargo/rustc process is near OOM: drop `-j`, drop `--all-targets`, re-run the smallest failing `--test <bin>`; do not re-run the full suite.
 - Mock e2e (`mock_llm.py` + one `niki run`) is fine; do not stack multiple mock runs or extra `cargo build` in the same shell.
 
+### The fast loop vs. the gate
+
+The commands above are the *gate*. They are also tens of minutes, which is why they are
+not what you reach for when you want to know if an edit compiles. `scripts/dev-loop.sh`
+is the inner loop:
+
+- `./scripts/dev-loop.sh check` — fmt + clippy on lib+bins only (skips `--all-targets`, the most expensive lint step)
+- `./scripts/dev-loop.sh test <binary>` — one integration binary, `--test-threads=1`
+- `./scripts/dev-loop.sh changed` — which binaries a given diff puts at risk
+- `./scripts/dev-loop.sh watch` — re-check and re-test on change
+- `./scripts/dev-loop.sh fast` / `gate` — the cheap set / the full pre-push gate
+
+### Which binaries must not run concurrently
+
+`.config/test-binary-groups` is the **single source of truth** for this. One list,
+two consumers:
+
+- `scripts/test-layer.sh` reads it directly (the plain-cargo runner);
+- `scripts/gen-nextest-groups.py` compiles it into `.config/nextest.toml` as
+  `[[profile.default.overrides]]` with `test-group = 'heavy' | 'heap'`, so
+  `cargo nextest run` serialises exactly the same binaries.
+
+Both groups must stay non-empty: `[test-groups.heavy] max-threads = 1` with no
+overrides is valid TOML that serialises **nothing**, and that is precisely how the
+heavy binaries came to run fully parallel in CI. `tests/test_groups.rs` fails if
+the list and the generated overrides drift, if a listed binary has no
+`tests/<name>.rs`, if a binary is in two groups, or if `test-layer.sh` grows a
+second hardcoded list. Run `python3 scripts/gen-nextest-groups.py` after editing
+the list; `--check` is wired into the gate.
+
 ## Critical quirk: prompts and schemas are baked into the binary
 
 `src/lib.rs:138-139` compiles `prompts/` and `schemas/` into the binary at build time via `include_dir!`. Editing `prompts/*.md` or `schemas/*.json` has **no effect until you rebuild** (`cargo build`/`cargo run`). If your prompt/schema change "doesn't take", rebuild first. Runtime reads from embedded copies, not the source files.

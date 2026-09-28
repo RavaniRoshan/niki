@@ -72,3 +72,4 @@ tui-smoke-logs/
 # committed. Written in a user's repo, so it has to be ignored like everything
 # else NIKI leaves behind.
 .niki-tmp.patch
+.odw/*/runs/
