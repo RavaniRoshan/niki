@@ -115,7 +115,26 @@ impl LlmProvider for OllamaProvider {
                 output_tokens,
                 ..Default::default()
             },
-            tool_calls: parse_tool_calls(&data),
+            tool_calls: {
+                let calls = parse_tool_calls(&data);
+                if !calls.is_empty() {
+                    calls
+                } else {
+                    // Some builds — including the one on this machine — return a
+                    // tool call as JSON *in the message content* rather than in
+                    // the structured `tool_calls` field. The model is calling
+                    // the tool; we were simply not looking where it put it.
+                    //
+                    // This is not cosmetic. It is why `niki doctor --measure`
+                    // reported 0/4 for a model that completes full runs, and
+                    // why the Coder's tool loop kept falling back for a reason
+                    // nothing in the logs explained.
+                    parse_tool_calls_from_content(crate::llm::json_path_str(
+                        &data,
+                        &["message", "content"],
+                    ))
+                }
+            },
         })
     }
 
@@ -281,4 +300,45 @@ pub fn parse_tool_calls(data: &serde_json::Value) -> Vec<crate::llm::provider::T
             })
         })
         .collect()
+}
+
+/// Recover a tool call that a server returned as message text instead of in the
+/// structured `tool_calls` field.
+///
+/// Handles the two shapes seen in the wild:
+///
+///   {"name": "submit_artifact", "arguments": {...}}     — Ollama-style
+///   {"tool": "submit_artifact", "parameters": {...}}    — chat-completions style
+///
+/// and tolerates the surrounding ```json fence a model adds when it is
+/// answering in prose anyway. Returns nothing rather than guessing when the text
+/// is not recognisably a tool call — inventing a call from arbitrary text would
+/// be far worse than missing one.
+pub fn parse_tool_calls_from_content(content: &str) -> Vec<crate::llm::provider::ToolCall> {
+    let Some(value) = crate::config::edit::json_value_of(content) else {
+        return Vec::new();
+    };
+    let name = value
+        .get("name")
+        .or_else(|| value.get("tool"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    if name.is_empty() {
+        return Vec::new();
+    }
+    let arguments = value
+        .get("arguments")
+        .or_else(|| value.get("parameters"))
+        .or_else(|| value.get("input"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let arguments = match arguments {
+        serde_json::Value::String(s) => serde_json::from_str(&s).unwrap_or(serde_json::json!({})),
+        other => other,
+    };
+    vec![crate::llm::provider::ToolCall {
+        id: "ollama-content-0".to_string(),
+        name: name.to_string(),
+        arguments,
+    }]
 }
