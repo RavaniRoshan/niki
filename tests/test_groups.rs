@@ -255,22 +255,81 @@ fn test_layer_reads_the_shared_list() {
 ///     verify a tree that does not contain the change
 ///
 /// That guard is right — it is why the run failed loudly rather than testing
-/// nothing. But the cause was a missing fact, not a bad guard.
-#[test]
-fn the_worktree_backend_reports_the_root_it_edits_in() {
+/// The worktree backend must report the root it actually edits in.
+///
+/// The previous version of this asserted on the source text, with a comment
+/// saying a real sandbox "needs a git repo and a container config, which does
+/// not belong in a unit test" — which is not true: the worktree backend is
+/// local by construction, and a tempdir plus `git init` is all it needs. So
+/// the test pinned the shape of the code rather than the answer, and a
+/// refactor that broke the behaviour while keeping the text would have
+/// passed it.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_worktree_backend_reports_the_root_it_edits_in() {
+    use niki::artifacts::types::AgentRole;
+    use niki::config::NikiConfig;
+    use niki::config::SecurityPolicyConfig;
+    use niki::sandbox::Sandbox;
     use niki::sandbox::worktree::WorktreeSandbox;
-    // The struct field is what `work_root()` returns, and it is the worktree —
-    // not the project the sandbox was created from. Asserted on the field type
-    // and the method existing, because instantiating a sandbox needs a git
-    // repo and a container config, which does not belong in a unit test.
-    let _ = std::marker::PhantomData::<WorktreeSandbox>;
-    let src = include_str!("../src/sandbox/worktree.rs");
-    assert!(
-        src.contains("fn work_root(&self) -> Option<&std::path::Path>")
-            && src.contains("Some(&self.worktree_path)"),
-        "the worktree backend must report its own root, or an agent is shown files that are \
-         not the ones it edits"
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = dir.path();
+    for args in [
+        vec!["init", "-q"],
+        vec!["config", "user.email", "b@niki.local"],
+        vec!["config", "user.name", "breadth"],
+    ] {
+        let ok = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(repo)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(ok, "git {:?} — this test needs a real repo", args);
+    }
+    std::fs::write(
+        repo.join("lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+    )
+    .expect("write");
+    for args in [vec!["add", "-A"], vec!["commit", "-q", "-m", "seed"]] {
+        let ok = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(repo)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(ok, "git {:?} — this test needs a committed tree", args);
+    }
+
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let sandbox = WorktreeSandbox::create(
+        AgentRole::Coder,
+        repo,
+        &uuid::Uuid::new_v4(),
+        &niki::config::DockerConfig::default(),
+        &NikiConfig::default(),
+        SecurityPolicyConfig::default(),
+        tx,
+    )
+    .await
+    .expect("worktree sandbox");
+
+    let root = sandbox
+        .work_root()
+        .expect("the worktree backend knows its own root")
+        .to_path_buf();
+
+    assert_ne!(
+        root, repo,
+        "the root must be the worktree, not the project it was created from — an agent shown \
+         the project is shown files that are not the ones it edits"
     );
+    assert!(
+        root.join("lib.rs").exists(),
+        "the reported root must actually be the tree being edited, got {root:?}"
+    );
+    let _ = sandbox.destroy().await;
 }
 
 /// The revision loop must build the Coder's view of the world from the sandbox,
