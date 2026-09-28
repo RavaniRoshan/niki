@@ -391,3 +391,47 @@ pub async fn run_agent(
 
     Ok((json_content, token_usage, retry_count, ttft_ms))
 }
+
+/// The Coder prompt, rendered with the same context a real Coder stage gets.
+///
+/// Public so `niki doctor --measure` can probe the *actual* thing a model has
+/// to do rather than a simplified version of it. The first version of that probe
+/// used a two-line system prompt and scored qwen2.5-coder:3b at 0/4, while the
+/// same model with the real prompt produces a valid edit — a strawman
+/// measurement that would have recorded a false 0% and pushed every user of a
+/// perfectly usable small model onto the slow path.
+pub fn render_coder_probe_prompt() -> String {
+    let (prompt_path, schema_path) = crate::orchestrator::pipeline::role_prompt(AgentRole::Coder);
+    let template = crate::load_asset(prompt_path).unwrap_or_default();
+    let schema = crate::load_asset(schema_path).unwrap_or_default();
+    //  borrows, so the prompt has to outlive the environment.
+    let owned_template = template.clone();
+
+    let current_files =
+        "### File: src/lib.rs (action: Modify)\n```\npub fn old() -> u32 { 0 }\n```\n\n";
+    let spec = serde_json::json!({
+        "summary": "Rename `old` to `new`",
+        "approach": "A single rename in src/lib.rs.",
+        "files_to_modify": [{ "path": "src/lib.rs", "action": "modify" }],
+        "acceptance_criteria": ["src/lib.rs defines `new`"],
+        "constraints": [],
+        "estimated_complexity": "low"
+    })
+    .to_string();
+
+    let mut env = minijinja::Environment::new();
+    env.add_template("probe", &owned_template).ok();
+    let ctx = minijinja::context! {
+        input_artifacts => vec![spec],
+        revision_context => serde_json::Value::Null,
+        revision_round => 0,
+        project_knowledge => "",
+        project_memory => "",
+        current_files => current_files,
+        mcp_tools => "",
+        artifact_schema => schema,
+    };
+    env.get_template("probe")
+        .and_then(|t| t.render(ctx))
+        .unwrap_or_else(|_| String::new())
+}
