@@ -489,11 +489,15 @@ async fn an_independently_reviewed_run_reports_approved_and_names_its_reviewer()
     let script_path = project.join(".niki-mock-script.json");
     successful_script(&script_path);
 
-    let toml = format!(
-        "{}\n[pipeline]\ntopology = \"multiagent\"\n",
-        multiagent_mock_toml(&script_path, Some("true"))
-    );
-    std::fs::write(project.join("niki.toml"), toml).unwrap();
+    // `multiagent_mock_toml` already carries the pinned topology. Appending a
+    // second `[pipeline]` table on top of it is a duplicate key, and the config
+    // fails to parse — which is what made this test fail after the topology
+    // heuristic changed.
+    std::fs::write(
+        project.join("niki.toml"),
+        multiagent_mock_toml(&script_path, Some("true")),
+    )
+    .unwrap();
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_niki"))
         .args([
