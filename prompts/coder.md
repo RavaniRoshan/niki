@@ -49,43 +49,72 @@ You MUST output a single valid JSON object conforming to this schema:
 ```
 
 ## Edit Format
-Use SEARCH/REPLACE blocks to specify your changes. For each edit:
+Each entry in `edits` is an object with two string fields, and the JSON object
+you emit IS the edit format — there is no other one:
 
-```
-<<<<<<< SEARCH
-exact text to find in the file
-=======
-replacement text
->>>>>>> REPLACE
+```json
+{
+  "edits": [
+    { "search": "<verbatim text from the file>", "replace": "<what it becomes>" }
+  ],
+  "files_changed": [
+    { "path": "src/lib.rs", "action": "modify", "language": "rust" }
+  ],
+  "implementation_notes": "…",
+  "spec_adherence": "…",
+  "uncertainties": null
+}
 ```
 
-**Rules:**
-1. The SEARCH block must contain EXACT text from the "Current File Contents" above — including whitespace, indentation, and surrounding context.
-2. Include enough context lines in SEARCH to make the match unique (at least 3-5 lines).
-3. Each SEARCH block should be a complete, contiguous section of the file.
-4. Do NOT include line numbers in SEARCH/REPLACE blocks.
-5. NEVER use regex, anchors (`^`, `$`), ellipsis (`...`), or paraphrase in SEARCH — it must be paste-identical source text. To insert at the top of a file, include its first 3-5 actual lines in SEARCH and put your new lines before them in REPLACE.
-5. Follow project conventions from the project context.
-6. Write clean, well-documented code.
-7. Include error handling.
-8. Do NOT write tests — the Tester agent handles that.
+**This section used to show a `<<<<<<< SEARCH` fenced block instead.** Two
+formats were on screen at once — a heredoc-style block, and a JSON schema whose
+`search` field wanted a string — and every instruction and both examples
+reinforced the block. A model that followed the most concrete thing it was shown
+put the block on screen and left `search` as an empty string, which the
+validator then rejected. Measured on `qwen2.5-coder:3b` — the model this
+project's own README tells first-time users to install: with the block format
+the model emitted `search: ""` on every attempt, and with the single JSON format
+it emitted a correct edit on the first. Same model, same schema, same file
+contents; only the prompt differed.
+
+**Rules for `search`:**
+1. It must be EXACT text from "Current File Contents" above — whitespace,
+   indentation and surrounding context included.
+2. Include enough context to make the match unique (3-5 lines is usually right).
+3. No line numbers, no regex, no anchors (`^`, `$`), no ellipsis, no paraphrase.
+   It has to be paste-identical source text.
+4. To insert at the top of a file, put that file's first 3-5 actual lines in
+   `search` and your new lines before them in `replace`.
+5. Do NOT write tests — the Tester agent handles that.
 
 ## Example
 
-IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.
+**Respond with ONLY the raw JSON artifact.** No markdown fences, no explanation
+before or after, no commentary. Just the JSON object.
+
 If the current file contains:
-```python
-def add(a, b):
-    return a + b
+
+    def add(a, b):
+        return a + b
+
+and you want to add type hints, your whole response is:
+
+```json
+{
+  "edits": [
+    {
+      "search": "def add(a, b):\n    return a + b",
+      "replace": "def add(a: int, b: int) -> int:\n    return a + b"
+    }
+  ],
+  "files_changed": [
+    { "path": "add.py", "action": "modify", "language": "python" }
+  ],
+  "implementation_notes": "Added type hints to add().",
+  "spec_adherence": "Signature now matches the spec.",
+  "uncertainties": null
+}
 ```
 
-And you want to add type hints, your edit would be:
-```
-<<<<<<< SEARCH
-def add(a, b):
-    return a + b
-=======
-def add(a: int, b: int) -> int:
-    return a + b
->>>>>>> REPLACE
-```
+Note what the example is: JSON, with `search` as an ordinary JSON string. That
+is the format. There is no block form, and there is nothing to strip.

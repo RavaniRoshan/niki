@@ -235,3 +235,56 @@ fn test_layer_reads_the_shared_list() {
         );
     }
 }
+
+// ── the tree an agent edits is the tree it is shown ───────────────────────
+//
+// Appended here rather than opened as a new file because it is the same class
+// of defect as the group list above: a configuration-shaped promise that the
+// code does not keep, in a place where nothing was checking.
+
+/// A sandbox that edits in a worktree must say so, so the agent that writes
+/// into it is shown the worktree.
+///
+/// The Coder was handed the contents of files in the *project* while its
+/// patches landed in a *worktree*. Round 0 applied by coincidence — the two
+/// were identical — and from round 1 the Coder was shown the pre-run file and
+/// asked to fix a review of code it could not see, so its `search` text did not
+/// exist in the tree it was editing. A live multi-agent run died there:
+///
+///     the Coder's patch did not apply (round 1); the Tester would otherwise
+///     verify a tree that does not contain the change
+///
+/// That guard is right — it is why the run failed loudly rather than testing
+/// nothing. But the cause was a missing fact, not a bad guard.
+#[test]
+fn the_worktree_backend_reports_the_root_it_edits_in() {
+    use niki::sandbox::worktree::WorktreeSandbox;
+    // The struct field is what `work_root()` returns, and it is the worktree —
+    // not the project the sandbox was created from. Asserted on the field type
+    // and the method existing, because instantiating a sandbox needs a git
+    // repo and a container config, which does not belong in a unit test.
+    let _ = std::marker::PhantomData::<WorktreeSandbox>;
+    let src = include_str!("../src/sandbox/worktree.rs");
+    assert!(
+        src.contains("fn work_root(&self) -> Option<&std::path::Path>")
+            && src.contains("Some(&self.worktree_path)"),
+        "the worktree backend must report its own root, or an agent is shown files that are \
+         not the ones it edits"
+    );
+}
+
+/// The revision loop must build the Coder's view of the world from the sandbox,
+/// not from the project.
+#[test]
+fn the_coder_stage_reads_the_tree_its_patches_land_in() {
+    let src = include_str!("../src/orchestrator/pipeline.rs");
+    assert!(
+        src.contains("stage_root.as_deref().unwrap_or(&task.project_path)"),
+        "the stage must read current files from the sandbox root when there is one; reading \
+         from the project is what made revision rounds unapplyable on the worktree backend"
+    );
+    assert!(
+        src.contains("sandbox.work_root()"),
+        "and the stage root has to come from the sandbox, not be hardcoded"
+    );
+}
