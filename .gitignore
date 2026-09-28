@@ -65,3 +65,10 @@ __pycache__/
 # TUI smoke suite transient captures
 tui-smoke-logs/
 .wrangler/
+
+# NIKI writes this into the repository root while applying a run's patch and
+# removes it on the normal path. If the process is killed mid-run it stays, and
+# it was not ignored — so it showed up in `git status` after a run and could be
+# committed. Written in a user's repo, so it has to be ignored like everything
+# else NIKI leaves behind.
+.niki-tmp.patch
