@@ -442,3 +442,66 @@ fn the_readme_documents_the_demo_and_its_limits() {
          deciding whether to trust it."
     );
 }
+
+/// A CI job that runs a file git does not ship.
+///
+/// This is not hypothetical. `.gitignore` had a bare `demo.sh` entry meant for
+/// a local scratch script at the repo root; a gitignore pattern with no slash
+/// matches at every depth, so it silently excluded `scripts/demo.sh` — the demo
+/// script the README tells a stranger to run, and the one the `demo` job
+/// executes. The job failed in CI with "No such file or directory" while
+/// passing everywhere the file happened to exist on disk, which is every
+/// developer's machine and no runner's checkout.
+///
+/// Asserting the job's *shape* did not catch it; several tests here check that
+/// the demo job runs and checks the right things, and all of them were green.
+/// The gap is that nothing asked whether the file is tracked.
+#[test]
+fn every_script_ci_runs_is_tracked_by_git() {
+    let ci = ci_yml();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    // The scripts the workflow shells out to.
+    let mut referenced: Vec<String> = Vec::new();
+    for line in ci.lines() {
+        for token in line.split_whitespace() {
+            let token = token.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+            if let Some(path) = token.strip_prefix("./scripts/") {
+                let path = path.split_whitespace().next().unwrap_or("");
+                if !path.is_empty() && !path.contains('$') {
+                    referenced.push(format!("scripts/{path}"));
+                }
+            }
+        }
+    }
+    referenced.sort();
+    referenced.dedup();
+    assert!(
+        referenced.len() >= 3,
+        "parsed only {referenced:?} — the extractor drifted"
+    );
+
+    for path in &referenced {
+        assert!(
+            root.join(path).exists(),
+            "ci.yml runs `{path}` but it does not exist in the tree"
+        );
+        // The load-bearing check, and the only one that can work here.
+        // `git check-ignore` reports nothing for a TRACKED file, so it passes
+        // for `scripts/demo.sh` the moment it is added — which is exactly when
+        // the guard matters least. `git ls-files` asks the question that
+        // actually decides whether CI works: is this file in the repository?
+        let tracked = std::process::Command::new("git")
+            .args(["ls-files", "--error-unmatch", path])
+            .current_dir(root)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(
+            tracked,
+            "`{path}` is run by ci.yml but is not tracked by git, so it is absent from a \
+             fresh checkout and the job fails with 'No such file or directory' — on every \
+             runner, and on no developer machine, where the file merely exists on disk."
+        );
+    }
+}
