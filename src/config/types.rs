@@ -5,10 +5,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 use toml;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NikiConfig {
+    /// Where this config was loaded from. Not serialised, not part of the
+    /// documented schema, and not something a user ever sets — it exists so a
+    /// decision that depends on measured state (the topology heuristic reading
+    /// the recorded model capability) can find the project without the caller
+    /// threading a path through every signature.
+    #[serde(skip)]
+    pub project_dir: PathBuf,
     #[serde(default)]
     pub general: GeneralConfig,
     #[serde(default)]
@@ -1527,6 +1535,16 @@ impl NikiConfig {
         }
     }
 
+    /// The directory this config was loaded from.
+    ///
+    /// Carried so a decision that depends on *measured* state — the topology
+    /// heuristic, which reads the recorded model capability — can find it
+    /// without the caller threading a project path through every signature.
+    /// Empty for a config built in memory, which reads as "unknown".
+    pub fn project_dir_hint(&self) -> PathBuf {
+        self.project_dir.clone()
+    }
+
     pub fn load(project_dir: &Path) -> Result<Self> {
         let mut config = Self::default();
 
@@ -1549,6 +1567,10 @@ impl NikiConfig {
             let c: NikiConfig = toml::from_str(&content)?;
             config.merge(c);
         }
+
+        // Remembered so measured state (the recorded model capability) can be
+        // found later without threading a project path through every signature.
+        config.project_dir = project_dir.to_path_buf();
 
         config.apply_env_vars();
         config.resolve_aliases();
