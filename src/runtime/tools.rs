@@ -445,6 +445,97 @@ impl ToolInput {
     }
 }
 
+/// Resolve a model-supplied path against the project root, refusing anything
+/// that escapes it.
+///
+/// The write/edit/patch tools used to take an absolute path verbatim and then
+/// `create_dir_all` its parent, so a model could name any path the process
+/// could write and the tool would oblige — `~/.ssh/authorized_keys`,
+/// `/etc/cron.d/x`, anything. The permission layer has a protected-path list
+/// (`.git`, `.claude`, `~/.ssh`, …) and `PermissionChecker::is_protected_path`
+/// to match it, but nothing on the write path ever called it, so the list was
+/// documentation.
+///
+/// On the worktree backend this runs as the invoking user with their
+/// privileges and no container between the model and the filesystem, so
+/// "absolute paths are honoured" is the difference between a sandbox and a
+/// suggestion.
+///
+/// Absolute paths are allowed when they are *inside* the project — the container
+/// backend's working directory is `/workspace` and models legitimately produce
+/// absolute paths there. `..` is rejected outright rather than normalised,
+/// because a path that needs normalising to stay inside is not one to trust.
+pub fn resolve_tool_path(project_path: &std::path::Path, raw: &str) -> Result<PathBuf, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("empty path".to_string());
+    }
+    if trimmed.contains("..") {
+        return Err(format!(
+            "path {trimmed:?} contains '..' — paths must stay inside the project"
+        ));
+    }
+
+    let candidate = PathBuf::from(trimmed);
+    let full = if candidate.is_absolute() {
+        candidate
+    } else {
+        project_path.join(candidate)
+    };
+
+    // Compare against the canonicalised root so `/proj/../etc/passwd`, a
+    // trailing slash, or a symlinked root cannot make the prefix test lie.
+    // Both sides are canonicalised; if the root itself cannot be canonicalised
+    // the project is in a state where nothing can be checked, so refuse.
+    let root = project_path.canonicalize().map_err(|e| {
+        format!(
+            "cannot resolve project root {}: {e}",
+            project_path.display()
+        )
+    })?;
+    let resolved = full
+        .canonicalize()
+        .or_else(|_| {
+            // The file may legitimately not exist yet — that is what `write` is
+            // for. Canonicalise the deepest existing ancestor and re-attach the
+            // remainder, so a path whose PARENT is a symlink out of the tree is
+            // still caught.
+            let mut tail = Vec::new();
+            let mut cursor = full.clone();
+            loop {
+                match cursor.parent() {
+                    Some(parent) => {
+                        let name = cursor
+                            .file_name()
+                            .map(|n| n.to_os_string())
+                            .unwrap_or_default();
+                        tail.push(name);
+                        cursor = parent.to_path_buf();
+                        if let Ok(c) = cursor.canonicalize() {
+                            let mut out = c;
+                            for part in tail.iter().rev() {
+                                out.push(part);
+                            }
+                            return Ok(out);
+                        }
+                    }
+                    None => return Err(format!("cannot resolve path {trimmed:?}")),
+                }
+            }
+        })
+        .map_err(|e| e.to_string())?;
+
+    if !resolved.starts_with(&root) {
+        return Err(format!(
+            "path {trimmed:?} resolves outside the project ({}) — tools may only touch files \
+             inside {}",
+            resolved.display(),
+            root.display()
+        ));
+    }
+    Ok(resolved)
+}
+
 /// Execution context provided to every tool.
 #[derive(Debug, Clone)]
 pub struct ToolContext {
@@ -724,10 +815,9 @@ impl Tool for ReadTool {
             Ok(p) => p,
             Err(e) => return make_error_result(&e),
         };
-        let full_path = if PathBuf::from(path).is_absolute() {
-            PathBuf::from(path)
-        } else {
-            ctx.project_path.join(path)
+        let full_path = match resolve_tool_path(&ctx.project_path, path) {
+            Ok(p) => p,
+            Err(e) => return make_error_result(&e),
         };
         let start_line = input.int("start_line").unwrap_or(1) as usize;
         let end_line = input.int("end_line").map(|n| n as usize);
@@ -1027,15 +1117,20 @@ impl Tool for GrepTool {
         if let Some(inc) = &include {
             cmd.arg("-g").arg(inc);
         }
-        let search_path = path
-            .map(|p| {
-                if PathBuf::from(&p).is_absolute() {
-                    p
-                } else {
-                    format!("{}/{}", ctx.project_path.display(), p)
-                }
-            })
-            .unwrap_or_else(|| ctx.project_path.display().to_string());
+        // Confined like the write path: grep is a read, but on the worktree
+        // backend a read outside the project is still a read of the host.
+        let search_path = match path.as_deref() {
+            Some(p) => match resolve_tool_path(&ctx.project_path, p) {
+                Ok(resolved) => resolved.display().to_string(),
+                Err(e) => return make_error_result(&e),
+            },
+            None => ctx
+                .project_path
+                .canonicalize()
+                .unwrap_or_else(|_| ctx.project_path.clone())
+                .display()
+                .to_string(),
+        };
         cmd.arg(query).arg(&search_path);
 
         match cmd.output().await {
@@ -1104,10 +1199,9 @@ impl Tool for ListTool {
 
     async fn execute(&self, input: ToolInput, ctx: &ToolContext) -> ToolResult {
         let path = input.str("path").unwrap_or(".");
-        let full_path = if PathBuf::from(path).is_absolute() {
-            PathBuf::from(path)
-        } else {
-            ctx.project_path.join(path)
+        let full_path = match resolve_tool_path(&ctx.project_path, path) {
+            Ok(p) => p,
+            Err(e) => return make_error_result(&e),
         };
         match tokio::fs::read_dir(&full_path).await {
             Ok(mut entries) => {
@@ -1165,10 +1259,9 @@ impl Tool for WriteTool {
             Ok(c) => c,
             Err(e) => return make_error_result(&e),
         };
-        let full_path = if PathBuf::from(path).is_absolute() {
-            PathBuf::from(path)
-        } else {
-            ctx.project_path.join(path)
+        let full_path = match resolve_tool_path(&ctx.project_path, path) {
+            Ok(p) => p,
+            Err(e) => return make_error_result(&e),
         };
 
         // Ensure parent directory exists
@@ -1229,10 +1322,9 @@ impl Tool for EditTool {
             Ok(t) => t,
             Err(e) => return make_error_result(&e),
         };
-        let full_path = if PathBuf::from(path).is_absolute() {
-            PathBuf::from(path)
-        } else {
-            ctx.project_path.join(path)
+        let full_path = match resolve_tool_path(&ctx.project_path, path) {
+            Ok(p) => p,
+            Err(e) => return make_error_result(&e),
         };
 
         match tokio::fs::read_to_string(&full_path).await {
@@ -1440,10 +1532,9 @@ impl Tool for PatchTool {
             Ok(p) => p,
             Err(e) => return make_error_result(&e),
         };
-        let full_path = if PathBuf::from(path).is_absolute() {
-            PathBuf::from(path)
-        } else {
-            ctx.project_path.join(path)
+        let full_path = match resolve_tool_path(&ctx.project_path, path) {
+            Ok(p) => p,
+            Err(e) => return make_error_result(&e),
         };
         // Simple patch: apply as replacement for now
         match tokio::fs::read_to_string(&full_path).await {
@@ -3531,6 +3622,176 @@ mod network_egress_permission_tests {
             res.summary.contains("network"),
             "the user must be told why: {}",
             res.summary
+        );
+    }
+
+    // -- path confinement -------------------------------------------------
+    //
+    // read/list/write/edit/patch/grep all took a model-supplied path, used an
+    // absolute one verbatim, and — for the writers — `create_dir_all`'d its
+    // parent. So a model could name any path the process could reach and the
+    // tool would oblige.
+    //
+    // The permission layer has a protected-path list (`.git`, `.claude`,
+    // `~/.ssh`, ...) and `PermissionChecker::is_protected_path` to match it,
+    // but nothing on the write path called it. The list was documentation.
+    //
+    // On the worktree backend this is the difference between a sandbox and a
+    // suggestion: commands run as the invoking user, with their privileges, and
+    // no container in between.
+
+    fn project() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_path_inside_the_project_resolves() {
+        let dir = project();
+        let root = dir.path();
+        for raw in ["src/main.rs", "./src/main.rs", "src/new.rs", "a/b/c/d.txt"] {
+            let resolved = resolve_tool_path(root, raw)
+                .unwrap_or_else(|e| panic!("{raw:?} should resolve: {e}"));
+            assert!(
+                resolved.starts_with(root.canonicalize().unwrap()),
+                "{raw:?} resolved to {resolved:?}, outside the project"
+            );
+        }
+    }
+
+    #[test]
+    fn an_absolute_path_inside_the_project_is_allowed() {
+        // The container backend's working directory is /workspace and models
+        // legitimately produce absolute paths there. Refusing every absolute
+        // path would break that backend to fix a different one.
+        let dir = project();
+        let abs = dir.path().join("src/main.rs");
+        let resolved = resolve_tool_path(dir.path(), abs.to_str().unwrap())
+            .expect("an absolute path inside the project is fine");
+        assert!(resolved.ends_with("src/main.rs"));
+    }
+
+    #[test]
+    fn a_path_outside_the_project_is_refused() {
+        let dir = project();
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("authorized_keys");
+        std::fs::write(&victim, "original\n").unwrap();
+
+        // The absolute case, verbatim.
+        let err = resolve_tool_path(dir.path(), victim.to_str().unwrap())
+            .expect_err("an absolute path outside the project must be refused");
+        assert!(
+            err.contains("outside the project"),
+            "the refusal must say why: {err}"
+        );
+        // And nothing was created on the way to finding that out.
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "original\n");
+
+        for raw in ["/etc/passwd", "/tmp/anything", "/home/someone/.ssh/id_rsa"] {
+            assert!(
+                resolve_tool_path(dir.path(), raw).is_err(),
+                "{raw:?} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tilde_is_not_expanded_so_it_stays_inside() {
+        // Not a security property, and the test is here so nobody later reads
+        // it as one in either direction. Nothing in this path is a shell: a
+        // leading `~` is just a character, so `~/.ssh/authorized_keys` is the
+        // RELATIVE path `<project>/~/.ssh/authorized_keys` and lands inside the
+        // project, harmlessly, in a directory literally named `~`.
+        //
+        // It is tempting to "fix" this by expanding `~` — which would turn a
+        // safe oddity into a real escape. Asserted so the temptation is visible.
+        let dir = project();
+        let resolved = resolve_tool_path(dir.path(), "~/.ssh/authorized_keys")
+            .expect("a tilde is a filename character here, not a home reference");
+        assert!(
+            resolved.starts_with(dir.path().canonicalize().unwrap()),
+            "must still land inside the project, got {resolved:?}"
+        );
+        assert!(
+            resolved.to_string_lossy().contains("/~/"),
+            "and it must not have been expanded to a home directory: {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn traversal_is_refused_rather_than_normalised() {
+        let dir = project();
+        for raw in [
+            "../outside.txt",
+            "src/../../outside.txt",
+            "src/..",
+            "a/b/../../../etc/passwd",
+        ] {
+            let err = resolve_tool_path(dir.path(), raw).unwrap_err();
+            assert!(
+                err.contains(".."),
+                "{raw:?} must be refused for containing '..': {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_symlink_out_of_the_tree_does_not_launder_a_write() {
+        // Canonicalising only the textual path would resolve `inside/link` to
+        // `inside/link`, pass the prefix test, and then follow the link on
+        // write. The deepest existing ancestor is canonicalised instead, so the
+        // link is followed before the check, not after.
+        let dir = project();
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("secret.txt");
+        std::fs::write(&victim, "original\n").unwrap();
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&victim, dir.path().join("link.txt")).unwrap();
+        #[cfg(not(unix))]
+        return; // no symlinks to create; the unix path is the one that matters
+
+        let err = resolve_tool_path(dir.path(), "link.txt")
+            .expect_err("a symlink pointing out of the tree must be refused");
+        assert!(err.contains("outside the project"), "{err}");
+    }
+
+    #[test]
+    fn the_write_tool_actually_refuses_to_escape() {
+        // The helper is only worth anything if the tools use it. This drives
+        // the real tool, not the helper.
+        let dir = project();
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("pwned.txt");
+
+        let ctx = ToolContext {
+            agent_id: crate::mission::AgentId("confinement-test".into()),
+            mission_id: crate::mission::MissionId("confinement-test".into()),
+            role: "coder".into(),
+            project_path: dir.path().to_path_buf(),
+            permissions: HashMap::new(),
+            permission_mode: "bypass".into(),
+            task_store: None,
+        };
+        let input = ToolInput {
+            raw: serde_json::json!({
+                "path": victim.to_str().unwrap(),
+                "content": "pwned",
+            }),
+        };
+
+        let res = futures::executor::block_on(WriteTool.execute(input, &ctx));
+        assert!(
+            matches!(res.status, ToolStatus::Failed),
+            "writing outside the project must fail, got {:?}",
+            res.status
+        );
+        assert!(
+            !victim.exists(),
+            "the file outside the project must not exist — the tool wrote it anyway"
         );
     }
 }
