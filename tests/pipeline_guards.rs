@@ -797,3 +797,65 @@ async fn a_reviewer_who_names_the_problem_in_issues_gets_a_round() {
         "exactly one revision round: the named problem was worth one"
     );
 }
+
+/// A change to a file the specification never named is shown to the Reviewer.
+///
+/// Measured: a task about `src/broken.rs` produced a Coder artifact that
+/// created `src/search.rs` — a file the task never mentioned and the Coder
+/// invented — and the run carried on silently, because the artifact schema has
+/// no opinion on scope.
+///
+/// Not an error: touching an adjacent file is often right, and failing the run
+/// for it would be worse than saying so. What is not acceptable is the
+/// Reviewer approving a diff whose scope it was never shown.
+#[test]
+fn the_reviewer_is_told_which_files_the_task_never_asked_for() {
+    use niki::artifacts::types::TaskSpec;
+    use niki::orchestrator::pipeline::scope_drift_note;
+
+    let spec: TaskSpec = serde_json::from_str(&mock_llm::task_spec_json()).expect("spec parses");
+    let planned: Vec<&str> = spec
+        .files_to_modify
+        .iter()
+        .map(|f| f.path.as_str())
+        .collect();
+    assert!(!planned.is_empty(), "the fixture must plan a file");
+
+    // The measured case: a Coder that created a file the task never mentioned.
+    let drifted: serde_json::Value = serde_json::from_str(&mock_llm::code_diff_json(
+        "let end = start + size - 1;",
+        "let end = start + size;",
+        "src/search.rs",
+    ))
+    .expect("diff json");
+    let note =
+        scope_drift_note(&spec, &drifted.to_string()).expect("an unplanned file must be reported");
+    assert!(
+        note.contains("src/search.rs"),
+        "the note must name the file: {note}"
+    );
+    assert!(
+        planned.iter().all(|p| note.contains(p)),
+        "and the planned files, or the Reviewer cannot judge the difference: {note}"
+    );
+
+    // A change inside the plan says nothing.
+    let in_scope: serde_json::Value = serde_json::from_str(&mock_llm::code_diff_json(
+        "let end = start + size - 1;",
+        "let end = start + size;",
+        planned[0],
+    ))
+    .expect("diff json");
+    assert_eq!(
+        scope_drift_note(&spec, &in_scope.to_string()),
+        None,
+        "a change the task asked for is not drift, and saying so on every run would be noise"
+    );
+
+    // No spec, no Coder, nothing to compare — silence in all three.
+    assert_eq!(
+        scope_drift_note(&spec, ""),
+        None,
+        "no Coder artifact, no note"
+    );
+}

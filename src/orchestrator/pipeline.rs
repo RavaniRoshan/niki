@@ -527,6 +527,46 @@ fn apply_reviewer_verdict(
     *verdict_source = Some("reviewer".to_string());
 }
 
+/// Name the files a change touches that the specification never asked for, so
+/// the Reviewer can judge scope it would otherwise never see.
+///
+/// Returns `None` when there is nothing to say: no spec, no Coder artifact, no
+/// planned files to compare against, or no drift. The text names both sides on
+/// purpose — "this file is unplanned" is only useful next to "these were the
+/// planned ones".
+///
+/// Public so the wording is testable: the Reviewer's prompt is not reachable
+/// from a unit test, and a source check would prove nothing about what is
+/// actually said.
+pub fn scope_drift_note(spec: &TaskSpec, coder_json: &str) -> Option<String> {
+    let planned: Vec<&str> = spec
+        .files_to_modify
+        .iter()
+        .map(|f| f.path.as_str())
+        .collect();
+    if planned.is_empty() || coder_json.is_empty() {
+        return None;
+    }
+    let diff = serde_json::from_str::<CodeDiff>(coder_json).ok()?;
+    let unplanned: Vec<&str> = diff
+        .files_changed
+        .iter()
+        .map(|f| f.path.as_str())
+        .filter(|p| !planned.contains(p))
+        .collect();
+    if unplanned.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "SCOPE NOTE — the Coder changed file(s) the specification did not list in \
+         files_to_modify: {}. The planned files were: {}. Judge whether each of these is \
+         genuinely required by the task; one that is not is unrequested scope, and a \
+         reviewer approving a diff it was never shown the scope of is not a review.",
+        unplanned.join(", "),
+        planned.join(", ")
+    ))
+}
+
 /// Build the Coder's revision brief from the Reviewer's `issues`.
 ///
 /// Only critical and major issues are carried over — a nit is not worth a round
@@ -1434,6 +1474,22 @@ async fn run_role(
             ];
             if !red_json.is_empty() {
                 artifacts.push(red_json.to_string());
+            }
+            // Files the change touches that the specification never named.
+            //
+            // Measured: a task about `src/broken.rs` produced a Coder artifact
+            // that created `src/search.rs` — a file the task never mentioned and
+            // the Coder invented — and the run carried on, because the artifact
+            // schema has no opinion on scope. The Reviewer is the stage that
+            // judges whether a change is in scope, and it cannot judge what it
+            // is never shown.
+            //
+            // Not an error: touching an adjacent file is often right, and
+            // failing the run for it would be worse than saying so. It is
+            // named here so the judgement is actually available to the stage
+            // that makes it.
+            if let Some(note) = scope_drift_note(task_spec, coder_json) {
+                artifacts.push(note);
             }
             let diff_guardrail_hint = max_diff_lines.and_then(|m| {
                 if m > 0 {
