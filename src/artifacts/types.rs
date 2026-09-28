@@ -309,13 +309,56 @@ pub struct ReviewIssue {
     pub suggested_fix: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueSeverity {
     Critical, // Must fix before approval
     Major,    // Should fix
     Minor,    // Nice to fix
     Nit,      // Style/preference
+}
+
+// The aliases are the other vocabulary already in the product.
+//
+// `SecuritySeverity` is Critical/High/Medium/Low/Info, and a Reviewer asked
+// for its own scale reaches for the other one: measured, a review came back
+// with `"severity": "medium"` and the artifact was rejected by the schema for
+// a word the product already uses three lines away. That is a vocabulary the
+// harness should accept rather than a mistake the model made — the reviewer
+// was saying what it meant, and the run died on the spelling.
+impl<'de> serde::Deserialize<'de> for IssueSeverity {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        enum Raw {
+            Critical,
+            Major,
+            #[serde(alias = "high")]
+            MajorHigh,
+            Minor,
+            #[serde(alias = "medium", alias = "moderate")]
+            MinorMedium,
+            Nit,
+            #[serde(alias = "low", alias = "info", alias = "note", alias = "trivial")]
+            NitLow,
+        }
+        Ok(match Raw::deserialize(d)? {
+            Raw::Critical => IssueSeverity::Critical,
+            Raw::Major | Raw::MajorHigh => IssueSeverity::Major,
+            Raw::Minor | Raw::MinorMedium => IssueSeverity::Minor,
+            Raw::Nit | Raw::NitLow => IssueSeverity::Nit,
+        })
+    }
+}
+
+impl serde::Serialize for IssueSeverity {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(match self {
+            IssueSeverity::Critical => "critical",
+            IssueSeverity::Major => "major",
+            IssueSeverity::Minor => "minor",
+            IssueSeverity::Nit => "nit",
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]

@@ -350,3 +350,95 @@ fn critic_render() {
         "critic render missing verdict text"
     );
 }
+
+/// A Reviewer that says "medium" is saying what it means.
+///
+/// Measured: a review came back with `"severity": "medium"` and the whole
+/// artifact was rejected by the schema for a word this product already uses
+/// three lines away — `SecuritySeverity` is Critical/High/Medium/Low/Info.
+/// The run died on the spelling.
+///
+/// So the accepted set covers both vocabularies, in the schema *and* in the
+/// deserialiser, and both map onto the canonical four.
+#[test]
+fn issue_severity_accepts_the_security_vocabulary() {
+    use niki::artifacts::types::IssueSeverity;
+
+    let parse = |s: &str| -> IssueSeverity {
+        serde_json::from_value::<IssueSeverity>(serde_json::json!(s))
+            .unwrap_or_else(|e| panic!("{s} should be a severity: {e}"))
+    };
+
+    assert_eq!(parse("critical"), IssueSeverity::Critical);
+    assert_eq!(parse("major"), IssueSeverity::Major);
+    assert_eq!(parse("minor"), IssueSeverity::Minor);
+    assert_eq!(parse("nit"), IssueSeverity::Nit);
+
+    // The other scale, mapped onto the canonical four.
+    assert_eq!(parse("high"), IssueSeverity::Major);
+    assert_eq!(parse("medium"), IssueSeverity::Minor);
+    assert_eq!(parse("moderate"), IssueSeverity::Minor);
+    assert_eq!(parse("low"), IssueSeverity::Nit);
+    assert_eq!(parse("info"), IssueSeverity::Nit);
+    assert_eq!(parse("note"), IssueSeverity::Nit);
+
+    // Canonical on the way out, whatever came in — so a downstream consumer
+    // never has to know about the aliases.
+    assert_eq!(
+        serde_json::to_value(parse("medium")).unwrap(),
+        serde_json::json!("minor"),
+        "an alias must not leak into a serialized artifact"
+    );
+
+    // And a word that means nothing is still refused.
+    assert!(
+        serde_json::from_value::<IssueSeverity>(serde_json::json!("catastrophic")).is_err(),
+        "the schema is widened, not dissolved"
+    );
+}
+
+/// The JSON schema is what actually rejected it, so it has to widen too —
+/// and both copies of the enum, since the schema lists severity twice.
+#[test]
+fn the_review_schema_accepts_the_words_the_reviewer_used() {
+    let review = serde_json::json!({
+        "verdict": "revision_needed",
+        "overall_assessment": "One issue.",
+        "quality_scores": {
+            "correctness": 6, "code_quality": 7, "test_coverage": 6, "spec_adherence": 8
+        },
+        "issues": [{
+            "severity": "medium",
+            "category": "logic",
+            "description": "off by one"
+        }],
+        "strengths": [],
+        "feedback": {
+            "critical_issues": [{
+                "severity": "high",
+                "category": "security",
+                "description": "token compared with =="
+            }],
+            "guidance": "Fix both.",
+            "keep_unchanged": [],
+            "revision_round": 0
+        }
+    });
+    niki::artifacts::validate::validate_artifact(
+        &review.to_string(),
+        "schemas/review_verdict.schema.json",
+    )
+    .expect("a reviewer using the product's other severity scale must not fail the run");
+
+    // And it still parses into the typed artifact.
+    let parsed: niki::artifacts::types::ReviewVerdict =
+        serde_json::from_value(review).expect("and it must survive deserialisation");
+    assert_eq!(
+        parsed.issues[0].severity,
+        niki::artifacts::types::IssueSeverity::Minor
+    );
+    assert_eq!(
+        parsed.feedback.unwrap().critical_issues[0].severity,
+        niki::artifacts::types::IssueSeverity::Major
+    );
+}
