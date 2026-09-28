@@ -44,6 +44,43 @@ fn diff_files(diff: &str) -> Vec<String> {
     files
 }
 
+/// Directories whose contents never belong in a published patch, whatever the
+/// agent reports.
+///
+/// `.niki/` is the run's own artifact store, `niki.toml` holds credentials, and
+/// `.git/` is git's own metadata — the last two are also in the permission
+/// layer's default protected-path list. These are the *only* dot-paths that
+/// are refused.
+const EXCLUDED_PREFIXES: [&str; 3] = [".niki/", ".niki\\", ".git/"];
+
+/// Whether an agent-reported path may appear in the published diff.
+///
+/// This used to refuse any path starting with `.`. That reads like a tidy rule
+/// and is not one: it silently dropped every dotfile an agent legitimately
+/// produces. `.github/workflows/*.yml`, `.gitignore`, `.env.example`,
+/// `.eslintrc`, `.claude/settings.json` — a long list of files a coding agent is
+/// routinely asked to create, each of which the agent would write, report in
+/// `CodeDiff.files_changed`, and then have vanish before the user ever saw it.
+/// On the worktree backend the file was written and then thrown away, so the
+/// work was not merely unreported, it was gone.
+///
+/// A deny-list of specific directories is the rule that was actually meant.
+/// Traversal escapes and absolute paths are still refused, and `.git/` is now
+/// refused explicitly rather than by the accident of starting with a dot.
+pub fn is_publishable_path(path: &str) -> bool {
+    if path.is_empty() || path.starts_with('/') || path.contains("..") {
+        return false;
+    }
+    if path == "niki.toml" {
+        return false;
+    }
+    // A Windows-style separator must not smuggle a path past the prefix check.
+    let normalised = path.replace('\\', "/");
+    !EXCLUDED_PREFIXES
+        .iter()
+        .any(|p| normalised.starts_with(&p.replace('\\', "/")))
+}
+
 /// Capture the working-tree diff scoped to agent-produced changes.
 ///
 /// Phase 5.1: the old implementation ran `git add -A -N` on the host and
@@ -52,22 +89,14 @@ fn diff_files(diff: &str) -> Vec<String> {
 /// the files the agent reported (`CodeDiff.files_changed`), intent-to-adding
 /// just those — the host index is otherwise untouched.
 ///
-/// Paths under `.niki/` / `niki.toml` and escapes (`..`, absolute) are
-/// dropped: task artifacts and secrets never belong in the published patch.
-/// An empty file list yields an empty diff without touching the host at all.
+/// Paths under `.niki/` / `.git/`, the credentials file `niki.toml`, and
+/// traversal escapes are dropped; see `is_publishable_path`. An empty file list
+/// yields an empty diff without touching the host at all.
 pub fn working_tree_diff_scoped(repo_path: &Path, agent_files: &[String]) -> String {
     let files: Vec<&str> = agent_files
         .iter()
         .map(|s| s.as_str())
-        .filter(|s| {
-            !s.is_empty()
-                && !s.starts_with('.')
-                && !s.starts_with('/')
-                && !s.contains("..")
-                && *s != "niki.toml"
-                && !s.starts_with(".niki/")
-                && !s.starts_with(".niki\\")
-        })
+        .filter(|s| is_publishable_path(s))
         .collect();
     if files.is_empty() {
         return String::new();
@@ -355,5 +384,116 @@ mod tests {
         let clean_diff = "diff --git a/clean.rs b/clean.rs\n--- a/clean.rs\n+++ b/clean.rs\n@@\n";
         assert!(ensure_no_conflict_markers(&dir, clean_diff).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── the dotfile bug ─────────────────────────────────────────────────
+    //
+    // The scoping filter refused any path starting with `.`, on the theory that
+    // dot-paths were artifacts. In practice an agent asked to add a CI workflow
+    // writes `.github/workflows/ci.yml`, reports it in `files_changed`, and the
+    // file is dropped from the diff. On the worktree backend it was written and
+    // then thrown away, so the work did not just go unreported — it was gone.
+    //
+    // These are the files an agent is routinely asked to create. They are the
+    // regression.
+
+    #[test]
+    fn dotfiles_an_agent_is_routinely_asked_to_create_are_publishable() {
+        for path in [
+            ".github/workflows/ci.yml",
+            ".github/dependabot.yml",
+            ".gitignore",
+            ".dockerignore",
+            ".env.example",
+            ".eslintrc.json",
+            ".claude/settings.json",
+            ".prettierrc",
+            ".editorconfig",
+            ".rustfmt.toml",
+            "docs/.gitkeep",
+            "src/.gitattributes",
+        ] {
+            assert!(
+                is_publishable_path(path),
+                "{path:?} is a file a coding agent is routinely asked to create; refusing it \
+                 because it starts with a dot silently discards the work"
+            );
+        }
+    }
+
+    #[test]
+    fn the_paths_that_actually_must_not_be_published_still_are_not() {
+        for path in [
+            ".niki/tasks/abc/plan.md",
+            ".niki/config.toml",
+            ".git/config",
+            ".git/hooks/pre-commit",
+            "niki.toml",
+            "/etc/passwd",
+            "../../etc/passwd",
+            "src/../../outside.rs",
+            "",
+        ] {
+            assert!(
+                !is_publishable_path(path),
+                "{path:?} must never appear in a published patch"
+            );
+        }
+    }
+
+    #[test]
+    fn a_windows_separator_does_not_smuggle_a_path_past_the_prefix_check() {
+        // `.niki\config.toml` is `.niki/config.toml` to the rest of the stack.
+        // Refusing the forward-slash form and accepting the backslash one would
+        // make the exclusion a suggestion.
+        assert!(!is_publishable_path(".niki\\config.toml"));
+        assert!(!is_publishable_path(".git\\config"));
+        // ...and the ordinary case still works.
+        assert!(is_publishable_path("src\\main.rs"));
+    }
+
+    /// The filter is only interesting because of what it does to a real repo, so
+    /// this exercises the whole path: a dotfile an agent creates must survive
+    /// into the diff, and a `.niki/` artifact must not.
+    #[test]
+    fn a_dotfile_survives_into_the_scoped_diff_and_an_artifact_does_not() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = dir.path();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo)
+                .output()
+                .expect("git runs")
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@n.local"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(repo.join("README.md"), "# fixture\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "init"]);
+
+        // The agent creates a CI workflow and, separately, leaves a run artifact.
+        std::fs::create_dir_all(repo.join(".github/workflows")).unwrap();
+        std::fs::write(repo.join(".github/workflows/ci.yml"), "name: ci\n").unwrap();
+        std::fs::create_dir_all(repo.join(".niki")).unwrap();
+        std::fs::write(repo.join(".niki/secretish.json"), "{}\n").unwrap();
+
+        let scoped = working_tree_diff_scoped(
+            repo,
+            &[
+                ".github/workflows/ci.yml".to_string(),
+                ".niki/secretish.json".to_string(),
+            ],
+        );
+
+        assert!(
+            scoped.contains(".github/workflows/ci.yml"),
+            "a CI workflow the agent created must reach the diff; got:\n{scoped}"
+        );
+        assert!(
+            !scoped.contains("secretish"),
+            "a .niki/ artifact must never reach the published patch; got:\n{scoped}"
+        );
     }
 }

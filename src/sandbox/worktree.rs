@@ -296,16 +296,19 @@ impl Sandbox for WorktreeSandbox {
         // Phase 5.1: scope to agent-reported files (intent-to-add just those),
         // so brand-new agent files appear in the diff while worktree-local
         // byproducts (caches, tool output) stay out.
+        //
+        // The publishability rule lives in one place (`output::git::is_publishable_path`)
+        // because this filter, the Docker one, and the host-side one were three
+        // copies of the same logic — and they had already drifted. All three
+        // refused any path starting with `.`, which silently dropped every
+        // dotfile an agent legitimately creates (`.github/workflows/*.yml`,
+        // `.gitignore`, `.env.example`). On this backend the file is written
+        // into the worktree and then discarded, so the work was not just
+        // unreported, it was gone.
         let wt = self.worktree_path.clone();
         let files: Vec<String> = agent_files
             .iter()
-            .filter(|s| {
-                !s.is_empty()
-                    && !s.starts_with('.')
-                    && !s.starts_with('/')
-                    && !s.contains("..")
-                    && *s != "niki.toml"
-            })
+            .filter(|s| crate::output::git::is_publishable_path(s))
             .cloned()
             .collect();
         tokio::task::spawn_blocking(move || -> Result<String> {

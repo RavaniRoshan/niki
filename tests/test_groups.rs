@@ -43,8 +43,10 @@ fn parse_groups() -> BTreeMap<String, Vec<String>> {
     let text = std::fs::read_to_string(repo(GROUPS_REL))
         .expect(".config/test-binary-groups must exist — it is the single source of truth");
 
-    let mut groups: BTreeMap<String, Vec<String>> =
-        KNOWN_GROUPS.iter().map(|g| ((*g).to_string(), Vec::new())).collect();
+    let mut groups: BTreeMap<String, Vec<String>> = KNOWN_GROUPS
+        .iter()
+        .map(|g| ((*g).to_string(), Vec::new()))
+        .collect();
 
     for (lineno, raw) in text.lines().enumerate() {
         let line = raw.split('#').next().unwrap_or("").trim();
@@ -54,7 +56,11 @@ fn parse_groups() -> BTreeMap<String, Vec<String>> {
         let mut parts = line.split_whitespace();
         let (group, binary) = match (parts.next(), parts.next(), parts.next()) {
             (Some(g), Some(b), None) => (g, b),
-            _ => panic!("{}:{}: expected `<group> <binary>`, got {raw:?}", GROUPS_REL, lineno + 1),
+            _ => panic!(
+                "{}:{}: expected `<group> <binary>`, got {raw:?}",
+                GROUPS_REL,
+                lineno + 1
+            ),
         };
         let bucket = groups
             .get_mut(group)
@@ -146,9 +152,9 @@ fn nextest_overrides_match_the_shared_list() {
             pending_filter = rest.strip_suffix('\'').map(|s| s.to_string());
         } else if let Some(rest) = line.strip_prefix("test-group = '") {
             if let Some(group) = rest.strip_suffix('\'') {
-                let f = pending_filter
-                    .take()
-                    .unwrap_or_else(|| panic!("{NEXTEST_REL}: {group:?} has a test-group with no filter"));
+                let f = pending_filter.take().unwrap_or_else(|| {
+                    panic!("{NEXTEST_REL}: {group:?} has a test-group with no filter")
+                });
                 filter_for.insert(group.to_string(), f);
             }
         }
@@ -177,11 +183,18 @@ fn every_nextest_override_targets_a_populated_group() {
 
     let declared: BTreeSet<&str> = nextest
         .lines()
-        .filter_map(|l| l.trim().strip_prefix("[test-groups.").and_then(|r| r.strip_suffix("]")))
+        .filter_map(|l| {
+            l.trim()
+                .strip_prefix("[test-groups.")
+                .and_then(|r| r.strip_suffix("]"))
+        })
         .collect();
 
     for line in nextest.lines() {
-        let Some(target) = line.trim().strip_prefix("test-group = '").and_then(|r| r.strip_suffix('\''))
+        let Some(target) = line
+            .trim()
+            .strip_prefix("test-group = '")
+            .and_then(|r| r.strip_suffix('\''))
         else {
             continue;
         };
@@ -190,7 +203,10 @@ fn every_nextest_override_targets_a_populated_group() {
             "{NEXTEST_REL} assigns tests to {target:?}, which is not declared as a [test-groups.{target}]"
         );
         let size = groups.get(target).map(|v| v.len()).unwrap_or(0);
-        assert!(size > 0, "override targets {target:?}, whose group is empty");
+        assert!(
+            size > 0,
+            "override targets {target:?}, whose group is empty"
+        );
     }
 }
 
