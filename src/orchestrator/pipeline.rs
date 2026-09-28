@@ -2446,6 +2446,10 @@ pub async fn execute_pipeline(
     // open — the auditor's findings. `None`/`""` means "asked to revise, told
     // nothing", which is what `revision_hold` refuses to spend a round on.
     let mut actionable_findings: Option<String> = None;
+    // Set when the Coder's patch was well-formed but would not apply. The
+    // rest of the round is skipped and the Coder is asked again with the
+    // reason, rather than the run ending.
+    let mut patch_failure: Option<String> = None;
     // The signature of the findings the *previous* round was run against, so a
     // repeat of the same critique is recognisable.
     let mut last_findings: Option<String> = None;
@@ -2827,16 +2831,38 @@ pub async fn execute_pipeline(
                         match role_output {
                             RoleOutput::Coder(diff) => {
                                 coder_json = json;
-                                sandbox
+                                // A patch that validates but does not apply is
+                                // the Coder's `search` not being text that is
+                                // in the file. That is a fixable mistake, not a
+                                // dead end: the model is told, and gets another
+                                // round with the reason.
+                                //
+                                // It used to end the run. Measured: a refactor
+                                // produced a schema-valid artifact whose anchor
+                                // matched nothing, and the whole task died at
+                                // round 1 — after the plan, the code, and a
+                                // Tester pass had already been paid for. The
+                                // guard itself was right (a Tester must never
+                                // verify a tree without the change); returning
+                                // an error was not.
+                                match sandbox
                                     .apply_patch(&code_diff_to_edit_text(&diff), &task.project_path)
                                     .await
-                                    .with_context(|| {
-                                        format!(
-                                            "the Coder's patch did not apply (round {round}); \
-                                             the Tester would otherwise verify a tree that \
-                                             does not contain the change"
-                                        )
-                                    })?;
+                                {
+                                    Ok(()) => {}
+                                    Err(e) => {
+                                        patch_failure = Some(format!(
+                                            "The harness could not apply your patch, so none of \
+                                             it was written and nothing you produced this round \
+                                             is in the tree.\n\nThe usual cause is a `search` \
+                                             that is not literally present in the file — it \
+                                             must be copied verbatim, including indentation, \
+                                             with enough surrounding lines to be unique. Re-read \
+                                             the file and rebuild each edit against what it \
+                                             actually contains now.\n\nThe harness said: {e}"
+                                        ));
+                                    }
+                                }
                             }
                             RoleOutput::Tester(_) => {
                                 tester_json = json;
@@ -2904,6 +2930,33 @@ pub async fn execute_pipeline(
                                 unreachable!("critic runs post-loop, never in the loop")
                             }
                         }
+                        // The round is abandoned here, not after it: the Tester
+                        // must not run against a tree the change never reached,
+                        // and neither must the Reviewer judge it.
+                        if patch_failure.is_some() {
+                            break;
+                        }
+                    }
+
+                    if let Some(reason) = patch_failure.take() {
+                        if round + 1 >= max_rounds {
+                            return Err(anyhow::anyhow!(
+                                "the Coder's patch did not apply and there are no revision \
+                                 rounds left (round {round} of {max_rounds}): {reason}"
+                            ));
+                        }
+                        review_feedback = Some(reason);
+                        display.agent_warning(
+                            AgentRole::Coder,
+                            &format!(
+                                "the patch did not apply — asking for another round \
+                                 ({}/{})",
+                                round + 1,
+                                max_rounds
+                            ),
+                        );
+                        round += 1;
+                        continue;
                     }
 
                     // A round is only worth running if it can act on something.
