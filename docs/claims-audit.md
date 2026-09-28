@@ -86,6 +86,23 @@ the install docs, not something to assert from here.
 - [x] (2026-09-28) `niki --version` prints the build version: `niki 0.9.0`.
   This verifies the *local* binary; per-target verification needs a run of each
   published asset, which is a release-time check, so the strong form stays open.
+- [ ] **OPEN since 2026-09-28:** the marketing screenshots in
+  `assets/screenshots/` do not show what the product does, and nothing uses
+  them. `diff.png` is named for the diff view and shows the **first-run
+  onboarding modal** over it; `cost.png` has the same problem. Both have body
+  text running past the right edge of the window chrome, so the crop is wrong as
+  well as the content. They are referenced by neither the README nor the
+  marketing site — only by `research/marketing-asset-pipeline.md`, which
+  describes how they *should* be generated. So today they are orphaned *and*
+  misleading, which is worse than absent: a reader who finds one concludes the
+  product looks like that.
+  Not fixed here: producing marketing-styled captures (window chrome, shadows)
+  needs the VHS + freeze pipeline the research document already prescribes, and
+  the same environment-dependence that makes the visual gate unrunnable locally
+  applies. The verified real frames for the current UI are
+  `tests/visual/reference/` (12, re-blessed on the CI runner and
+  human-reviewed 2026-09-28) — those are what a screenshot should be drawn from.
+
 - [ ] **OPEN since 2026-09-28:** the `Visual regression (VHS)` references are
   re-blessed and green, but the gate cannot be made green from a developer
   machine — the render differs from the CI runner's by 6.6-9.4% of pixels. The
