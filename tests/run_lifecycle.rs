@@ -503,11 +503,19 @@ async fn failing_test_suite_creates_no_branch_and_marks_task_failed() {
     let mut args = run_args(project.clone());
     args.bare = true;
 
-    // Run handle: it should succeed in running the pipeline, but record the verification failure
+    // Run handle: the pipeline runs to completion, but a failed suite blocks the
+    // branch, so the run delivers nothing and must report that.
+    //
+    // This asserted `res.is_ok()` for years, and that assertion *was the bug*.
+    // A run whose test suite failed created no branch, recorded Failed, told the
+    // user on stderr — and exited 0. A CI gate reading the exit code passed on a
+    // run that shipped nothing.
     let res = niki::cli::run::handle(&args).await;
     assert!(
-        res.is_ok(),
-        "handle returns Ok even when suite fails (recording failure in record)"
+        res.is_err(),
+        "a failed test suite blocks the branch, so the run delivers nothing and must \
+         return Err. Got Ok — the exit code is 0 and a CI gate passes on a run that \
+         produced no branch. {res:?}"
     );
 
     // No niki/* branch was created because verification blocked it
@@ -723,5 +731,162 @@ async fn dry_run_never_records_completed() {
         record.get("branch").is_none() || record.get("branch") == Some(&serde_json::Value::Null),
         "a dry run must record branch: null, got {:?}",
         record.get("branch")
+    );
+}
+
+// ── the exit-code contract ────────────────────────────────────────────────
+//
+// `niki run` recorded `TaskStatus::Failed` for a blocked branch, a failed
+// commit, and an empty diff — and then returned `Ok(())`. `main.rs` propagates
+// that straight out of `run()`, so the process exited 0. A CI step running
+// `niki run "…"` passed on a run that produced nothing to review.
+//
+// These are process-level tests, not `handle()`-level ones, because the defect
+// was never in the record: it was in the gap between the record and the exit
+// code. Asserting on `handle()` alone would have passed against the bug — the
+// function under test returned `Ok(())` the whole time.
+
+/// The happy-path script, with the run stopped short of a branch by a failing
+/// verification command. `test_command = "false"` makes the Tester's command
+/// exit 1, `branch_block_note` is set, and the run delivers nothing.
+///
+/// Three other fixtures were tried for this and all reached a *different*
+/// failure first, which is why this test used to be able to pass for the wrong
+/// reason:
+///
+/// - editing a nonexistent path — the patch never applied, so the run died
+///   during patch application;
+/// - replacing text with itself — `schemas/code_diff.schema.json` rejects an
+///   identical `search`/`replace` pair as a no-op;
+/// - editing an untracked file — the worktree is checked out from git, so an
+///   untracked file is not in it and the edit has nothing to match.
+///
+/// All three exit non-zero, and none of them reach the `record.status ==
+/// Failed` branch this test is about. The blocked-by-verification path does,
+/// and it is the case a user actually hits: the agent worked, the tests
+/// failed, nothing was delivered.
+fn blocked_by_verification_toml(script_path: &std::path::Path) -> String {
+    minimal_mock_toml(script_path, Some("false"))
+}
+
+fn niki_bin() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_niki"))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_that_produces_no_branch_exits_non_zero() {
+    let repo = create_fixture_repo();
+    let project = repo.dir.path().to_path_buf();
+    let script_path = project.join(".niki-mock-script.json");
+    successful_script(&script_path);
+    std::fs::write(
+        project.join("niki.toml"),
+        blocked_by_verification_toml(&script_path),
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(niki_bin())
+        .args([
+            "run",
+            "--backend",
+            "worktree",
+            "--bare",
+            "--project",
+            project.to_str().unwrap(),
+            "fix pagination",
+        ])
+        .output()
+        .expect("niki runs");
+
+    assert!(
+        niki_branches(&project).is_empty(),
+        "precondition: a blocked run must not create a branch"
+    );
+    assert!(
+        !output.status.success(),
+        "a run that delivered no branch must exit non-zero, got {:?}. \
+         A gate that cannot fail is not a gate.",
+        output.status.code()
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.to_lowercase().contains("blocked") || stderr.contains("no branch"),
+        "the exit must say why the run was blocked, got: {stderr}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_successful_run_still_exits_zero() {
+    // The other half of the property. A fix that made every run exit non-zero
+    // would satisfy the test above and be useless.
+    let repo = create_fixture_repo();
+    let project = repo.dir.path().to_path_buf();
+    let script_path = project.join(".niki-mock-script.json");
+    successful_script(&script_path);
+    std::fs::write(
+        project.join("niki.toml"),
+        minimal_mock_toml(&script_path, Some("true")),
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(niki_bin())
+        .args([
+            "run",
+            "--backend",
+            "worktree",
+            "--bare",
+            "--project",
+            project.to_str().unwrap(),
+            "fix pagination",
+        ])
+        .output()
+        .expect("niki runs");
+
+    assert!(
+        output.status.success(),
+        "a run that delivered a branch must exit 0, got {:?}; stderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !niki_branches(&project).is_empty(),
+        "precondition: the happy path creates a branch"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dry_run_exits_zero_even_though_it_creates_no_branch() {
+    // `--dry-run` is the one case where "no branch" is the expected result
+    // rather than a failure, and the exit-code rule has to make that exception
+    // explicitly or every dry run would look like a broken run.
+    let repo = create_fixture_repo();
+    let project = repo.dir.path().to_path_buf();
+    let script_path = project.join(".niki-mock-script.json");
+    successful_script(&script_path);
+    std::fs::write(
+        project.join("niki.toml"),
+        minimal_mock_toml(&script_path, Some("true")),
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(niki_bin())
+        .args([
+            "run",
+            "--backend",
+            "worktree",
+            "--bare",
+            "--dry-run",
+            "--project",
+            project.to_str().unwrap(),
+            "fix pagination",
+        ])
+        .output()
+        .expect("niki runs");
+
+    assert!(
+        output.status.success(),
+        "a dry run must exit 0, got {:?}; stderr: {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
