@@ -92,7 +92,11 @@ pub struct ChatPage;
 /// so a command cannot exist in one and not the other. It previously lived inline
 /// in a `trimmed == "/help"` arm, which is how `/providers` and `/mcp` ended up
 /// working while never being listed anywhere a user would look.
-const HELP_TEXT: &str = concat!(
+/// The text `/help` prints.
+///
+/// Public so `tests/tui_sheets.rs` can assert every working command is listed,
+/// rather than slicing the string out of this file.
+pub const HELP_TEXT: &str = concat!(
     "Available slash commands:\n",
     "  /help            This list\n",
     "  /config          Edit settings — saved to niki.toml\n",
