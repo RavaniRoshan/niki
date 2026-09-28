@@ -6,8 +6,8 @@
 //! anything failing. A workflow file is configuration; a test is the only thing
 //! that notices when the configuration stops meaning what its comment says.
 
-use std::path::Path;
 use std::collections::BTreeMap;
+use std::path::Path;
 
 fn ci_yml() -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/ci.yml"))
@@ -57,12 +57,18 @@ fn the_tui_vacuity_check_matches_both_pytest_output_formats() {
     let verbose = "tests/headless_tui.py::test_chat PASSED [  5%]\n\
                    ======================== 17 passed, 2 skipped in 11.84s ========================\n";
 
-    assert!(anchored(quiet), "sanity: the anchored form matches -q output");
+    assert!(
+        anchored(quiet),
+        "sanity: the anchored form matches -q output"
+    );
     assert!(
         !anchored(verbose),
         "sanity: this is the bug — the anchored form does NOT match -v output"
     );
-    assert!(unanchored(quiet) && unanchored(verbose), "the unanchored form matches both");
+    assert!(
+        unanchored(quiet) && unanchored(verbose),
+        "the unanchored form matches both"
+    );
 }
 
 /// The headless-TUI suite must run once per job, not twice.
@@ -74,7 +80,10 @@ fn the_tui_vacuity_check_matches_both_pytest_output_formats() {
 #[test]
 fn the_headless_tui_suite_runs_once_per_job() {
     let ci = ci_yml();
-    for (job_name, tee_path) in [("tui-headless", "/tmp/tui.txt"), ("tui-pty", "/tmp/pty.txt")] {
+    for (job_name, tee_path) in [
+        ("tui-headless", "/tmp/tui.txt"),
+        ("tui-pty", "/tmp/pty.txt"),
+    ] {
         let job = ci
             .split(&format!("\n  {job_name}:"))
             .nth(1)
@@ -100,7 +109,8 @@ fn the_headless_tui_suite_runs_once_per_job() {
              the same run rather than starting another"
         );
         assert_eq!(
-            job.matches("python3 -m pytest -c pytest_headless.ini -q").count(),
+            job.matches("python3 -m pytest -c pytest_headless.ini -q")
+                .count(),
             0,
             "job `{job_name}` still has a second `-q` invocation of the suite; that run exists \
              only to be grepped"
@@ -158,8 +168,10 @@ fn jobs_that_consume_no_test_output_do_not_depend_on_it() {
 /// the only gate is the point.
 #[test]
 fn product_verify_does_not_rerun_the_suite_in_ci() {
-    let script = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/product-verify.sh"))
-        .expect("scripts/product-verify.sh");
+    let script = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/product-verify.sh"),
+    )
+    .expect("scripts/product-verify.sh");
 
     assert!(
         script.contains("NIKI_VERIFY_FULL"),
@@ -205,7 +217,11 @@ fn the_vacuity_gate_fails_when_a_mandatory_layer_did_not_run() {
     };
 
     // Every required layer recorded: the gate passes.
-    std::fs::write(dir.join("all"), "CLI smoke\nTUI PTY smoke\nAgent workflow E2E\n").unwrap();
+    std::fs::write(
+        dir.join("all"),
+        "CLI smoke\nTUI PTY smoke\nAgent workflow E2E\n",
+    )
+    .unwrap();
     assert!(
         run("all", &["CLI smoke", "TUI PTY smoke", "Agent workflow E2E"]),
         "with every layer recorded the gate must pass"
@@ -214,7 +230,15 @@ fn the_vacuity_gate_fails_when_a_mandatory_layer_did_not_run() {
     // One required layer never recorded (the exact bug: a runner script absent,
     // so its `else` branch called skip_check) while the rest passed.
     assert!(
-        !run("all", &["CLI smoke", "TUI PTY smoke", "Agent workflow E2E", "Visual regression"]),
+        !run(
+            "all",
+            &[
+                "CLI smoke",
+                "TUI PTY smoke",
+                "Agent workflow E2E",
+                "Visual regression"
+            ]
+        ),
         "a layer that did not run must fail the gate, whatever else passed"
     );
 
@@ -227,7 +251,10 @@ fn the_vacuity_gate_fails_when_a_mandatory_layer_did_not_run() {
 
     // Nothing ran at all.
     std::fs::write(dir.join("none"), "").unwrap();
-    assert!(!run("none", &["CLI smoke"]), "an empty ledger must fail the gate");
+    assert!(
+        !run("none", &["CLI smoke"]),
+        "an empty ledger must fail the gate"
+    );
 
     // The ledger itself is gone — the recording was removed.
     assert!(
@@ -253,8 +280,10 @@ fn the_vacuity_gate_fails_when_a_mandatory_layer_did_not_run() {
 /// the local "run one thing and trust it" workflow with them.
 #[test]
 fn product_verify_wires_the_gate_and_keeps_the_full_path() {
-    let script = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/product-verify.sh"))
-        .expect("scripts/product-verify.sh");
+    let script = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/product-verify.sh"),
+    )
+    .expect("scripts/product-verify.sh");
 
     assert!(
         script.contains("require-layers.sh"),
@@ -307,10 +336,7 @@ fn ci_triggers_are_declared_at_the_workflow_level() {
 #[test]
 fn every_needs_target_exists() {
     let ci = ci_yml();
-    let jobs_block = ci
-        .split("\njobs:")
-        .nth(1)
-        .expect("ci.yml has a jobs block");
+    let jobs_block = ci.split("\njobs:").nth(1).expect("ci.yml has a jobs block");
 
     let mut job_names: Vec<String> = Vec::new();
     let mut needs: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -339,7 +365,11 @@ fn every_needs_target_exists() {
         }
     }
 
-    assert!(job_names.len() >= 15, "parsed only {} jobs — the parser drifted", job_names.len());
+    assert!(
+        job_names.len() >= 15,
+        "parsed only {} jobs — the parser drifted",
+        job_names.len()
+    );
     for (job, targets) in &needs {
         for t in targets {
             assert!(
