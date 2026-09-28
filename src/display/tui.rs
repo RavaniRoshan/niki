@@ -946,6 +946,20 @@ fn run_tui(
                     // this replaces checked the help overlay before onboarding
                     // and permission after; `run_chat` had the opposite order.
                     // Ordering is now a single decision, stated in one place.
+                    if crate::display::sheets::sheets_open(&state) {
+                        match crate::display::sheets::route(&mut state, key) {
+                            Ok(_) => {
+                                engine.mark_dirty();
+                                continue;
+                            }
+                            Err(e) => {
+                                state.set_notice(&format!("settings error: {e}"), 5000);
+                                engine.mark_dirty();
+                                continue;
+                            }
+                        }
+                    }
+
                     match route_overlay_key(&mut state, &mut command_palette, key, &project_path) {
                         OverlayOutcome::Consumed => {
                             engine.mark_dirty();
@@ -1341,6 +1355,26 @@ pub fn run_chat(
                     // One overlay ladder for both loops. It used to be two
                     // hand-ordered chains that could disagree — and did: `run_tui`
                     // checked the help overlay before onboarding, `run_chat` after.
+                    // Sheets own every key while one is open. This is ahead of
+                    // the overlay ladder on purpose: a settings form that
+                    // leaked an Esc or a Ctrl+S to the page behind it would be
+                    // worse than no form at all, and the overlay ladder's
+                    // global toggles must not fire out from under a form the
+                    // user is halfway through filling in.
+                    if crate::display::sheets::sheets_open(&state) {
+                        match crate::display::sheets::route(&mut state, key) {
+                            Ok(_) => {
+                                needs_render = true;
+                                continue;
+                            }
+                            Err(e) => {
+                                state.set_notice(&format!("settings error: {e}"), 5000);
+                                needs_render = true;
+                                continue;
+                            }
+                        }
+                    }
+
                     match route_overlay_key(&mut state, &mut command_palette, key, &project_path) {
                         OverlayOutcome::Consumed => {
                             needs_render = true;
@@ -1757,6 +1791,11 @@ fn render(
     if state.has_running_stage() {
         render_activity_spinner(frame, size, state);
     }
+
+    // Sheets go last, above the page, the help overlay and the spinner. A sheet
+    // is modal by contract, so anything drawn after it would be a layer the
+    // user could interact with while the sheet is open.
+    crate::display::sheets::render_top_sheet(frame, size, &state.sheets, state);
 }
 
 /// Global page jump for a key event: plain (unmodified) letters map via

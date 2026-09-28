@@ -600,7 +600,7 @@ impl Page for ChatPage {
                     if trimmed == "/help" {
                         state.chat_log.push((
                             "system".to_string(),
-                            "Available slash commands:\n  /doctor          Check providers, keys, sandbox health\n  /review          Trigger code review audit on workspace\n  /diff            View full-screen unified diff\n  /cost            Show token spend and cost metrics\n  /context         Show context window utilization\n  /compact         Compact session history into memory\n  /clear           Clear conversation log\n  /init            Scan project and draft AGENTS.md\n  /model <name>    Switch active LLM model\n  /theme           Cycle color theme (dark/light/auto)\n  /config          Open configuration editor\n  /terminal-setup  Guide truecolor & OSC 52 clipboard setup\n  /undo · /redo    Undo or redo workspace checkpoints\n  /steer <msg>     Send a live steering hint to running agent".to_string(),
+                            "Available slash commands:\n  /doctor          Check providers, keys, sandbox health\n  /review          Trigger code review audit on workspace\n  /diff            View full-screen unified diff\n  /cost            Show token spend and cost metrics\n  /context         Show context window utilization\n  /compact         Compact session history into memory\n  /clear           Clear conversation log\n  /init            Scan project and draft AGENTS.md\n  /model <name>    Switch active LLM model\n  /theme           Pick a colour theme (with live preview)\n  /config          Edit settings, saved to niki.toml\n  /terminal-setup  Guide truecolor & OSC 52 clipboard setup\n  /undo · /redo    Undo or redo workspace checkpoints\n  /steer <msg>     Send a live steering hint to running agent".to_string(),
                         ));
                     } else if trimmed == "/clear" || trimmed == "/reset" {
                         state.chat_log.clear();
@@ -647,7 +647,18 @@ impl Page for ChatPage {
                     } else if trimmed == "/diff" {
                         state.current_page = PageId::Diff;
                     } else if trimmed == "/config" {
-                        state.current_page = PageId::Config;
+                        // A sheet, not the read-only Config page. The page could
+                        // be tabbed through and nothing could be changed; a user
+                        // who wanted to change a setting had to leave the product
+                        // and edit TOML by hand.
+                        crate::display::sheets::open_sheet(
+                            state,
+                            crate::display::sheets::Sheet::Settings(Default::default()),
+                        );
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Settings — space changes a value, enter saves, esc discards and closes.".to_string(),
+                        ));
                     } else if trimmed == "/terminal-setup" {
                         state.chat_log.push((
                             "system".to_string(),
@@ -671,11 +682,14 @@ impl Page for ChatPage {
                                 .push(("system".to_string(), format!("Switched model to {}", arg)));
                         }
                     } else if trimmed == "/theme" {
-                        let new_theme = crate::display::theme::next_theme();
-                        state.chat_log.push((
-                            "system".to_string(),
-                            format!("Switched theme to {}", new_theme),
-                        ));
+                        // A list with a live preview, not a cycle. Cycling means
+                        // you cannot see what exists, cannot go back without
+                        // going all the way round, and cannot tell which one you
+                        // are on.
+                        crate::display::sheets::open_sheet(
+                            state,
+                            crate::display::sheets::Sheet::Theme(Default::default()),
+                        );
                     } else if trimmed == "/undo" {
                         let mgr = crate::session::SessionManager::new(&state.project_path);
                         let msg = match mgr.undo() {
