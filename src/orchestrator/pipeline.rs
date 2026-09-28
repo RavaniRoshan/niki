@@ -1087,14 +1087,18 @@ async fn run_coder_tool_loop(
     // falling back, and reporting the fallback's "model is too small" error —
     // which named neither the loop nor the fact that it had run.
     if let Err(e) = crate::artifacts::validate::validate_artifact(&json, schema_path) {
-        tracing::warn!(
-            target: "niki::pipeline",
-            role = "coder",
-            error = %e,
-            "the coder's tool loop submitted an artifact that failed validation; \
-             falling back to the one-shot path, and the user will be told about the \
-             fallback's error rather than this one",
+        // `tracing::warn` alone is not a diagnostic anyone will read: main
+        // installs `EnvFilter::from_default_env()`, which is ERROR-only unless
+        // RUST_LOG is set. So this also goes to stderr, where a person running
+        // a CLI from a terminal is already looking, and to the TUI notice line
+        // when there is one.
+        let msg = format!(
+            "the Coder explored with tools and submitted a CodeDiff that did not validate \
+             ({e}); falling back to a single-shot call. The error that follows describes \
+             the fallback, not this."
         );
+        tracing::warn!(target: "niki::pipeline", role = "coder", error = %e, "{}", msg);
+        eprintln!("niki: {msg}");
         return None;
     }
 
