@@ -551,15 +551,16 @@ fn route_mouse(
                 }
                 // Click-to-position cursor in input box
                 if clicking && state.current_page == PageId::Chat {
-                    let input_chunks = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([Constraint::Min(3), Constraint::Length(3)])
-                        .split(chunks.content);
-                    if super::components::input_box::handle_click(
-                        state,
-                        mouse.column,
-                        input_chunks[1],
-                    ) {
+                    // The same split the renderer paints, with the same
+                    // growth rule. This assumed a fixed three-row composer
+                    // while the composer grows with a multi-line draft, so
+                    // after one Shift+Enter every click in the lower third of
+                    // the panel was resolved against a band that was no longer
+                    // where the composer was drawn.
+                    let input_lines = state.input_state.buffer.lines().count().max(1);
+                    let (_msg, composer) =
+                        crate::display::layout::composer_split(chunks.content, input_lines);
+                    if super::components::input_box::handle_click(state, mouse.column, composer) {
                         dirty = true;
                     }
                 }
