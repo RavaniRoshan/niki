@@ -95,6 +95,26 @@ fn check_semantics(artifact: &Value, schema_path: &str) -> Result<()> {
                      anything in the file."
                 ));
             }
+            // A replacement that BEGINS with its own search can never converge:
+            // applying it leaves the search text in place, so the next round
+            // matches again and inserts the same thing. Observed live, where a
+            // revision round emitted a truncated `replace` that re-inserted the
+            // prefix it had matched, and three rounds later the file held
+            //
+            //     numbers.iter().sum()    numbers.iter().sum()    numbers.iter().sum()
+            //
+            // The `search == replace` rule above is the degenerate case of this
+            // one and is kept as its own message because it is the clearer
+            // thing to say. This catches the general form, which is what a
+            // truncated response actually looks like.
+            if replace.starts_with(search) {
+                return Err(anyhow::anyhow!(
+                    "{schema_path}: edits[{i}] replaces {search:?} with text that still begins \
+                     with {search:?}. Applying this edit leaves the search text in place, so it \
+                     would match again on the next round and keep inserting — it cannot \
+                     converge. This usually means the `replace` was truncated."
+                ));
+            }
         }
     }
 
