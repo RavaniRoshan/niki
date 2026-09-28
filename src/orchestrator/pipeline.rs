@@ -526,6 +526,24 @@ pub fn select_topology(spec: &TaskSpec, config: &NikiConfig) -> TopologyMode {
             if config.security.enabled || config.parallel.enabled {
                 return TopologyMode::MultiAgent;
             }
+            // Model capability is now an input, not an assumption.
+            //
+            // This used to look only at the task, so a low-complexity task
+            // collapsed to a single agent regardless of what was running it. The
+            // compute-matched ablation says that is backwards for a weak model:
+            // below a 45% single-agent baseline a multi-agent pipeline is worth
+            // about +22 points, and above 50% it costs about 5. NIKI's own
+            // zero-setup path is a small local model, which is exactly the case
+            // the old heuristic hurt most.
+            //
+            // `benefits_from_structure()` is deliberately asymmetric: an
+            // unmeasured model is treated as weak, because the expensive
+            // mistake is running without structure and watching the run die at
+            // the Coder, not running with it and paying a few points.
+            let capability = crate::config::capability::load(&config.project_dir_hint());
+            if capability.benefits_from_structure() {
+                return TopologyMode::MultiAgent;
+            }
             let task_level = spec.estimated_complexity as u8;
             let threshold = config.pipeline.single_agent_max_complexity as u8;
             if task_level <= threshold {
@@ -566,11 +584,22 @@ pub fn topology_reason(spec: &TaskSpec, config: &NikiConfig) -> String {
             if config.security.enabled || config.parallel.enabled {
                 return "auto: security/parallel stages require the full multi-agent chain".to_string();
             }
+            let capability = crate::config::capability::load(&config.project_dir_hint());
+            if capability.benefits_from_structure() {
+                return format!(
+                    "auto: full multi-agent chain — model capability {}. A multi-agent pipeline \
+                     is worth about +22 points to a weak model and costs about 5 to a strong \
+                     one, so an unmeasured or weak model gets the structure.",
+                    capability.explain()
+                );
+            }
             if (spec.estimated_complexity as u8)
                 <= (config.pipeline.single_agent_max_complexity as u8)
             {
                 format!(
-                    "auto: estimated complexity {:?} <= max {:?}: collapsed to fast-path (Planner + solo Coder; no independent Tester/Reviewer/Red)",
+                    "auto: estimated complexity {:?} <= max {:?} and the model measured strong — \
+                     collapsed to fast-path (Planner + solo Coder; no independent \
+                     Tester/Reviewer/Red)",
                     spec.estimated_complexity, config.pipeline.single_agent_max_complexity
                 )
             } else {
@@ -3539,8 +3568,44 @@ mod tests {
     }
 
     #[test]
-    fn select_topology_auto_low_uses_single_agent() {
+    fn select_topology_auto_low_with_an_unmeasured_model_uses_multi_agent() {
+        // This test used to assert the opposite, and it was not a neutral
+        // assertion: it encoded the bug. `Auto` looked only at the task, so a
+        // low-complexity task collapsed to a single agent whatever was running
+        // it — and the compute-matched ablation (arXiv:2512.08296, 260 configs,
+        // SWE-bench Verified included) says a multi-agent pipeline is worth
+        // about +22 points below a 45% single-agent baseline and costs about 5
+        // above 50%. NIKI's own zero-setup path is a 3B local model, so the
+        // heuristic handed the structure-hungry model the opposite of the
+        // structure it needed, and a live run against it died at the Coder.
+        //
+        // The fast path is still correct for a *measured strong* model, and
+        // `select_topology_auto_low_with_a_measured_strong_model_uses_single_agent`
+        // covers that.
         let mut c = NikiConfig::default();
+        c.pipeline.topology = TopologyMode::Auto;
+        let spec = spec_with(Complexity::Low);
+        assert_eq!(select_topology(&spec, &c), TopologyMode::MultiAgent);
+    }
+
+    #[test]
+    fn select_topology_auto_low_with_a_measured_strong_model_uses_single_agent() {
+        // The other half: the change is not "always multi". A frontier model on
+        // a simple task should still take the fast path, because the same study
+        // says structure costs it about 5 points.
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::config::capability::save(
+            dir.path(),
+            crate::config::capability::ModelCapability::Measured {
+                passed: 9,
+                total: 10,
+            },
+        )
+        .expect("save");
+        let mut c = NikiConfig {
+            project_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        };
         c.pipeline.topology = TopologyMode::Auto;
         let spec = spec_with(Complexity::Low);
         assert_eq!(select_topology(&spec, &c), TopologyMode::SingleAgent);
@@ -3579,11 +3644,29 @@ mod tests {
     }
 
     #[test]
-    fn topology_reason_names_collapse_and_rationale() {
+    fn topology_reason_names_the_collapse_and_what_it_cost() {
         // A silent fast-path collapse is a vision violation; the reason string
         // must name what was dropped.
-        let mut c = NikiConfig::default();
+        //
+        // `Auto` with no measurement now keeps the chain, so the collapse is
+        // only reachable with a model measured strong — which is the case where
+        // it is the right call, and the one the user needs to be able to see
+        // happen.
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::config::capability::save(
+            dir.path(),
+            crate::config::capability::ModelCapability::Measured {
+                passed: 9,
+                total: 10,
+            },
+        )
+        .expect("save");
+        let mut c = NikiConfig {
+            project_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        };
         c.pipeline.topology = TopologyMode::Auto;
+
         let reason = topology_reason(&spec_with(Complexity::Low), &c);
         assert!(
             reason.contains("collapsed to fast-path"),
@@ -3591,8 +3674,17 @@ mod tests {
         );
         assert!(
             reason.contains("no independent Tester/Reviewer/Red"),
-            "reason: {reason}"
+            "the reason must name what the collapse dropped: {reason}"
         );
+
+        // And the unmeasured case must say *why* it kept the chain, and what
+        // would let it collapse.
+        let mut unknown = NikiConfig::default();
+        unknown.pipeline.topology = TopologyMode::Auto;
+        let kept = topology_reason(&spec_with(Complexity::Low), &unknown);
+        assert!(kept.contains("not measured"), "reason: {kept}");
+        assert!(kept.contains("doctor --measure"), "reason: {kept}");
+
         let reason_multi = topology_reason(&spec_with(Complexity::High), &c);
         assert!(
             reason_multi.contains("full multi-agent chain"),
