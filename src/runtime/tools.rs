@@ -2543,6 +2543,15 @@ pub struct LoopOutput {
     /// Accumulated provider token usage across all loop iterations (Phase 3.2:
     /// tool loops participate in token accounting instead of discarding it).
     pub usage: crate::llm::provider::TokenUsage,
+    /// The artifact the agent submitted through `submit_artifact`, if it did.
+    ///
+    /// This is what lets a stage be a *loop* and still produce the typed,
+    /// auditable artifact NIKI is built on. The agent reads, greps, runs, and
+    /// edits for as long as it needs, and then calls one tool whose input schema
+    /// IS the artifact schema. It is a structured output that a small model can
+    /// fail at and retry, rather than a contract it must satisfy blind on the
+    /// first token.
+    pub artifact: Option<serde_json::Value>,
 }
 
 /// Serialize the conversation (minus the leading `System` message) into a single
@@ -2610,6 +2619,28 @@ fn display_role(role: &str) -> crate::artifacts::types::AgentRole {
 /// and their results are appended as `ToolResult` messages; the loop repeats.
 /// The loop terminates when the model returns no tool calls, or after
 /// `max_steps` round-trips.
+/// The `submit_artifact` tool spec: the artifact schema, presented as a tool.
+///
+/// This is how a stage can be a *loop* and still produce the typed artifact
+/// NIKI is audited on. The agent explores with tools for as long as it needs,
+/// then calls one tool whose input schema IS the artifact schema. Structurally
+/// it is the same contract as before, but it is a contract the model can fail at
+/// and retry, rather than one it must satisfy blind on the first token — which
+/// is precisely what a 3B model cannot do.
+pub fn submit_artifact_spec(schema: serde_json::Value) -> crate::llm::provider::ToolSpec {
+    crate::llm::provider::ToolSpec {
+        name: "submit_artifact".to_string(),
+        description: "Submit your final answer. Call this exactly once, when you are done — \
+                      the parameters ARE the artifact this stage is graded on. Do not call it \
+                      until you have actually done the work with the other tools."
+            .to_string(),
+        // The artifact schema is an object schema already; nest it so the tool
+        // call is `{...artifact fields...}` rather than `{artifact: {...}}`,
+        // which is one less level of nesting for a small model to get wrong.
+        parameters: schema,
+    }
+}
+
 /// Whether a provider's finish reason means the response was cut short.
 ///
 /// The vocabularies differ and a new one would otherwise be silently treated as
@@ -2635,6 +2666,41 @@ pub async fn run_tool_loop(
     model: &str,
     registry: &ToolRegistry,
     ctx: &ToolContext,
+    messages: Vec<LoopMessage>,
+    bus: Option<&EventBus>,
+    max_steps: usize,
+    display_tx: Option<std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>>,
+    budget: Option<&mut crate::orchestrator::budget::RunBudget>,
+) -> Result<LoopOutput> {
+    run_tool_loop_with(
+        LoopOptions::default(),
+        provider,
+        model,
+        registry,
+        ctx,
+        messages,
+        bus,
+        max_steps,
+        display_tx,
+        budget,
+    )
+    .await
+}
+
+/// Extra configuration for the tool loop.
+#[derive(Debug, Default, Clone)]
+pub struct LoopOptions {
+    /// When set, the agent is offered this tool and the loop ends when it calls
+    /// it, handing back `LoopOutput::artifact`.
+    pub submit_artifact: Option<crate::llm::provider::ToolSpec>,
+}
+
+pub async fn run_tool_loop_with(
+    opts: LoopOptions,
+    provider: &dyn LlmProvider,
+    model: &str,
+    registry: &ToolRegistry,
+    ctx: &ToolContext,
     mut messages: Vec<LoopMessage>,
     bus: Option<&EventBus>,
     max_steps: usize,
@@ -2649,16 +2715,18 @@ pub async fn run_tool_loop(
         })
         .unwrap_or_default();
 
-    let tools = if registry.tool_specs_for(&ctx.role).is_empty() {
-        None
-    } else {
-        Some(registry.tool_specs_for(&ctx.role))
-    };
+    let mut specs = registry.tool_specs_for(&ctx.role);
+    if let Some(submit) = &opts.submit_artifact {
+        specs.push(submit.clone());
+    }
+    let tools = if specs.is_empty() { None } else { Some(specs) };
 
     let mut steps = 0usize;
     let mut call_log: Vec<(String, bool)> = Vec::new();
     let mut last_content = String::new();
     let mut usage = crate::llm::provider::TokenUsage::default();
+    // Set when the agent calls `submit_artifact`, which ends the loop.
+    let mut submitted: Option<serde_json::Value> = None;
 
     loop {
         if steps >= max_steps {
@@ -2700,6 +2768,7 @@ pub async fn run_tool_loop(
                 steps,
                 tool_calls: call_log,
                 usage,
+                artifact: None,
             });
         }
 
@@ -2749,11 +2818,32 @@ pub async fn run_tool_loop(
 
         // Record the assistant turn (with its requested tool calls).
         messages.push(LoopMessage::Assistant {
-            content: response.content,
+            content: response.content.clone(),
             tool_calls: response.tool_calls.clone(),
         });
 
         for tc in &response.tool_calls {
+            // `submit_artifact` ends the loop rather than executing: the model
+            // is done exploring and is handing over its answer. It is
+            // intercepted here rather than registered because it is not a tool
+            // that touches the machine — it is the loop's own exit.
+            if tc.name == "submit_artifact" {
+                let content = response.content.clone();
+                submitted = Some(tc.arguments.clone());
+                call_log.push((tc.name.clone(), true));
+                messages.push(LoopMessage::ToolResult {
+                    tool_call_id: tc.id.clone(),
+                    content: "artifact accepted".into(),
+                });
+                return Ok(LoopOutput {
+                    content,
+                    steps,
+                    tool_calls: call_log,
+                    usage,
+                    artifact: submitted,
+                });
+            }
+
             let tool_id = ToolId::generate();
             if let Some(bus) = bus {
                 let _ = bus.emit(Event::ToolStarted {
@@ -2859,6 +2949,7 @@ pub async fn run_tool_loop(
         steps,
         tool_calls: call_log,
         usage,
+        artifact: submitted,
     })
 }
 
