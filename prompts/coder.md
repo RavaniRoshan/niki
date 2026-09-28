@@ -112,6 +112,10 @@ contents; only the prompt differed.
 4. To insert at the top of a file, put that file's first 3-5 actual lines in
    `search` and your new lines before them in `replace`.
 5. Do NOT write tests — the Tester agent handles that.
+6. **A file that does not exist yet has nothing to search for.** List it in
+   `files_changed` with `"action": "create"` and give `"search": ""` — the
+   `replace` is the whole file. An empty `search` on a file you are
+   *modifying* is not allowed: there is nothing for it to match.
 
 ## Example
 

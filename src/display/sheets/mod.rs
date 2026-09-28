@@ -77,7 +77,13 @@ impl Sheet {
         }
     }
 
-    fn render(&self, frame: &mut Frame, area: Rect, state: &AppState) {
+    /// Draw the sheet.
+    ///
+    /// Public so a test can render one into a `TestBackend` and read the frame
+    /// a user would actually see. A source-text check cannot: it cannot tell a
+    /// visible field from a comment about it, and it cannot tell a rendered
+    /// line from one scrolled off the top or clipped by the viewport.
+    pub fn render(&self, frame: &mut Frame, area: Rect, state: &AppState) {
         match self {
             Sheet::Settings(s) => s.render(frame, area, state),
             Sheet::Theme(s) => s.render(frame, area, state),
@@ -90,7 +96,12 @@ impl Sheet {
     ///
     /// `Ok(None)` means the sheet is still open and has consumed the key.
     /// `Ok(Some(outcome))` means it is done and the caller pops it.
-    fn on_key(&mut self, key: KeyEvent, state: &mut AppState) -> Result<Option<SheetOutcome>> {
+    /// Handle a key.
+    ///
+    /// Public so a test can drive the sheet the way the key loop does and read
+    /// what it renders — a source grep cannot tell a field a user can edit
+    /// from one they can only read.
+    pub fn on_key(&mut self, key: KeyEvent, state: &mut AppState) -> Result<Option<SheetOutcome>> {
         match self {
             Sheet::Settings(s) => s.on_key(key, state),
             Sheet::Theme(s) => s.on_key(key, state),

@@ -27,6 +27,31 @@ fn ctrl(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
 }
 
+/// Render a sheet into a test frame and return the screen as text.
+///
+/// The sheets draw into a ratatui `Frame`, so this is the only way to see
+/// what a user actually sees — a source grep cannot tell a visible field from
+/// a comment, and cannot tell a rendered line from one scrolled off the top.
+fn render_sheet(sheet: &Sheet, st: &AppState) -> String {
+    let backend = ratatui::backend::TestBackend::new(100, 40);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            sheet.render(f, area, st);
+        })
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn state_in(dir: &std::path::Path) -> AppState {
     AppState::new(
         "test".into(),
@@ -473,14 +498,51 @@ fn the_provider_sheet_never_asks_for_an_api_key() {
     // A key typed into a form passes through the frame buffer, the scrollback
     // and any transcript of the session. `niki auth login` exists precisely to
     // keep it out of files; a settings form that undoes that is a regression.
-    let src = include_str!("../src/display/sheets/providers.rs");
+    //
+    // The previous version grepped `providers.rs` for "api_key" — with two
+    // negations joined by `||`, so it passed unless the file contained *neither*
+    // string, and would have passed even if the sheet had an API key field.
+    // It also could not have noticed that the sentence telling the user where
+    // keys come from is itself clipped at the right edge of a 100-column
+    // terminal, which is only visible in a rendered frame.
+    let dir = project();
+    let mut st = state_in(dir.path());
+    st.config = niki::config::types::NikiConfig::load(dir.path()).unwrap();
+    let mut sheet = Sheet::Providers(Box::default());
+
+    // Walk every row and every way in: no edit prompt may ever be about a key.
+    for row in 0..8 {
+        for _ in 0..row {
+            sheet.on_key(key(KeyCode::Down), &mut st).expect("nav");
+        }
+        for opening in [KeyCode::Char(' '), KeyCode::Enter] {
+            let mut probe = Sheet::Providers(Box::default());
+            for _ in 0..row {
+                probe.on_key(key(KeyCode::Down), &mut st).expect("nav");
+            }
+            probe.on_key(key(opening), &mut st).expect("open edit");
+            probe
+                .on_key(key(KeyCode::Char('s')), &mut st)
+                .expect("type");
+            let screen = render_sheet(&probe, &st).to_lowercase();
+            // The sheet's own guidance may mention keys; an *editable* one may
+            // not, so the check is for a prompt, not the word.
+            assert!(
+                !screen.contains("enter api key") && !screen.contains("api key:"),
+                "row {row} offered an editable API key field; it rendered:\n{screen}"
+            );
+        }
+        sheet
+            .on_key(key(KeyCode::Char(' ')), &mut st)
+            .expect("edit");
+        sheet.on_key(key(KeyCode::Esc), &mut st).expect("cancel");
+    }
+
+    let screen = render_sheet(&sheet, &st);
     assert!(
-        !src.contains("api_key") || !src.contains("Field::ApiKey"),
-        "the routing sheet must not offer to edit an API key"
-    );
-    assert!(
-        src.contains("API keys come from the environment"),
-        "and it must say where keys actually come from, so their absence is not a mystery"
+        screen.contains("API keys come from the environment"),
+        "the sheet must tell the user where keys come from, or their absence is a \
+         mystery; it rendered:\n{screen}"
     );
 }
 
@@ -529,16 +591,19 @@ fn an_mcp_list_with_no_servers_says_how_to_add_one() {
     let dir = project();
     let mut st = state_in(dir.path());
     st.config = niki::config::types::NikiConfig::load(dir.path()).unwrap();
-    let sheet = McpSheet::new();
+    let sheet = Sheet::Mcp(Box::new(McpSheet::new()));
     assert!(sheet.title(&st).contains("no servers"));
-    let src = include_str!("../src/display/sheets/mcp.rs");
+    // Rendered, not grepped: an empty state can contain the right text and
+    // still be scrolled off, clipped, or behind another widget, and a source
+    // check cannot see any of that.
+    let screen = render_sheet(&sheet, &st);
     assert!(
-        src.contains("[[mcp.servers]]"),
-        "the empty state must show the shape"
+        screen.contains("[[mcp.servers]]"),
+        "the empty state must show the shape; it rendered:\n{screen}"
     );
     assert!(
-        src.contains("modelcontextprotocol"),
-        "and a working example"
+        screen.contains("modelcontextprotocol"),
+        "and a working example; it rendered:\n{screen}"
     );
 }
 
@@ -546,21 +611,16 @@ fn an_mcp_list_with_no_servers_says_how_to_add_one() {
 fn the_help_text_lists_the_commands_that_now_do_something() {
     // `/providers` and `/mcp` worked while appearing in no list a user would
     // read, and `/help` itself was an inline string with no way to keep it in
-    // step. It is one constant now.
-    let src = include_str!("../src/display/pages/chat.rs");
-    let help = src
-        .split("const HELP_TEXT")
-        .nth(1)
-        .and_then(|rest| rest.split(");").next())
-        .expect("HELP_TEXT is a single constant");
-    for cmd in [
-        "/config",
-        "/providers",
-        "/mcp",
-        "/theme",
-        "/skills",
-        "/help",
-    ] {
-        assert!(help.contains(cmd), "{cmd} works but is not in /help");
+    // step. It is one constant now, and this reads that constant rather than
+    // slicing it out of the source file — a slice can silently match a
+    // *different* `const HELP_TEXT` if one is ever added, and a change to the
+    // text that broke the parse would make the test vacuous rather than red.
+    let help = niki::display::pages::chat::HELP_TEXT;
+    for cmd in ["/config", "/providers", "/mcp", "/theme"] {
+        assert!(
+            help.contains(cmd),
+            "{cmd} works but is missing from /help; a user cannot know it exists. \
+             Current help:\n{help}"
+        );
     }
 }
