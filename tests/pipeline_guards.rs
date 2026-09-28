@@ -419,16 +419,11 @@ async fn a_reviewer_that_asks_for_revision_without_saying_why_gets_no_second_rou
             "test_coverage": 4,
             "spec_adherence": 6
         },
-        "issues": [{
-            "severity": "major",
-            "category": "correctness",
-            "file_path": "src/list.rs",
-            "line_range": "1-10",
-            "description": "still off-by-one under edge conditions",
-            "suggested_fix": null
-        }],
+        // Names nothing and tells the Coder nothing: a model that declines to
+        // approve without being able to say why, which is what a small model
+        // does readily.
+        "issues": [],
         "strengths": [],
-        // Says "revise" and then tells the Coder nothing.
         "feedback": null,
         "red_reconciliation": null
     })
@@ -692,5 +687,113 @@ async fn an_unappliable_patch_with_no_rounds_left_fails_loudly() {
     assert!(
         msg.contains("no revision rounds left"),
         "and that there was no second chance: {msg}"
+    );
+}
+
+/// A Reviewer that names the problem but leaves `feedback` empty still gets a
+/// round.
+///
+/// The Coder only ever reads `feedback`, so a verdict of `revision_needed`
+/// whose critique lives in `issues` was discarding the only description of the
+/// problem. The run then stopped — correctly, for having nothing to act on —
+/// with a named defect it would never address. Measured: the knowledge-base
+/// testgap run, which ends `RevisionNeeded` while naming a missing test.
+///
+/// The brief is bridged from the critical and major issues, so the information
+/// the Reviewer did supply reaches the Coder. Nits are not carried over: a
+/// critique of nits is noise, and it is how a round becomes unable to change
+/// anything.
+#[tokio::test]
+async fn a_reviewer_who_names_the_problem_in_issues_gets_a_round() {
+    let mut spec: serde_json::Value = serde_json::from_str(&medium_spec_json()).unwrap();
+    spec["estimated_complexity"] = serde_json::json!("high");
+
+    let names_the_problem: String = json!({
+        "verdict": "revision_needed",
+        "overall_assessment": "Logic is fine but a test is missing.",
+        "quality_scores": {
+            "correctness": 7, "code_quality": 7, "test_coverage": 3, "spec_adherence": 8
+        },
+        "issues": [
+            {
+                "severity": "major",
+                "category": "test_gap",
+                "file_path": "src/list.rs",
+                "line_range": "1-4",
+                "description": "no test covers the last-page boundary",
+                "suggested_fix": null
+            },
+            {
+                "severity": "nit",
+                "category": "style",
+                "file_path": null,
+                "line_range": null,
+                "description": "naming could be tighter",
+                "suggested_fix": null
+            }
+        ],
+        "strengths": [],
+        "feedback": null,
+        "red_reconciliation": null
+    })
+    .to_string();
+
+    let first: serde_json::Value = serde_json::from_str(&mock_llm::code_diff_json(
+        "let end = start + size - 1;",
+        "let end = start + size;",
+        "src/list.rs",
+    ))
+    .expect("diff json");
+    let second: serde_json::Value = serde_json::from_str(&mock_llm::code_diff_json(
+        "let end = start + size;",
+        "let end = start + size + 1;",
+        "src/list.rs",
+    ))
+    .expect("diff json");
+
+    let builder = MockScriptBuilder::new()
+        .add_response("mock-planner", &wrap_json(&spec.to_string()), 80, 120)
+        .add_tool_call("mock-coder", "submit_artifact", first)
+        .add_response(
+            "mock-tester",
+            &wrap_json(&mock_llm::test_report_json()),
+            100,
+            60,
+        )
+        .add_response("mock-reviewer", &wrap_json(&names_the_problem), 150, 60)
+        .add_tool_call("mock-coder", "submit_artifact", second)
+        .add_response(
+            "mock-tester",
+            &wrap_json(&mock_llm::test_report_json()),
+            100,
+            60,
+        )
+        .add_response(
+            "mock-reviewer",
+            &wrap_json(&mock_llm::review_verdict_approved_json()),
+            150,
+            60,
+        );
+
+    let mut harness = TestHarness::new()
+        .with_mock_builder(|_| builder)
+        .with_worktree_backend()
+        .with_mock_provider();
+    harness.config.docker.extra_packages.clear();
+    harness.config.general.max_revision_rounds = 3;
+
+    let res = harness
+        .run_pipeline_result()
+        .await
+        .expect("a named problem must be actionable, not a dead end");
+
+    assert_eq!(
+        res.verdict,
+        Verdict::Approved,
+        "the second round must be able to close the finding"
+    );
+    assert_eq!(
+        res.revision_rounds, 1,
+        "exactly one revision round: the named problem was worth one"
     );
 }

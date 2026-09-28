@@ -3,19 +3,19 @@
 # other signal, so this file makes each such edit an explicit one-line diff.
 # Regenerate: cargo test --test embedded_assets -- --ignored --nocapture
 f8678078ec79e700  prompts/base.md
-e289abbfb101007a  prompts/coder.md
+0acb3eeb32c5efa0  prompts/coder.md
 22ed918b2811f15c  prompts/critic.md
 6fd7f9f37c5abe43  prompts/planner.md
 449503eb6fd46e3d  prompts/red.md
 95cd26d88c3f64f9  prompts/reviewer.md
 81b3c96affd0660b  prompts/security_auditor.md
-430fc3bb13c3e158  prompts/solo.md
+0242e7219d6fe862  prompts/solo.md
 45702b977687d4a6  prompts/synthesizer.md
 a092c493e44b4f59  prompts/tester.md
 c44aeb769dd72979  schemas/code_diff.schema.json
 ffce8f5bbf2ff332  schemas/critique.schema.json
 bc406f90df3a6551  schemas/red_challenge.schema.json
-b44e6a8176e0a39b  schemas/review_verdict.schema.json
+ed3eebb8d93a4ba7  schemas/review_verdict.schema.json
 ceee51684139f0b5  schemas/security_audit.schema.json
 87117303792b2590  schemas/synthesis.schema.json
 17b54e1d7984d905  schemas/task_spec.schema.json

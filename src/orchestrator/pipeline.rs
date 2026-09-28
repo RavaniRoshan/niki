@@ -7,8 +7,9 @@ use uuid::Uuid;
 
 use crate::artifacts::types::RunOutcome;
 use crate::artifacts::types::{
-    AgentRole, CodeDiff, CriticDisposition, Critique, IsolationRecord, RedChallenge, ReviewVerdict,
-    SecurityVerdict, Synthesis, TaskSpec, TestReport, Verdict,
+    AgentRole, CodeDiff, CriticDisposition, Critique, IsolationRecord, IssueSeverity, RedChallenge,
+    ReviewFeedback, ReviewIssue, ReviewVerdict, SecurityVerdict, Synthesis, TaskSpec, TestReport,
+    Verdict,
 };
 pub use crate::config::types::{PipelineStageConfig, TopologyMode};
 use crate::config::{NikiConfig, SecurityPolicyConfig};
@@ -524,6 +525,29 @@ fn apply_reviewer_verdict(
     }
     *verdict = reviewer_verdict;
     *verdict_source = Some("reviewer".to_string());
+}
+
+/// Build the Coder's revision brief from the Reviewer's `issues`.
+///
+/// Only critical and major issues are carried over — a nit is not worth a round
+/// on its own, and including them is how a critique becomes noise the model
+/// cannot act on. The guidance is the Reviewer's own assessment, so the tone
+/// and the reason stay its own rather than the harness paraphrasing them.
+fn bridge_feedback_from_issues(issues: &[ReviewIssue], round: u32) -> Option<ReviewFeedback> {
+    let actionable: Vec<ReviewIssue> = issues
+        .iter()
+        .filter(|i| matches!(i.severity, IssueSeverity::Critical | IssueSeverity::Major))
+        .cloned()
+        .collect();
+    if actionable.is_empty() {
+        return None;
+    }
+    Some(ReviewFeedback {
+        critical_issues: actionable,
+        guidance: "Address each issue above, in the files it names.".to_string(),
+        keep_unchanged: Vec::new(),
+        revision_round: round,
+    })
 }
 
 /// Why the revision loop must stop, even though a stage asked for a revision.
@@ -1134,7 +1158,6 @@ async fn run_coder_tool_loop(
     display: &mut AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
 ) -> Option<String> {
-    eprintln!("DIAG enter {template_name} {schema_path}");
     let schema_text = crate::load_asset(schema_path).ok()?;
     let schema_json: serde_json::Value = serde_json::from_str(&schema_text).ok()?;
     // `prompts/` matters, and getting it wrong is silent.
@@ -1152,7 +1175,6 @@ async fn run_coder_tool_loop(
     // this were source-text greps, which cannot see a function that runs and
     // immediately gives up.
     let template = crate::load_asset(&format!("prompts/{template_name}")).ok()?;
-    eprintln!("DIAG template {} bytes", template.len());
     let mut env = minijinja::Environment::new();
     env.add_template("loop", &template).ok()?;
     let system_prompt = env.get_template("loop").ok()?.render(ctx).ok()?;
@@ -2880,11 +2902,29 @@ pub async fn execute_pipeline(
                                     security_hold,
                                 );
                                 reviewer_json = json.clone();
-                                actionable_findings = v
+                                // A Reviewer that asks for a revision while
+                                // leaving `feedback` null has still said what
+                                // is wrong — in `issues`. The Coder only ever
+                                // reads `feedback`, so the critique was being
+                                // discarded and the next round, when it ran,
+                                // got nothing.
+                                //
+                                // Bridging it is better than refusing to loop:
+                                // the information exists, and the alternative
+                                // is a run that stops at "revise" with a named
+                                // problem it will not act on. The gate below
+                                // still covers the case where there is genuinely
+                                // nothing to act on — a revision request with
+                                // no issues *and* no feedback, which is what a
+                                // small model does when it declines to approve
+                                // without naming a blocker.
+                                let feedback = v
                                     .feedback
+                                    .or_else(|| bridge_feedback_from_issues(&v.issues, round));
+                                actionable_findings = feedback
                                     .as_ref()
                                     .and_then(|f| issue_signature(&f.critical_issues));
-                                review_feedback = match v.feedback {
+                                review_feedback = match feedback {
                                     Some(f) => Some(serde_json::to_string_pretty(&f)?),
                                     None => None,
                                 };

@@ -114,9 +114,15 @@ async fn full_clean_run_updates_manifest_without_learnings() {
     // The mock pipeline needs only git/node/npm/python3; the default
     // extra_packages (nodejs, ...) vary by platform and are absent in CI.
     harness.config.docker.extra_packages.clear();
+    // The topology is requested rather than inferred. This test is about the
+    // solo fast path — it runs no Reviewer, so it cannot report an
+    // independently-reviewed approval — and `auto` no longer collapses a
+    // low-complexity task to a single agent: an unmeasured model is assumed
+    // weak and gets the full chain, which is the safer side of the trade.
+    // Asserting on `auto` therefore tested a topology heuristic, not the solo
+    // path, and went red when the heuristic changed.
+    harness.config.pipeline.topology = niki::config::TopologyMode::SingleAgent;
     let result = harness.run_pipeline().await;
-    // The SingleAgent fast path runs no Reviewer, so it cannot report an
-    // independently-reviewed approval. It self-verifies, and says so.
     assert_eq!(format!("{:?}", result.topology), "SingleAgent");
     assert!(
         !result.outcome.is_independently_reviewed(),
@@ -331,6 +337,26 @@ async fn auto_high_risk_yields_multiagent_with_security_auditor() {
         .with_mock_provider();
     harness.config.docker.extra_packages.clear();
     harness.config.risk.mode = niki::config::types::RiskMode::High;
+    // A *measured, capable* model, so the low-complexity task would otherwise
+    // take the solo fast-path and the risk tier would be the only thing that
+    // could turn it back.
+    //
+    // Without this the run is MultiAgent anyway — an unmeasured model is
+    // assumed weak and gets the full chain — so the override never fires, the
+    // reason says "capability not measured", and the assertion below failed
+    // against a run that satisfied everything it is actually named for. The
+    // test was not testing the risk override; it was red.
+    // The capability is read from `config.project_dir`, which the harness
+    // leaves empty, so the measurement has to be seeded where the run looks.
+    harness.config.project_dir = harness.project_path();
+    niki::config::capability::save(
+        &harness.config.project_dir_hint(),
+        niki::config::capability::ModelCapability::Measured {
+            passed: 4,
+            total: 4,
+        },
+    )
+    .expect("seed a capability measurement");
     // The risk-added stages need mock answers: the Critic reuses the
     // reviewer's model binding (appended as its second response), the
     // SecurityAuditor has its own model.
