@@ -1,4 +1,6 @@
-use crate::artifacts::types::{AgentRole, RedChallenge, ReviewVerdict, SecurityVerdict};
+use crate::artifacts::types::{
+    AgentRole, RedChallenge, ReviewVerdict, RunOutcome, SecurityVerdict,
+};
 use crate::config::NikiConfig;
 use crate::orchestrator::pipeline::{PipelineResult, Task, TopologyMode};
 use crate::safety::SafetyProof;
@@ -634,6 +636,7 @@ pub fn generate_report(
 
 ## Pipeline Result
 - Verdict: {{ verdict }}
+- Outcome: {{ outcome_line }}
 - Revision Rounds: {{ revision_rounds }}
 - Topology: {{ topology_line }}
 {{ model_sharing_note }}
@@ -659,6 +662,7 @@ pub fn generate_report(
         description => task.description.clone(),
         project_path => task.project_path.to_string_lossy().to_string(),
         verdict => format!("{:?}", result.verdict),
+        outcome_line => outcome_line(result),
         revision_rounds => result.revision_rounds,
         topology_line => topology_line(result),
         model_sharing_note => model_sharing_note(result).unwrap_or_default(),
@@ -717,6 +721,30 @@ pub fn topology_line(result: &PipelineResult) -> String {
     }
 }
 
+/// The one line that decides how the verdict above should be read.
+///
+/// The report is the artefact a human actually reads, and `Verdict: Approved`
+/// on its own is exactly the false signal this whole change exists to remove:
+/// a self-verified run and an independently reviewed one render identically.
+/// So the outcome, and who produced it, is stated on the same line.
+pub fn outcome_line(result: &PipelineResult) -> String {
+    match &result.outcome {
+        RunOutcome::Reviewed { by, verdict } => {
+            format!("independently reviewed by {by} — verdict: {verdict:?}")
+        }
+        RunOutcome::RevisionRequested { by } => format!("revision requested by {by}"),
+        RunOutcome::SelfVerified { note } => {
+            format!("SELF-VERIFIED — NOT independently reviewed. {note}")
+        }
+        RunOutcome::NotEvaluated { reason } => {
+            format!("NOT EVALUATED — no review stage ran. {reason}")
+        }
+        RunOutcome::Blocked { reason } => format!("blocked: {reason}"),
+        RunOutcome::Cancelled => "cancelled".to_string(),
+        RunOutcome::Failed { error } => format!("failed: {error}"),
+    }
+}
+
 /// Warn when a reviewing role runs on the exact same provider+model as the
 /// Coder: architectural independence without model diversity is weaker review
 /// (goal-a3f9c2, Phase 3). Returns `None` when reviewers differ or no
@@ -772,6 +800,10 @@ mod tests {
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::from("+hello"),
             verdict: Verdict::Approved,
+            outcome: crate::artifacts::types::RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "test-fixture".into(),
+            },
             revision_rounds: 1,
             artifacts: vec![],
             metrics: vec![StageMetric {
@@ -936,6 +968,9 @@ mod tests {
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::from("+x"),
             verdict: Verdict::RevisionNeeded,
+            outcome: crate::artifacts::types::RunOutcome::RevisionRequested {
+                by: "test-fixture".into(),
+            },
             revision_rounds: 1,
             artifacts: vec![
                 (AgentRole::Red, red_artifact),
@@ -975,6 +1010,10 @@ mod tests {
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::new(),
             verdict: Verdict::Approved,
+            outcome: crate::artifacts::types::RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "test-fixture".into(),
+            },
             revision_rounds: 1,
             artifacts: vec![],
             metrics: vec![],
@@ -1069,6 +1108,9 @@ mod tests {
             state: PipelineState::new(Uuid::nil()),
             final_diff: diff.to_string(),
             verdict: Verdict::RevisionNeeded,
+            outcome: crate::artifacts::types::RunOutcome::RevisionRequested {
+                by: "test-fixture".into(),
+            },
             revision_rounds: 1,
             artifacts,
             metrics: vec![],
@@ -1169,6 +1211,10 @@ index 3333333..4444444 100644
             state: PipelineState::new(Uuid::nil()),
             final_diff: String::new(),
             verdict: Verdict::Approved,
+            outcome: crate::artifacts::types::RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "test-fixture".into(),
+            },
             revision_rounds: 1,
             artifacts: vec![],
             metrics,

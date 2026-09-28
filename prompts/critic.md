@@ -22,12 +22,22 @@ You are a verdict-grounding critic. Your job is NOT to re-review the code — it
 {{ input_artifacts[3] }}
 ```
 
-{% if input_artifacts | length > 4 %}
+{% if red_artifact %}
 ## Red Challenge (RECONCILE WHEN PRESENT)
 ```json
-{{ input_artifacts[4] }}
+{{ red_artifact }}
 ```
 When present, every Red challenge id must appear in `red_reconciliation` handling — missing reconciliations are UNSUPPORTED.
+{% endif %}
+
+{% if security_artifact %}
+## Security Audit (ENGAGE WHEN PRESENT)
+```json
+{{ security_artifact }}
+```
+When present, the Reviewer must have engaged with every finding the SecurityAuditor raised.
+A security finding accepted as real but absent from the Reviewer's `issues` — or a `Rejected`
+security verdict that the Reviewer's own verdict does not reflect — is an UNSUPPORTED verdict.
 {% endif %}
 
 ## Your checks (mechanical, in order)

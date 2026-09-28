@@ -7,6 +7,13 @@
 #   ./run.sh 01 04            # only tapes matching 01, 04, ...
 #   REGEN=1 ./run.sh          # re-bless reference/ from frames/ (human reviews PNGs first)
 #
+# REGEN IS NOT A LOCAL OPERATION. The render depends on the machine: with the
+# same binary and the same DejaVu Sans Mono, frames captured on a developer box
+# still differ from the CI runner's by 6-9% of pixels, so locally blessed
+# references leave every frame failing. Bless them on the runner —
+# `gh workflow run ci.yml -f regen=true` — and review the uploaded artifact
+# before committing it.
+#
 # Determinism contract (documented, not accidental):
 # - Fresh fixture project per tape (rm -rf + git init) so the onboarding
 #   modal always appears and is always dismissed with Esc.

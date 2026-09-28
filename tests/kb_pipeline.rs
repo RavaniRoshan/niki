@@ -115,8 +115,19 @@ async fn full_clean_run_updates_manifest_without_learnings() {
     // extra_packages (nodejs, ...) vary by platform and are absent in CI.
     harness.config.docker.extra_packages.clear();
     let result = harness.run_pipeline().await;
-    assert_eq!(format!("{:?}", result.verdict), "Approved");
+    // The SingleAgent fast path runs no Reviewer, so it cannot report an
+    // independently-reviewed approval. It self-verifies, and says so.
     assert_eq!(format!("{:?}", result.topology), "SingleAgent");
+    assert!(
+        !result.outcome.is_independently_reviewed(),
+        "the solo fast path has no independent reviewer: {:?}",
+        result.outcome
+    );
+    assert!(
+        !result.outcome.is_approved(),
+        "a self-verified run must not report a bare approval: {:?}",
+        result.outcome
+    );
 
     // Mirror run.rs completion: stamp branch (none here) + cost, then reflect.
     let task_dir = task_dir_of(&harness, &result.task_id);
@@ -154,6 +165,22 @@ async fn testgap_rejection_records_verification_failure() {
             &wrap_json(&mock_llm::code_diff_json(
                 "let end = start + size - 1;",
                 "let end = start + size;",
+                "src/list.rs",
+            )),
+            200,
+            80,
+        )
+        // Round 1 needs a patch that can actually apply. The mock cycles its
+        // responses, so reusing the round-0 diff meant the Reviewer's revision
+        // request re-emitted a SEARCH block for text the round-0 patch had
+        // already replaced. The apply failed, and the failure was only a
+        // warning on stderr — so the test asserted a clean Approved verdict on
+        // a second round that had changed nothing at all.
+        .add_response(
+            "mock-coder",
+            &wrap_json(&mock_llm::code_diff_json(
+                "    &items[start..end]",
+                "    &items[start..end.min(items.len())]",
                 "src/list.rs",
             )),
             200,
@@ -342,5 +369,82 @@ async fn auto_high_risk_yields_multiagent_with_security_auditor() {
         result.topology_reason.contains("risk override"),
         "{}",
         result.topology_reason
+    );
+}
+
+/// A patch that cannot apply must stop the run, not decorate it with a warning.
+///
+/// This is the whole shape of the defect: a Coder emits a diff whose SEARCH
+/// block matches nothing, `apply_patch` fails, the failure is printed to
+/// stderr and the run carries on to produce a verdict — about a working tree
+/// that does not contain any of the change. Every downstream signal then reads
+/// as a success: a branch is cut, the report claims a fix, the JSON envelope
+/// says `completed`. The only evidence of the truth is a line in a log the
+/// user may never read.
+#[tokio::test]
+async fn a_patch_that_cannot_apply_stops_the_run() {
+    let builder = MockScriptBuilder::new()
+        .add_response("mock-planner", &wrap_json(&broad_spec_json()), 80, 120)
+        .add_response(
+            "mock-coder",
+            // SEARCH text that exists nowhere in the fixture repo.
+            &wrap_json(&mock_llm::code_diff_json(
+                "this text is not present in any file in this repository",
+                "replacement",
+                "src/list.rs",
+            )),
+            200,
+            80,
+        );
+    let mut harness = TestHarness::new()
+        .with_mock_builder(|_| builder)
+        .with_worktree_backend()
+        .with_mock_provider();
+    harness.config.docker.extra_packages.clear();
+
+    let err = harness
+        .run_pipeline_result()
+        .await
+        .expect_err("a patch that never applied must not report a completed run");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("did not apply"),
+        "the failure must say what actually went wrong, got: {msg}"
+    );
+}
+
+/// The solo fast path's bounded repair is the only recovery from a failed
+/// apply, and it is bounded on purpose. When the repair fails too, the run
+/// must stop — it used to fall through to `verdict = Approved` and hand back a
+/// branch containing no change at all, reported as a success.
+#[tokio::test]
+async fn a_solo_repair_that_also_fails_stops_the_run() {
+    let impossible = mock_llm::code_diff_json(
+        "this text is not present in any file in this repository",
+        "replacement",
+        "src/list.rs",
+    );
+    let builder = MockScriptBuilder::new()
+        .add_response(
+            "mock-planner",
+            &wrap_json(&mock_llm::task_spec_json()),
+            100,
+            100,
+        )
+        .add_response("mock-coder", &wrap_json(&impossible), 200, 100);
+    let mut harness = TestHarness::new()
+        .with_mock_builder(|_| builder)
+        .with_worktree_backend()
+        .with_mock_provider();
+    harness.config.docker.extra_packages.clear();
+
+    let err = harness
+        .run_pipeline_result()
+        .await
+        .expect_err("a run whose change was never written must not report success");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("did not apply") || msg.contains("not a valid code diff"),
+        "the failure must name the real cause, got: {msg}"
     );
 }

@@ -321,9 +321,24 @@ pub enum Conflict {
 }
 
 /// Resolved bindings: ordered (combo, action) pairs, first match wins.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct KeyBindings {
     map: Vec<(KeyCombo, GlobalAction)>,
+}
+
+/// `Default` builds the real default table.
+///
+/// It used to be derived, which produced an *empty* map — and sat next to a
+/// `defaults()` that built the actual bindings. The two spellings differ by one
+/// letter, the wrong one is the idiomatic Rust spelling, and it fails silently:
+/// every key resolves to `None` and every binding quietly does nothing. A test
+/// written against it passed its own construction and asserted nonsense.
+///
+/// Nothing in the codebase hit it, which is exactly why it was worth removing.
+impl Default for KeyBindings {
+    fn default() -> Self {
+        Self::defaults()
+    }
 }
 
 impl KeyBindings {
@@ -409,6 +424,22 @@ impl KeyBindings {
     }
 
     /// First table-order match wins. Returns `None` for unbound keys.
+    /// The key label for an action, as the user actually has it bound.
+    ///
+    /// Built from the *resolved* map, so a rebound key reads back correctly.
+    /// This exists because the banner's keybinding hint has to name the real
+    /// key: writing the default into the hint would tell a user who
+    /// reconfigured `toggle_help` to press a key that no longer does anything.
+    /// `fallback` covers an action that is fully clashed away, where naming the
+    /// affordance beats naming nothing.
+    pub fn label_for(&self, action: GlobalAction, fallback: &str) -> String {
+        self.map
+            .iter()
+            .find(|(_, a)| *a == action)
+            .map(|(c, _)| c.to_string())
+            .unwrap_or_else(|| fallback.to_string())
+    }
+
     pub fn resolve(&self, key: &KeyEvent) -> Option<GlobalAction> {
         self.map
             .iter()

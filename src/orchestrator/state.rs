@@ -117,6 +117,10 @@ pub struct TaskRecord {
     /// machine-readable instead of implied.
     #[serde(default)]
     pub verdict_source: Option<String>,
+    /// The full outcome, including whether anything independently reviewed the
+    /// work. `verdict` alone cannot express "nobody looked".
+    #[serde(default)]
+    pub outcome: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
     /// Per-agent cost & latency, in execution order.
     pub agent_metrics: Vec<StageMetric>,
@@ -154,6 +158,7 @@ impl TaskRecord {
             verdict: None,
             revision_rounds: 0,
             verdict_source: None,
+            outcome: None,
             created_at: Utc::now(),
             agent_metrics: Vec::new(),
             total_input_tokens: 0,
@@ -185,10 +190,10 @@ impl TaskRecord {
     }
 
     pub fn save_to_disk(&self, task_dir: &Path) -> Result<()> {
-        std::fs::create_dir_all(task_dir)?;
-        let path = task_dir.join("task.json");
+        // Atomic: `task.json` is polled by the TUI while the run writes it, and
+        // a torn read there shows the user a half-written run record. It used
+        // to be a plain `fs::write`, which truncates before it writes.
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, json)?;
-        Ok(())
+        crate::knowledge::kb::write_atomic(&task_dir.join("task.json"), json.as_bytes())
     }
 }

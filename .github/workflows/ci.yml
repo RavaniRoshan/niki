@@ -2,6 +2,22 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      # The visual render is environment-dependent: the same binary and the
+      # same DejaVu Sans Mono produce materially different pixels on this
+      # runner than on a developer machine. Blessing references locally and
+      # pushing them left every frame still failing, by 6.6% to 9.4%. So they
+      # have to be blessed *here*, and a human reviews them before committing.
+      #
+      # This lives at workflow level because `workflow_dispatch` is a trigger,
+      # not a job key. I first wrote it inside the `visual:` job, where PyYAML
+      # accepted it and GitHub rejected the whole file — so `ci.yml` produced
+      # no jobs at all and the pull_request run stopped being created. The
+      # failure surfaced as a 0-second "workflow file issue" on push runs.
+      regen:
+        description: "Re-bless the visual reference frames on this runner"
+        type: boolean
+        default: false
   push:
     branches: [master, "goal/**"]
   pull_request:
@@ -89,7 +105,12 @@ jobs:
       - name: Check manifest download URLs resolve
         run: |
           set -euo pipefail
-          urls=$(grep -rhoE 'https://github\.com/[^ "]*\.tar\.gz' homebrew/ ; grep -rhoE 'https://github\.com/[^ "]*\.zip' scoop/ winget/)
+          # Both archive extensions dist actually publishes. This grepped for
+          # `.tar.gz` alone, which no manifest has contained since the
+          # install-path fix moved Homebrew to `.tar.xz` — so the job had been
+          # checking only the Windows .zip URLs and reporting success while
+          # four of the six release URLs went unverified.
+          urls=$(grep -rhoE 'https://github\.com/[^ "]*\.(tar\.gz|tar\.xz|zip)' homebrew/ scoop/ winget/)
           echo "$urls"
           fail=0
           for u in $urls; do
@@ -99,8 +120,23 @@ jobs:
             esac
             if curl -fIsS --max-time 30 "$u" -o /dev/null; then
               echo "OK   $u"
+              continue
+            fi
+            # A 404 on an asset is only a manifest bug if the release it names
+            # actually exists. A release-preparation branch legitimately points
+            # at a version whose tag has not been pushed yet, and treating that
+            # as a dead link makes every version bump fail CI until the tag
+            # lands — which is backwards.
+            #
+            # So distinguish the two: if the release tag is published, a
+            # missing asset is a real failure and stays one. If the tag does
+            # not exist, the URL is not wrong yet, just early.
+            tag=$(echo "$u" | sed -n 's|.*/releases/download/\([^/]*\)/.*|\1|p')
+            if [ -n "$tag" ] && curl -fIsS --max-time 30 \
+                 "https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag" -o /dev/null; then
+              echo "DEAD $u  (release $tag exists but the asset does not)"; fail=1
             else
-              echo "DEAD $u"; fail=1
+              echo "PENDING $u  (release $tag is not published yet)"
             fi
           done
           exit $fail
@@ -292,9 +328,30 @@ jobs:
   # slash commands, the command palette, the status bar. It was written, worked,
   # and was never wired to anything — 11 passing tests nobody ran.
   tui-headless:
-    name: Headless PTY TUI
+    name: Headless PTY TUI (${{ matrix.colour }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Both colour states, as separate jobs on separate runners — not as two
+    # invocations in one job. The suite is timing-sensitive by construction:
+    # every test ends in `wait_for_stable`, so it fails when the machine is
+    # loaded. Running it twice back-to-back in one job doubled that load and
+    # turned a strict gate into a flaky one, which is the opposite of what it
+    # was for. Separate runners give each state a clean machine.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - colour: "NO_COLOR=1"
+            label: "no colour"
+          - colour: "colour"
+            label: "truecolor"
+    env:
+      # `colour` runs the suite with NO_COLOR explicitly removed; `NO_COLOR=1`
+      # sets it. The Rust suite learned this the hard way: a shimmer test
+      # passed only because a developer's shell exported NO_COLOR, and the same
+      # env-dependence then hid a TUI that repainted forever and could never be
+      # waited on. The Python suite had the same blind spot.
+      FORCE_NO_COLOR: ${{ matrix.colour == 'NO_COLOR=1' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -309,12 +366,23 @@ jobs:
       - name: Build release binary
         run: cargo build --release
       - name: Run headless PTY suite
-        run: python3 -m pytest -c pytest_headless.ini -v
+        run: |
+          set -euo pipefail
+          if [ "$FORCE_NO_COLOR" = "true" ]; then
+            NO_COLOR=1 python3 -m pytest -c pytest_headless.ini -v
+          else
+            env -u NO_COLOR python3 -m pytest -c pytest_headless.ini -v
+          fi
       - name: Fail if the whole suite was skipped
         # A dependency problem must not present as a green TUI gate.
         run: |
           set -euo pipefail
-          python3 -m pytest -c pytest_headless.ini -q 2>&1 | tee /tmp/tui.txt
+          if [ "$FORCE_NO_COLOR" = "true" ]; then
+            NO_COLOR=1 python3 -m pytest -c pytest_headless.ini -q > /tmp/tui.txt 2>&1 || true
+          else
+            env -u NO_COLOR python3 -m pytest -c pytest_headless.ini -q > /tmp/tui.txt 2>&1 || true
+          fi
+          cat /tmp/tui.txt
           grep -qE '^[0-9]+ passed' /tmp/tui.txt || {
             echo "FAIL: no headless TUI test passed — the gate must not pass vacuously"
             exit 1
@@ -434,7 +502,19 @@ jobs:
       - name: Build release
         run: cargo build --release
       - name: Capture + compare reference frames
-        run: ./tests/visual/run.sh
+        run: |
+          if [ "${{ inputs.regen }}" = "true" ]; then
+            REGEN=1 ./tests/visual/run.sh
+          else
+            ./tests/visual/run.sh
+          fi
+      - name: Upload re-blessed frames for review
+        if: ${{ inputs.regen }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-reference-frames
+          path: tests/visual/reference/*.png
+          retention-days: 14
       - name: Upload frames on failure
         if: failure()
         uses: actions/upload-artifact@v7

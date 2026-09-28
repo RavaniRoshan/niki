@@ -266,3 +266,87 @@ fn readme_install_one_liner_points_at_a_script_that_exists() {
          scripts/install.sh is missing — every copy-paste of that line 404s"
     );
 }
+
+/// The Scoop and Winget manifests must track the crate version too.
+///
+/// They were pinned at 0.7.0 while the crate was at 0.8.0, and nothing
+/// noticed: the only version-parity test covered the Homebrew formula, so two
+/// of the three advertised one-line install paths were quietly serving a
+/// two-releases-old binary. The same lesson as everywhere else in this pass —
+/// a check that only exists for one of the three things it claims to check.
+///
+/// `scoop install niki` and `winget install RavaniRoshan.niki` are both
+/// advertised in the README, so both are release-blocking.
+#[test]
+fn scoop_and_winget_manifests_match_the_crate_version() {
+    let crate_version = env!("CARGO_PKG_VERSION");
+
+    let scoop: serde_json::Value =
+        serde_json::from_str(&read("scoop/niki.json")).expect("scoop/niki.json must be valid JSON");
+    assert_eq!(
+        scoop["version"].as_str(),
+        Some(crate_version),
+        "scoop/niki.json is pinned to v{} but the crate is {crate_version}; \
+         `scoop install niki` would install a stale binary",
+        scoop["version"].as_str().unwrap_or("<none>")
+    );
+    // Scoop builds its download URL from the version field, so a stale
+    // download URL is a second, separate way to serve the wrong binary.
+    for (k, v) in scoop.as_object().expect("scoop manifest is an object") {
+        if k == "version" {
+            continue;
+        }
+        let text = v.to_string();
+        for tag in text.match_indices("/releases/download/v") {
+            let rest = &text[tag.0 + "/releases/download/v".len()..];
+            let pinned: String = rest.chars().take_while(|c| *c != '/').collect();
+            // `$version` is a PowerShell substitution into the manifest's own
+            // version field, not a pin. The field check above is the real
+            // assertion; checking this would be checking a placeholder.
+            if pinned.starts_with('$') {
+                continue;
+            }
+            assert_eq!(
+                pinned, crate_version,
+                "scoop manifest {k} points at v{pinned} but the crate is {crate_version}"
+            );
+        }
+    }
+
+    for manifest in [
+        "winget/RavaniRoshan.niki.yaml",
+        "winget/RavaniRoshan.niki.installer.yaml",
+        "winget/RavaniRoshan.niki.locale.en-US.yaml",
+    ] {
+        let text = read(manifest);
+        let version = text
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("PackageVersion:"))
+            .map(|v| v.trim().to_string())
+            .unwrap_or_else(|| {
+                panic!("{manifest} must declare a PackageVersion; crate is {crate_version}")
+            });
+        assert_eq!(
+            version, crate_version,
+            "{manifest} is pinned to {version} but the crate is {crate_version}; \
+             `winget install RavaniRoshan.niki` would install a stale binary"
+        );
+        // ManifestVersion is a winget schema version, not our release — it is
+        // allowed to differ, and confusing the two was the whole bug.
+        for line in text.lines().filter(|l| l.contains("/releases/download/v")) {
+            let rest = line
+                .split("/releases/download/v")
+                .nth(1)
+                .unwrap_or_default();
+            let pinned: String = rest.chars().take_while(|c| *c != '/').collect();
+            // Same as scoop: a `$version` placeholder is not a pin.
+            if pinned.starts_with('$') {
+                continue;
+            }
+            assert_eq!(
+                pinned, crate_version,
+                "{manifest} downloads v{pinned} but the crate is {crate_version}"
+            );
+        }
+    }
+}

@@ -155,10 +155,30 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     // static badge at the far right of a wide bar is the least-looked-at pixel
     // on screen.
     let badge_label = badge_text.trim();
+    // Animate only while the run is doing something. A permission badge at
+    // rest is a fact, not an event.
+    //
+    // The shimmer used to run on every frame, unconditionally — so a chat
+    // sitting idle with a static permission badge repainted at 30fps forever.
+    // Two costs: it burns CPU and battery to animate a permission the user
+    // can already see, and it means the screen never goes quiescent, which
+    // makes "wait until the UI settles" untestable. The headless PTY suite
+    // asserted on exactly that and failed on CI while passing on any machine
+    // with `NO_COLOR` set — the same env-dependence the Rust suite had.
+    //
+    // Reduced motion and "nothing is happening" mean the same thing to this
+    // element: draw the badge, do not move it. They have to take the *same*
+    // branch, or the two disagree about what a still badge looks like — which
+    // is how a still badge came out styled in one case and unstyled in the
+    // other.
+    let reduced_motion =
+        state.config.ui.reduced_motion || std::env::var_os("NIKI_REDUCED_MOTION").is_some();
+    let animating =
+        !reduced_motion && !matches!(state.run_state, crate::display::state::RunState::Idle);
     let shimmered = crate::display::motion::summary_shimmer_with(
         badge_label,
         state.tick as f64 / 30.0, // 30fps idle loop
-        state.config.ui.reduced_motion || std::env::var_os("NIKI_REDUCED_MOTION").is_some(),
+        !animating,
         crate::display::theme::supports_truecolor(),
     );
     // The shimmer spans carry their own foreground, so a hovered badge would
@@ -184,15 +204,27 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     if let Some(notice) = &state.notice {
         // Slide in over the first 150ms of life; static when reduced.
         let age_ms = notice.since.elapsed().as_millis() as u64;
-        let slide = crate::display::motion::slide_prefix(
-            age_ms,
-            150,
-            3,
-            crate::display::motion::reduced(state.config.ui.reduced_motion),
-        );
+        let reduced = crate::display::motion::reduced(state.config.ui.reduced_motion);
+        let slide = crate::display::motion::slide_prefix(age_ms, 150, 3, reduced);
+        // ...and fade out over the last 200ms, so a notice leaves rather than
+        // ceasing to exist between two frames. A full TTL is the common case,
+        // so the fade window is the only part that varies.
+        let total_ms = notice
+            .until
+            .saturating_duration_since(notice.since)
+            .as_millis() as u64;
+        let fade = if reduced {
+            1.0
+        } else {
+            crate::display::motion::notice_fade(age_ms, total_ms)
+        };
         right_spans.push(Span::styled(
             format!("· {}{} ", slide, notice.msg),
-            Style::default().fg(theme::clay()),
+            Style::default().fg(crate::display::motion::lerp_color(
+                theme::bg_elevated(),
+                theme::clay(),
+                fade,
+            )),
         ));
     }
 

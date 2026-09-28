@@ -56,7 +56,13 @@ jobs:
           git init
           git config user.email "test@niki.dev"
           git config user.name "Test"
-          echo '# Test App' > index.js
+          # The Coder artifact the mock returns searches for this exact line.
+          # It used to be `# Test App`, which the mock's SEARCH block cannot
+          # match, so the patch never applied: the run warned, the repair
+          # warned, the solo path still set `verdict = Approved`, and the job
+          # went green having verified... something. The fail-closed change
+          # turned that into a hard error, which is how it was found.
+          echo 'console.log("hello");' > index.js
           echo 'node_modules/' > .gitignore
           git add . && git commit -m "initial"
           cp ${{ github.workspace }}/tests/integration/niki.test.toml /tmp/test-project/niki.toml
