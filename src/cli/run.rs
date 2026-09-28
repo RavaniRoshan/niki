@@ -478,6 +478,49 @@ fn result_envelope(
     })
 }
 
+/// The JSON envelope for a run that ended in an error rather than a result.
+///
+/// `--output-format json` documents "one JSON envelope on stdout at the end".
+/// Until now only the pipeline-failure path honoured that: an unresolvable
+/// `--plan` id, a missing key, a bad config, a safety-proof failure — every one
+/// of those short-circuited on `?` and exited 1 with an *empty stdout*, so a
+/// consumer that pipes stdout into `jq` got a parse error instead of a verdict.
+/// The error envelope also carried a different key set from the success one,
+/// so a consumer needed two parsers for one flag.
+///
+/// Same shape as the success envelope, every key present, `status` telling the
+/// two apart. `task_dir`/`report` are null because no run directory was produced
+/// for these paths; the envelope is a fact about the failure, not a stub.
+fn error_envelope(
+    task: Option<&Task>,
+    status: &str,
+    error: &str,
+    task_dir: Option<&std::path::Path>,
+) -> serde_json::Value {
+    let dir = task_dir.map(|p| p.display().to_string());
+    serde_json::json!({
+        "task_id": task.map(|t| t.id.to_string()),
+        "description": task.map(|t| t.description.clone()),
+        "status": status,
+        "error": error,
+        "branch": serde_json::Value::Null,
+        "branch_blocked": serde_json::Value::Null,
+        "forced_branch": false,
+        "bare": false,
+        "verdict": "unknown",
+        "outcome": serde_json::Value::Null,
+        "independently_reviewed": false,
+        "revision_rounds": 0,
+        "tests_passed": serde_json::Value::Null,
+        "mutation_passed": serde_json::Value::Null,
+        "cost_usd": 0.0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "report": dir.as_ref().map(|d| format!("{d}/report.md")),
+        "task_dir": dir,
+    })
+}
+
 fn role_filename(role: AgentRole) -> &'static str {
     match role {
         AgentRole::Planner => "planner",
@@ -491,7 +534,43 @@ fn role_filename(role: AgentRole) -> &'static str {
     }
 }
 
+/// Entry point for `niki run`.
+///
+/// Thin on purpose. `--output-format json` promises "one JSON envelope on
+/// stdout at the end", and the body of a run has a dozen ways to fail before it
+/// reaches the point where an envelope is built — a project path that does not
+/// exist, an unparseable `niki.toml`, no container runtime, an unresolvable
+/// `--plan` id. Every one of those propagated with `?` straight out of here, so
+/// the promise was kept only on the paths somebody remembered. A consumer
+/// piping stdout into `jq` got a parse error and learned nothing.
+///
+/// `run_inner` does the work; this owns the promise. Anything that escapes it
+/// becomes an envelope, in the same shape as the success one, on stdout, and the
+/// error still propagates so the exit code is non-zero.
 pub async fn handle(args: &RunArgs) -> Result<()> {
+    if args.output_format != OutputFormat::Json {
+        return run_inner(args).await;
+    }
+    match run_inner(args).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // run_inner already emitted a task-aware envelope for the one
+            // failure it knows most about. This catches everything upstream of
+            // that — including the paths where no task exists yet — so the
+            // flag's promise holds unconditionally.
+            //
+            // `task_id` is null rather than scraped out of the message. Every
+            // failure that reaches here happened before the id was minted, and
+            // a consumer that pattern-matches an error string for an id gets a
+            // value that is wrong the first time the message is reworded.
+            eprintln!("Error: {e}");
+            println!("{}", error_envelope(None, "error", &e.to_string(), None));
+            Err(e)
+        }
+    }
+}
+
+async fn run_inner(args: &RunArgs) -> Result<()> {
     let project_dir = match &args.project {
         Some(p) => p.canonicalize()?,
         None => env::current_dir()?,
@@ -851,14 +930,12 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
             if args.output_format == OutputFormat::Json {
                 println!(
                     "{}",
-                    serde_json::json!({
-                        "task_id": task.id.to_string(),
-                        "description": task.description,
-                        "status": if is_cancelled { "cancelled" } else { "error" },
-                        "error": e.to_string(),
-                        "branch": serde_json::Value::Null,
-                        "task_dir": task_dir.display().to_string(),
-                    })
+                    error_envelope(
+                        Some(&task),
+                        if is_cancelled { "cancelled" } else { "error" },
+                        &e.to_string(),
+                        Some(&task_dir),
+                    )
                 );
             }
             return Err(e);
@@ -1246,19 +1323,30 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
             None => {
                 // Human completion summary is stdout noise in JSON mode — the
                 // envelope below is the contract.
+                //
+                // The branch printed here must be the one that exists on disk,
+                // not the one that *would* have been created. A dry run, an
+                // empty diff, and a blocked branch all reach this arm with
+                // `record.branch == None`, and printing the generated name there
+                // told the user "Branch: niki/ab12cd" about a ref that was never
+                // created.
                 if !json_mode {
-                    display.show_completion(&result, &branch_name, &task_dir);
+                    let delivered = record
+                        .branch
+                        .clone()
+                        .unwrap_or_else(|| "(no branch created)".to_string());
+                    display.show_completion(&result, &delivered, &task_dir);
                 }
             }
         }
     }
 
     if args.output_format == OutputFormat::Json {
-        let branch = if branch_block_note.is_some() {
-            None
-        } else {
-            Some(branch_name.as_str())
-        };
+        // Same rule as the human path above and the exit code below: report the
+        // branch that exists, not the one that would have. `record.branch` is
+        // the single answer — it is None for a blocked branch, an empty diff, a
+        // dry run, and a failed commit alike.
+        let branch = record.branch.as_deref();
         println!(
             "{}",
             result_envelope(
@@ -1309,6 +1397,23 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
     // Tear down the TUI (if active): this joins the render thread, which
     // restores the terminal before any further output.
     display.finish_tui();
+
+    // The exit code has to agree with the record. Until now it did not: a run
+    // that recorded `TaskStatus::Failed` — a blocked branch, a failed commit,
+    // an empty diff — still returned `Ok(())`, so `niki run "…"` in a CI step
+    // exited 0 on a run that produced nothing to review. A gate that cannot
+    // fail is not a gate.
+    //
+    // Derived from `record.status`, not from a second opinion about what went
+    // wrong, so the status a user reads with `niki status` and the status a
+    // build system sees are the same fact stated once. `--dry-run` is the one
+    // case where "no branch" is the expected result, not a failure.
+    if !args.dry_run && matches!(record.status, TaskStatus::Failed { .. }) {
+        return Err(anyhow!(
+            "{}",
+            status_error.as_deref().unwrap_or("the run produced no reviewable branch")
+        ));
+    }
 
     Ok(())
 }
