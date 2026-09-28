@@ -139,22 +139,63 @@ ROLE_RESPONSES = {
         ],
         "red_reconciliation": None,
         "feedback": None
+    },
+    "security_auditor": {
+        "verdict": "pass",
+        "overall_assessment": "No security-relevant surface was added: the change adds a static route with no user input, no shell, no filesystem, and no network egress.",
+        "findings": [],
+        "strengths": [
+            "No untrusted input reaches a sink",
+            "No new dependencies or dynamic evaluation"
+        ]
+    },
+    "critic": {
+        "disposition": "no_material_issues",
+        "summary": "The reviewer's single nit is a style comment, not a correctness or security claim, so there is nothing here for an adversarial pass to refute.",
+        "unsupported_claims": [],
+        "confirmed_findings": []
     }
 }
 
 
+# Substring of the system prompt -> role. Order matters: the more specific
+# persona lines are checked first.
+ROLE_MARKERS = [
+    ("security auditing agent", "security_auditor"),
+    ("code review agent", "reviewer"),
+    ("testing agent", "tester"),
+    ("implementation agent", "coder"),
+    ("planning agent", "planner"),
+]
+
+# What a request looks like when no marker matched. Previously this returned
+# "planner" unconditionally, which meant a role nobody had wired up — a new
+# stage, a renamed persona, a security_auditor — was answered with a TaskSpec
+# and failed schema validation far downstream, with an error that pointed at the
+# schema rather than at the mock. Every consumer of this script paid that
+# discovery cost separately.
+ROLE_FALLBACK = "critic"
+
+
 def detect_role(body):
-    """Detect agent role from system prompt content."""
+    """Detect agent role from system prompt content.
+
+    Falls back to the Critic, which is the one role whose output is a critique of
+    another agent's work and so is the least wrong thing to hand back when the
+    prompt is not recognised. It is still a guess, so it is logged: a mock that
+    quietly answers a question it did not understand is how a test ends up
+    asserting on the wrong artifact.
+    """
     text = json.dumps(body).lower()
-    if "code review agent" in text:
-        return "reviewer"
-    if "testing agent" in text:
-        return "tester"
-    if "implementation agent" in text:
-        return "coder"
-    if "planning agent" in text:
-        return "planner"
-    return "planner"
+    for marker, role in ROLE_MARKERS:
+        if marker in text:
+            return role
+    print(
+        f"[mock_llm] no role marker matched; answering as {ROLE_FALLBACK}. "
+        f"If this run is meant to exercise another role, add a marker for it.",
+        file=sys.stderr,
+    )
+    return ROLE_FALLBACK
 
 
 def chunk_text(text, size=20):

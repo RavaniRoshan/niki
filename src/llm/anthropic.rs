@@ -149,12 +149,9 @@ impl LlmProvider for AnthropicProvider {
         let output_tokens = data["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
         // Prompt-cache hits price below input rate; reasoning effort is billed
         // as output tokens by Anthropic, so it stays inside output_tokens.
-        let cached_input_tokens = (data["usage"]["cache_creation_input_tokens"]
-            .as_u64()
-            .unwrap_or(0)
-            + data["usage"]["cache_read_input_tokens"]
-                .as_u64()
-                .unwrap_or(0)) as u32;
+        let cached_input_tokens =
+            crate::llm::json_path_u32(&data, &["usage", "cache_creation_input_tokens"])
+                + crate::llm::json_path_u32(&data, &["usage", "cache_read_input_tokens"]);
 
         Ok(CompletionResponse {
             content,
@@ -256,15 +253,22 @@ impl LlmProvider for AnthropicProvider {
                                                 .send(Ok(StreamChunk::Usage(TokenUsage {
                                                     input_tokens: input as u32,
                                                     output_tokens: 0,
-                                                    cached_input_tokens: (json["message"]["usage"]
-                                                        ["cache_creation_input_tokens"]
-                                                        .as_u64()
-                                                        .unwrap_or(0)
-                                                        + json["message"]["usage"]
-                                                            ["cache_read_input_tokens"]
-                                                            .as_u64()
-                                                            .unwrap_or(0))
-                                                        as u32,
+                                                    cached_input_tokens: crate::llm::json_path_u32(
+                                                        &json,
+                                                        &[
+                                                            "message",
+                                                            "usage",
+                                                            "cache_creation_input_tokens",
+                                                        ],
+                                                    )
+                                                        + crate::llm::json_path_u32(
+                                                            &json,
+                                                            &[
+                                                                "message",
+                                                                "usage",
+                                                                "cache_read_input_tokens",
+                                                            ],
+                                                        ),
                                                     ..Default::default()
                                                 })))
                                                 .is_err()

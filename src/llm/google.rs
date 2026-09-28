@@ -83,23 +83,17 @@ impl LlmProvider for GoogleProvider {
         }
 
         let data: serde_json::Value = resp.json().await?;
-        let content = data["candidates"][0]["content"]["parts"][0]["text"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let content =
+            crate::llm::json_path_str(&data, &["candidates", "0", "content", "parts", "0", "text"])
+                .to_string();
 
-        let input_tokens = data["usageMetadata"]["promptTokenCount"]
-            .as_u64()
-            .unwrap_or(0) as u32;
-        let output_tokens = data["usageMetadata"]["candidatesTokenCount"]
-            .as_u64()
-            .unwrap_or(0) as u32;
-        let cached_input_tokens = data["usageMetadata"]["cachedContentTokenCount"]
-            .as_u64()
-            .unwrap_or(0) as u32;
-        let reasoning_tokens = data["usageMetadata"]["thoughtsTokenCount"]
-            .as_u64()
-            .unwrap_or(0) as u32;
+        let input_tokens = crate::llm::json_path_u32(&data, &["usageMetadata", "promptTokenCount"]);
+        let output_tokens =
+            crate::llm::json_path_u32(&data, &["usageMetadata", "candidatesTokenCount"]);
+        let cached_input_tokens =
+            crate::llm::json_path_u32(&data, &["usageMetadata", "cachedContentTokenCount"]);
+        let reasoning_tokens =
+            crate::llm::json_path_u32(&data, &["usageMetadata", "thoughtsTokenCount"]);
 
         Ok(CompletionResponse {
             content,
