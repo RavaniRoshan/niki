@@ -171,3 +171,69 @@ async fn edit_apply_is_all_or_nothing() {
     );
     sb.destroy().await.unwrap();
 }
+
+// ── an edit must not be able to match text it just wrote ───────────────────
+//
+// A live revision loop produced this after three rounds:
+//
+//     numbers.iter().sum()    numbers.iter().sum()    numbers.iter().sum()
+//
+// The per-round artifacts show round 1 emitting a `replace` that began with the
+// very `search` it matched, so applying it left that text in place and round 2
+// matched again. The corruption and the legitimate shape — "emit the signature,
+// then fill it in" — are the same edit to a string-comparing validator.
+//
+// Rejecting the shape was tried and measured to be worse: it failed the
+// overwhelmingly common case. So the result is made *stable* instead. An edit
+// whose output is already present, and whose anchor is gone, has been applied.
+
+#[test]
+fn re_applying_the_same_extension_edit_is_a_no_op_rather_than_a_second_copy() {
+    use niki::sandbox::edit_format::apply_single_edit_block;
+
+    let file = "pub fn tally(numbers: &[i32]) -> i32 {\n    numbers.iter().sum()\n}\n";
+    // The common model shape: the anchor is the signature line, the replacement
+    // is that line plus the body.
+    let search = "pub fn tally(numbers: &[i32]) -> i32 {";
+    let replace = "pub fn tally(numbers: &[i32]) -> i32 {\n    numbers.iter().sum()";
+
+    // Round 0: applies.
+    let after_first = apply_single_edit_block(file, search, replace)
+        .expect("applies")
+        .expect("matched");
+    assert!(after_first.contains("numbers.iter().sum()"));
+    assert_eq!(
+        after_first.matches("numbers.iter().sum()").count(),
+        1,
+        "the first application is a normal edit"
+    );
+
+    // Round 1: the same edit re-issued against the new file must not duplicate.
+    let after_second = apply_single_edit_block(&after_first, search, replace)
+        .expect("applies")
+        .expect("matched");
+    assert_eq!(
+        after_second.matches("numbers.iter().sum()").count(),
+        1,
+        "re-issuing the same extension must converge, not duplicate. Got:\n{after_second}"
+    );
+    assert_eq!(after_second, after_first, "and it must be a true no-op");
+}
+
+#[test]
+fn an_ordinary_replacement_is_still_applied_every_time_it_differs() {
+    use niki::sandbox::edit_format::apply_single_edit_block;
+
+    let file = "let x = 1;\n";
+    let out = apply_single_edit_block(file, "let x = 1;", "let x = 2;")
+        .expect("applies")
+        .expect("matched");
+    assert_eq!(out, "let x = 2;\n");
+
+    // The idempotence guard must not swallow a second, different edit that
+    // happens to be issued against text the first one produced.
+    let again = apply_single_edit_block(&out, "let x = 2;", "let x = 3;")
+        .expect("applies")
+        .expect("matched");
+    assert_eq!(again, "let x = 3;\n");
+}

@@ -171,6 +171,30 @@ pub fn apply_single_edit_block(
 
 /// Try to apply a single edit block. Returns the edited content if applied successfully.
 fn apply_single_edit(content: &str, edit: &EditBlock) -> Result<Option<String>> {
+    // An edit must not be able to match text it just wrote.
+    //
+    // `X -> X + more` leaves `X` in place, so the next round's `find(X)` hits
+    // again and inserts the same thing a second time. A live revision loop did
+    // exactly that and produced, after three rounds:
+    //
+    //     numbers.iter().sum()    numbers.iter().sum()    numbers.iter().sum()
+    //
+    // This is a legitimate thing for a model to mean — emit a function
+    // signature, then fill it in — so rejecting it is wrong (that was tried, and
+    // it rejected the common case and cost more than it saved). Instead the
+    // result is made *stable*: if applying the edit again would produce exactly
+    // the text that is already there, it is a no-op and we report it as applied
+    // rather than leaving the caller to re-apply it forever.
+    //
+    // "Already applied" means the occurrence we would match is *already* the
+    // replacement — not merely that the replacement appears somewhere in the
+    // file, which is true of most of a file after any edit.
+    if let Some(pos) = content.find(&edit.search)
+        && content[pos..].starts_with(&edit.replace)
+    {
+        return Ok(Some(content.to_string()));
+    }
+
     // Strategy 1: Exact match
     if let Some(pos) = content.find(&edit.search) {
         let mut result = String::with_capacity(content.len() + edit.replace.len());
