@@ -474,6 +474,55 @@ jobs:
             exit 1
           }
 
+  # ── The demo a stranger will actually run ──────────────────────────────
+  # `scripts/demo.sh` is the first-run experience: no API key, no container
+  # runtime, four real agents, a real branch. It is also the easiest thing in
+  # this repo to break silently — the scripted model server, the fixture's exact
+  # contents, the provider wiring, the worktree backend's tool preflight, and
+  # the exit code all have to line up, and nothing else in CI touches most of
+  # them. A demo that stops working is worse than no demo: the first person to
+  # try the product is the person who finds out.
+  demo:
+    name: Demo (no key, no container)
+    needs: [check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - name: Build release binary
+        run: cargo build --release
+      - name: Run the demo end to end
+        # --keep: without it the script deletes the scratch project on exit,
+        # and the check below has nothing to inspect.
+        run: ./scripts/demo.sh --keep
+      - name: The demo's branch must contain a real change
+        # The demo exits non-zero when no branch is produced, but a branch with
+        # an empty diff would pass that. The point of the demo is handing the
+        # user something to read.
+        run: |
+          set -euo pipefail
+          demo_dir="$(ls -dt /tmp/tmp.*/demo-project 2>/dev/null | head -1)"
+          if [ -z "$demo_dir" ]; then
+            echo "FAIL: the demo left no project behind, so there is nothing to check"
+            exit 1
+          fi
+          branch="$(git -C "$demo_dir" branch --format='%(refname:short)' --list 'niki/*' | head -1)"
+          if [ -z "$branch" ]; then
+            echo "FAIL: the demo produced no niki/* branch"
+            exit 1
+          fi
+          stat="$(git -C "$demo_dir" diff --stat "master...$branch" | tail -1)"
+          echo "branch: $branch"
+          echo "change: $stat"
+          case "$stat" in
+            *insertion*) ;;
+            *) echo "FAIL: the demo's branch contains no insertions — the agent changed nothing"; exit 1 ;;
+          esac
+
   # ── Windows ──────────────────────────────────────────────────────────
   # niki ships a winget manifest and a cargo-dist `x86_64-pc-windows-msvc`
   # target, but no workflow ever built or ran anything on Windows. A manifest
