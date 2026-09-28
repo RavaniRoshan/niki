@@ -509,13 +509,7 @@ impl DockerSandbox {
         let files: Vec<&str> = agent_files
             .iter()
             .map(|s| s.as_str())
-            .filter(|s| {
-                !s.is_empty()
-                    && !s.starts_with('.')
-                    && !s.starts_with('/')
-                    && !s.contains("..")
-                    && *s != "niki.toml"
-            })
+            .filter(|s| crate::output::git::is_publishable_path(s))
             .collect();
         if files.is_empty() {
             return Ok(String::new());

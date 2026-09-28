@@ -1411,7 +1411,9 @@ async fn run_inner(args: &RunArgs) -> Result<()> {
     if !args.dry_run && matches!(record.status, TaskStatus::Failed { .. }) {
         return Err(anyhow!(
             "{}",
-            status_error.as_deref().unwrap_or("the run produced no reviewable branch")
+            status_error
+                .as_deref()
+                .unwrap_or("the run produced no reviewable branch")
         ));
     }
 
