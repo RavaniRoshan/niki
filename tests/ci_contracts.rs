@@ -790,3 +790,43 @@ fn the_live_measurement_harness_exists_and_is_honest_about_timeouts() {
         "and it must use the backend the README recommends for a first run"
     );
 }
+
+/// The breadth sweep must exist, and must not collapse to one task shape.
+///
+/// A harness measured only on "add a function that sums a slice" proves almost
+/// nothing, and it is the measurement most likely to look like a result. Codex
+/// and Claude Code are general engineering agents — bug fixes, refactors, tests,
+/// docs, migrations, build breakage. If NIKI only does the first thing well, it
+/// is a demo, not a product, and nothing in a single-task suite would say so.
+///
+/// This is a contract on the *harness*, not on the product: the sweep is
+/// expensive and model-dependent, so it cannot gate CI. What must not be allowed
+/// is for the only measurement to be the one that flatters.
+#[test]
+fn the_breadth_sweep_covers_more_than_one_shape_of_task() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/measure-breadth.sh");
+    let script = std::fs::read_to_string(&path).expect("scripts/measure-breadth.sh must exist");
+    let executable: String = script
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // The five kinds a real engineering job arrives in. Each has to be a real
+    // seeded repo and a real `niki run`, never a stand-in.
+    for kind in ["add-function", "fix-bug", "refactor", "add-test", "docs"] {
+        assert!(
+            executable.contains(kind),
+            "the breadth sweep must cover `{kind}`; a suite that only adds functions cannot \
+             tell us whether this is a coding agent or a demo"
+        );
+    }
+    assert!(
+        executable.contains("git init") && executable.contains("git commit"),
+        "each task must be seeded into a real repo, or the sweep measures nothing"
+    );
+    assert!(
+        executable.contains("breadth:"),
+        "and it must report a per-kind result, so a single kind cannot hide behind the others"
+    );
+}
