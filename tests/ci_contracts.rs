@@ -742,3 +742,51 @@ fn every_step_declares_exactly_one_of_uses_or_run() {
         w.steps
     );
 }
+
+/// The live-measurement harness must exist, and must not under-report.
+///
+/// The number that matters most — does a real model complete a real run — cannot
+/// gate CI, because it depends on the model, the machine and the network. That
+/// makes it exactly the thing that quietly stops being measured: the harness
+/// improvements this stretch shipped were judged on live pass rates, and those
+/// numbers were produced by ad-hoc commands with a timeout I twice set too
+/// short, which killed runs that were still working and would have been counted
+/// as failures.
+///
+/// The rule that follows: a measurement that can be invalidated by the
+/// measurement setup is not a measurement. So the timeout has to be generous,
+/// and a timeout has to be *reported as a timeout* rather than as a failure.
+#[test]
+fn the_live_measurement_harness_exists_and_is_honest_about_timeouts() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/measure-live.sh");
+    let script = std::fs::read_to_string(&path).expect("scripts/measure-live.sh must exist");
+
+    assert!(
+        script.contains("NIKI_MEASURE_TIMEOUT:-600"),
+        "the default timeout must fit a three-round multi-agent run. A completed one took 121s \
+         on this box, and an earlier sweep used 280s and killed a run that was still working."
+    );
+    assert!(
+        script.contains("TIMED OUT after") && script.contains("this is not a failure"),
+        "a run killed by the harness's own ceiling must say so. Counting it as a failure makes the \
+         product look worse than it is — and, once over-corrected, better than it is."
+    );
+    // The measurement must be the user's path, not a mock: a pass rate measured
+    // against scripted responses says nothing about coding quality.
+    // Only the executable lines count. The header deliberately says "no mocks",
+    // and matching that would be matching the word in a sentence about mocks.
+    let executable: String = script
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !executable.to_lowercase().contains("mock"),
+        "the live measurement must not invoke a scripted provider; that is what the headless \
+         suite is for"
+    );
+    assert!(
+        script.contains("--backend worktree"),
+        "and it must use the backend the README recommends for a first run"
+    );
+}
