@@ -21,6 +21,14 @@ use crate::display::tips::TipsBanner;
 use crate::display::tui::DisplayEvent;
 use crate::permissions::PermissionAction;
 
+/// How much of a running stage's live stream is kept on screen, in BYTES.
+///
+/// A tail, not a buffer: the full text lives in `full_transcript`. Bytes rather
+/// than characters because the comparison is against `String::len`, and the
+/// drain below has to agree with it — the truncation walks to a char boundary,
+/// so the tail can end up a few bytes under this.
+pub const STREAM_TAIL_BYTES: usize = 2000;
+
 /// One rendered chat row, with metadata for screen-to-source mapping.
 #[derive(Debug, Clone, Default)]
 pub struct ChatLine {
@@ -1346,8 +1354,24 @@ impl AppState {
                 {
                     s.stream.push_str(&token);
                     s.full_transcript.push_str(&token);
-                    if s.stream.len() > 2000 {
-                        let drop = s.stream.len() - 2000;
+                    if s.stream.len() > STREAM_TAIL_BYTES {
+                        // `String::drain` PANICS if the range does not land on a
+                        // char boundary, and `len()` counts BYTES. A stage that
+                        // emitted an em-dash, a box-drawing character, a check
+                        // mark or an emoji anywhere near the cap therefore
+                        // panicked the event loop — and a panic there leaves the
+                        // terminal in the alternate screen with no prompt, which
+                        // reads to the user as the app having destroyed their
+                        // shell.
+                        //
+                        // Advance the cut forward to the next boundary. That
+                        // discards up to three extra bytes of the character
+                        // being split, which is the only safe direction: going
+                        // backwards would split the other half of it instead.
+                        let mut drop = s.stream.len() - STREAM_TAIL_BYTES;
+                        while drop < s.stream.len() && !s.stream.is_char_boundary(drop) {
+                            drop += 1;
+                        }
                         s.stream.drain(..drop);
                     }
                 }
@@ -2000,5 +2024,140 @@ mod tests {
         assert!(!state.refresh_fleet_if_stale(Duration::from_secs(60)));
         // Zero budget always refreshes (deterministic, no sleeps).
         assert!(state.refresh_fleet_if_stale(Duration::ZERO));
+    }
+
+    // -- the stream-truncation panic --------------------------------------
+    //
+    // The live stage stream was trimmed with
+    //
+    //     if s.stream.len() > 2000 {
+    //         let drop = s.stream.len() - 2000;
+    //         s.stream.drain(..drop);
+    //     }
+    //
+    // `len()` is BYTES and `String::drain` panics when the range does not land
+    // on a char boundary. So any stage whose output put a multi-byte character
+    // across the 2000-byte line panicked the TUI event loop — an em-dash, a
+    // check mark, a box-drawing character, an emoji, any CJK. Models emit those
+    // constantly.
+    //
+    // The panic is worse than a dropped frame: it unwinds out of the loop that
+    // owns terminal restoration, so the user's shell is left in the alternate
+    // screen with no prompt. To them the TUI appeared to destroy their terminal.
+    //
+    // These walk a non-ASCII stream across the cap at every offset, which is
+    // what makes it a property test rather than one lucky sample.
+
+    /// Drive a running stage's stream with `text` and return the surviving tail.
+    fn stream_after(state: &mut AppState, role: AgentRole, text: &str) -> String {
+        state.apply_event(DisplayEvent::StageStart { role });
+        state.apply_event(DisplayEvent::StageToken {
+            role,
+            token: text.to_string(),
+        });
+        state
+            .stages
+            .iter()
+            .rev()
+            .find(|s| s.role == role)
+            .expect("stage exists")
+            .stream
+            .clone()
+    }
+
+    fn state_for_stream() -> AppState {
+        AppState::new(
+            "test".into(),
+            crate::config::types::NikiConfig::default(),
+            ".".into(),
+        )
+    }
+
+    /// Text whose truncation point lands *inside* `ch`, for each interior offset.
+    ///
+    /// Text whose truncation point lands *inside* `ch`, for each interior offset.
+    ///
+    /// The cut is `len - CAP`. With the character starting at byte `p`, wanting
+    /// the cut at `p + k` means the total length must be `CAP + p + k`, so the
+    /// suffix is `CAP + k - len(ch)`. That arithmetic is the whole test: a
+    /// "non-ASCII stream" fixture that does not land the cut inside the
+    /// character passes against the bug, which is exactly what the first two
+    /// versions of this test did.
+    fn straddle(ch: &str, p: usize) -> Vec<String> {
+        let clen = ch.len();
+        (1..clen)
+            .map(|k| {
+                let s = STREAM_TAIL_BYTES + k - clen;
+                format!("{}{ch}{}", "a".repeat(p), "b".repeat(s))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn truncating_a_non_ascii_stream_does_not_panic() {
+        for ch in ["\u{2026}", "\u{1f980}", "\u{4e2d}\u{6587}"] {
+            for text in straddle(ch, 500) {
+                let mut s = state_for_stream();
+                let tail = stream_after(&mut s, AgentRole::Coder, &text);
+                assert!(
+                    !tail.contains('\u{fffd}'),
+                    "the surviving tail must be whole characters, not replacement junk"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_cut_actually_lands_inside_the_character() {
+        // Guards the fixture above against becoming a vacuous test. If the
+        // arithmetic in `straddle` drifts, the panic test silently stops
+        // testing anything, and this is what says so.
+        for ch in ["\u{2026}", "\u{1f980}"] {
+            let clen = ch.len();
+            for text in straddle(ch, 500) {
+                let drop = text.len() - STREAM_TAIL_BYTES;
+                let p = 500;
+                assert!(
+                    p < drop && drop < p + clen,
+                    "fixture no longer straddles the cut: len={} drop={drop} char_at={p}..{}",
+                    text.len(),
+                    p + clen - 1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_tail_stays_under_the_cap_and_the_transcript_keeps_everything() {
+        let mut s = state_for_stream();
+        let long = "z".repeat(STREAM_TAIL_BYTES * 3);
+        let tail = stream_after(&mut s, AgentRole::Coder, &long);
+        assert_eq!(
+            tail.len(),
+            STREAM_TAIL_BYTES,
+            "the tail is trimmed to the cap"
+        );
+
+        let full = s
+            .stages
+            .iter()
+            .rev()
+            .find(|st| st.role == AgentRole::Coder)
+            .unwrap()
+            .full_transcript
+            .clone();
+        assert_eq!(
+            full.len(),
+            long.len(),
+            "the live tail is a display window; the transcript is the record and \
+             must not lose anything"
+        );
+    }
+
+    #[test]
+    fn a_short_stream_is_never_trimmed() {
+        let mut s = state_for_stream();
+        let tail = stream_after(&mut s, AgentRole::Coder, "short output — with a dash");
+        assert_eq!(tail, "short output — with a dash");
     }
 }
