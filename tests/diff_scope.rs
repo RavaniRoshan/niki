@@ -301,8 +301,12 @@ fn the_retry_is_bounded_and_covers_the_transport_classes() {
     // read. Measured: a live run restarted a stage three times on an identical
     // error and then failed, having spent three times the wall clock to learn
     // nothing. So the guard is on repetition, not on a count.
+    // The condition, not the name. The first version of this assertion was
+    // `src.contains("last_mid_stream_error")`, which passed with the guard's
+    // condition deleted — the variable's declaration alone satisfies a substring
+    // check, so the test was pinning the plumbing rather than the behaviour.
     assert!(
-        src.contains("last_mid_stream_error"),
+        src.contains("last_mid_stream_error.as_deref() != Some(&e.to_string())"),
         "an unchanged repeat must not be retried; a *different* error is a different problem \
          and still gets its retry"
     );
