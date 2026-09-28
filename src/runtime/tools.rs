@@ -2727,6 +2727,11 @@ pub async fn run_tool_loop_with(
     let mut usage = crate::llm::provider::TokenUsage::default();
     // Set when the agent calls `submit_artifact`, which ends the loop.
     let mut submitted: Option<serde_json::Value> = None;
+    // Kept so the exit log can distinguish "the model stopped on its own" from
+    // "the provider cut it off at the token limit" — the truncation guard
+    // refuses those calls, and a loop full of refusals looks identical to a
+    // loop where the model simply never used the tool.
+    let mut last_finish_reason: Option<String> = None;
 
     loop {
         if steps >= max_steps {
@@ -2745,6 +2750,7 @@ pub async fn run_tool_loop_with(
         };
 
         let response = provider.complete(request).await?;
+        last_finish_reason = response.finish_reason.clone();
         // Accumulate, do not take the max. Each loop iteration is a *separate*
         // request, so `.max()` reported only the single largest step and a
         // four-step tool loop was billed as one. The same `.max()` is still
@@ -2942,6 +2948,25 @@ pub async fn run_tool_loop_with(
                 });
             }
         }
+    }
+
+    // A loop that ran its budget without submitting is the failure that costs a
+    // stage, and until now nothing said what it did with those steps. This is the
+    // one place that knows, so it is the one place that logs.
+    //
+    // Found by running, not by reading: a live Coder stage against a small local
+    // model failed intermittently, the error blamed the model's size, and the
+    // tool log — which would have said the model spent twelve steps reading
+    // files and never submitted — was in a struct nobody printed.
+    if submitted.is_none() {
+        tracing::warn!(
+            target: "niki::runtime",
+            steps,
+            role = %ctx.role,
+            tool_calls = ?call_log,
+            finish_reason = ?last_finish_reason,
+            "tool loop exhausted without submitting an artifact",
+        );
     }
 
     Ok(LoopOutput {
