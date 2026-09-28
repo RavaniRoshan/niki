@@ -24,11 +24,40 @@ use crate::agents::run_agent;
 use crate::agents::tester::{self, TestExecution};
 use minijinja::context;
 
-/// Serialize a CodeDiff's structured edits into SEARCH/REPLACE text so the
-/// sandbox (worktree or container) can apply them to its own working copy.
-fn code_diff_to_edit_text(diff: &CodeDiff) -> String {
+/// Serialize a CodeDiff's structured edits into the SEARCH/REPLACE text the
+/// sandbox applies, binding each block to the file it belongs to.
+pub fn code_diff_to_edit_text(diff: &CodeDiff) -> String {
+    // Which file each block belongs to.
+    //
+    // `CodeDiff.edits` is a flat list with no per-edit path — the applier finds
+    // each block by searching every file. That works while every block is a
+    // modification, and cannot work at all for a creation: a block with an
+    // empty `search` has nothing to search for, so it would be applied to
+    // whichever file happened to be first, or refused as unmatched.
+    //
+    // So: when the artifact names exactly one file, every block is bound to
+    // it. Otherwise a creation is bound to the file it creates, and a
+    // modification is left unbound exactly as before — a search across all
+    // files is what the format has always done, and guessing a binding would
+    // silently misapply it.
+    let single = (diff.files_changed.len() == 1).then(|| diff.files_changed[0].path.clone());
+    let created: Vec<&str> = diff
+        .files_changed
+        .iter()
+        .filter(|f| f.action == crate::artifacts::types::FileAction::Create)
+        .map(|f| f.path.as_str())
+        .collect();
+
     let mut out = String::new();
     for e in &diff.edits {
+        let target = if e.search.trim().is_empty() {
+            created.first().map(|p| (*p).to_string())
+        } else {
+            single.clone()
+        };
+        if let Some(path) = target {
+            out.push_str(&format!("FILE: {path}\n"));
+        }
         out.push_str("<<<<<<< SEARCH\n");
         out.push_str(&e.search);
         out.push('\n');
@@ -1243,8 +1272,27 @@ pub fn coder_loop_fallback_notice(out: &crate::runtime::tools::LoopOutput) -> St
         .filter(|(name, ok)| *ok && name != "submit_artifact")
         .map(|(name, _)| name.as_str())
         .collect();
+    // What the model actually said.
+    //
+    // Without this the user is told the model is too small, which is a guess,
+    // when the real answer is sitting in the response the harness already
+    // holds: a small model asked to call a tool frequently answers in prose,
+    // and prose is a completely different problem with a different fix. Five
+    // breadth runs failed identically and identically uninformative.
+    let said = out.content.trim();
+    let excerpt = if said.is_empty() {
+        "(it returned no text either)".to_string()
+    } else {
+        let flat: String = said.split_whitespace().collect::<Vec<_>>().join(" ");
+        if flat.chars().count() > 240 {
+            format!("{}…", flat.chars().take(240).collect::<String>())
+        } else {
+            flat
+        }
+    };
     format!(
         "the Coder ran the tool loop for {} step(s) and never called submit_artifact{}. \
+         It said: {excerpt} \
          Falling back to a single-shot call. The error that follows describes the \
          fallback, not this.",
         out.steps,

@@ -73,7 +73,13 @@ pub fn parse_edit_blocks(text: &str) -> Vec<EditBlock> {
             let search = search_lines.join("\n");
             let replace = replace_lines.join("\n");
 
-            if !search.is_empty() {
+            // A block with nothing to search for is normally noise, and
+            // dropping it is right — `apply_single_edit` would match at offset
+            // 0 and insert there. But a *bound* block with an empty search is
+            // how the contract says "create this file", and the parser used to
+            // discard it as well, so `action: "create"` could be validated
+            // and then silently vanish before it reached the applier.
+            if !search.is_empty() || file.is_some() {
                 blocks.push(EditBlock {
                     search,
                     replace,

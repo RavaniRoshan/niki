@@ -54,6 +54,20 @@ pub fn validate_artifact(json_str: &str, schema_path: &str) -> Result<()> {
 /// JSON Schema validates shape, not meaning. Before this existed, a model
 /// returning `{"edits": [], "files_changed": [], "notes": ""}` passed cleanly
 /// and the run was recorded as a successful implementation.
+/// Whether this artifact declares at least one file it is creating.
+///
+/// A creation has no prior content to anchor to, so it is the one case where
+/// an empty `search` is meaningful rather than a silent misapplication.
+fn creates_a_file(obj: &serde_json::Map<String, Value>) -> bool {
+    obj.get("files_changed")
+        .and_then(|f| f.as_array())
+        .is_some_and(|files| {
+            files
+                .iter()
+                .any(|f| f.get("action").and_then(|a| a.as_str()) == Some("create"))
+        })
+}
+
 fn check_semantics(artifact: &Value, schema_path: &str) -> Result<()> {
     let Some(obj) = artifact.as_object() else {
         return Ok(());
@@ -89,10 +103,20 @@ fn check_semantics(artifact: &Value, schema_path: &str) -> Result<()> {
                      replacement equal to what it replaces is a no-op."
                 ));
             }
-            if search.trim().is_empty() {
+            // An empty `search` is meaningless in a file that exists — and
+            // `apply_single_edit` would quietly match at offset 0 and insert
+            // there, so rejecting it is right.
+            //
+            // For a file that does *not* exist it is the only way to say
+            // "create this". The contract already has `action: "create"`; it
+            // just refused to be used. Rejecting it made the `docs` task
+            // (write a README) unexpressible, and pushed the harness toward
+            // asking a model for a search anchor on a file with no content.
+            if search.trim().is_empty() && !creates_a_file(obj) {
                 return Err(anyhow::anyhow!(
                     "{schema_path}: edits[{i}] has an empty `search`, which cannot anchor to \
-                     anything in the file."
+                     anything in the file. For a new file, list it in files_changed with \
+                     action \"create\"."
                 ));
             }
         }

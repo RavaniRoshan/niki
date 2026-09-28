@@ -345,3 +345,163 @@ fn the_retry_is_bounded_and_covers_the_transport_classes() {
          responses together"
     );
 }
+
+/// The contract has to be able to say "this file is new".
+///
+/// `FileAction::Create` has always existed in the schema, and `apply_patch`
+/// now honours it, but `check_semantics` rejected the only edit that can
+/// express a creation — an empty `search`, since a file that does not exist has
+/// no content to anchor to. So the `docs` task (write a README) was
+/// unexpressible, and the model was left inventing an anchor for an empty file,
+/// which is the `edits[0] has an empty search` failure four of five breadth
+/// runs died on.
+///
+/// The relaxation is narrow: an empty `search` is still rejected unless the
+/// artifact declares a `create`.
+#[test]
+fn an_empty_search_is_only_allowed_for_a_file_being_created() {
+    let create = serde_json::json!({
+        "edits": [{ "search": "", "replace": "# Title\n\nBody." }],
+        "files_changed": [
+            { "path": "README.md", "action": "create", "language": null }
+        ],
+        "implementation_notes": "wrote the readme",
+        "spec_adherence": "as asked",
+        "uncertainties": null
+    });
+    niki::artifacts::validate::validate_artifact(
+        &create.to_string(),
+        "schemas/code_diff.schema.json",
+    )
+    .expect("a creation has no prior content to anchor to, and must be allowed");
+
+    let modify = serde_json::json!({
+        "edits": [{ "search": "", "replace": "fn total() {}" }],
+        "files_changed": [
+            { "path": "src/lib.rs", "action": "modify", "language": "rust" }
+        ],
+        "implementation_notes": "x",
+        "spec_adherence": "y",
+        "uncertainties": null
+    });
+    let err = niki::artifacts::validate::validate_artifact(
+        &modify.to_string(),
+        "schemas/code_diff.schema.json",
+    )
+    .expect_err("an empty anchor in an existing file would apply at offset 0 and misapply");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("action \"create\""),
+        "the error must say how to express a creation, or the model repeats it: {msg}"
+    );
+}
+
+/// The patch text has to carry the file binding, or a creation has nowhere to
+/// land.
+#[test]
+fn the_patch_text_binds_blocks_to_the_file_they_change() {
+    use niki::artifacts::types::{ChangedFile, CodeDiff, EditBlock, FileAction};
+
+    let diff = CodeDiff {
+        edits: vec![EditBlock {
+            search: "".into(),
+            replace: "# Title\n".into(),
+        }],
+        files_changed: vec![ChangedFile {
+            path: "README.md".into(),
+            action: FileAction::Create,
+            language: None,
+        }],
+        implementation_notes: String::new(),
+        spec_adherence: String::new(),
+        uncertainties: None,
+    };
+    let text = niki::orchestrator::pipeline::code_diff_to_edit_text(&diff);
+    assert!(
+        text.starts_with("FILE: README.md"),
+        "a creation must be bound to its path, or the applier cannot know what to create: {text}"
+    );
+
+    // The single-file case binds modifications too, so a one-file task never
+    // depends on a cross-file search finding the right target.
+    let single = CodeDiff {
+        edits: vec![EditBlock {
+            search: "pub fn add".into(),
+            replace: "pub fn total".into(),
+        }],
+        files_changed: vec![ChangedFile {
+            path: "src/lib.rs".into(),
+            action: FileAction::Modify,
+            language: Some("rust".into()),
+        }],
+        implementation_notes: String::new(),
+        spec_adherence: String::new(),
+        uncertainties: None,
+    };
+    let text = niki::orchestrator::pipeline::code_diff_to_edit_text(&single);
+    assert!(text.starts_with("FILE: src/lib.rs"), "{text}");
+}
+
+/// A `create` edit has to actually create the file, end to end.
+///
+/// The docs task — "write a README.md for this crate" — is a first-run-sized
+/// request, and four of five breadth failures were `edits[0] has an empty
+/// search`: the model was being asked for a search anchor in a file that had no
+/// content to copy. The contract can now say `action: "create"`, and this
+/// proves the applier honours it rather than rejecting the block as unmatched
+/// or, worse, writing the body over an unrelated first file.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_create_edit_writes_the_file_it_names() {
+    let dir = fixture_repo();
+    let repo = dir.path();
+    let sb = worktree_sandbox(repo).await;
+
+    let patch =
+        "FILE: README.md\n<<<<<<< SEARCH\n\n=======\n# Crate\n\nDoes a thing.\n>>>>>>> REPLACE\n\n";
+    sb.apply_patch(patch, repo)
+        .await
+        .expect("a create block must be applied, not rejected as unmatched");
+
+    let created = sb.worktree_path.join("README.md");
+    assert!(created.exists(), "the named file must exist after the edit");
+    assert_eq!(
+        std::fs::read_to_string(&created).unwrap(),
+        "# Crate\n\nDoes a thing.",
+        "the body must be the replacement, verbatim — including the absence of a trailing \
+         newline, which is what the patch said. A whole-file write that quietly added one would \
+         make every created file differ from what the model asked for."
+    );
+
+    // And it must not have been written over something else on the way.
+    assert_eq!(
+        std::fs::read_to_string(sb.worktree_path.join("tracked.rs")).unwrap(),
+        std::fs::read_to_string(repo.join("tracked.rs")).unwrap(),
+        "an unbound or mis-targeted block must not rewrite another file"
+    );
+    sb.destroy().await.unwrap();
+}
+
+/// A `create` block must refuse to overwrite a file that is already there.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_create_edit_will_not_clobber_an_existing_file() {
+    let dir = fixture_repo();
+    let repo = dir.path();
+    let sb = worktree_sandbox(repo).await;
+    let before = std::fs::read_to_string(sb.worktree_path.join("tracked.rs")).unwrap();
+
+    let patch = "FILE: tracked.rs\n<<<<<<< SEARCH\n\n=======\nfn a() { 999 }\n>>>>>>> REPLACE\n\n";
+    let err = sb
+        .apply_patch(patch, repo)
+        .await
+        .expect_err("claiming to create a file that exists is a silent overwrite, not a creation");
+    assert!(
+        err.to_string().contains("already exists"),
+        "the error must say why: {err}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(sb.worktree_path.join("tracked.rs")).unwrap(),
+        before,
+        "a refused creation must not have written anything"
+    );
+    sb.destroy().await.unwrap();
+}
