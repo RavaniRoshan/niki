@@ -224,8 +224,49 @@ impl Sandbox for WorktreeSandbox {
                 }
 
                 for (i, block) in edit_blocks.iter().enumerate() {
+                    // A block with an empty `search` and a named target is a
+                    // *creation*: the file does not exist, so there is nothing
+                    // to anchor to, and the `replace` is the whole file.
+                    //
+                    // `files_changed[].action == "create"` is the only thing in
+                    // the artifact that can say so, and without this the
+                    // contract could express a new file but not produce one —
+                    // the `docs` task (write a README) was unexpressible, and
+                    // the model was left guessing an anchor for a file that
+                    // had no content to copy.
+                    if block.search.trim().is_empty() {
+                        if let Some(target) = &block.file {
+                            let path = wt.join(target);
+                            if let Some(parent) = path.parent() {
+                                std::fs::create_dir_all(parent)?;
+                            }
+                            if !contents.contains_key(&path) {
+                                std::fs::write(&path, &block.replace)?;
+                                changed_files.insert(path);
+                                // `continue` skips the match bookkeeping below,
+                                // so this block is retired here.
+                                unmatched.retain(|&idx| idx != i);
+                            } else {
+                                // The file already exists — writing `replace`
+                                // over it would be a silent overwrite, not a
+                                // creation. Refuse.
+                                return Err(anyhow!(
+                                    "edit block claims to create {target}, which already exists"
+                                ));
+                            }
+                            continue;
+                        }
+                        return Err(anyhow!(
+                            "edit block has an empty `search` and no target file; it cannot \
+                             say what it is creating"
+                        ));
+                    }
                     // Bound blocks apply only to their target file; unbound blocks
                     // fall back to the cross-file search. See research report S4.
+                    // `applied` is per block: a block that matched must not
+                    // retire its siblings, or the all-or-nothing guarantee
+                    // below stops meaning anything.
+                    let mut applied = false;
                     let targets: Vec<std::path::PathBuf> = match &block.file {
                         Some(target) => paths
                             .iter()
@@ -239,7 +280,6 @@ impl Sandbox for WorktreeSandbox {
                             .collect(),
                         None => paths.clone(),
                     };
-                    let mut applied = false;
                     for file_path in targets {
                         if let Some(content) = contents.get(&file_path) {
                             if let Some(new_content) =
@@ -269,6 +309,8 @@ impl Sandbox for WorktreeSandbox {
                     ));
                 }
                 for file_path in changed_files {
+                    // A file created above was written directly and is not in
+                    // `contents`; re-writing it here would truncate it.
                     if let Some(content) = contents.get(&file_path) {
                         std::fs::write(&file_path, content)?;
                     }
