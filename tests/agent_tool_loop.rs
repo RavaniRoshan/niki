@@ -349,3 +349,29 @@ fn ollama_tool_calls_are_parsed_in_both_shapes() {
     );
     assert_eq!(calls[0].name, "read");
 }
+
+/// A diagnostic nobody will read is not a diagnostic.
+///
+/// `main` installs `tracing_subscriber` with `EnvFilter::from_default_env()`,
+/// which is ERROR-only unless `RUST_LOG` is set. So a `tracing::warn!` about the
+/// Coder's loop submitting an invalid artifact is invisible in exactly the
+/// situation it exists for: someone running the binary from a terminal to see
+/// why their run failed.
+#[test]
+fn a_failed_coder_loop_says_so_on_stderr_not_only_in_tracing() {
+    let src = include_str!("../src/orchestrator/pipeline.rs");
+    let start = src
+        .find("run_coder_tool_loop")
+        .expect("the function exists");
+    let body = &src[start..];
+    let branch = body
+        .find("failed validation")
+        .or_else(|| body.find("did not validate"))
+        .expect("the invalid-artifact branch exists");
+    let window = &body[branch.saturating_sub(600)..(branch + 900).min(body.len())];
+    assert!(
+        window.contains("eprintln!"),
+        "a failed tool loop must be reported on stderr. A `tracing::warn!` alone is \\
+         invisible without RUST_LOG, and this is a CLI."
+    );
+}
