@@ -1073,11 +1073,19 @@ impl Page for ChatPage {
                 if let Some(start) = tool_start_row {
                     let rel_row = row.saturating_sub(start + 1); // +1 for header
                     let mut rows_consumed = 0;
-                    let chat_width = state.chat_width.get().max(40) as u16;
+                    // Same width, same block builder as the renderer: the row a
+                    // card occupies on screen is the number of lines it emits,
+                    // not a second guess at it.
+                    let chat_width = tool_card_width(state.chat_width.get());
+                    let detail_open = state.tool_detail_index.is_some();
                     for (idx, card) in state.tool_cards.iter().enumerate() {
-                        let h = crate::display::components::tool_card::tool_card_height(
-                            card, chat_width,
-                        );
+                        let h = crate::display::components::tool_card::tool_card_block(
+                            card,
+                            chat_width,
+                            state.expanded_tools.contains(&idx),
+                            detail_open,
+                        )
+                        .len();
                         if rel_row >= rows_consumed && rel_row < rows_consumed + h {
                             state.tool_detail_index = Some(idx);
                             state.tool_detail_scroll = crate::display::scroll::ScrollState::new();
@@ -1102,6 +1110,16 @@ impl Page for ChatPage {
 /// when the buffer was rewritten. Sources: session models (current + each
 /// configured agent) first, then well-known ids. Best match = shortest
 /// prefix hit, then alphabetical (deterministic).
+/// Width the transcript lays tool cards out at.
+///
+/// Shared by the renderer and the Enter hit-test. They previously derived it
+/// independently — `width - 4` for painting, `chat_width` for hit-testing —
+/// so a card could be painted at one width and measured at another, and any
+/// wrapping difference would shift every row below it.
+fn tool_card_width(container_width: usize) -> u16 {
+    container_width.saturating_sub(4).max(20) as u16
+}
+
 fn complete_model_arg(state: &mut AppState) -> bool {
     let buf = state.input_state.buffer.clone();
     let prefix = match buf.strip_prefix("/model ") {
@@ -1570,9 +1588,13 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
             None,
         );
         for (idx, card) in state.tool_cards.iter().enumerate() {
-            let card_width = width.saturating_sub(4).max(20) as u16;
-            let card_lines =
-                crate::display::components::tool_card::render_tool_card(card, card_width);
+            let expanded = state.expanded_tools.contains(&idx);
+            let card_lines = crate::display::components::tool_card::tool_card_block(
+                card,
+                tool_card_width(width),
+                expanded,
+                state.tool_detail_index.is_some(),
+            );
             for card_line in card_lines {
                 let plain_text = card_line
                     .spans
@@ -1586,21 +1608,6 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
                     0,
                     false,
                     Some(card_line),
-                    None,
-                );
-            }
-            // Toggle hint if expanded
-            if state.expanded_tools.contains(&idx) && state.tool_detail_index.is_none() {
-                push_line(
-                    &mut lines,
-                    "  └─ Enter to view all output · y to copy ──────┘".to_string(),
-                    usize::MAX,
-                    0,
-                    false,
-                    Some(Line::from(Span::styled(
-                        "  └─ Enter to view all output · y to copy ──────┘",
-                        Style::default().fg(theme::fg_subtle()),
-                    ))),
                     None,
                 );
             }
