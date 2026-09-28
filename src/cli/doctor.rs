@@ -80,6 +80,11 @@ pub fn handle(args: &DoctorArgs) -> Result<()> {
         match measured {
             Ok(capability) => {
                 let project = std::env::current_dir().unwrap_or_default();
+                // A 0/N is a fact about the probe, not the model — see
+                // `ModelCapability::usable`. Record it as unknown so the
+                // topology heuristic falls back to its safe default instead of
+                // routing on a number we have shown to be confounded.
+                let capability = capability.usable();
                 let where_ = crate::config::capability::save(&project, capability)
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|e| format!("not saved: {e}"));

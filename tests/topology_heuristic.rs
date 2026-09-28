@@ -178,3 +178,54 @@ fn a_config_loaded_from_disk_knows_its_project() {
     assert_eq!(c.project_dir_hint(), dir.path());
     assert_eq!(c.general.max_revision_rounds, 4);
 }
+
+/// A 0/N probe result must not steer the topology.
+///
+/// The probe asks a deliberately trivial question — "replace `old` with `new`" —
+/// and a small model answers it minimally: the `edits` it was asked for and
+/// nothing else. `code_diff.schema.json` requires four properties, so the answer
+/// fails validation and the probe scores 0/N.
+///
+/// That is a fact about the probe, not about the model. The same model, given
+/// the real Coder prompt with a specification and the file contents, emits the
+/// whole artifact and completes four-agent runs — which was measured on this
+/// machine before the routing consequence was noticed.
+///
+/// Letting a measurement this confounded decide that a usable model should take
+/// the slow path would be worse than having no probe at all.
+#[test]
+fn a_clean_zero_probe_result_falls_back_to_unknown() {
+    let zero = ModelCapability::Measured {
+        passed: 0,
+        total: 4,
+    };
+    assert_eq!(
+        zero.usable(),
+        ModelCapability::Unknown,
+        "a 0/N is confounded by a trivial ask, not a measurement of the model"
+    );
+    // The unknown case routes to the safe side — the multi-agent chain.
+    assert!(zero.usable().benefits_from_structure());
+
+    // Anything with a pass is a real signal and is kept.
+    for real in [
+        ModelCapability::Measured {
+            passed: 1,
+            total: 4,
+        },
+        ModelCapability::Measured {
+            passed: 4,
+            total: 4,
+        },
+    ] {
+        assert_eq!(real.usable(), real);
+    }
+    // And the explanation has to say why, so the next reader is not misled by
+    // a 0% that is reported as unmeasured.
+    let msg = zero.explain();
+    assert!(msg.contains("UNKNOWN"), "{msg}");
+    assert!(
+        msg.contains("trivial") || msg.contains("probe"),
+        "and must name the probe as the confounded thing: {msg}"
+    );
+}
