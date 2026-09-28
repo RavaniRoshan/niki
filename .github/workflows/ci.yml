@@ -37,7 +37,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - uses: actions/setup-node@v7
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - name: Check formatting
         run: cargo fmt --check
       - name: Clippy lints (fatal)
@@ -52,7 +60,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.88.0"
-      - uses: actions/setup-node@v7
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - name: Check MSRV build
         run: cargo check --all-targets
 
@@ -63,6 +79,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - name: Build without default features
         run: cargo build --no-default-features
 
@@ -75,7 +100,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - uses: actions/setup-node@v7
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - name: Cache cargo-audit and cargo-deny
         uses: actions/cache@v6
         with:
@@ -154,6 +187,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v7
       # nextest gives per-test process isolation (a real flakiness source when
       # tests share process state) plus the test-groups in .config/nextest.toml
@@ -223,6 +265,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - name: Installer / formula / dist-config agreement
         run: cargo test --test dist_install --verbose
       - name: User-facing claims match the code
@@ -257,7 +308,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - name: Build release
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
         run: cargo build --release --target ${{ matrix.target }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
@@ -277,6 +336,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - name: Install Node.js
         uses: actions/setup-node@v7
         with:
@@ -388,6 +456,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -442,6 +519,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - name: Build release binary
         run: cargo build --release
       - name: Run consumer journeys
@@ -461,6 +547,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -511,6 +606,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v7
         with:
           node-version: "20"
@@ -557,6 +661,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - name: Enable long paths
         shell: pwsh
         run: git config --global core.longpaths true
@@ -590,6 +703,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - name: Install VHS + fonts + PIL
         run: |
           sudo apt-get update -qq
@@ -711,6 +833,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Cargo registry + compiled dependencies. `git2` uses vendored-libgit2, so a
+      # cold build pays a full C compile of libgit2 — and a dozen jobs in this
+      # workflow each build the workspace from scratch on their own runner, every run.
+      #
+      # Keyed per job on purpose. A `shared-key` across the release builders would let
+      # eight jobs write the same ~2 GB `target/release` and evict each other, which
+      # is slower than no cache at all. Per-job is correct without being clever;
+      # sharing is a further win once the repo's cache budget is known.
+      - uses: Swatinem/rust-cache@v2
       - name: Install dependencies
         run: |
           sudo apt-get update -qq

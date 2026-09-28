@@ -559,3 +559,78 @@ fn the_install_job_installs_the_manifest_version() {
          quietly passing — an untested install path reported as green is the failure being fixed"
     );
 }
+
+/// Every job that compiles the workspace must cache cargo, and must do it
+/// before compiling.
+///
+/// `git2` uses vendored-libgit2, so a cold build pays a full C compile of
+/// libgit2 — and a dozen jobs in this workflow each build the workspace from
+/// scratch on their own runner, every run.
+///
+/// The ordering half is the one that is easy to get wrong and impossible to
+/// notice: a cache step placed after the build is valid YAML, runs without
+/// error, and does nothing at all. So the assertion is on line order within a
+/// job, not on presence.
+#[test]
+fn cargo_caching_precedes_every_workspace_build() {
+    let ci = ci_yml();
+    let lines: Vec<&str> = ci.lines().collect();
+
+    // Cargo invocations that compile this workspace. `audit`'s `cargo install`
+    // of cargo-audit/cargo-deny is deliberately absent: it builds unrelated
+    // tools and is not what this is about.
+    let compiles = [
+        "cargo build --release",
+        "cargo build --no-default-features",
+        "cargo nextest run",
+        "cargo clippy --all-targets",
+        "cargo check --all-targets",
+        "./scripts/product-verify.sh",
+    ];
+
+    // Job boundaries: two-space-indented `name:` lines.
+    let mut bounds: Vec<(String, usize, usize)> = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        let indent = l.len() - l.trim_start().len();
+        let t = l.trim();
+        if indent == 2 && t.ends_with(':') && !t.starts_with('#') {
+            if let Some(prev) = bounds.last_mut() {
+                prev.2 = i;
+            }
+            bounds.push((t.trim_end_matches(':').to_string(), i, lines.len()));
+        }
+    }
+
+    let mut checked = 0;
+    for (name, start, end) in &bounds {
+        let body = &lines[*start..*end];
+        let first_build = body.iter().position(|l| {
+            let t = l.trim();
+            compiles
+                .iter()
+                .any(|c| t == format!("run: {c}").as_str() || t.ends_with(c))
+        });
+        let Some(first_build) = first_build else {
+            continue;
+        };
+        checked += 1;
+
+        let cache_at = body.iter().position(|l| l.contains("Swatinem/rust-cache"));
+
+        assert!(
+            cache_at.is_some(),
+            "job `{name}` compiles the workspace but has no cargo-cache step"
+        );
+        assert!(
+            cache_at < Some(first_build),
+            "job `{name}` caches cargo at offset {cache_at:?}, after its first compile at \
+             offset {first_build}. A cache placed after the build is valid YAML that does nothing."
+        );
+    }
+    assert!(
+        checked >= 10,
+        "only matched {checked} compiling jobs out of {} — the extractor drifted as the \
+         workflow changed",
+        bounds.len()
+    );
+}
