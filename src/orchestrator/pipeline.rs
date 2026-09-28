@@ -1155,7 +1155,38 @@ async fn run_coder_tool_loop(
     .await
     .ok()?;
 
-    let artifact = out.artifact?;
+    // Every way the loop can come back empty has to say so.
+    //
+    // The notice used to fire only when the loop *submitted* something
+    // invalid. A model that never called `submit_artifact` at all — which is
+    // what a model told "respond with only the raw JSON artifact" does, while
+    // being offered a tool loop — returned None with no message anywhere, and
+    // the run quietly became the one-shot path. From the outside that is
+    // indistinguishable from the loop not existing, which is how the tool
+    // loop shipped with a prompt that contradicted it and nobody noticed.
+    let Some(artifact) = out.artifact else {
+        let said = out
+            .tool_calls
+            .iter()
+            .filter(|(name, ok)| !name.starts_with("submit_artifact") && *ok)
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let msg = format!(
+            "the Coder ran the tool loop for {} step(s) and never called submit_artifact{}. \
+             Falling back to a single-shot call. The error that follows describes the \
+             fallback, not this.",
+            out.steps,
+            if said.is_empty() {
+                " (it made no tool calls at all)".to_string()
+            } else {
+                format!(" (it did use: {said})")
+            }
+        );
+        tracing::warn!(target: "niki::pipeline", role = "coder", steps = out.steps, "{}", msg);
+        eprintln!("niki: {msg}");
+        return None;
+    };
     let json = serde_json::to_string_pretty(&artifact).ok()?;
 
     // Validate before accepting: a loop that produced something the stage cannot
@@ -1275,6 +1306,16 @@ async fn run_role(
             project_memory => memory_str,
             current_files => build_current_files(task_spec, project_path),
             mcp_tools => mcp_tools.to_string(),
+            // The Coder may run as a tool loop instead of one call, and the
+            // protocol is different: the answer is a `submit_artifact` call,
+            // not prose. The prompt says "respond with only the raw JSON
+            // artifact", so without this the model obeys the prompt, the loop
+            // is offered a tool it was told not to use, and it returns prose
+            // the loop cannot accept — silently, because nothing was
+            // submitted, so the fallback had no reason to announce itself.
+            // Measured: five breadth runs, zero tool calls, every one
+            // falling back to the one-shot path without saying so.
+            tool_loop => true,
         },
         AgentRole::Tester => context! {
             input_artifacts => vec![task_spec_json.clone(), coder_json.to_string()],
