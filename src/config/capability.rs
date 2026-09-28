@@ -59,6 +59,17 @@ impl ModelCapability {
         }
     }
 
+    /// Whether a measurement is trustworthy enough to steer on.
+    ///
+    /// A 0/N is not a measurement of the model — see `explain` for why — so it
+    /// falls back to the unknown case, which routes to the safe side.
+    pub fn usable(self) -> Self {
+        match self {
+            ModelCapability::Measured { passed: 0, .. } => ModelCapability::Unknown,
+            other => other,
+        }
+    }
+
     /// Whether a multi-agent pipeline is expected to help this model.
     ///
     /// `Unknown` returns `true`, and that is a deliberate asymmetry rather than
@@ -88,6 +99,27 @@ impl ModelCapability {
             ModelCapability::Unreachable => {
                 "could not be measured — the model did not respond. Treated as unknown.".to_string()
             }
+            // A clean zero is treated as UNKNOWN, not as a measured weakness.
+            //
+            // The probe asks a deliberately trivial question ("replace `old`
+            // with `new`"), and a small model answers it minimally — the `edits`
+            // it was asked for, and nothing else. `code_diff.schema.json`
+            // requires four properties, so the answer fails validation and the
+            // probe scores 0/4. That is a fact about the *probe*, not about
+            // the model: the same model, asked the real Coder prompt with a
+            // specification and the file contents, emits the whole artifact and
+            // completes four-agent runs.
+            //
+            // Letting that steer the topology would send every user of a usable
+            // small local model down the slow path on the strength of a question
+            // that was too small to answer honestly. A measurement this badly
+            // confounded is not a measurement.
+            ModelCapability::Measured { passed: 0, total } if *total > 0 => format!(
+                "no probe produced a complete artifact, but the probe asks a trivial question \
+                 and small models answer it minimally — recorded as UNKNOWN rather than as a \
+                 measured 0%, because routing on it would push a usable model down the slow \
+                 path for the wrong reason ({total} probes)"
+            ),
             ModelCapability::Measured { passed, total } => {
                 let rate = if *total == 0 {
                     0.0
