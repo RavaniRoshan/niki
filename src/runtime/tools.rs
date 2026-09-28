@@ -128,6 +128,28 @@ pub struct ToolDef {
     pub risk_level: RiskLevel,
     pub permission: PermissionRequirement,
     pub agent_access: &'static [&'static str],
+    /// A JSON Schema (as a string, because `ToolDef` is built in `static`
+    /// context) naming this tool's arguments.
+    ///
+    /// It used to not exist: every tool was advertised to the model as
+    /// `{"type":"object","properties":{},"additionalProperties":true}`, so a
+    /// model calling `edit` was told nothing about `path`/`old_text`/`new_text`
+    /// and had to infer them from the description prose. That is a large part
+    /// of why the tool loop failed on small models — the harness was asking
+    /// the model to guess an argument contract it could have been given.
+    ///
+    /// `tool_specs_for` falls back to a permissive object if this is absent or
+    /// unparseable, so a bad entry degrades rather than breaking the loop.
+    /// `tools_declare_every_argument_they_read` keeps them honest.
+    pub parameters: &'static str,
+}
+
+/// The schema a tool with no declared parameters gets: accepts anything.
+///
+/// Also the fallback when a declared schema fails to parse, so a typo in a
+/// static string cannot take the whole tool loop down.
+fn permissive_parameters() -> serde_json::Value {
+    serde_json::json!({"type": "object", "properties": {}, "additionalProperties": true})
 }
 
 // ---------------------------------------------------------------------------
@@ -629,20 +651,17 @@ impl ToolRegistry {
 
     /// Build tool specifications (JSON-schema) for the LLM, scoped to a role.
     ///
-    /// The generated parameter schema is intentionally permissive: each tool
-    /// accepts a free-form `object`. Concrete arg validation happens inside the
-    /// tool's `execute()` via `ToolInput` accessors.
+    /// Each tool advertises its real argument schema. Concrete values are still
+    /// validated inside `execute()` via `ToolInput` accessors — the schema tells
+    /// the model what to send, it does not replace the checks.
     pub fn tool_specs_for(&self, role: &str) -> Vec<ToolSpec> {
         self.for_role(role)
             .into_iter()
             .map(|def| ToolSpec {
                 name: def.name.to_string(),
                 description: def.description.to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": true,
-                }),
+                parameters: serde_json::from_str(def.parameters)
+                    .unwrap_or_else(|_| permissive_parameters()),
             })
             .collect()
     }
@@ -806,6 +825,7 @@ impl Tool for ReadTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"path":{"type":"string","description":"File to read, relative to the project root"},"start_line":{"type":"integer","description":"1-based first line to return"},"end_line":{"type":"integer","description":"1-based last line to return"}},"required":["path"]}"#,
         };
         &DEF
     }
@@ -1040,6 +1060,7 @@ impl Tool for GlobTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern, e.g. src/**/*.rs"}},"required":["pattern"]}"#,
         };
         &DEF
     }
@@ -1099,6 +1120,7 @@ impl Tool for GrepTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"query":{"type":"string","description":"Regular expression to search for"},"include":{"type":"string","description":"Only search files matching this glob"},"path":{"type":"string","description":"Directory to search, relative to the project root"}},"required":["query"]}"#,
         };
         &DEF
     }
@@ -1193,6 +1215,7 @@ impl Tool for ListTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"path":{"type":"string","description":"Directory to list, relative to the project root. Defaults to the project root."}},"required":[]}"#,
         };
         &DEF
     }
@@ -1246,6 +1269,7 @@ impl Tool for WriteTool {
             risk_level: RiskLevel::Medium,
             permission: PermissionRequirement::Ask,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"path":{"type":"string","description":"File to write, relative to the project root"},"content":{"type":"string","description":"Full new contents of the file"}},"required":["path","content"]}"#,
         };
         &DEF
     }
@@ -1305,6 +1329,7 @@ impl Tool for EditTool {
             risk_level: RiskLevel::Medium,
             permission: PermissionRequirement::Ask,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"path":{"type":"string","description":"File to edit, relative to the project root"},"old_text":{"type":"string","description":"Exact existing text to replace, copied verbatim including indentation"},"new_text":{"type":"string","description":"Text to put in its place"}},"required":["path","old_text","new_text"]}"#,
         };
         &DEF
     }
@@ -1377,6 +1402,7 @@ impl Tool for BashTool {
             risk_level: RiskLevel::High,
             permission: PermissionRequirement::Ask,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"command":{"type":"string","description":"Shell command to run in the project root"},"timeout_ms":{"type":"integer","description":"Kill the command after this many milliseconds. Defaults to 30000."}},"required":["command"]}"#,
         };
         &DEF
     }
@@ -1519,6 +1545,7 @@ impl Tool for PatchTool {
             risk_level: RiskLevel::Medium,
             permission: PermissionRequirement::Ask,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"path":{"type":"string","description":"File to patch, relative to the project root"},"patch":{"type":"string","description":"Patch text with *** Update File / @@ hunks"}},"required":["path","patch"]}"#,
         };
         &DEF
     }
@@ -1576,6 +1603,7 @@ impl Tool for TestTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"target":{"type":"string","description":"Optional test name or filter to run"}},"required":[]}"#,
         };
         &DEF
     }
@@ -1645,6 +1673,7 @@ impl Tool for WebSearchTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"query":{"type":"string","description":"Search query"}},"required":["query"]}"#,
         };
         &DEF
     }
@@ -1685,6 +1714,7 @@ impl Tool for WebFetchTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"url":{"type":"string","description":"Absolute http(s) URL to fetch"}},"required":["url"]}"#,
         };
         &DEF
     }
@@ -1847,6 +1877,7 @@ impl Tool for TaskSpawnTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &["planner"],
+            parameters: r#"{"type":"object","properties":{"prompt":{"type":"string","description":"The task for the sub-agent to carry out"},"role":{"type":"string","description":"Role to spawn. Defaults to coder."},"subagent_type":{"type":"string","description":"Named sub-agent preset"},"description":{"type":"string","description":"Short label shown while it runs"},"run_in_background":{"type":"boolean","description":"Return immediately instead of waiting"}},"required":["prompt"]}"#,
         };
         &DEF
     }
@@ -1941,6 +1972,7 @@ impl Tool for TaskStatusTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"task_id":{"type":"string","description":"Id returned by task_spawn"}},"required":["task_id"]}"#,
         };
         &DEF
     }
@@ -1986,6 +2018,7 @@ impl Tool for TaskCancelTool {
             risk_level: RiskLevel::Medium,
             permission: PermissionRequirement::Ask,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"task_id":{"type":"string","description":"Id returned by task_spawn"}},"required":["task_id"]}"#,
         };
         &DEF
     }
@@ -2028,6 +2061,7 @@ impl Tool for TaskCreateTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &["planner"],
+            parameters: r#"{"type":"object","properties":{"name":{"type":"string","description":"Short task name"},"description":{"type":"string","description":"What the task requires"},"task_id":{"type":"string","description":"Id to record the task under"},"status":{"type":"string","description":"Initial status. Defaults to in_progress."}},"required":[]}"#,
         };
         &DEF
     }
@@ -2061,6 +2095,7 @@ impl Tool for TaskUpdateTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &["planner", "coder"],
+            parameters: r#"{"type":"object","properties":{"task_id":{"type":"string","description":"Id of the task to update"},"status":{"type":"string","description":"New status"}},"required":[]}"#,
         };
         &DEF
     }
@@ -2095,6 +2130,7 @@ impl Tool for TaskListTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{},"required":[]}"#,
         };
         &DEF
     }
@@ -2153,6 +2189,7 @@ impl Tool for AskUserTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"question":{"type":"string","description":"The question to put to the user"},"options":{"type":"array","items":{"type":"string"},"description":"Answer choices, if the question has a fixed set"},"default":{"type":"string","description":"Answer to use when the user gives none"}},"required":["question"]}"#,
         };
         &DEF
     }
@@ -2229,6 +2266,7 @@ impl Tool for ApprovalTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"command":{"type":"string","description":"The command being approved"}},"required":[]}"#,
         };
         &DEF
     }
@@ -2302,6 +2340,7 @@ impl Tool for SkillListTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{},"required":[]}"#,
         };
         &DEF
     }
@@ -2363,6 +2402,7 @@ impl Tool for SkillLoadTool {
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"name":{"type":"string","description":"Skill to load"}},"required":["name"]}"#,
         };
         &DEF
     }
@@ -2418,6 +2458,7 @@ impl Tool for GitTool {
             risk_level: RiskLevel::Medium,
             permission: PermissionRequirement::Ask,
             agent_access: &[],
+            parameters: r#"{"type":"object","properties":{"subcommand":{"type":"string","description":"git subcommand, e.g. status, diff, log, branch. Defaults to status."},"path":{"type":"string","description":"Path to operate on"}},"required":[]}"#,
         };
         &DEF
     }
@@ -3479,6 +3520,7 @@ mod tests {
                     risk_level: RiskLevel::Low,
                     permission: PermissionRequirement::Allow,
                     agent_access: &[],
+                    parameters: r#"{"type":"object","properties":{},"required":[]}"#,
                 };
                 &DEF
             }

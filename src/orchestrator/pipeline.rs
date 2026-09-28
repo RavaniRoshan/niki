@@ -439,11 +439,20 @@ fn isolation_sources_for(role: AgentRole, with_red: bool, with_security: bool) -
 
 /// Fold a SecurityAuditor verdict into the run's verdict.
 ///
-/// Only an explicit `Rejected` acts. `Approved` and `RevisionNeeded` from the
-/// auditor are advisory — the Reviewer owns the ordinary quality gate — but a
-/// security rejection is not a matter of taste: it forces the run to revise and
-/// names the security auditor as the source, so the record shows the run was
-/// stopped by security rather than by style.
+/// `Rejected` holds the run open: the finding is not a matter of taste, so it
+/// forces a revision and names the auditor as the source, and no Reviewer
+/// approval can overturn it (see `apply_reviewer_verdict`).
+///
+/// `Approved` *clears* that hold. The auditor re-reads the revised code each
+/// round, so an explicit approval means the finding it raised is addressed. The
+/// hold used to be a latch — set once, never cleared — which meant a run that
+/// fixed its security finding still burned every remaining round and reported
+/// `RevisionNeeded` forever. A harness that cannot be talked out of a stale
+/// alarm is one nobody trusts: the correct fix stops being reported as
+/// outstanding.
+///
+/// `RevisionNeeded` from the auditor is advisory and does not move the verdict
+/// — the Reviewer owns the ordinary quality gate.
 ///
 /// It used to apply only when there was *no* reviewer, on the theory that the
 /// Reviewer owns the gate. In the normal configuration a Reviewer is always
@@ -455,10 +464,16 @@ fn apply_security_verdict(
     verdict_source: &mut Option<String>,
     security_hold: &mut bool,
 ) {
-    if matches!(security_verdict, Verdict::Rejected) {
-        *security_hold = true;
-        *verdict = Verdict::RevisionNeeded;
-        *verdict_source = Some("security-auditor".to_string());
+    match security_verdict {
+        Verdict::Rejected => {
+            *security_hold = true;
+            *verdict = Verdict::RevisionNeeded;
+            *verdict_source = Some("security-auditor".to_string());
+        }
+        Verdict::Approved if *security_hold => {
+            *security_hold = false;
+        }
+        _ => {}
     }
 }
 
@@ -480,6 +495,58 @@ fn apply_reviewer_verdict(
     }
     *verdict = reviewer_verdict;
     *verdict_source = Some("reviewer".to_string());
+}
+
+/// Why the revision loop must stop, even though a stage asked for a revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RevisionHold {
+    /// There is something new to act on — run the next round.
+    Continue,
+    /// A revision was requested with nothing to act on.
+    NoActionableIssues,
+    /// A full round ran and came back with the same findings.
+    UnchangedIssues,
+}
+
+/// A stable identity for a set of findings, used to recognise "the same
+/// critique, again" — and to tell *having* findings from *having none*.
+///
+/// `None` means empty. Serialized rather than hand-built so a new field on an
+/// issue type cannot silently stop participating in the comparison.
+fn issue_signature<T: serde::Serialize>(issues: &[T]) -> Option<String> {
+    if issues.is_empty() {
+        return None;
+    }
+    Some(serde_json::to_string(issues).unwrap_or_default())
+}
+
+/// Decide whether another revision round is worth running.
+///
+/// A revision round costs a Coder, a Tester and a Reviewer — minutes and real
+/// money — and it can only do what the critique tells it to. Two cases make that
+/// spend pointless, and both were observed in live runs:
+///
+/// * **Nothing actionable.** The Reviewer returned `revision_needed` with an
+///   empty `critical_issues` list (a 3B model does this readily: it declines to
+///   approve without naming a blocker). The Coder is handed that, cannot act on
+///   it, and re-emits a near-identical patch — which in one live run then failed
+///   to parse and took down a task that had already passed its tests 5/5.
+///
+/// * **The same critique.** The round ran, and the next Reviewer returned a
+///   byte-identical issue set. Nothing changed, so nothing would.
+///
+/// Stopping is not the same as approving. The verdict stays `RevisionNeeded`,
+/// the run still reports `RevisionRequested`, and the branch is still produced
+/// — the only thing that changes is that the harness stops paying for rounds
+/// that cannot help.
+fn revision_hold(previous: Option<&str>, current: Option<&str>) -> RevisionHold {
+    let Some(current) = current.filter(|c| !c.is_empty()) else {
+        return RevisionHold::NoActionableIssues;
+    };
+    if previous == Some(current) {
+        return RevisionHold::UnchangedIssues;
+    }
+    RevisionHold::Continue
 }
 
 /// Fire one lifecycle hook, failing the run closed on Block.
@@ -2250,6 +2317,14 @@ pub async fn execute_pipeline(
     // current critique, not an accumulation of stale guidance. Full history
     // stays in the artifacts trail.
     let mut review_feedback: Option<String> = None;
+    // The findings a next revision round would actually be handed: the
+    // Reviewer's critical issues, or — while a security rejection holds the run
+    // open — the auditor's findings. `None`/`""` means "asked to revise, told
+    // nothing", which is what `revision_hold` refuses to spend a round on.
+    let mut actionable_findings: Option<String> = None;
+    // The signature of the findings the *previous* round was run against, so a
+    // repeat of the same critique is recognisable.
+    let mut last_findings: Option<String> = None;
     let mut verdict = Verdict::Approved;
     // Set whenever a Reviewer actually produces the verdict. Overwritten by the
     // Solo fast path below, which has no Reviewer.
@@ -2655,6 +2730,10 @@ pub async fn execute_pipeline(
                                     security_hold,
                                 );
                                 reviewer_json = json.clone();
+                                actionable_findings = v
+                                    .feedback
+                                    .as_ref()
+                                    .and_then(|f| issue_signature(&f.critical_issues));
                                 review_feedback = match v.feedback {
                                     Some(f) => Some(serde_json::to_string_pretty(&f)?),
                                     None => None,
@@ -2686,6 +2765,12 @@ pub async fn execute_pipeline(
                                     &mut verdict_source,
                                     &mut security_hold,
                                 );
+                                // While the hold stands, these are what the next
+                                // round would be asked to fix — the reviewer's
+                                // approval cannot clear it.
+                                if security_hold {
+                                    actionable_findings = issue_signature(&v.findings);
+                                }
                                 security_json = json.clone();
                             }
                             RoleOutput::Planner(_) => unreachable!("planner is handled separately"),
@@ -2697,8 +2782,47 @@ pub async fn execute_pipeline(
                         }
                     }
 
+                    // A round is only worth running if it can act on something.
+                    // Both holds below keep the verdict at `RevisionNeeded`, so
+                    // stopping early reports the same honest outcome as running
+                    // out of rounds — it just stops paying for rounds that
+                    // cannot help, and stops a doomed Coder call from taking
+                    // down a task whose tests already passed.
+                    let mut stop_now = false;
                     if matches!(verdict, Verdict::RevisionNeeded) {
-                        display.revision_requested(round, max_rounds, &[]);
+                        match revision_hold(
+                            last_findings.as_deref(),
+                            actionable_findings.as_deref(),
+                        ) {
+                            RevisionHold::Continue => {
+                                last_findings = actionable_findings.clone();
+                                display.revision_requested(round, max_rounds, &[]);
+                            }
+                            RevisionHold::NoActionableIssues => {
+                                display.agent_warning(
+                                    AgentRole::Reviewer,
+                                    &format!(
+                                        "revision requested with nothing to act on \
+                                         (round {round}/{max_rounds}) — stopping instead of \
+                                         repeating the round"
+                                    ),
+                                );
+                                stop_now = true;
+                            }
+                            RevisionHold::UnchangedIssues => {
+                                display.agent_warning(
+                                    AgentRole::Reviewer,
+                                    &format!(
+                                        "round {round} returned the same findings unchanged \
+                                         — stopping instead of revising again"
+                                    ),
+                                );
+                                stop_now = true;
+                            }
+                        }
+                    }
+                    if stop_now {
+                        break;
                     }
 
                     if has_reviewer {
@@ -3382,7 +3506,9 @@ fn maybe_stage_skill_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifacts::types::Complexity;
+    use crate::artifacts::types::{
+        Complexity, IssueCategory, IssueSeverity, ReviewFeedback, ReviewIssue,
+    };
     use crate::config::NikiConfig;
 
     #[test]
@@ -3662,6 +3788,122 @@ mod tests {
             Some("security-auditor"),
             "the record must still show security as the reason"
         );
+    }
+
+    /// A hold the auditor itself can lift.
+    ///
+    /// The auditor re-reads the revised code every round, so an explicit
+    /// `Approved` means the finding it raised is addressed. The hold used to be
+    /// a latch that nothing could clear: a run that fixed its security finding
+    /// still burned every remaining round and reported `RevisionNeeded` for
+    /// ever, which is a false alarm the user can do nothing about.
+    #[test]
+    fn an_auditor_approval_clears_its_own_hold() {
+        let (mut verdict, mut source) = (Verdict::Approved, None);
+        let mut hold = false;
+
+        apply_security_verdict(Verdict::Rejected, &mut verdict, &mut source, &mut hold);
+        assert!(hold);
+
+        // Round 2: the auditor reads the revision and finds it clean.
+        apply_security_verdict(Verdict::Approved, &mut verdict, &mut source, &mut hold);
+        assert!(!hold, "the auditor must be able to clear its own hold");
+
+        // And the Reviewer's verdict is free to take the gate again — the
+        // reviewer's independence from the auditor is untouched.
+        apply_reviewer_verdict(Verdict::Approved, &mut verdict, &mut source, hold);
+        assert_eq!(verdict, Verdict::Approved);
+        assert_eq!(source.as_deref(), Some("reviewer"));
+    }
+
+    /// An auditor that still wants a revision keeps the hold — only an explicit
+    /// approval lifts it.
+    #[test]
+    fn an_auditors_revision_verdict_does_not_clear_the_hold() {
+        let (mut verdict, mut source) = (Verdict::Approved, None);
+        let mut hold = false;
+        apply_security_verdict(Verdict::Rejected, &mut verdict, &mut source, &mut hold);
+        apply_security_verdict(
+            Verdict::RevisionNeeded,
+            &mut verdict,
+            &mut source,
+            &mut hold,
+        );
+        assert!(hold, "an unresolved security finding must keep the hold");
+        assert_eq!(verdict, Verdict::RevisionNeeded);
+    }
+
+    /// A revision round with nothing to act on is money spent for nothing.
+    ///
+    /// Measured: a 3B Reviewer returned `revision_needed` with zero issues. The
+    /// Coder was handed that, could not act on it, and its next output failed
+    /// to parse — taking down a task whose tests had already passed 5/5.
+    #[test]
+    fn a_revision_with_no_issues_is_not_worth_a_round() {
+        let feedback = ReviewFeedback {
+            critical_issues: vec![],
+            guidance: "looks a bit off".into(),
+            keep_unchanged: vec![],
+            revision_round: 0,
+        };
+        assert_eq!(
+            revision_hold(None, issue_signature(&feedback.critical_issues).as_deref()),
+            RevisionHold::NoActionableIssues
+        );
+    }
+
+    /// No feedback at all is the same case: nothing was said, so nothing can
+    /// be acted on.
+    #[test]
+    fn a_revision_with_no_feedback_is_not_worth_a_round() {
+        assert_eq!(revision_hold(None, None), RevisionHold::NoActionableIssues);
+    }
+
+    /// A round that comes back with the identical critique changed nothing, so
+    /// a second one would not either.
+    #[test]
+    fn an_unchanged_critique_stops_the_loop() {
+        let issues = vec![ReviewIssue {
+            severity: IssueSeverity::Major,
+            category: IssueCategory::Bug,
+            file_path: Some("src/lib.rs".into()),
+            line_range: None,
+            description: "off-by-one".into(),
+            suggested_fix: None,
+        }];
+        let first = issue_signature(&issues).expect("one issue is not empty");
+        assert_eq!(
+            revision_hold(None, Some(first.as_str())),
+            RevisionHold::Continue
+        );
+        assert_eq!(
+            revision_hold(Some(&first), Some(&first)),
+            RevisionHold::UnchangedIssues
+        );
+    }
+
+    /// A genuinely new critique runs the next round.
+    #[test]
+    fn a_changed_critique_continues_the_loop() {
+        let a = issue_signature(&[ReviewIssue {
+            severity: IssueSeverity::Major,
+            category: IssueCategory::Bug,
+            file_path: Some("src/lib.rs".into()),
+            line_range: None,
+            description: "off-by-one".into(),
+            suggested_fix: None,
+        }])
+        .expect("one issue is not empty");
+        let b = issue_signature(&[ReviewIssue {
+            severity: IssueSeverity::Critical,
+            category: IssueCategory::Security,
+            file_path: Some("src/auth.rs".into()),
+            line_range: None,
+            description: "token compared with ==, not constant-time".into(),
+            suggested_fix: None,
+        }])
+        .expect("one issue is not empty");
+        assert_eq!(revision_hold(Some(&a), Some(&b)), RevisionHold::Continue);
     }
 
     #[test]
