@@ -571,3 +571,126 @@ fn the_solo_prompt_also_describes_the_tool_loop() {
         "the fallback path has no tools, so raw JSON is the right instruction there"
     );
 }
+
+/// A patch that validates but will not apply is a fixable mistake.
+///
+/// The artifact was schema-valid and its `search` was not text in the file.
+/// The old behaviour ended the run there — after the plan, the code, and a
+/// Tester pass had already been paid for. Measured on a refactor task.
+///
+/// The guard that refused is right and stays: a Tester must never verify a
+/// tree that does not contain the change, so the round is abandoned rather
+/// than continued. What changes is that the model is told, and asked again.
+#[tokio::test]
+async fn an_unappliable_patch_asks_the_coder_again_instead_of_ending_the_run() {
+    let mut spec: serde_json::Value = serde_json::from_str(&medium_spec_json()).unwrap();
+    spec["estimated_complexity"] = serde_json::json!("high");
+
+    // Round 0: a `search` that exists nowhere in the fixture repo.
+    let unappliable: serde_json::Value = serde_json::from_str(&mock_llm::code_diff_json(
+        "this text is not in the file and never was",
+        "fn total() {}",
+        "src/list.rs",
+    ))
+    .expect("diff json");
+    // Round 1: the fix.
+    let appliable: serde_json::Value = serde_json::from_str(&mock_llm::code_diff_json(
+        "let end = start + size - 1;",
+        "let end = start + size;",
+        "src/list.rs",
+    ))
+    .expect("diff json");
+
+    let builder = MockScriptBuilder::new()
+        .add_response("mock-planner", &wrap_json(&spec.to_string()), 80, 120)
+        .add_tool_call("mock-coder", "submit_artifact", unappliable)
+        .add_tool_call("mock-coder", "submit_artifact", appliable)
+        .add_response(
+            "mock-tester",
+            &wrap_json(&mock_llm::test_report_json()),
+            100,
+            60,
+        )
+        .add_response(
+            "mock-reviewer",
+            &wrap_json(&mock_llm::review_verdict_approved_json()),
+            150,
+            60,
+        );
+
+    let mut harness = TestHarness::new()
+        .with_mock_builder(|_| builder)
+        .with_worktree_backend()
+        .with_mock_provider();
+    harness.config.docker.extra_packages.clear();
+    harness.config.general.max_revision_rounds = 3;
+
+    let res = harness
+        .run_pipeline_result()
+        .await
+        .expect("an unappliable patch is a fixable mistake, not the end of the run");
+
+    assert!(
+        !res.final_diff.is_empty(),
+        "the run must end with a real diff, not a silently empty one"
+    );
+    let coder_calls = res
+        .metrics
+        .iter()
+        .filter(|m| m.role == niki::artifacts::types::AgentRole::Coder)
+        .count();
+    assert_eq!(
+        coder_calls, 2,
+        "the Coder must be asked again, exactly once"
+    );
+    // The Tester must only ever have run against the tree that has the change.
+    let tester_calls = res
+        .metrics
+        .iter()
+        .filter(|m| m.role == niki::artifacts::types::AgentRole::Tester)
+        .count();
+    assert_eq!(
+        tester_calls, 1,
+        "the Tester must not run against a tree the change never reached"
+    );
+}
+
+/// With no rounds left, the same situation is a hard error rather than a
+/// silent empty branch.
+#[tokio::test]
+async fn an_unappliable_patch_with_no_rounds_left_fails_loudly() {
+    let mut spec: serde_json::Value = serde_json::from_str(&medium_spec_json()).unwrap();
+    spec["estimated_complexity"] = serde_json::json!("high");
+
+    let unappliable: serde_json::Value = serde_json::from_str(&mock_llm::code_diff_json(
+        "this text is not in the file and never was",
+        "fn total() {}",
+        "src/list.rs",
+    ))
+    .expect("diff json");
+
+    let builder = MockScriptBuilder::new()
+        .add_response("mock-planner", &wrap_json(&spec.to_string()), 80, 120)
+        .add_tool_call("mock-coder", "submit_artifact", unappliable);
+
+    let mut harness = TestHarness::new()
+        .with_mock_builder(|_| builder)
+        .with_worktree_backend()
+        .with_mock_provider();
+    harness.config.docker.extra_packages.clear();
+    harness.config.general.max_revision_rounds = 1;
+
+    let err = harness
+        .run_pipeline_result()
+        .await
+        .expect_err("with no rounds left there is nothing to retry, and silence would be a lie");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("did not apply"),
+        "the error must say what happened: {msg}"
+    );
+    assert!(
+        msg.contains("no revision rounds left"),
+        "and that there was no second chance: {msg}"
+    );
+}
