@@ -77,14 +77,11 @@ impl LlmProvider for OllamaProvider {
         }
 
         let data: serde_json::Value = resp.json().await?;
-        let content = data["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let content = crate::llm::json_path_str(&data, &["message", "content"]).to_string();
 
         // Ollama provides eval_count and prompt_eval_count
-        let input_tokens = data["prompt_eval_count"].as_u64().unwrap_or(0) as u32;
-        let output_tokens = data["eval_count"].as_u64().unwrap_or(0) as u32;
+        let input_tokens = crate::llm::json_path_u32(&data, &["prompt_eval_count"]);
+        let output_tokens = crate::llm::json_path_u32(&data, &["eval_count"]);
 
         Ok(CompletionResponse {
             content,
