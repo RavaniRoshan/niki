@@ -1019,69 +1019,12 @@ fn run_tui(
                             engine.mark_dirty();
                         }
                     }
-                    // Tab bar click handling (always active)
-                    if clicking && let Some(full) = full {
-                        let tab_area = Rect {
-                            x: 0,
-                            y: full.y,
-                            width: full.width,
-                            height: 1,
-                        };
-                        if mouse.row == tab_area.y {
-                            if let Some(page_id) = super::layout::tab_bar_hit_test(
-                                mouse.column,
-                                tab_area,
-                                &state,
-                                full.width as usize,
-                            ) {
-                                state.view = crate::display::state::ViewMode::Page(page_id);
-                                state.current_page = page_id;
-                                engine.mark_dirty();
-                            }
-                        }
-                    }
-                    // Hover hit-test for tab bar
-                    if hovering && let Some(full) = full {
-                        let tab_area = Rect {
-                            x: 0,
-                            y: full.y,
-                            width: full.width,
-                            height: 1,
-                        };
-                        if mouse.row == tab_area.y {
-                            if let Some(page_id) = super::layout::tab_bar_hit_test(
-                                mouse.column,
-                                tab_area,
-                                &state,
-                                full.width as usize,
-                            ) {
-                                let idx = [
-                                    PageId::Pipeline,
-                                    PageId::Agents,
-                                    PageId::Diff,
-                                    PageId::Verdict,
-                                    PageId::Cost,
-                                    PageId::Artifacts,
-                                ]
-                                .iter()
-                                .position(|p| *p == page_id)
-                                .unwrap_or(0);
-                                let new_target = HoverTarget::TabBar(idx);
-                                if state.hover_target != new_target {
-                                    state.hover_target = new_target;
-                                    state.hover_time = Some(std::time::Instant::now());
-                                    engine.mark_dirty();
-                                }
-                            } else if matches!(state.hover_target, HoverTarget::TabBar(_)) {
-                                state.hover_target = HoverTarget::None;
-                                engine.mark_dirty();
-                            }
-                        } else if matches!(state.hover_target, HoverTarget::TabBar(_)) {
-                            state.hover_target = HoverTarget::None;
-                            engine.mark_dirty();
-                        }
-                    }
-                    // Fleet card click handling
+                    // There is no tab bar. `layout::render_page` was the only
+                    // thing that drew one and it has no callers, so the click
+                    // and hover handlers here were responding to a region with
+                    // no pixels in it: clicking the top row of the screen
+                    // teleported the user to an arbitrary page, and a test
+                    // exercised the hit-test against a bar that is never drawn.
                     if clicking
                         && state.current_page == PageId::Fleet
                         && let Some(full) = full
