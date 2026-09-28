@@ -182,13 +182,34 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: Install the latest release from the published script
+      - name: Install the version the package managers name
+        # This used to install "${TAG:-v0.8.0}". `TAG` is set nowhere in the
+        # workflow, so the fallback always won: the job installed a release from
+        # before last, ran --version on it, and went green. It could not fail,
+        # because the version it tested was not the version anyone installs.
+        #
+        # What a user gets comes from the manifests. So that is what this
+        # installs — read out of scoop/niki.json, which every other manifest is
+        # asserted to agree with (tests/dist_install.rs). If the manifests point
+        # at a release that does not exist, the job says so out loud and says
+        # the install path is therefore untested, rather than quietly passing
+        # against an older version.
+        id: install
         run: |
           set -euo pipefail
+          version="$(python3 -c 'import json;print(json.load(open("scoop/niki.json"))["version"])')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "installed=false" >> "$GITHUB_OUTPUT"
+          if ! gh release view "$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::warning title=install path untested::$version is not released yet, so there is nothing published to install and the one-line installer is NOT being verified against the version this branch will become. Tag and push $version to close this."
+            exit 0
+          fi
           export INSTALL_DIR="$RUNNER_TEMP/niki-bin"
           mkdir -p "$INSTALL_DIR"
-          bash scripts/install.sh --version "${TAG:-v0.8.0}" --install-dir "$INSTALL_DIR"
-      - name: The installed binary must run
+          bash scripts/install.sh --version "$version" --install-dir "$INSTALL_DIR"
+          echo "installed=true" >> "$GITHUB_OUTPUT"
+      - name: The installed binary must run, and be the version we asked for
+        if: steps.install.outputs.installed == 'true'
         run: |
           set -euo pipefail
           "$RUNNER_TEMP/niki-bin/niki" --version

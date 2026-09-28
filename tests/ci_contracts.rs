@@ -9,6 +9,26 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+/// The lines of a job body that are not comments.
+///
+/// Two of these assertions were, at different times, satisfied by the very
+/// comment explaining the bug they guard: one matched `needs: test` in the
+/// comment that says why the job no longer needs it, and one matched the old
+/// `v0.8.0` inside the note explaining that it was removed. A comment is
+/// documentation; a gate that reads documentation is a gate that can be made to
+/// pass by writing prose.
+fn job_body_without_comments(ci: &str, job: &str) -> String {
+    let body = ci
+        .split(&format!("\n  {job}:"))
+        .nth(1)
+        .and_then(|rest| rest.split("\n  # ──").next())
+        .unwrap_or_else(|| panic!("job {job} exists in ci.yml"));
+    body.lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn ci_yml() -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/ci.yml"))
         .expect(".github/workflows/ci.yml")
@@ -134,11 +154,7 @@ fn the_headless_tui_suite_runs_once_per_job() {
 fn jobs_that_consume_no_test_output_do_not_depend_on_it() {
     let ci = ci_yml();
     for job in ["build-matrix", "e2e-mock", "visual", "product-verify"] {
-        let body = ci
-            .split(&format!("\n  {job}:"))
-            .nth(1)
-            .and_then(|rest| rest.split("\n  # ──").next())
-            .unwrap_or_else(|| panic!("job {job} exists in ci.yml"));
+        let body = job_body_without_comments(&ci, job);
 
         // Parse the `needs:` *line*, not the prose. A substring search for
         // "needs: test" matches the job's own comment explaining why it used to
@@ -504,4 +520,42 @@ fn every_script_ci_runs_is_tracked_by_git() {
              runner, and on no developer machine, where the file merely exists on disk."
         );
     }
+}
+
+/// The install job must install the version the package managers name.
+///
+/// It used to install `${TAG:-v0.8.0}`. `TAG` is set nowhere in the workflow,
+/// so the fallback always won: the job installed a release from before last,
+/// ran `--version` on it, and went green. A gate that cannot fail is the exact
+/// failure mode this repo has shipped before, and this one was invisible because
+/// a green job looks identical to a green gate.
+///
+/// A user's binary comes from `scoop/niki.json`, `homebrew/niki.rb` or the
+/// winget manifest, so the job reads the version out of one of those rather than
+/// hardcoding anything. Cross-manifest agreement is `tests/dist_install.rs`.
+#[test]
+fn the_install_job_installs_the_manifest_version() {
+    let ci = ci_yml();
+    let body = job_body_without_comments(&ci, "install");
+
+    assert!(
+        !body.contains("v0.8.0"),
+        "the install job must not hardcode a released version; it would keep passing against a \
+         release from before last while the manifests point somewhere newer"
+    );
+    assert!(
+        !body.contains("${TAG"),
+        "`TAG` is never set in this workflow, so a TAG-with-default fallback is a constant \
+         wearing a variable's name"
+    );
+    assert!(
+        body.contains("scoop/niki.json"),
+        "the install job must read the version from a package manifest, so it tests what a user \
+         actually gets"
+    );
+    assert!(
+        body.contains("::warning"),
+        "when the named version is not released yet, the job must say so loudly rather than \
+         quietly passing — an untested install path reported as green is the failure being fixed"
+    );
 }
