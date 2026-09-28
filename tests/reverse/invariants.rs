@@ -204,6 +204,27 @@ pub fn invariants() -> Vec<Invariant> {
                     .and_then(|m| m.as_array())
                     .map(|a| a.len())
                     .unwrap_or(0);
+                // The strong form, and the one that made the fix necessary: a
+                // bare `verdict: "Approved"` is only legitimate if
+                // `outcome` says an independent stage made it. This is the
+                // check that stops the pipeline ever initialising its way back
+                // to a fabricated pass.
+                if let Some(o) = t.record.as_ref().and_then(|r| r.get("outcome")) {
+                    let outcome = o.get("outcome").and_then(|x| x.as_str()).unwrap_or("");
+                    if outcome == "reviewed"
+                        && let Some(v) = o.get("verdict").and_then(|x| x.as_str())
+                        && v == "approved"
+                    {
+                        let by = o.get("by").and_then(|x| x.as_str()).unwrap_or("");
+                        if by.is_empty() || by == "solo-coder" {
+                            return fail(format!(
+                                "task.json reports outcome=reviewed by \"{by}\" — a self-approval \
+                                 must never be reported as an independent review"
+                            ));
+                        }
+                    }
+                }
+
                 // A verdict must always name its source, so a self-approval
                 // cannot be read as an independent review.
                 match t

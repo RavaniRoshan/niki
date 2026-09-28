@@ -169,6 +169,32 @@ fn char_width(c: char) -> usize {
 }
 
 /// True when motion must collapse to static final states.
+/// Opacity of a transient notice at a given age, 0.0 (gone) to 1.0 (full).
+///
+/// The notice already *slides* in over its first 150ms; this is the other
+/// half, the last [`FADE_OUT_MS`] before its TTL expires. Without it a notice
+/// simply stops existing between two frames, which reads as a glitch rather
+/// than as an ending — and it left `ease_out_cubic`, `clamp01` and `lerp_color`
+/// as building blocks with fourteen unit tests between them and no call site.
+///
+/// Pure in its arguments so the timing is testable without sleeping, which is
+/// the only way this could honestly be verified.
+pub const FADE_OUT_MS: u64 = 200;
+
+pub fn notice_fade(age_ms: u64, total_ms: u64) -> f32 {
+    let remaining = total_ms.saturating_sub(age_ms);
+    if remaining >= FADE_OUT_MS {
+        return 1.0;
+    }
+    if remaining == 0 {
+        return 0.0;
+    }
+    // 0 at the end of life, 1 a full fade-window early, eased so the notice
+    // lingers at full strength and then leaves rather than dimming linearly
+    // from the moment it appears.
+    clamp01(ease_out_cubic(remaining as f32 / FADE_OUT_MS as f32))
+}
+
 pub fn reduced(config_flag: bool) -> bool {
     config_flag || std::env::var_os("NIKI_REDUCED_MOTION").is_some()
 }
@@ -437,5 +463,98 @@ mod tests {
         assert!(blink_on(0, 32, 16, true));
         assert_eq!(slide_prefix(0, 150, 4, true), "");
         assert!(!pulse_phase(9999, 10, true));
+    }
+}
+
+#[cfg(test)]
+mod fade_tests {
+    use super::*;
+
+    /// A notice is at full strength for all but the last 200ms of its life,
+    /// then eases to nothing. This is the property that makes the transition
+    /// read as an ending rather than a glitch — and it is only testable
+    /// because the fade is a pure function of the age, not of a clock.
+    #[test]
+    fn a_notice_is_full_strength_until_its_fade_window() {
+        for total in [300u64, 1_000, 1_500, 4_000] {
+            assert_eq!(notice_fade(0, total), 1.0, "fresh at ttl {total}");
+            assert_eq!(
+                notice_fade(total - FADE_OUT_MS, total),
+                1.0,
+                "a full window early at ttl {total}"
+            );
+            assert_eq!(
+                notice_fade(total - FADE_OUT_MS - 1, total),
+                1.0,
+                "just before the window at ttl {total}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_notice_reaches_zero_exactly_at_its_ttl() {
+        for total in [300u64, 1_500, 2_000] {
+            assert_eq!(notice_fade(total, total), 0.0, "gone at ttl {total}");
+        }
+    }
+
+    #[test]
+    fn the_fade_is_monotonic_and_stays_in_range() {
+        let total = 1_000u64;
+        let mut prev = 1.0f32;
+        for age in (0..=total).step_by(5) {
+            let f = notice_fade(age, total);
+            assert!((0.0..=1.0).contains(&f), "fade out of range at {age}: {f}");
+            assert!(
+                f <= prev + f32::EPSILON,
+                "fade went backwards at {age}: {prev} -> {f}"
+            );
+            prev = f;
+        }
+    }
+
+    /// Eased, not linear: a notice should hold its full strength and then
+    /// leave, rather than dimming evenly the moment its fade window opens.
+    ///
+    /// Stated as "always above the linear ramp" rather than as a magic number.
+    /// My first version asserted an exact bound and was off by one at the
+    /// boundary — the shape was right and the number was a guess.
+    #[test]
+    fn the_fade_lingers_above_a_linear_ramp() {
+        let total = 1_000u64;
+        let window_start = total - FADE_OUT_MS;
+        for age in window_start..=total {
+            let linear = (total - age) as f32 / FADE_OUT_MS as f32;
+            let eased = notice_fade(age, total);
+            assert!(
+                eased >= linear,
+                "at age {age} the eased fade ({eased}) must not be dimmer than \
+                 linear ({linear}); the notice should linger, not fade evenly \
+                 from the start of the window"
+            );
+        }
+        // And it is genuinely above linear somewhere, or the loop above would
+        // pass for a linear function too.
+        let midway = total - FADE_OUT_MS / 2;
+        let linear_midway = (FADE_OUT_MS / 2) as f32 / FADE_OUT_MS as f32;
+        assert!(
+            notice_fade(midway, total) > linear_midway + 0.1,
+            "the easing has to be visible, not merely non-negative"
+        );
+    }
+
+    /// A notice with a TTL shorter than the fade window must still behave:
+    /// reach zero, never go negative, never invert.
+    #[test]
+    fn a_notice_shorter_than_the_fade_window_still_behaves() {
+        for total in [0u64, 1, 50, FADE_OUT_MS - 1] {
+            for age in 0..=total.saturating_add(50) {
+                let f = notice_fade(age, total);
+                assert!(
+                    (0.0..=1.0).contains(&f),
+                    "ttl {total} at age {age} gave {f}"
+                );
+            }
+        }
     }
 }

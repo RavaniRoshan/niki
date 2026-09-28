@@ -125,11 +125,21 @@ pub fn capture(
 }
 
 /// Write `manifest.json` into `task_dir` (created if missing).
+///
+/// Atomic, because `STATE_LAYOUT.md` states that JSON state writes go through
+/// `kb::write_atomic` and this one did not. It mattered: the manifest is read
+/// by the report and by the eval harness, and a plain `fs::write` truncates
+/// before it writes, so a reader arriving mid-write — or a run interrupted
+/// partway — found a half-written manifest that parses as nothing.
+///
+/// This was the only store in the documented set that broke its own stated
+/// convention. The audit I started from claimed fifteen; it was wrong, and
+/// counting rather than assuming is how the real one was found.
 pub fn write_manifest(task_dir: &Path, manifest: &RunManifest) -> Result<()> {
-    std::fs::create_dir_all(task_dir)?;
-    let path = task_dir.join("manifest.json");
-    std::fs::write(path, serde_json::to_string_pretty(manifest)?)?;
-    Ok(())
+    crate::knowledge::kb::write_atomic(
+        &task_dir.join("manifest.json"),
+        serde_json::to_string_pretty(manifest)?.as_bytes(),
+    )
 }
 
 /// Load the manifest previously written by [`write_manifest`].

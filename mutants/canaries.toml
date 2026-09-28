@@ -158,3 +158,51 @@ does not still completes. Nothing in the suite can distinguish 20ms from
 200ms here, and a "kill" would be a false positive. Kept so the denominator
 reflects a real blind spot instead of being quietly reduced.
 """
+
+# ── Interface: painting and hit-testing must agree ──────────────────────────
+#
+# Every entry below is a defect that actually existed in this repository and
+# shipped, found by looking at what the code did rather than at what it said.
+# Each is the same mistake: the painter and the hit-test computed one piece of
+# geometry separately, and they disagreed. That class is invisible to a test
+# that exercises only one side, which is why each has a test that drives the
+# side that was wrong.
+
+[[canary]]
+id = "IF-1-status-bar-click-guarded-by-hover"
+file = "src/display/tui.rs"
+patch = "    if (hovering || clicking)"
+replace_with = "    if hovering"
+category = "interface-hit-test"
+invariant = "INV-HIT-TEST: an affordance that is drawn is reachable by the input that activates it"
+probe = "--lib clicking_the_permission_badge"
+scope = "unit"
+expect_kill = true
+split = "holdout"
+origin = "the status bar's click handler was nested inside `if hovering`, and hovering (Moved/Drag) and clicking (Down) are mutually exclusive — so the permission badge highlighted on hover and did nothing when clicked, while the UI told the user to click it"
+
+[[canary]]
+id = "IF-2-composer-measured-at-fixed-height"
+file = "src/display/layout/mod.rs"
+patch = "    let input_h = (input_lines + 2).min(max_input).max(3) as u16;"
+replace_with = "    let input_h = 3u16; let _ = (input_lines, max_input);"
+category = "interface-hit-test"
+invariant = "INV-MEASURED-CELL: a cell's height is measured from its own output, never declared alongside it"
+probe = "--lib composer"
+scope = "unit"
+expect_kill = true
+split = "holdout"
+origin = "the composer grows with a multi-line draft while the click handler assumed a fixed three rows, so after one Shift+Enter every click in the lower third of the panel resolved against a band that was no longer where the composer was drawn"
+
+[[canary]]
+id = "IF-3-header-band-hardcoded-eight"
+file = "src/display/tui.rs"
+patch = "    let header_height = super::logo::preferred_logo_height(size.width, size.height);"
+replace_with = "    let header_height = 8;"
+category = "interface-hit-test"
+invariant = "INV-MEASURED-CELL: painting and hit-testing resolve against the same geometry"
+probe = "--lib band_layout"
+scope = "unit"
+expect_kill = true
+split = "holdout"
+origin = "the mouse path solved its own layout with a hardcoded 8-row header while the renderer asked preferred_logo_height, which returns 0 on a short terminal and 1 on a narrow one — so scrolling and the scrollbar were wrong on every terminal that was not large"

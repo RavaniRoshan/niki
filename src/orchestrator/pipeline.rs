@@ -1,10 +1,11 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 
+use crate::artifacts::types::RunOutcome;
 use crate::artifacts::types::{
     AgentRole, CodeDiff, CriticDisposition, Critique, IsolationRecord, RedChallenge, ReviewVerdict,
     SecurityVerdict, Synthesis, TaskSpec, TestReport, Verdict,
@@ -50,9 +51,13 @@ pub struct PipelineResult {
     pub task_id: Uuid,
     pub state: super::state::PipelineState,
     pub final_diff: String,
+    /// The decision, and whether anything actually made it.
+    ///
+    /// `verdict` is derived from `outcome`; it can no longer be a value
+    /// nothing assigned. `verdict_source` is the human-readable form of the
+    /// same fact, kept for display and for the report.
+    pub outcome: RunOutcome,
     pub verdict: Verdict,
-    /// Who produced `verdict` — `reviewer`, `security-auditor`, or the Solo
-    /// fast path's self-approval. `None` on the early-return path.
     pub verdict_source: Option<String>,
     pub revision_rounds: u32,
     /// Raw JSON artifacts produced by each agent, in execution order.
@@ -102,7 +107,9 @@ pub enum RoleOutput {
 /// The ordered stages to run, honoring a user-defined `[pipeline]` topology when
 /// present, otherwise the classic Planner → Coder → Tester → Reviewer wiring.
 /// When `[security] enabled = true`, an independent `SecurityAuditor` stage is
-/// appended after the Reviewer (#4).
+/// injected ahead of the Reviewer (#4). Ahead, not after: an auditor whose
+/// findings arrive once the reviewing agent has already finished are a check
+/// that cannot influence the thing it checked.
 pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
     let mut stages = if !config.pipeline.stages.is_empty() {
         config.pipeline.stages.clone()
@@ -132,7 +139,7 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
         let (provider, model) = security_stage_target(config);
         if !stages.iter().any(|s| s.role == AgentRole::SecurityAuditor) {
             let agent = &config.agents.security_auditor;
-            stages.push(PipelineStageConfig {
+            let stage = PipelineStageConfig {
                 role: AgentRole::SecurityAuditor,
                 provider: if provider.is_empty() {
                     agent.provider.clone()
@@ -148,7 +155,15 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
                 max_tokens: agent.effective_max_tokens(),
                 temperature: agent.effective_temperature(),
                 fallbacks: agent.fallbacks.clone(),
-            });
+            };
+            // Ahead of the Reviewer, not after it. An auditor whose findings
+            // arrive after the reviewing agent has finished are a footnote the
+            // Reviewer never reads — the check happens, and the checking
+            // cannot influence the thing it checked.
+            match stages.iter().position(|s| s.role == AgentRole::Reviewer) {
+                Some(pos) => stages.insert(pos, stage),
+                None => stages.push(stage),
+            }
         }
     }
 
@@ -278,7 +293,7 @@ pub fn apply_risk_stages(
     {
         let (provider, model) = security_stage_target(config);
         let agent = &config.agents.security_auditor;
-        out.push(PipelineStageConfig {
+        let stage = PipelineStageConfig {
             role: AgentRole::SecurityAuditor,
             provider,
             model,
@@ -286,7 +301,13 @@ pub fn apply_risk_stages(
             max_tokens: agent.effective_max_tokens(),
             temperature: agent.effective_temperature(),
             fallbacks: agent.fallbacks.clone(),
-        });
+        };
+        // Ahead of the Reviewer, for the same reason as in `resolve_stages`:
+        // a risk-injected auditor that runs last is a check nothing reads.
+        match out.iter().position(|s| s.role == AgentRole::Reviewer) {
+            Some(pos) => out.insert(pos, stage),
+            None => out.push(stage),
+        }
     }
     if config.critic.enabled && !out.iter().any(|s| s.role == AgentRole::Critic) {
         let (provider, model) = critic_stage_target(config, &out);
@@ -374,7 +395,7 @@ fn red_evidence_json(coder_json: &str) -> String {
 /// one exception: Red receives an evidence-only projection of the Coder diff
 /// (see [`red_evidence_json`]). Withholding rationale everywhere remains a
 /// follow-up; the record below describes wiring truthfully, not aspiration.
-fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
+fn isolation_sources_for(role: AgentRole, with_red: bool, with_security: bool) -> Vec<AgentRole> {
     use AgentRole::*;
     match role {
         Planner => vec![],
@@ -386,12 +407,20 @@ fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
             if with_red {
                 v.push(Red);
             }
+            // The auditor runs first and its verdict is a Reviewer input, so
+            // the record has to name it. Understating the wiring here would
+            // make the isolation table a worse description of the run than the
+            // run itself.
+            if with_security {
+                v.push(SecurityAuditor);
+            }
             v
         }
         Synthesizer => vec![Planner, Coder],
         // The auditor's prompt is rendered with spec + coder diff only — it
         // never receives Tester/Reviewer/Red artifacts, so the record says so
-        // even though that narrowness is itself a follow-up decision.
+        // even though that narrowness is itself a follow-up decision. It
+        // runs *before* the Reviewer, so it never sees one.
         SecurityAuditor => vec![Planner, Coder],
         // The critic checks the Reviewer's verdict against the same evidence
         // the Reviewer saw (plus Red, when that pass ran).
@@ -400,9 +429,57 @@ fn isolation_sources_for(role: AgentRole, with_red: bool) -> Vec<AgentRole> {
             if with_red {
                 v.push(Red);
             }
+            if with_security {
+                v.push(SecurityAuditor);
+            }
             v
         }
     }
+}
+
+/// Fold a SecurityAuditor verdict into the run's verdict.
+///
+/// Only an explicit `Rejected` acts. `Approved` and `RevisionNeeded` from the
+/// auditor are advisory — the Reviewer owns the ordinary quality gate — but a
+/// security rejection is not a matter of taste: it forces the run to revise and
+/// names the security auditor as the source, so the record shows the run was
+/// stopped by security rather than by style.
+///
+/// It used to apply only when there was *no* reviewer, on the theory that the
+/// Reviewer owns the gate. In the normal configuration a Reviewer is always
+/// present, so a SecurityAuditor `Rejected` was computed, recorded as an
+/// artifact, displayed in the report — and had no effect on the run.
+fn apply_security_verdict(
+    security_verdict: Verdict,
+    verdict: &mut Verdict,
+    verdict_source: &mut Option<String>,
+    security_hold: &mut bool,
+) {
+    if matches!(security_verdict, Verdict::Rejected) {
+        *security_hold = true;
+        *verdict = Verdict::RevisionNeeded;
+        *verdict_source = Some("security-auditor".to_string());
+    }
+}
+
+/// Record a Reviewer's verdict without letting it clear a security hold.
+///
+/// The SecurityAuditor runs first so the Reviewer can reconcile its findings,
+/// which means a well-behaved Reviewer withholds approval on its own. This is
+/// the backstop for the case where it does not: a plain `Approved` must not
+/// quietly overturn a security rejection that the auditor already raised.
+fn apply_reviewer_verdict(
+    reviewer_verdict: Verdict,
+    verdict: &mut Verdict,
+    verdict_source: &mut Option<String>,
+    security_hold: bool,
+) {
+    if security_hold {
+        // Leave the verdict and the source where security put them.
+        return;
+    }
+    *verdict = reviewer_verdict;
+    *verdict_source = Some("reviewer".to_string());
 }
 
 /// Fire one lifecycle hook, failing the run closed on Block.
@@ -516,16 +593,17 @@ pub fn topology_reason(spec: &TaskSpec, config: &NikiConfig) -> String {
 /// (if present) SecurityAuditor/Synthesizer stages are collapsed into the one
 /// solo Coder session, which is the whole point of the fast-path: it avoids the
 /// multi-agent token tax of re-ingesting shared context in every session.
-pub fn body_stages_for(
+pub fn body_stages_for<'a>(
     topology: TopologyMode,
-    stages: Vec<PipelineStageConfig>,
-) -> Vec<PipelineStageConfig> {
+    stages: &[&'a PipelineStageConfig],
+) -> Vec<&'a PipelineStageConfig> {
     match topology {
         TopologyMode::SingleAgent => stages
-            .into_iter()
+            .iter()
             .filter(|s| s.role == AgentRole::Coder)
+            .copied()
             .collect(),
-        TopologyMode::MultiAgent | TopologyMode::Auto => stages,
+        TopologyMode::MultiAgent | TopologyMode::Auto => stages.to_vec(),
     }
 }
 
@@ -700,6 +778,7 @@ async fn run_parallel_coders(
                 "",
                 "",
                 "",
+                "",
                 0,
                 &knowledge,
                 &project_path,
@@ -721,13 +800,21 @@ async fn run_parallel_coders(
                 RoleOutput::Coder(d) => d,
                 _ => unreachable!("coder stage yields a CodeDiff"),
             };
-            // Apply to this coder's own worktree so `get_diff` reflects only its change.
-            if let Err(e) = sandbox
+            // Apply to this coder's own worktree so `get_diff` reflects only its
+            // change. A failed apply leaves the worktree holding nothing this
+            // coder produced, so the diff read below would return the tree
+            // unchanged and the synthesiser would merge an empty contribution
+            // as if it were real work.
+            sandbox
                 .apply_patch(&code_diff_to_edit_text(&diff), &project_path)
                 .await
-            {
-                eprintln!("Warning: coder worktree patch failed: {}", e);
-            }
+                .with_context(|| {
+                    format!(
+                        "a parallel Coder's patch did not apply to its own worktree \
+                         ({project_path:?}); its change was never written, so the run \
+                         is stopped rather than merging a diff that does not exist"
+                    )
+                })?;
             let _wt_diff = sandbox
                 .get_diff(
                     &diff
@@ -934,6 +1021,7 @@ async fn run_role(
     tester_json: &str,
     red_json: &str,
     reviewer_json: &str,
+    security_json: &str,
     round: u32,
     knowledge_str: &str,
     project_path: &Path,
@@ -985,6 +1073,11 @@ async fn run_role(
             // challenge. We append the Red artifact as a 4th input so the
             // Reviewer is forced to engage with the adversarial critique instead
             // of ratifying the Coder (guards sycophantic convergence, #1.2).
+            //
+            // The SecurityAuditor's findings go in the same way, and for the
+            // same reason: an independent check that a reviewing agent cannot
+            // see is not a check. The auditor runs first precisely so this is
+            // populated by the time the Reviewer is called.
             let mut artifacts = vec![
                 task_spec_json.clone(),
                 coder_json.to_string(),
@@ -1006,6 +1099,13 @@ async fn run_role(
             });
             context! {
                 input_artifacts => artifacts,
+                // Red and Security ride as named optional artifacts, not as
+                // positional entries. Appending to `input_artifacts` made the
+                // prompt's `input_artifacts[3]` mean "Red" only when Red ran
+                // and nothing else did — so a fourth artifact silently
+                // re-pointed the template at the wrong JSON.
+                red_artifact => red_json.to_string(),
+                security_artifact => security_json.to_string(),
                 project_knowledge => knowledge_str.to_string(),
                 project_memory => memory_str,
                 diff_guardrail_hint => diff_guardrail_hint.clone(),
@@ -1052,6 +1152,8 @@ async fn run_role(
             }
             context! {
                 input_artifacts => artifacts,
+                red_artifact => red_json.to_string(),
+                security_artifact => security_json.to_string(),
                 project_knowledge => knowledge_str.to_string(),
                 project_memory => memory_str,
                 mcp_tools => mcp_tools.to_string(),
@@ -1135,6 +1237,7 @@ async fn run_bookkept_stage(
     tester_json: &str,
     red_json: &str,
     reviewer_json: &str,
+    security_json: &str,
     round: u32,
     knowledge_str: &str,
     project_path: &Path,
@@ -1151,6 +1254,12 @@ async fn run_bookkept_stage(
     task_dir: &Path,
     state: &mut super::state::PipelineState,
     bare: bool,
+    // Whether this run actually has a SecurityAuditor stage. Taken from the
+    // resolved stage list rather than `config.security.enabled` because a
+    // High/Security-risk task gets one injected whether or not the config
+    // asked for it — the isolation record has to reflect the run, not the
+    // request.
+    security_enabled: bool,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<(String, RoleOutput)> {
     let (json, summary, output) = run_role(
@@ -1163,6 +1272,7 @@ async fn run_bookkept_stage(
         tester_json,
         red_json,
         reviewer_json,
+        security_json,
         round,
         knowledge_str,
         project_path,
@@ -1183,18 +1293,32 @@ async fn run_bookkept_stage(
     isolation.push(IsolationRecord {
         role: stage.role,
         backend: config.docker.backend,
-        context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
+        context_sources: isolation_sources_for(
+            stage.role,
+            config.red_blue.enabled,
+            security_enabled,
+        ),
         saw_other_reasoning: false,
     });
-    let m = metrics
+    // Copy the values out: `metrics` is about to be borrowed mutably below,
+    // and the old code held a reference to its last element across that call.
+    // An empty metrics list was an `unreachable!` panic; it is now a zero-cost
+    // stage, which is the honest reading.
+    let (usage, cost) = metrics
         .last()
-        .unwrap_or_else(|| unreachable!("metrics always has at least one entry after push"));
-    display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
-    display.update_pipeline_status();
-    enforce_spend_cap(config.general.spend_cap_usd, metrics)?;
-    state.accrue_budget(metrics)?;
-    update_context_budget(metrics, state, project_path, task_dir, config);
-    save_task_record(task, metrics, TaskStatus::Running, task_dir, round);
+        .map(|m| (m.usage(), m.cost_usd))
+        .unwrap_or((crate::llm::provider::TokenUsage::default(), 0.0));
+    display.agent_done(stage.role, summary, usage, cost);
+    finish_stage(
+        display,
+        metrics,
+        state,
+        config,
+        task,
+        task_dir,
+        project_path,
+        round,
+    )?;
     Ok((json, output))
 }
 
@@ -1243,7 +1367,7 @@ fn update_context_budget(
     project_path: &Path,
     task_dir: &Path,
     config: &NikiConfig,
-) {
+) -> Result<()> {
     let total: u32 = metrics.iter().map(|m| m.total_tokens()).sum();
     state.context_budget.used = total;
     let past_threshold = state.context_budget.needs_session_switch();
@@ -1278,12 +1402,16 @@ fn update_context_budget(
                 "compacted": true,
                 "dropped_sections": dropped,
             });
-            let _ = std::fs::create_dir_all(task_dir);
-            let _ = std::fs::write(
-                task_dir.join("context.json"),
-                serde_json::to_string_pretty(&ctx_json).unwrap_or_default(),
-            );
-            return;
+            return crate::knowledge::kb::write_atomic(
+                &task_dir.join("context.json"),
+                serde_json::to_string_pretty(&ctx_json)?.as_bytes(),
+            )
+            .with_context(|| {
+                format!(
+                    "could not write the context snapshot to {}",
+                    task_dir.join("context.json").display()
+                )
+            });
         }
         eprintln!(
             "Warning: context budget past threshold ({:.1}% of {} tokens) with compaction off — continuing without compression.",
@@ -1305,26 +1433,96 @@ fn update_context_budget(
         "needs_session_switch": past_threshold,
         "compacted": false,
     });
-    let _ = std::fs::create_dir_all(task_dir);
-    let _ = std::fs::write(
-        task_dir.join("context.json"),
-        serde_json::to_string_pretty(&ctx_json).unwrap_or_default(),
-    );
+    // Was two discarded `let _ =`s. `context.json` is what a run's context
+    // pressure story is reconstructed from, and a silent write failure left a
+    // stale or absent file that reads as "this run never used much context".
+    // Atomic, and propagated.
+    crate::knowledge::kb::write_atomic(
+        &task_dir.join("context.json"),
+        serde_json::to_string_pretty(&ctx_json)?.as_bytes(),
+    )
+    .with_context(|| {
+        format!(
+            "could not write the context snapshot to {}",
+            task_dir.join("context.json").display()
+        )
+    })
+}
+
+/// The bookkeeping every finished stage owes the run, in one place.
+///
+/// Seven call sites spelled this out separately, in two different orders, and
+/// two of them — the Planner's and the Synthesizer's — had dropped
+/// `enforce_spend_cap` entirely. Those paths did not bypass the cap; they
+/// enforced it one stage late, so a run could overshoot by the cost of a whole
+/// stage before anything noticed. "What counts as complete for a stage" also
+/// had as many answers as there were call sites, which is how cost and usage
+/// drift out of agreement with what actually ran.
+///
+/// `round` is the revision round to record; stages that run outside a loop
+/// pass 0.
+#[allow(clippy::too_many_arguments)]
+fn finish_stage(
+    display: &mut crate::display::agent_stream::AgenticDisplay,
+    metrics: &mut Vec<StageMetric>,
+    state: &mut super::state::PipelineState,
+    config: &NikiConfig,
+    task: &Task,
+    task_dir: &Path,
+    project_path: &Path,
+    round: u32,
+) -> Result<()> {
+    display.update_pipeline_status();
+    enforce_spend_cap(config.general.spend_cap_usd, metrics)?;
+    state.accrue_budget(metrics)?;
+    update_context_budget(metrics, state, project_path, task_dir, config)?;
+    save_task_record(task, metrics, TaskStatus::Running, task_dir, round)?;
+    Ok(())
+}
+
+/// Record one stage's isolation provenance.
+///
+/// Part of the same duplication: every stage site rebuilt the identical
+/// record, so the table in the report was assembled by copy-paste and a
+/// stage that forgot it would silently drop out of the isolation proof.
+fn record_isolation(
+    isolation: &mut Vec<IsolationRecord>,
+    role: AgentRole,
+    config: &NikiConfig,
+    security_enabled: bool,
+) {
+    isolation.push(IsolationRecord {
+        role,
+        backend: config.docker.backend,
+        context_sources: isolation_sources_for(role, config.red_blue.enabled, security_enabled),
+        saw_other_reasoning: false,
+    });
 }
 
 /// T8: Save an incremental TaskRecord snapshot to disk.
+///
+/// Fail-closed. This used to discard the write error (`let _ = ...`), so a run
+/// whose state could not be persisted carried on to completion and reported
+/// success — leaving the user a branch with no record of what produced it, no
+/// cost accounting, and nothing to resume from. Every caller now propagates.
 fn save_task_record(
     task: &Task,
     metrics: &[StageMetric],
     status: TaskStatus,
     task_dir: &Path,
     round: u32,
-) {
+) -> Result<()> {
     let mut rec = TaskRecord::new(task.id, &task.description);
     rec.status = status;
     rec.revision_rounds = round;
     rec.add_metrics(metrics);
-    let _ = rec.save_to_disk(task_dir);
+    rec.save_to_disk(task_dir).with_context(|| {
+        format!(
+            "could not persist the run record to {} — stopping rather than \
+             completing a run whose state cannot be read back",
+            task_dir.join("task.json").display()
+        )
+    })
 }
 
 /// Project memory for prompt injection: ambient history, present by default,
@@ -1457,7 +1655,7 @@ pub async fn execute_pipeline(
 
     // T8: Save an early TaskRecord (Running) so a crash mid-pipeline still
     // leaves a status file on disk.
-    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0)?;
 
     let mut artifacts: Vec<(AgentRole, String)> = Vec::new();
     // Per-agent context-isolation records (BUILD_PLAN 2.1). Populated as each
@@ -1625,7 +1823,11 @@ pub async fn execute_pipeline(
     isolation.push(IsolationRecord {
         role: AgentRole::Planner,
         backend: config.docker.backend,
-        context_sources: isolation_sources_for(AgentRole::Planner, config.red_blue.enabled),
+        // The Planner is the entry point and sees nothing, so its isolation
+        // record is empty regardless; `security_enabled` is not yet computed
+        // this early, and passing a value the arm ignores would only invite
+        // someone to start believing it.
+        context_sources: isolation_sources_for(AgentRole::Planner, config.red_blue.enabled, false),
         saw_other_reasoning: false,
     });
     // Approved-plan runs skip the Planner LLM call, so no metric exists for
@@ -1658,11 +1860,16 @@ pub async fn execute_pipeline(
             agent_hook_payload(AgentRole::Planner, &task.id, 0),
         )?;
     }
-    display.update_pipeline_status();
-
-    // T7+T8: Update context budget and save incremental task record after Planner.
-    update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
-    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+    finish_stage(
+        display,
+        &mut metrics,
+        &mut state,
+        config,
+        task,
+        task_dir,
+        &task.project_path,
+        0,
+    )?;
 
     // Decide the agent topology from the task shape (BUILD_PLAN 3.2, P2.2).
     // The Planner has already derived `estimated_complexity`, so we can pick
@@ -1673,6 +1880,10 @@ pub async fn execute_pipeline(
     // away). Explicit `[pipeline].stages` topologies are never rewritten.
     let task_risk = crate::risk::classify(&task_spec, config);
     let stages = apply_risk_stages(stages, &task_risk, config);
+    // Whether a SecurityAuditor is actually part of *this* run. A High/Security
+    // risk tier injects one even when `[security] enabled` is false, so this
+    // is read off the resolved stage list rather than the config flag.
+    let security_enabled = stages.iter().any(|s| s.role == AgentRole::SecurityAuditor);
     let mut topology = select_topology(&task_spec, config);
     let mut topology_reason = topology_reason(&task_spec, config);
     if force_multiagent_for_high_risk(topology, config.pipeline.topology, task_risk.level)
@@ -1742,6 +1953,9 @@ pub async fn execute_pipeline(
             state,
             final_diff: String::new(),
             diff_guardwarn: None,
+            outcome: RunOutcome::NotEvaluated {
+                reason: "plan-only early return: the pipeline did not run".into(),
+            },
             verdict: Verdict::Approved,
             // Nothing was reviewed on this early-return path either.
             verdict_source: Some("planner-only (no review performed)".to_string()),
@@ -1759,12 +1973,23 @@ pub async fn execute_pipeline(
     }
 
     // T10: Create a checkpoint after the Planner stage so /undo and /rewind can restore.
+    // Both of these used to be discarded. A session directory that cannot be
+    // created, or a checkpoint that cannot be written, means `/undo` and
+    // `/rewind` silently do not work for the rest of the run — the user
+    // discovers it only when they reach for the undo they were promised.
     let session_mgr = crate::session::SessionManager::new(&task.project_path);
-    let _ = session_mgr.init();
-    let _ = session_mgr.create_checkpoint(
-        "after_planner",
-        crate::session::current_git_commit(&task.project_path),
-    );
+    session_mgr.init().with_context(|| {
+        format!(
+            "could not initialise sessions under {}",
+            task.project_path.display()
+        )
+    })?;
+    session_mgr
+        .create_checkpoint(
+            "after_planner",
+            crate::session::current_git_commit(&task.project_path),
+        )
+        .context("could not write the after_planner checkpoint; /undo and /rewind would not work for this run")?;
 
     // 2. Initialize Sandbox (backend chosen by config: docker / worktree)
     // `containers` is an Arc and is cloned here so the parallel-coder path below
@@ -1791,10 +2016,16 @@ pub async fn execute_pipeline(
     sandbox.ensure_tools(&required).await?;
 
     // --- Body stages (everything after the Planner), in configured order ---
-    let body_stages: Vec<&PipelineStageConfig> = stages
+    // The topology collapse goes through `body_stages_for` so the rule has one
+    // mechanism. It used to be open-coded as "everything but the Planner",
+    // which meant the SingleAgent collapse was satisfied only because that arm
+    // happens to look up the Coder by hand — change the arm to iterate the list
+    // and the full chain would run while the unit test still passed.
+    let all_body: Vec<&PipelineStageConfig> = stages
         .iter()
         .filter(|s| s.role != AgentRole::Planner && !s.skip)
         .collect();
+    let body_stages: Vec<&PipelineStageConfig> = body_stages_for(topology, &all_body);
 
     // Build one provider client per distinct provider+fallbacks combination.
     // Stored as `Arc` so the parallel-coder path can move a clone into a
@@ -1802,13 +2033,7 @@ pub async fn execute_pipeline(
     let mut provider_cache: HashMap<String, Arc<dyn LlmProvider>> = HashMap::new();
     for s in &body_stages {
         // Cache key includes fallbacks so different failover chains don't collide.
-        let cache_key = if s.fallbacks.is_empty() {
-            s.provider.clone()
-        } else {
-            let mut parts = vec![s.provider.clone()];
-            parts.extend(s.fallbacks.iter().cloned());
-            parts.join(":")
-        };
+        let cache_key = provider_cache_key(s);
         if let std::collections::hash_map::Entry::Vacant(e) = provider_cache.entry(cache_key) {
             let llm = provider_for(&s.provider, &s.fallbacks, config)?;
             e.insert(Arc::from(llm));
@@ -1826,6 +2051,14 @@ pub async fn execute_pipeline(
     let mut red_json = String::new();
     // Latest Reviewer verdict JSON, fed to the post-loop Critic pass.
     let mut reviewer_json = String::new();
+    // Latest SecurityAuditor verdict JSON. The auditor runs *before* the
+    // Reviewer so its findings are something the Reviewer can reconcile
+    // rather than a footnote it never sees.
+    let mut security_json = String::new();
+    // Set by a SecurityAuditor `Rejected`. While it is set, no Reviewer
+    // approval can end the run — the auditor's rejection stands until the work
+    // is actually revised.
+    let mut security_hold = false;
     // Revision feedback is intentionally latest-round-only: each Reviewer
     // verdict OVERWRITES (never appends), so a retrying Coder sees the
     // current critique, not an accumulation of stale guidance. Full history
@@ -1846,13 +2079,7 @@ pub async fn execute_pipeline(
                     .iter()
                     .find(|s| s.role == AgentRole::Coder)
                     .expect("parallel mode requires a Coder stage");
-                let coder_cache_key = if coder_stage.fallbacks.is_empty() {
-                    coder_stage.provider.clone()
-                } else {
-                    let mut parts = vec![coder_stage.provider.clone()];
-                    parts.extend(coder_stage.fallbacks.iter().cloned());
-                    parts.join(":")
-                };
+                let coder_cache_key = provider_cache_key(coder_stage);
                 let per_coder = run_parallel_coders(
                     config.parallel.coder_count,
                     provider_cache
@@ -1895,6 +2122,7 @@ pub async fn execute_pipeline(
                     context_sources: isolation_sources_for(
                         AgentRole::Coder,
                         config.red_blue.enabled,
+                        security_enabled,
                     ),
                     saw_other_reasoning: false,
                 });
@@ -1905,13 +2133,7 @@ pub async fn execute_pipeline(
                     .iter()
                     .find(|s| s.role == AgentRole::Synthesizer)
                     .expect("parallel mode requires a Synthesizer stage");
-                let synth_cache_key = if synth_stage.fallbacks.is_empty() {
-                    synth_stage.provider.clone()
-                } else {
-                    let mut parts = vec![synth_stage.provider.clone()];
-                    parts.extend(synth_stage.fallbacks.iter().cloned());
-                    parts.join(":")
-                };
+                let synth_cache_key = provider_cache_key(synth_stage);
                 let synth_llm = provider_cache.get(&synth_cache_key).ok_or_else(|| {
                     anyhow::anyhow!("Provider '{}' not found in cache", synth_stage.provider)
                 })?;
@@ -1923,6 +2145,7 @@ pub async fn execute_pipeline(
                     &synth_stage.provider,
                     &task_spec,
                     &coder_json_in,
+                    "",
                     "",
                     "",
                     "",
@@ -1943,35 +2166,40 @@ pub async fn execute_pipeline(
                 )
                 .await?;
                 artifacts.push((AgentRole::Synthesizer, json.clone()));
-                isolation.push(IsolationRecord {
-                    role: AgentRole::Synthesizer,
-                    backend: config.docker.backend,
-                    context_sources: isolation_sources_for(
-                        AgentRole::Synthesizer,
-                        config.red_blue.enabled,
-                    ),
-                    saw_other_reasoning: false,
-                });
+                record_isolation(
+                    &mut isolation,
+                    AgentRole::Synthesizer,
+                    config,
+                    security_enabled,
+                );
                 let m = metrics.last().unwrap_or_else(|| {
                     unreachable!("metrics always has at least one entry after push")
                 });
                 display.agent_done(AgentRole::Synthesizer, summary, m.usage(), m.cost_usd);
-                display.update_pipeline_status();
-
-                update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
-                save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+                finish_stage(
+                    display,
+                    &mut metrics,
+                    &mut state,
+                    config,
+                    task,
+                    task_dir,
+                    &task.project_path,
+                    0,
+                )?;
 
                 let merged = match role_output {
                     RoleOutput::Synthesizer(s) => s.merged,
                     _ => unreachable!("synthesizer stage yields a Synthesis"),
                 };
                 coder_json = serde_json::to_string_pretty(&merged)?;
-                if let Err(e) = sandbox
+                // The Tester runs against this tree. If the merged patch never
+                // lands, the Tester verifies a tree that does not contain the
+                // change, and a Reviewer then judges a verdict about code that
+                // was never written.
+                sandbox
                     .apply_patch(&code_diff_to_edit_text(&merged), &task.project_path)
                     .await
-                {
-                    eprintln!("Warning: Failed to apply synthesis patch: {}", e);
-                }
+                    .context("the Synthesizer's merged patch did not apply")?;
 
                 // 3) Run the remaining stages (Tester / Red / Reviewer / SecurityAuditor)
                 //    exactly once. In parallel mode the coders don't re-run on revision
@@ -1982,13 +2210,14 @@ pub async fn execute_pipeline(
                         && s.role != AgentRole::Synthesizer
                         && s.role != AgentRole::Critic
                 }) {
-                    let cache_key = if stage.fallbacks.is_empty() {
-                        stage.provider.clone()
-                    } else {
-                        let mut parts = vec![stage.provider.clone()];
-                        parts.extend(stage.fallbacks.iter().cloned());
-                        parts.join(":")
-                    };
+                    // Same per-stage check as the sequential loop: this branch
+                    // has no outer revision loop to fall back on, so without it
+                    // the flag is never read at all.
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, 0)?;
+                        return Err(crate::NikiError::Cancelled.into());
+                    }
+                    let cache_key = provider_cache_key(stage);
                     let llm = provider_cache.get(&cache_key).ok_or_else(|| {
                         anyhow::anyhow!("Provider '{}' not found in cache", stage.provider)
                     })?;
@@ -2002,6 +2231,7 @@ pub async fn execute_pipeline(
                         &tester_json,
                         &red_json,
                         &reviewer_json,
+                        &security_json,
                         0,
                         &knowledge_str,
                         &task.project_path,
@@ -2022,25 +2252,27 @@ pub async fn execute_pipeline(
                     isolation.push(IsolationRecord {
                         role: stage.role,
                         backend: config.docker.backend,
-                        context_sources: isolation_sources_for(stage.role, config.red_blue.enabled),
+                        context_sources: isolation_sources_for(
+                            stage.role,
+                            config.red_blue.enabled,
+                            security_enabled,
+                        ),
                         saw_other_reasoning: false,
                     });
                     let m = metrics.last().unwrap_or_else(|| {
                         unreachable!("metrics always has at least one entry after push")
                     });
                     display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
-                    display.update_pipeline_status();
-                    enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
-                    state.accrue_budget(&metrics)?;
-
-                    update_context_budget(
-                        &metrics,
+                    finish_stage(
+                        display,
+                        &mut metrics,
                         &mut state,
-                        &task.project_path,
-                        task_dir,
                         config,
-                    );
-                    save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+                        task,
+                        task_dir,
+                        &task.project_path,
+                        0,
+                    )?;
 
                     match role_output {
                         RoleOutput::Tester(_) => {
@@ -2052,11 +2284,23 @@ pub async fn execute_pipeline(
                             red_json = json;
                         }
                         RoleOutput::Reviewer(v) => {
-                            verdict = v.verdict;
-                            verdict_source = Some("reviewer".to_string());
+                            apply_reviewer_verdict(
+                                v.verdict,
+                                &mut verdict,
+                                &mut verdict_source,
+                                security_hold,
+                            );
                             reviewer_json = json;
                         }
-                        RoleOutput::SecurityAuditor(_) => {}
+                        RoleOutput::SecurityAuditor(v) => {
+                            apply_security_verdict(
+                                v.verdict,
+                                &mut verdict,
+                                &mut verdict_source,
+                                &mut security_hold,
+                            );
+                            security_json = json;
+                        }
                         _ => unreachable!("only Tester/Red/Reviewer/SecurityAuditor remain"),
                     }
                 }
@@ -2065,17 +2309,27 @@ pub async fn execute_pipeline(
                     // Cooperative cancellation: the TUI (or any holder of the
                     // flag) can abort the run between revision rounds.
                     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                        save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, round);
+                        save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, round)?;
                         return Err(crate::NikiError::Cancelled.into());
                     }
                     for stage in body_stages.iter().filter(|s| s.role != AgentRole::Critic) {
-                        let cache_key = if stage.fallbacks.is_empty() {
-                            stage.provider.clone()
-                        } else {
-                            let mut parts = vec![stage.provider.clone()];
-                            parts.extend(stage.fallbacks.iter().cloned());
-                            parts.join(":")
-                        };
+                        // Checked per stage, not just per round. A round is
+                        // Tester → Red → SecurityAuditor → Reviewer, each a
+                        // sequential LLM call; on a slow model that is minutes
+                        // in which the cancel flag was never read. The user
+                        // pressed Esc and nothing happened until the round
+                        // happened to end.
+                        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                            save_task_record(
+                                task,
+                                &metrics,
+                                TaskStatus::Cancelled,
+                                task_dir,
+                                round,
+                            )?;
+                            return Err(crate::NikiError::Cancelled.into());
+                        }
+                        let cache_key = provider_cache_key(stage);
                         let llm = provider_cache.get(&cache_key).ok_or_else(|| {
                             anyhow::anyhow!("Provider '{}' not found in cache", stage.provider)
                         })?;
@@ -2089,6 +2343,7 @@ pub async fn execute_pipeline(
                             &tester_json,
                             &red_json,
                             &reviewer_json,
+                            &security_json,
                             round,
                             &knowledge_str,
                             &task.project_path,
@@ -2155,6 +2410,7 @@ pub async fn execute_pipeline(
                             context_sources: isolation_sources_for(
                                 stage.role,
                                 config.red_blue.enabled,
+                                security_enabled,
                             ),
                             saw_other_reasoning: false,
                         });
@@ -2162,28 +2418,30 @@ pub async fn execute_pipeline(
                             unreachable!("metrics always has at least one entry after push")
                         });
                         display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
-                        display.update_pipeline_status();
-                        enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
-                        state.accrue_budget(&metrics)?;
-
-                        update_context_budget(
-                            &metrics,
+                        finish_stage(
+                            display,
+                            &mut metrics,
                             &mut state,
-                            &task.project_path,
-                            task_dir,
                             config,
-                        );
-                        save_task_record(task, &metrics, TaskStatus::Running, task_dir, round);
+                            task,
+                            task_dir,
+                            &task.project_path,
+                            round,
+                        )?;
 
                         match role_output {
                             RoleOutput::Coder(diff) => {
                                 coder_json = json;
-                                if let Err(e) = sandbox
+                                sandbox
                                     .apply_patch(&code_diff_to_edit_text(&diff), &task.project_path)
                                     .await
-                                {
-                                    eprintln!("Warning: Failed to apply coder patch: {}", e);
-                                }
+                                    .with_context(|| {
+                                        format!(
+                                            "the Coder's patch did not apply (round {round}); \
+                                             the Tester would otherwise verify a tree that \
+                                             does not contain the change"
+                                        )
+                                    })?;
                             }
                             RoleOutput::Tester(_) => {
                                 tester_json = json;
@@ -2194,7 +2452,12 @@ pub async fn execute_pipeline(
                                 red_json = json;
                             }
                             RoleOutput::Reviewer(v) => {
-                                verdict = v.verdict;
+                                apply_reviewer_verdict(
+                                    v.verdict,
+                                    &mut verdict,
+                                    &mut verdict_source,
+                                    security_hold,
+                                );
                                 reviewer_json = json.clone();
                                 review_feedback = match v.feedback {
                                     Some(f) => Some(serde_json::to_string_pretty(&f)?),
@@ -2205,24 +2468,29 @@ pub async fn execute_pipeline(
                                 // The reconciled change replaces the per-coder diffs for the
                                 // downstream Tester/Reviewer stages.
                                 coder_json = serde_json::to_string_pretty(&s.merged)?;
-                                if let Err(e) = sandbox
+                                sandbox
                                     .apply_patch(
                                         &code_diff_to_edit_text(&s.merged),
                                         &task.project_path,
                                     )
                                     .await
-                                {
-                                    eprintln!("Warning: Failed to apply synthesis patch: {}", e);
-                                }
+                                    .context("the Synthesizer's merged patch did not apply")?;
                             }
                             RoleOutput::SecurityAuditor(v) => {
-                                // The security verdict is recorded as an artifact. By default it
-                                // does not gate the revision loop (the Reviewer owns the gate); an
-                                // explicit Rejected with no reviewer overrides to a revision.
-                                if matches!(v.verdict, Verdict::Rejected) && !has_reviewer {
-                                    verdict = Verdict::RevisionNeeded;
-                                    verdict_source = Some("security-auditor".to_string());
-                                }
+                                // A security rejection gates the run. It used to
+                                // apply only when there was *no* reviewer, on
+                                // the theory that the Reviewer owns the gate —
+                                // which meant that in the normal configuration,
+                                // with a Reviewer present, a SecurityAuditor
+                                // verdict of Rejected was computed, recorded,
+                                // and then had no effect on the run at all.
+                                apply_security_verdict(
+                                    v.verdict,
+                                    &mut verdict,
+                                    &mut verdict_source,
+                                    &mut security_hold,
+                                );
+                                security_json = json.clone();
                             }
                             RoleOutput::Planner(_) => unreachable!("planner is handled separately"),
                             // The Critic is filtered from loop iteration and
@@ -2238,7 +2506,12 @@ pub async fn execute_pipeline(
                     }
 
                     if has_reviewer {
-                        if matches!(verdict, Verdict::Approved | Verdict::Rejected) {
+                        // A security rejection keeps the loop going even if a
+                        // Reviewer went on to approve: the run is not done
+                        // until the finding is actually addressed.
+                        if !security_hold
+                            && matches!(verdict, Verdict::Approved | Verdict::Rejected)
+                        {
                             break;
                         }
                     } else {
@@ -2259,17 +2532,21 @@ pub async fn execute_pipeline(
             // 3-4 large-context re-ingestion sessions that make up the multi-agent
             // token tax (slice 2.3). Trade-off (named in the report): there is no
             // independent Red/Blue adversarial review on this path.
+            // This arm has no revision loop, so nothing downstream would ever
+            // read the cancel flag. Check it before spending a full Coder
+            // session on work the user has already asked to stop.
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                // `&metrics`, not `&[]`: the Planner already ran and was
+                // billed, and a cancelled record that shows zero stages makes
+                // the user pay for a run that appears to have done nothing.
+                save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, 0)?;
+                return Err(crate::NikiError::Cancelled.into());
+            }
             let coder_stage = body_stages
                 .iter()
                 .find(|s| s.role == AgentRole::Coder)
                 .expect("single-agent mode requires a Coder stage");
-            let coder_cache_key = if coder_stage.fallbacks.is_empty() {
-                coder_stage.provider.clone()
-            } else {
-                let mut parts = vec![coder_stage.provider.clone()];
-                parts.extend(coder_stage.fallbacks.iter().cloned());
-                parts.join(":")
-            };
+            let coder_cache_key = provider_cache_key(coder_stage);
             let coder_llm = provider_cache.get(&coder_cache_key).ok_or_else(|| {
                 anyhow::anyhow!("Provider '{}' not found in cache", coder_stage.provider)
             })?;
@@ -2305,46 +2582,67 @@ pub async fn execute_pipeline(
                 crate::audit::HookEvent::PostAgentStop,
                 agent_hook_payload(AgentRole::Coder, &task.id, 0),
             )?;
-            isolation.push(IsolationRecord {
-                role: AgentRole::Coder,
-                backend: config.docker.backend,
-                context_sources: isolation_sources_for(AgentRole::Coder, config.red_blue.enabled),
-                saw_other_reasoning: false,
-            });
-            let m = metrics.last().unwrap_or_else(|| {
-                unreachable!("metrics always has at least one entry after push")
-            });
+            record_isolation(&mut isolation, AgentRole::Coder, config, security_enabled);
+            // Copy the values out: `metrics` is about to be borrowed mutably
+            // below, and the old code held a reference to its last element
+            // across that call. An empty metrics list was an `unreachable!`
+            // panic; it is now a zero-cost stage, which is the honest reading.
+            let (usage, cost) = metrics
+                .last()
+                .map(|m| (m.usage(), m.cost_usd))
+                .unwrap_or((crate::llm::provider::TokenUsage::default(), 0.0));
             display.agent_done(
                 AgentRole::Coder,
                 vec!["solo code diff produced".to_string()],
-                m.usage(),
-                m.cost_usd,
+                usage,
+                cost,
             );
-            display.update_pipeline_status();
-            enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
-            state.accrue_budget(&metrics)?;
-
-            update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
-            save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+            finish_stage(
+                display,
+                &mut metrics,
+                &mut state,
+                config,
+                task,
+                task_dir,
+                &task.project_path,
+                0,
+            )?;
 
             // The solo Coder returns a CodeDiff; apply it so the downstream diff
             // read picks up the change.
             coder_json = solo_json;
-            if let Ok(parsed) = serde_json::from_str::<CodeDiff>(&coder_json)
-                && let Err(apply_err) = sandbox
-                    .apply_patch(&code_diff_to_edit_text(&parsed), &task.project_path)
-                    .await
-            {
+            // An unparseable artifact is treated as a failed apply, so it
+            // reaches the same bounded repair attempt rather than falling
+            // through to a self-approval of a change that was never written.
+            let first_apply: Result<()> = match serde_json::from_str::<CodeDiff>(&coder_json) {
+                Ok(parsed) => {
+                    sandbox
+                        .apply_patch(&code_diff_to_edit_text(&parsed), &task.project_path)
+                        .await
+                }
+                Err(parse_err) => Err(anyhow::anyhow!(
+                    "the solo Coder's artifact is not a valid code diff: {parse_err}"
+                )),
+            };
+            if let Err(apply_err) = first_apply {
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    save_task_record(task, &metrics, TaskStatus::Cancelled, task_dir, 0)?;
+                    return Err(crate::NikiError::Cancelled.into());
+                }
                 // One bounded repair attempt: show the coder its exact apply
                 // error and ask for corrected SEARCH blocks. Weak/local models
                 // often fix themselves when shown the failure (e.g. regex
                 // anchors instead of verbatim text). Same spend-cap and audit
                 // accounting as the first attempt — never silent, never unbounded.
+                let (usage, cost) = metrics
+                    .last()
+                    .map(|m| (m.usage(), m.cost_usd))
+                    .unwrap_or((crate::llm::provider::TokenUsage::default(), 0.0));
                 display.agent_done(
                     AgentRole::Coder,
                     vec![format!("patch did not apply ({apply_err}) — repairing")],
-                    m.usage(),
-                    m.cost_usd,
+                    usage,
+                    cost,
                 );
                 fire_hook(
                     &hook_bus,
@@ -2380,15 +2678,7 @@ pub async fn execute_pipeline(
                     crate::audit::HookEvent::PostAgentStop,
                     agent_hook_payload(AgentRole::Coder, &task.id, 1),
                 )?;
-                isolation.push(IsolationRecord {
-                    role: AgentRole::Coder,
-                    backend: config.docker.backend,
-                    context_sources: isolation_sources_for(
-                        AgentRole::Coder,
-                        config.red_blue.enabled,
-                    ),
-                    saw_other_reasoning: false,
-                });
+                record_isolation(&mut isolation, AgentRole::Coder, config, security_enabled);
                 let rm = metrics.last().unwrap_or_else(|| {
                     unreachable!("metrics always has at least one entry after push")
                 });
@@ -2398,21 +2688,39 @@ pub async fn execute_pipeline(
                     rm.usage(),
                     rm.cost_usd,
                 );
-                display.update_pipeline_status();
-                enforce_spend_cap(config.general.spend_cap_usd, &metrics)?;
-                state.accrue_budget(&metrics)?;
-
-                update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
-                save_task_record(task, &metrics, TaskStatus::Running, task_dir, 0);
+                finish_stage(
+                    display,
+                    &mut metrics,
+                    &mut state,
+                    config,
+                    task,
+                    task_dir,
+                    &task.project_path,
+                    0,
+                )?;
 
                 coder_json = repair_json;
-                if let Ok(repaired) = serde_json::from_str::<CodeDiff>(&coder_json)
-                    && let Err(e) = sandbox
-                        .apply_patch(&code_diff_to_edit_text(&repaired), &task.project_path)
-                        .await
-                {
-                    eprintln!("Warning: Failed to apply repaired solo coder patch: {}", e);
-                }
+                let repaired: CodeDiff = serde_json::from_str(&coder_json).with_context(|| {
+                    format!(
+                        "the repair attempt did not return a valid code diff either: \
+                         {coder_json}"
+                    )
+                })?;
+                // The repair was the last chance. Falling through here used to
+                // set `verdict = Approved` and complete the run, handing back
+                // a branch containing no change whatsoever and reporting it as
+                // a success.
+                sandbox
+                    .apply_patch(&code_diff_to_edit_text(&repaired), &task.project_path)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "the repaired patch still did not apply ({:?}); the working \
+                             tree contains none of this run's work, so the run is \
+                             stopped instead of reporting an approval for it",
+                            task.project_path
+                        )
+                    })?;
             }
             verdict = Verdict::Approved;
             // The Solo fast path never runs a Reviewer: this is the Coder
@@ -2454,6 +2762,7 @@ pub async fn execute_pipeline(
                 &tester_json,
                 &red_json,
                 &reviewer_json,
+                &security_json,
                 round,
                 &knowledge_str,
                 &task.project_path,
@@ -2470,6 +2779,7 @@ pub async fn execute_pipeline(
                 task_dir,
                 &mut state,
                 bare,
+                security_enabled,
                 steer_rx,
             )
             .await?;
@@ -2499,6 +2809,7 @@ pub async fn execute_pipeline(
                     &tester_json,
                     &red_json,
                     &reviewer_json,
+                    &security_json,
                     round,
                     &knowledge_str,
                     &task.project_path,
@@ -2515,11 +2826,17 @@ pub async fn execute_pipeline(
                     task_dir,
                     &mut state,
                     bare,
+                    security_enabled,
                     steer_rx,
                 )
                 .await?;
                 if let RoleOutput::Reviewer(v) = retry_output {
-                    verdict = v.verdict;
+                    apply_reviewer_verdict(
+                        v.verdict,
+                        &mut verdict,
+                        &mut verdict_source,
+                        security_hold,
+                    );
                     reviewer_json = retry_json;
                     // No further rounds exist post-loop, so the retried
                     // verdict's feedback has nowhere to go — the verdict
@@ -2536,6 +2853,7 @@ pub async fn execute_pipeline(
                     &tester_json,
                     &red_json,
                     &reviewer_json,
+                    &security_json,
                     round,
                     &knowledge_str,
                     &task.project_path,
@@ -2552,6 +2870,7 @@ pub async fn execute_pipeline(
                     task_dir,
                     &mut state,
                     bare,
+                    security_enabled,
                     steer_rx,
                 )
                 .await?;
@@ -2611,8 +2930,8 @@ pub async fn execute_pipeline(
 
     sandbox.destroy().await?;
 
-    update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config);
-    save_task_record(task, &metrics, TaskStatus::Running, task_dir, round);
+    update_context_budget(&metrics, &mut state, &task.project_path, task_dir, config)?;
+    save_task_record(task, &metrics, TaskStatus::Running, task_dir, round)?;
 
     // Extract learnings from this run and save to memory
     extract_memory_from_artifacts(
@@ -2678,10 +2997,48 @@ pub async fn execute_pipeline(
             .await;
     }
 
+    // The one place a run's outcome is decided.
+    //
+    // `verdict` alone cannot express "nobody reviewed this", so the outcome is
+    // derived from what actually ran: a reviewer that produced a verdict, the
+    // Solo fast path that approved its own work, or neither.
+    let reviewer_ran = !reviewer_json.is_empty();
+    let outcome = if reviewer_ran && verdict_source.is_some() {
+        match verdict {
+            Verdict::Approved => RunOutcome::Reviewed {
+                verdict,
+                by: verdict_source.clone().unwrap_or_else(|| "reviewer".into()),
+            },
+            _ => RunOutcome::RevisionRequested {
+                by: verdict_source.clone().unwrap_or_else(|| "reviewer".into()),
+            },
+        }
+    } else if topology == TopologyMode::SingleAgent {
+        RunOutcome::SelfVerified {
+            note: "the SingleAgent fast path approves its own patch; no independent review \
+                   was performed"
+                .into(),
+        }
+    } else {
+        RunOutcome::NotEvaluated {
+            reason: "no review stage produced a verdict for this topology".into(),
+        }
+    };
+    // A SelfVerified or NotEvaluated run must not report a bare `Approved`
+    // that a consumer could mistake for a passed review.
+    let verdict = outcome.verdict().unwrap_or(Verdict::RevisionNeeded);
+
+    // Fired after the derivation so the payload carries the verdict a consumer
+    // will actually see, not the pre-derivation one.
     fire_hook(
         &hook_bus,
         crate::audit::HookEvent::PostTaskStop,
-        serde_json::json!({"task_id": task.id.to_string(), "verdict": format!("{:?}", verdict)}),
+        serde_json::json!({
+            "task_id": task.id.to_string(),
+            "verdict": format!("{:?}", verdict),
+            "outcome": &outcome,
+            "independently_reviewed": outcome.is_independently_reviewed(),
+        }),
     )?;
 
     Ok(PipelineResult {
@@ -2690,6 +3047,7 @@ pub async fn execute_pipeline(
         state,
         final_diff,
         diff_guardwarn,
+        outcome,
         verdict,
         verdict_source,
         revision_rounds: round,
@@ -2953,8 +3311,14 @@ mod tests {
         env.add_template("reviewer.md", &content).unwrap();
         let tmpl = env.get_template("reviewer.md").unwrap();
 
+        // Red and Security are named optional artifacts, not positional
+        // entries. Keying the template off `input_artifacts | length` meant a
+        // fourth artifact silently re-pointed `input_artifacts[3]` at whatever
+        // arrived next.
         let ctx3 = minijinja::context! {
             input_artifacts => vec!["spec", "diff", "tests"],
+            red_artifact => "",
+            security_artifact => "",
             project_knowledge => "",
             artifact_schema => "{}",
         };
@@ -2965,7 +3329,9 @@ mod tests {
         );
 
         let ctx4 = minijinja::context! {
-            input_artifacts => vec!["spec", "diff", "tests", "red-challenge"],
+            input_artifacts => vec!["spec", "diff", "tests"],
+            red_artifact => "red-challenge",
+            security_artifact => "",
             project_knowledge => "",
             artifact_schema => "{}",
         };
@@ -2973,6 +3339,161 @@ mod tests {
         assert!(
             rendered4.contains("RECONCILE THIS"),
             "Red block must appear when the Red artifact is present"
+        );
+    }
+
+    /// The security block is independent of the Red block. They used to share
+    /// one positional slot, so enabling the auditor displaced Red rather than
+    /// joining it — and a run with both silently lost one of the two reviews.
+    #[test]
+    fn reviewer_template_renders_red_and_security_independently() {
+        use minijinja::Environment;
+        let content = crate::load_asset("prompts/reviewer.md").unwrap();
+        let mut env = Environment::new();
+        env.add_template("reviewer.md", &content).unwrap();
+        let tmpl = env.get_template("reviewer.md").unwrap();
+
+        let ctx = minijinja::context! {
+            input_artifacts => vec!["spec", "diff", "tests"],
+            red_artifact => "RED-PAYLOAD",
+            security_artifact => "SECURITY-PAYLOAD",
+            project_knowledge => "",
+            artifact_schema => "{}",
+        };
+        let rendered = tmpl.render(ctx).unwrap();
+        assert!(rendered.contains("RED-PAYLOAD"), "red payload missing");
+        assert!(
+            rendered.contains("SECURITY-PAYLOAD"),
+            "security payload missing: a security audit that is not shown to \
+             the Reviewer cannot be reconciled by it"
+        );
+        assert!(rendered.contains("Independent Security Audit"));
+
+        // Security alone, with no Red pass.
+        let ctx_sec = minijinja::context! {
+            input_artifacts => vec!["spec", "diff", "tests"],
+            red_artifact => "",
+            security_artifact => "SECURITY-PAYLOAD",
+            project_knowledge => "",
+            artifact_schema => "{}",
+        };
+        let rendered_sec = tmpl.render(ctx_sec).unwrap();
+        assert!(rendered_sec.contains("SECURITY-PAYLOAD"));
+        assert!(!rendered_sec.contains("Adversarial Red Challenge"));
+    }
+
+    /// The auditor must be injected *ahead* of the Reviewer. It used to be
+    /// appended, so in every run with `[security] enabled` the Reviewer
+    /// finished before the auditor produced anything — the audit could never
+    /// reach the reviewing agent it exists to inform.
+    #[test]
+    fn security_auditor_is_ordered_before_the_reviewer() {
+        let mut c = NikiConfig::default();
+        c.security.enabled = true;
+        let s = resolve_stages(&c);
+        let sec = s
+            .iter()
+            .position(|x| x.role == AgentRole::SecurityAuditor)
+            .expect("security stage injected");
+        let rev = s
+            .iter()
+            .position(|x| x.role == AgentRole::Reviewer)
+            .expect("reviewer present");
+        assert!(
+            sec < rev,
+            "SecurityAuditor must run before Reviewer, got order {s:?}"
+        );
+    }
+
+    /// Same ordering guarantee when the auditor is injected by a High/Security
+    /// risk tier rather than by config.
+    #[test]
+    fn risk_injected_security_auditor_precedes_the_reviewer() {
+        fn risk_spec_for_auth_change() -> TaskSpec {
+            let json = serde_json::json!({
+                "summary": "Harden auth",
+                "approach": "Validate tokens",
+                "files_to_modify": [
+                    {"path": "src/auth.rs", "action": "modify", "description": "validate tokens"}
+                ],
+                "acceptance_criteria": ["tokens are validated"],
+                "constraints": [],
+                "estimated_complexity": "medium",
+                "uncertainties": null,
+            });
+            serde_json::from_value(json).expect("spec parses")
+        }
+        let mut c = NikiConfig::default();
+        c.security.enabled = false;
+        // Force the tier rather than trying to coax it out of the classifier's
+        // heuristics — the assertion is about *ordering*, not about what makes
+        // a task risky.
+        c.risk.mode = crate::config::types::RiskMode::High;
+        let base = resolve_stages(&c);
+        let risk = crate::risk::classify(&risk_spec_for_auth_change(), &c);
+        let s = apply_risk_stages(base, &risk, &c);
+        let sec = s
+            .iter()
+            .position(|x| x.role == AgentRole::SecurityAuditor)
+            .expect("risk tier injects a security stage");
+        let rev = s
+            .iter()
+            .position(|x| x.role == AgentRole::Reviewer)
+            .expect("reviewer present");
+        assert!(sec < rev, "risk-injected auditor must precede the reviewer");
+    }
+
+    /// A security rejection has to survive a later Reviewer approval.
+    #[test]
+    fn a_security_rejection_is_not_overturned_by_a_reviewer_approval() {
+        let (mut verdict, mut source) = (Verdict::Approved, None);
+        let mut hold = false;
+
+        apply_security_verdict(Verdict::Rejected, &mut verdict, &mut source, &mut hold);
+        assert!(hold, "a rejection must set the hold");
+        assert_eq!(verdict, Verdict::RevisionNeeded);
+        assert_eq!(source.as_deref(), Some("security-auditor"));
+
+        // The Reviewer then approves. The security rejection stands.
+        apply_reviewer_verdict(Verdict::Approved, &mut verdict, &mut source, hold);
+        assert_eq!(
+            verdict,
+            Verdict::RevisionNeeded,
+            "a security rejection must not be overturned by a later approval"
+        );
+        assert_eq!(
+            source.as_deref(),
+            Some("security-auditor"),
+            "the record must still show security as the reason"
+        );
+    }
+
+    #[test]
+    fn an_advisory_security_verdict_does_not_take_the_gate() {
+        let (mut verdict, mut source) = (Verdict::RevisionNeeded, None);
+        let mut hold = false;
+        apply_security_verdict(Verdict::Approved, &mut verdict, &mut source, &mut hold);
+        assert!(!hold, "an advisory pass must not hold the run");
+        assert_eq!(source, None, "an advisory pass names nobody as the source");
+
+        // And the Reviewer is then free to set the verdict normally.
+        apply_reviewer_verdict(Verdict::Approved, &mut verdict, &mut source, hold);
+        assert_eq!(verdict, Verdict::Approved);
+        assert_eq!(source.as_deref(), Some("reviewer"));
+    }
+
+    /// The isolation record is a description of the run. When the Reviewer is
+    /// given the security artifact, the table has to say so.
+    #[test]
+    fn isolation_record_names_the_security_auditor_when_it_ran() {
+        assert!(
+            !isolation_sources_for(AgentRole::Reviewer, false, false)
+                .contains(&AgentRole::SecurityAuditor)
+        );
+        assert!(
+            isolation_sources_for(AgentRole::Reviewer, false, true)
+                .contains(&AgentRole::SecurityAuditor),
+            "a Reviewer that saw the security audit must record it as a source"
         );
     }
 
@@ -3102,11 +3623,11 @@ mod tests {
         // Synthesizer reconciles concatenated coder diffs; the auditor sees
         // spec + coder diff only (never Tester/Reviewer/Red).
         assert_eq!(
-            isolation_sources_for(AgentRole::Synthesizer, false),
+            isolation_sources_for(AgentRole::Synthesizer, false, false),
             vec![AgentRole::Planner, AgentRole::Coder]
         );
         assert_eq!(
-            isolation_sources_for(AgentRole::SecurityAuditor, true),
+            isolation_sources_for(AgentRole::SecurityAuditor, true, false),
             vec![AgentRole::Planner, AgentRole::Coder]
         );
     }
@@ -3191,7 +3712,7 @@ mod tests {
 
     #[test]
     fn body_stages_for_single_agent_keeps_only_coder() {
-        let stages = vec![
+        let stages = [
             PipelineStageConfig {
                 role: AgentRole::Coder,
                 provider: "a".into(),
@@ -3221,13 +3742,15 @@ mod tests {
             },
         ];
         // Single-agent collapses everything but the Coder.
-        let solo = body_stages_for(TopologyMode::SingleAgent, stages.clone());
+        let refs: Vec<&PipelineStageConfig> = stages.iter().collect();
+
+        let solo = body_stages_for(TopologyMode::SingleAgent, &refs);
         assert_eq!(solo.len(), 1);
         assert_eq!(solo[0].role, AgentRole::Coder);
 
         // Multi-agent passes every body stage through unchanged.
-        let multi = body_stages_for(TopologyMode::MultiAgent, stages);
-        assert_eq!(multi.len(), 3);
+        let multi = body_stages_for(TopologyMode::MultiAgent, &refs);
+        assert_eq!(multi.len(), stages.len());
     }
 
     #[test]

@@ -635,12 +635,49 @@ impl ToolRegistry {
         result
     }
 
+    /// Whether a tool reaches outside the machine.
+    ///
+    /// Network egress is the one capability a sandboxed agent holds that can
+    /// exfiltrate everything else in the repo, and NIKI's isolation story is
+    /// built on that being a deliberate act rather than a side effect of, say,
+    /// a dependency install.
+    fn is_network_egress(name: &str) -> bool {
+        matches!(name, "web_fetch" | "web_search" | "webfetch" | "websearch")
+    }
+
     /// Permission check for one tool call. Returns `Some(reason)` when the
     /// call must be denied, `None` when it may proceed.
     fn permission_denial(name: &str, def: &ToolDef, ctx: &ToolContext) -> Option<String> {
         let declared = ctx.permissions.get(name).copied().unwrap_or(def.permission);
         match declared {
-            PermissionRequirement::Allow => None,
+            PermissionRequirement::Allow => {
+                // A declared `Allow` is a tool-authoring default, not a
+                // statement about this run. It must not launder network
+                // egress past the permission mode: `web_fetch` and
+                // `web_search` both declared `Allow`, so an agent could pull
+                // anything off the network in any mode short of an explicit
+                // bypass.
+                //
+                // This rule used to live in `permissions::PermissionChecker::
+                // resolve_tool`, which nothing in the product calls — so the
+                // property was asserted by its own unit tests and enforced
+                // nowhere. The tool loop has no approval UI, so `Ask` is
+                // denied here fail-closed, exactly like the arm below.
+                if Self::is_network_egress(name) {
+                    return match ctx.permission_mode.as_str() {
+                        "bypass" | "dontask" => None,
+                        _ => Some(format!(
+                            "tool '{name}' reaches the network, which requires approval; \
+                             permission mode '{}' has no approval UI in the tool \
+                             loop — denied fail-closed. Set [permissions] mode = \
+                             \"dontask\" to allow network egress, or run outside the \
+                             tool loop.",
+                            ctx.permission_mode
+                        )),
+                    };
+                }
+                None
+            }
             PermissionRequirement::Deny => {
                 Some(format!("tool '{name}' is denied by policy (declared Deny)"))
             }
@@ -3389,5 +3426,111 @@ mod tests {
             ToolData::ApprovalResult { approved, .. } => assert!(!approved),
             other => panic!("expected ApprovalResult, got {:?}", other),
         }
+    }
+}
+
+/// Network egress must not ride in on a tool's declared `Allow`.
+///
+/// `web_fetch` and `web_search` both declare `PermissionRequirement::Allow` —
+/// a tool-authoring default. That made every network call unconditional in
+/// every permission mode, which is the one capability a sandboxed agent holds
+/// that can exfiltrate the whole repo. The rule that forbade it lived in
+/// `permissions::resolve_tool`, which no product code calls, so the property
+/// was proven by that function's own unit tests and enforced nowhere.
+#[cfg(test)]
+mod network_egress_permission_tests {
+    use super::*;
+
+    fn ctx(mode: &str) -> ToolContext {
+        ToolContext {
+            agent_id: crate::mission::AgentId("a1".into()),
+            mission_id: crate::mission::MissionId("m1".into()),
+            role: "coder".into(),
+            project_path: std::env::temp_dir(),
+            permissions: HashMap::new(),
+            permission_mode: mode.to_string(),
+            task_store: None,
+        }
+    }
+
+    fn def_for(name: &str) -> ToolDef {
+        let reg = build_baseline_registry();
+        reg.get(name)
+            .unwrap_or_else(|| panic!("{name} must be in the baseline registry"))
+            .def()
+            .clone()
+    }
+
+    #[test]
+    fn the_network_tools_really_do_declare_allow() {
+        // If this ever changes, the guard below stops being load-bearing and
+        // this test should be revisited rather than quietly kept.
+        assert_eq!(
+            def_for("web_fetch").permission,
+            PermissionRequirement::Allow
+        );
+        assert_eq!(
+            def_for("web_search").permission,
+            PermissionRequirement::Allow
+        );
+    }
+
+    #[test]
+    fn network_egress_is_denied_in_every_mode_without_an_explicit_bypass() {
+        for mode in ["manual", "auto", ""] {
+            for tool in ["web_fetch", "web_search"] {
+                let reason = ToolRegistry::permission_denial(tool, &def_for(tool), &ctx(mode))
+                    .unwrap_or_else(|| panic!("{tool} must not run unattended in mode {mode:?}"));
+                assert!(
+                    reason.contains("network"),
+                    "the denial must name the reason: {reason}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_explicit_bypass_allows_network_egress() {
+        for mode in ["bypass", "dontask"] {
+            for tool in ["web_fetch", "web_search"] {
+                assert!(
+                    ToolRegistry::permission_denial(tool, &def_for(tool), &ctx(mode)).is_none(),
+                    "{mode} is an explicit opt-out and must allow {tool}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn local_tools_are_unaffected() {
+        // The guard must not turn every tool into a prompt — only egress.
+        for tool in ["read", "write", "edit", "glob", "grep", "list"] {
+            assert!(
+                ToolRegistry::permission_denial(tool, &def_for(tool), &ctx("auto")).is_none(),
+                "{tool} is local and must stay unattended in auto mode"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_web_fetch_attempt_is_permission_denied_end_to_end() {
+        let reg = build_baseline_registry();
+        let res = reg
+            .execute(
+                "web_fetch",
+                ToolInput::new(serde_json::json!({"url": "https://example.com"})),
+                &ctx("auto"),
+            )
+            .await;
+        assert_eq!(
+            res.status,
+            ToolStatus::PermissionDenied,
+            "the guard must fire in the real execute path, not only in the helper"
+        );
+        assert!(
+            res.summary.contains("network"),
+            "the user must be told why: {}",
+            res.summary
+        );
     }
 }

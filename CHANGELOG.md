@@ -6,6 +6,131 @@ All notable changes to NIKI are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-27
+
+**Breaking.** A run's verdict now carries its provenance, and a verdict that
+nobody produced is no longer reported as an approval. See
+[Upgrade notes](#upgrade-notes) below — if you gate CI on `verdict`, read that
+section first.
+
+The release is the engine half of a larger correctness pass. Every item below
+was found by looking at what the code actually did, not by asserting what it
+should do, and several were defects the existing suite was passing over.
+
+### Fixed
+- A verdict is no longer a pass nobody granted. `Verdict` defaulted to
+  `Approved`, and two paths produced one: the SingleAgent fast path ran no
+  Reviewer and still reported `Approved`, and the MultiAgent arm set
+  `verdict` without ever setting `verdict_source`, so a genuine reviewer's
+  approval arrived with no provenance. `RunOutcome`
+  (`reviewed`/`revision_requested`/`self_verified`/`not_evaluated`/`blocked`/
+  `cancelled`/`failed`) is now derived at the single `PipelineResult` build
+  point, and `verdict` is a projection of it.
+- The security audit ran *after* the review. With `[security] enabled`, the
+  reviewing agent finished before the auditor produced anything, so the audit
+  could never reach the agent it exists to inform. The auditor is now injected
+  ahead of the Reviewer on both the config and risk-tier paths.
+- A SecurityAuditor `Rejected` had no effect on a run that had a Reviewer —
+  the normal configuration. It was computed, recorded, and rendered into the
+  report, and then ignored. A rejection now forces a revision and a later
+  Reviewer approval cannot overturn it.
+- Network egress was allowed unconditionally. `web_fetch` and `web_search`
+  declare `PermissionRequirement::Allow`, and the rule that forbade it lived
+  in `permissions::resolve_tool`, which no product code calls. Egress is now
+  denied fail-closed outside an explicit `bypass`/`dontask` opt-out.
+- A patch that failed to apply warned and continued. The Tester then verified
+  a tree that did not contain the change, the Reviewer judged a verdict about
+  code that was never written, and a branch was cut anyway. On the solo fast
+  path, a repair that *also* failed fell through to `verdict = Approved` and
+  completed the run with no change in the working tree. All of these now stop
+  the run with an error naming what failed.
+- State writes could vanish. `save_task_record` discarded its write error at
+  all ten call sites, the closing record write warned, `context.json` went
+  through two discarded `let _ =`s, and the session init and `after_planner`
+  checkpoint were discarded — so `/undo` and `/rewind` could silently not work
+  for a whole run. All propagate now.
+- `write_atomic` derived its temp name with `with_extension`, which replaces
+  the extension rather than appending: `task.json` and a sibling `task` both
+  became `task.tmp-niki-atomic`. Two writers would clobber each other's
+  partial write and rename a truncated file into place.
+- Cancelling was read once per revision round — four sequential LLM calls — and
+  never at all on the solo path, which has no loop. A user who pressed Esc
+  watched the rest of the round play out.
+- A repair retry's tokens were billed to nobody. `run_agent` assembled its
+  usage total before the repair loop, so a stage that needed two rounds to
+  produce a valid artifact under-reported its own cost to the user and to the
+  spend cap — precisely on the most expensive runs.
+- The container backend was unreachable on Windows. `connect_container_runtime`
+  was `#[cfg(unix)]` and the non-Unix arm bound `docker` to `None`, so Docker
+  Desktop being installed and running changed nothing. Ctrl-C cleanup was
+  Unix-gated too, so cancelled Windows runs leaked their containers.
+- The error modal was fully tested and completely unreachable. `Modal::Error`
+  had a renderer, a hit-test, key handling and three passing tests that
+  constructed the variant by hand; nothing in the product ever did. A failed
+  stage now opens it. That made live a `Box::leak` in its render path, which
+  leaked on every redraw.
+- The embedded-asset manifest was stale on master: the ratchet guarding the
+  prompts and schemas compiled into the binary had been red since an earlier
+  commit.
+
+### Added
+- `outcome` and `independently_reviewed` in the `--output-format json`
+  envelope, and an `Outcome:` line in the markdown report naming who produced
+  the verdict.
+- `reconcile_result_record_manifest` cross-checks the pipeline result,
+  `task.json` and `manifest.json` before a run is considered finished. A
+  disagreement is a hard error, not a warning: by then the artefacts are on
+  disk, so warning would mean shipping a self-contradictory run.
+- Regression tests for each of the above, each verified to fail against the
+  pre-fix code — including two (`tests/cancellation.rs`) that had to be
+  rewritten because their first drafts passed against the bug they were
+  written to catch.
+
+### Changed
+- `finish_stage` and `record_isolation` are now the only implementations of
+  per-stage bookkeeping. Seven copies of the tail existed in two orders and
+  two had dropped `enforce_spend_cap`, enforcing it one stage late. Six
+  hand-copies of `provider_cache_key` collapsed into the one function.
+- `body_stages_for` is actually called. The SingleAgent collapse was
+  satisfied only because that arm looks the Coder up by hand.
+- `permissions::resolve_tool` and its three tests are removed; the rule that
+  made it worth keeping now lives in the path that runs.
+- `ModalAction::Skip` is removed — no code path ever produced it.
+
+### Upgrade notes
+
+**If you gate CI on `verdict`, this is the change that matters.** A run that
+produces no independent review no longer reports `verdict: "Approved"`. If
+your script is:
+
+```sh
+niki run "..." --output-format json | jq -e '.verdict == "Approved"'
+```
+
+it will now correctly fail for runs that were never reviewed, and pass for
+runs that were. To keep the old *effective* behaviour of "did the run produce
+an approved artifact", gate on the outcome instead:
+
+```sh
+niki run "..." --output-format json | jq -e '.independently_reviewed'
+```
+
+`task.json` gains an `outcome` object with the same shape
+(`{"outcome": "...", "by": "...", "verdict": "..."}`). It is optional when
+reading old records. `verdict_source` remains a plain string and is now
+populated on the multi-agent path, where it was previously always `None`.
+
+**Config.** No new keys. `[security] enabled = true` changes behaviour: the
+auditor now runs before the Reviewer and a `Rejected` verdict from it gates
+the run. `[permissions] mode` gates network egress in the tool loop; use
+`dontask` to keep the previous permissive behaviour.
+
+**Platform.** Windows can now use the container backend. The new path is
+unverified by compilation here — cross-checking to `x86_64-pc-windows-msvc`
+needs MSVC tooling this machine does not have. Each bollard API was checked
+against the vendored 0.18.1 source, but a Windows CI job is the real gate and
+should be added.
+
 ## [0.8.0] - 2026-09-23
 
 Agent-harness + runtime release (36 commits since 0.7.0): repo

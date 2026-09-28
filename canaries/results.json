@@ -88,13 +88,46 @@
       "expect_kill": false,
       "known_surviving": false,
       "equivalent": true
+    },
+    {
+      "id": "IF-1-status-bar-click-guarded-by-hover",
+      "category": "interface-hit-test",
+      "invariant": "INV-HIT-TEST: an affordance that is drawn is reachable by the input that activates it",
+      "split": "holdout",
+      "probe": "--lib clicking_the_permission_badge",
+      "outcome": "killed",
+      "expect_kill": true,
+      "known_surviving": false,
+      "equivalent": false
+    },
+    {
+      "id": "IF-2-composer-measured-at-fixed-height",
+      "category": "interface-hit-test",
+      "invariant": "INV-MEASURED-CELL: a cell's height is measured from its own output, never declared alongside it",
+      "split": "holdout",
+      "probe": "--lib composer",
+      "outcome": "killed",
+      "expect_kill": true,
+      "known_surviving": false,
+      "equivalent": false
+    },
+    {
+      "id": "IF-3-header-band-hardcoded-eight",
+      "category": "interface-hit-test",
+      "invariant": "INV-MEASURED-CELL: painting and hit-testing resolve against the same geometry",
+      "split": "holdout",
+      "probe": "--lib band_layout",
+      "outcome": "killed",
+      "expect_kill": true,
+      "known_surviving": false,
+      "equivalent": false
     }
   ],
   "totals": {
-    "total": 8,
-    "killed": 6,
+    "total": 11,
+    "killed": 9,
     "survived": 2,
-    "holdout_total": 3,
-    "holdout_killed": 2
+    "holdout_total": 6,
+    "holdout_killed": 5
   }
 }

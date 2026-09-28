@@ -212,6 +212,10 @@ mod tests {
             final_diff: String::new(),
             diff_guardwarn: None,
             verdict: Verdict::Approved,
+            outcome: crate::artifacts::types::RunOutcome::Reviewed {
+                verdict: Verdict::Approved,
+                by: "test-fixture".into(),
+            },
             revision_rounds: 0,
             artifacts: vec![],
             metrics: vec![],
