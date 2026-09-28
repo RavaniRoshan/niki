@@ -88,15 +88,6 @@ pub async fn run_agent(
 
     // ===== Phase 1: Retry transient API errors (429/503/timeout/network) =====
     const MAX_TRANSIENT_RETRIES: u32 = 3;
-    /// How many times a stream that dies *mid-response* is re-established.
-    ///
-    /// Establishing the connection was already retried; a connection that drops
-    /// partway through a long response was not, and it is the more common of
-    /// the two against a local model. Measured: three live runs against
-    /// qwen2.5-coder:3b, the Coder succeeded in all three, and two of them
-    /// then died at the Tester with `Stream error: error decoding response
-    /// body` — discarding a finished run over a dropped connection.
-    const MAX_MID_STREAM_RETRIES: u32 = 2;
 
     use futures::StreamExt;
     let mut full_content = String::new();
@@ -198,17 +189,11 @@ pub async fn run_agent(
                     });
                 }
                 Err(e)
-                    if is_mid_stream_retryable(&e)
-                        && mid_stream_retries < MAX_MID_STREAM_RETRIES
-                        // A repeat of the SAME transport error means the
-                        // transport is down for this request, not that one
-                        // unlucky read was dropped. Measured: a live run whose
-                        // Tester stream kept dropping restarted the stage three
-                        // times and then failed with the identical error, having
-                        // spent three times the wall clock to learn nothing. A
-                        // *different* error is a different problem and still
-                        // gets its retry.
-                        && last_mid_stream_error.as_deref() != Some(&e.to_string()) =>
+                    if should_retry_mid_stream(
+                        &e,
+                        mid_stream_retries,
+                        last_mid_stream_error.as_deref(),
+                    ) =>
                 {
                     // The connection dropped partway through. Restart the request
                     // rather than ending the run: everything the model produced so
@@ -496,6 +481,30 @@ pub fn render_coder_probe_prompt() -> String {
         .unwrap_or_else(|_| String::new())
 }
 
+/// Whether a mid-stream failure earns another attempt.
+///
+/// Extracted so it can be *tested* rather than grepped for. The original guard
+/// lived inline in the match arm, and the only thing that could check it was a
+/// source-text assertion — which pins the shape of the code, not the decision.
+/// A behavioural test is the only kind that survives a refactor.
+///
+/// Two things must be true at once: the error is a transport class worth
+/// retrying at all, and it is not a repeat. A repeat of the *same* error means
+/// the transport is down for this request, not that one unlucky read was
+/// dropped — measured on a live run whose Tester stream kept failing, which
+/// restarted the stage three times and then died with the identical error,
+/// having spent three times the wall clock to learn nothing. A *different*
+/// error is a different problem and still gets its retry.
+pub fn should_retry_mid_stream(
+    e: &anyhow::Error,
+    retries_so_far: u32,
+    last_error: Option<&str>,
+) -> bool {
+    is_mid_stream_retryable(e)
+        && retries_so_far < MAX_MID_STREAM_RETRIES
+        && last_error != Some(e.to_string().as_str())
+}
+
 /// Whether a mid-stream error is worth re-establishing the request for.
 ///
 /// Scoped deliberately narrow. A decode failure, a truncated body, or a
@@ -505,6 +514,20 @@ pub fn render_coder_probe_prompt() -> String {
 /// overflow, a content filter — must NOT be retried here, because a second
 /// identical request will fail identically and burn the user's tokens proving
 /// it.
+/// How many times a stream that dies *mid-response* is re-established.
+///
+/// Establishing the connection was already retried (`MAX_TRANSIENT_RETRIES`);
+/// a connection that drops partway through a long response was not, and it is
+/// the more common of the two against a local model. Measured: three live runs
+/// against qwen2.5-coder:3b, the Coder succeeded in all three, and two of
+/// them then died at the Tester with `Stream error: error decoding response
+/// body` — discarding a finished run over a dropped connection.
+///
+/// Module-level so `should_retry_mid_stream` — which is public and tested —
+/// sees the same bound the loop uses, rather than the loop keeping a private
+/// copy no test could reach.
+pub const MAX_MID_STREAM_RETRIES: u32 = 2;
+
 pub fn is_mid_stream_retryable(e: &anyhow::Error) -> bool {
     let msg = e.to_string().to_ascii_lowercase();
     const RETRYABLE: [&str; 5] = [
