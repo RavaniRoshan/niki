@@ -29,6 +29,12 @@ jsonschema = "0.29"
 
 # Configuration
 toml = "0.8"
+# The in-TUI settings editor rewrites niki.toml in place. `toml` round-trips
+# through a plain Value and DROPS every comment on the way, which is
+# unacceptable for a file people keep notes in. `toml_edit` is already in the
+# lock file as a transitive dependency of `toml`, so this adds no new package —
+# it makes an existing one directly usable. MIT, and `deny.toml` allows MIT.
+toml_edit = "0.22"
 
 # HTTP client (for LLM API calls)
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "multipart"] }
