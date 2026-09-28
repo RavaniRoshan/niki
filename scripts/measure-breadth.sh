@@ -21,6 +21,25 @@ BIN="${NIKI_BIN:-$REPO_ROOT/target/debug/niki}"
 TIMEOUT="${NIKI_MEASURE_TIMEOUT:-600}"
 PROJECT="${NIKI_BREADTH_PROJECT:-/tmp/niki-breadth}"
 
+# Which model to measure. REQUIRED — and the first version of this script did not
+# ask for it, so every run silently fell back to whatever was in the developer's
+# global config. The whole sweep reported "NVIDIA API key not configured" five
+# times, which is a fact about the harness and was reported as a fact about the
+# product.
+CONFIG="${NIKI_BREADTH_CONFIG:-}"
+if [ -z "$CONFIG" ] || [ ! -f "$CONFIG" ]; then
+    cat >&2 <<'MSG'
+NIKI_BREADTH_CONFIG is not set to a niki.toml.
+
+The sweep measures whatever model the project is configured for, so it must be
+told. Without it a throwaway repo falls back to the global config, and the
+result is a measurement of the wrong machine entirely.
+
+  NIKI_BREADTH_CONFIG=/path/to/niki.toml ./scripts/measure-breadth.sh
+MSG
+    exit 2
+fi
+
 # name | file to seed | seed content | the task
 TASKS=(
 "add-function|src/lib.rs|pub fn add(a: i32, b: i32) -> i32 { a + b }|Add a public function named total that sums a slice of integers, and document it."
@@ -51,6 +70,7 @@ for spec in "${TASKS[@]}"; do
         rm -rf "$PROJECT"; mkdir -p "$PROJECT"
         ( cd "$PROJECT" && git init -q && git config user.email b@niki.local && git config user.name breadth )
         seed "$file" "$content"
+        cp "$CONFIG" "$PROJECT/niki.toml"
         ( cd "$PROJECT" && git add -A && git commit -q -m "seed: $name" )
         printf '%-12s run %s: ' "$name" "$r"
         if timeout "$TIMEOUT" "$BIN" run --project "$PROJECT" --backend worktree --bare "$task" \
