@@ -549,9 +549,16 @@ fn role_filename(role: AgentRole) -> &'static str {
 /// error still propagates so the exit code is non-zero.
 pub async fn handle(args: &RunArgs) -> Result<()> {
     if args.output_format != OutputFormat::Json {
-        return run_inner(args).await;
+        return run_inner(args, &mut false).await;
     }
-    match run_inner(args).await {
+    // Whether `run_inner` already wrote the envelope. It does for the one
+    // failure it knows the most about (the pipeline failing), and printing a
+    // second one in the wrapper produced TWO JSON objects on stdout — which
+    // broke `serde_json::from_str` for every consumer of `--output-format json`
+    // on the error path, while the happy path was fine. A flag beats a
+    // thread-local and a guess.
+    let mut emitted = false;
+    match run_inner(args, &mut emitted).await {
         Ok(()) => Ok(()),
         Err(e) => {
             // run_inner already emitted a task-aware envelope for the one
@@ -564,13 +571,15 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
             // a consumer that pattern-matches an error string for an id gets a
             // value that is wrong the first time the message is reworded.
             eprintln!("Error: {e}");
-            println!("{}", error_envelope(None, "error", &e.to_string(), None));
+            if !emitted {
+                println!("{}", error_envelope(None, "error", &e.to_string(), None));
+            }
             Err(e)
         }
     }
 }
 
-async fn run_inner(args: &RunArgs) -> Result<()> {
+async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
     let project_dir = match &args.project {
         Some(p) => p.canonicalize()?,
         None => env::current_dir()?,
@@ -928,6 +937,7 @@ async fn run_inner(args: &RunArgs) -> Result<()> {
             }
             display.finish_tui();
             if args.output_format == OutputFormat::Json {
+                *emitted_envelope = true;
                 println!(
                     "{}",
                     error_envelope(

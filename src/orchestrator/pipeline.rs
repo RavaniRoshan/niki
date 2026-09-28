@@ -1016,6 +1016,95 @@ async fn run_stage(
     Ok(json)
 }
 
+/// Run the Coder on a tool loop instead of a single call.
+///
+/// Returns `None` when the model answered without submitting an artifact, which
+/// is the signal to fall back to the one-shot path. That is not a failure mode
+/// to paper over: a model that ignores the tool call and replies in prose is
+/// exactly the case the old path handles, and the loop must never be worse than
+/// the thing it replaced.
+async fn run_coder_tool_loop(
+    role: AgentRole,
+    llm: &dyn LlmProvider,
+    model: &str,
+    provider: &str,
+    template_name: &str,
+    ctx: minijinja::Value,
+    schema_path: &str,
+    project_path: &Path,
+    // The loop's own step budget bounds the spend, so the stage's
+    // per-response  does not apply to it.
+    _max_tokens: u32,
+    display: &mut AgenticDisplay,
+    metrics: &mut Vec<StageMetric>,
+) -> Option<String> {
+    let schema_text = crate::load_asset(schema_path).ok()?;
+    let schema_json: serde_json::Value = serde_json::from_str(&schema_text).ok()?;
+
+    let template = crate::load_asset(template_name).ok()?;
+    let mut env = minijinja::Environment::new();
+    env.add_template("loop", &template).ok()?;
+    let system_prompt = env.get_template("loop").ok()?.render(ctx).ok()?;
+
+    let registry = crate::runtime::build_baseline_registry();
+    let tool_ctx = crate::runtime::ToolContext {
+        agent_id: crate::mission::AgentId(format!("coder-{}", project_path.display())),
+        mission_id: crate::mission::MissionId(project_path.display().to_string()),
+        role: "coder".into(),
+        project_path: project_path.to_path_buf(),
+        permissions: HashMap::new(),
+        permission_mode: crate::runtime::ToolContext::parse_permission_mode("manual"),
+        task_store: None,
+    };
+
+    let start = Instant::now();
+    let out = crate::runtime::run_tool_loop_with(
+        crate::runtime::LoopOptions {
+            submit_artifact: Some(crate::runtime::submit_artifact_spec(schema_json)),
+        },
+        llm,
+        model,
+        &registry,
+        &tool_ctx,
+        vec![crate::runtime::LoopMessage::System(system_prompt)],
+        None,
+        // Enough to explore and then submit, and no more: a loop with no exit
+        // is a spend cap with extra steps.
+        12,
+        display.tui_tx(),
+        None,
+    )
+    .await
+    .ok()?;
+
+    let artifact = out.artifact?;
+    let json = serde_json::to_string_pretty(&artifact).ok()?;
+
+    // Validate before accepting: a loop that produced something the stage
+    // cannot parse is no better than the one-shot call failing.
+    crate::artifacts::validate::validate_artifact(&json, schema_path).ok()?;
+
+    let latency_ms = start.elapsed().as_millis() as u64;
+    let served = llm.served_by();
+    let served_provider: &str = served.as_deref().unwrap_or(provider);
+    metrics.push(StageMetric {
+        role,
+        provider: served_provider.to_string(),
+        model: model.to_string(),
+        input_tokens: out.usage.input_tokens,
+        output_tokens: out.usage.output_tokens,
+        cached_input_tokens: out.usage.cached_input_tokens,
+        reasoning_tokens: out.usage.reasoning_tokens,
+        latency_ms,
+        cost_usd: compute_cost(served_provider, model, &out.usage),
+        // The loop is the retry mechanism now: the model was allowed to correct
+        // itself before it had to produce something final.
+        retry_count: 0,
+        ttft_ms: 0,
+    });
+    Some(json)
+}
+
 /// Prompt template + JSON schema for a given role.
 ///
 /// Public so `tests/embedded_assets.rs` can assert that every role's prompt and
@@ -1203,21 +1292,71 @@ async fn run_role(
         agent_hook_payload(role, hook_task_id, round),
     )?;
 
-    let json = run_stage(
-        role,
-        llm,
-        model,
-        provider,
-        template,
-        ctx,
-        schema,
-        display,
-        metrics,
-        max_tokens,
-        temperature,
-        steer_rx,
-    )
-    .await?;
+    // The Coder can be a loop instead of a single call.
+    //
+    // Every role here used to be one streaming call that had to emit a whole
+    // validated artifact blind. The Coder is the stage that suffers most: it is
+    // the one that needs to *read* the file it is editing, and it was being
+    // handed a copy of it. The loop lets it read, grep, run and edit, and then
+    // call `submit_artifact` with the typed artifact — the same schema, the
+    // same audit trail, reached after exploring rather than guessed blind.
+    //
+    // Falling back to the one-shot path when the loop yields no artifact. A
+    // model that ignores the tool and answers in prose must not be worse off
+    // than it was before, so the fallback is the old behaviour verbatim rather
+    // than an error — the loop can only add capability, never take it away.
+    let json = if role == AgentRole::Coder {
+        match run_coder_tool_loop(
+            role,
+            llm,
+            model,
+            provider,
+            template,
+            ctx.clone(),
+            schema,
+            project_path,
+            max_tokens,
+            display,
+            metrics,
+        )
+        .await
+        {
+            Some(json) => json,
+            None => {
+                run_stage(
+                    role,
+                    llm,
+                    model,
+                    provider,
+                    template,
+                    ctx,
+                    schema,
+                    display,
+                    metrics,
+                    max_tokens,
+                    temperature,
+                    steer_rx,
+                )
+                .await?
+            }
+        }
+    } else {
+        run_stage(
+            role,
+            llm,
+            model,
+            provider,
+            template,
+            ctx,
+            schema,
+            display,
+            metrics,
+            max_tokens,
+            temperature,
+            steer_rx,
+        )
+        .await?
+    };
     let output = parse_role(role, &json)?;
     let summary = match &output {
         RoleOutput::Planner(s) => crate::display::artifact_render::render_task_spec_summary(s),
