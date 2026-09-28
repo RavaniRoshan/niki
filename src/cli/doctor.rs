@@ -21,6 +21,15 @@ pub struct DoctorArgs {
     /// Only check a specific category (install, config, providers, sandbox)
     #[arg(short, long)]
     category: Option<String>,
+    /// Measure the configured model's ability to emit a conformant artifact.
+    ///
+    /// The topology heuristic reads this: below a 45% pass rate a multi-agent
+    /// pipeline is worth about +22 points, above 50% it costs about 5. Without a
+    /// measurement the heuristic has to guess, and it guesses toward the
+    /// multi-agent chain — so a user on a frontier model pays ~5 points they
+    /// did not have to.
+    #[arg(long)]
+    measure: bool,
 }
 
 enum CheckResult {
@@ -47,6 +56,54 @@ pub fn handle(args: &DoctorArgs) -> Result<()> {
     // common first-run failure after the runtime itself.
     if let Ok(cfg) = NikiConfig::load(&std::env::current_dir().unwrap_or_default()) {
         checks.push(check_sandbox_image(&cfg.docker.base_image));
+    }
+
+    if args.measure {
+        let cfg = cfg_for_measure();
+        // `handle` is called from main's dispatch, which already runs inside a
+        // tokio runtime — so `block_on` on a *fresh* one panics with "Cannot
+        // start a runtime from within a runtime", which is what it did. Spawn
+        // onto the current runtime when there is one, and only build one if this
+        // is being called from a plain thread.
+        let measured = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => tokio::task::block_in_place(|| handle.block_on(measure_capability(&cfg))),
+            Err(_) => match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt.block_on(measure_capability(&cfg)),
+                Err(e) => Err(anyhow::anyhow!(
+                    "could not start a runtime for the probe: {e}"
+                )),
+            },
+        };
+        match measured {
+            Ok(capability) => {
+                let project = std::env::current_dir().unwrap_or_default();
+                let where_ = crate::config::capability::save(&project, capability)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|e| format!("not saved: {e}"));
+                println!("\n  ✓ model capability — {}", capability.explain());
+                println!("    recorded in {where_}");
+                // Honest about what this measurement is worth. A probe that
+                // cannot reach a model reliably will report 0% for a model that
+                // is perfectly capable, and the user's only recourse then is to
+                // delete the file. Saying so is better than a confident number
+                // that routes them wrongly.
+                println!(
+                    "    This is a 4-sample probe of artifact emission, not a benchmark. A low\n    \
+                     score is actionable; a high one is not a guarantee. Delete the file to go\n    \
+                     back to the heuristic's default."
+                );
+            }
+            Err(e) => {
+                println!("\n  ✗ model capability — could not measure: {e}");
+                println!(
+                    "    the topology heuristic will keep the multi-agent chain, which is the\n    \
+                         safe side of the trade for a model of unknown strength."
+                );
+            }
+        }
     }
 
     let filtered: Vec<&Check> = match &args.category {
@@ -374,6 +431,140 @@ fn check_sandbox() -> Vec<Check> {
             result: git_result,
         },
     ]
+}
+
+/// How many probes `niki doctor --measure` runs.
+///
+/// Four is a number with a reason: enough that a 2/4 model is distinguishable
+/// from noise, few enough that the command is a few seconds rather than a
+/// coffee break. It is a lower bound on a rough measurement, and the output says
+/// so.
+const PROBES: u32 = 4;
+
+/// Probe the configured model with a trivial artifact task and record how often
+/// it produces something valid.
+///
+/// This measures the one capability the pipeline actually depends on — can the
+/// model emit a schema-valid artifact at all — rather than inferring it from a
+/// model name, which is a guess that rots the moment a provider ships a new
+/// one.
+///
+/// The probe is deliberately the *hardest* thing the model will be asked to do
+/// in a real run: a valid `CodeDiff` with a search/replace pair. A model that
+/// cannot do that cannot do the Coder stage, and that is the fact the topology
+/// heuristic needs.
+async fn measure_capability(
+    config: &NikiConfig,
+) -> Result<crate::config::capability::ModelCapability> {
+    use crate::llm::provider::CompletionRequest;
+
+    let agent = config.agents.coder.clone();
+    let provider_cfg = config
+        .providers
+        .get(&agent.provider)
+        .cloned()
+        .unwrap_or_default();
+    let provider = crate::llm::provider::create_provider(&agent.provider, &provider_cfg)?;
+
+    // The probe uses the *real* coder prompt, not a stripped-down one.
+    //
+    // The first version asked the model to "call submit_artifact exactly once"
+    // with a two-line system prompt, and qwen2.5-coder:3b scored 0/4 — while
+    // the same model, given the actual coder prompt, produces a valid edit. That
+    // measures a strawman, and it would have recorded a false 0% and routed
+    // every user of a perfectly usable small model to the slow path. The
+    // question worth asking is "can this model do what the Coder stage asks",
+    // so the probe asks exactly that.
+    let coder_prompt = crate::agents::render_coder_probe_prompt();
+    let spec = crate::llm::provider::ToolSpec {
+        name: "submit_artifact".to_string(),
+        description: "Submit your final answer. The parameters ARE the artifact this stage is \
+                      graded on; call it once, when the work is done."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "edits": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "search": { "type": "string" },
+                            "replace": { "type": "string" }
+                        },
+                        "required": ["search", "replace"]
+                    }
+                },
+                "files_changed": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" },
+                            "action": { "type": "string" },
+                            "language": { "type": "string" }
+                        },
+                        "required": ["path"]
+                    }
+                },
+                "implementation_notes": { "type": "string" },
+                "spec_adherence": { "type": "string" }
+            },
+            "required": ["edits", "files_changed", "implementation_notes", "spec_adherence"]
+        }),
+    };
+
+    let mut passed = 0u32;
+    let mut reachable = false;
+    for _ in 0..PROBES {
+        let request = CompletionRequest {
+            model: agent.model.clone(),
+            system_prompt: coder_prompt.clone(),
+            user_message: "Replace the text `old` with `new`.".to_string(),
+            max_tokens: 1024,
+            temperature: 0.0,
+            json_schema: None,
+            tools: Some(vec![spec.clone()]),
+        };
+        match provider.complete(request).await {
+            Ok(response) => {
+                reachable = true;
+                let submitted = response
+                    .tool_calls
+                    .iter()
+                    .find(|c| c.name == "submit_artifact")
+                    .map(|c| c.arguments.clone());
+                // The same validator the Coder stage uses, so the probe
+                // measures the thing that actually matters rather than a
+                // proxy that happens to be easy to check.
+                if let Some(value) = submitted
+                    && crate::artifacts::validate::validate_artifact(
+                        &value.to_string(),
+                        "schemas/code_diff.schema.json",
+                    )
+                    .is_ok()
+                {
+                    passed += 1;
+                }
+            }
+            Err(e) => {
+                println!("    probe failed: {e}");
+                break;
+            }
+        }
+    }
+
+    if !reachable {
+        return Ok(crate::config::capability::ModelCapability::Unreachable);
+    }
+    Ok(crate::config::capability::ModelCapability::Measured {
+        passed,
+        total: PROBES,
+    })
+}
+
+fn cfg_for_measure() -> NikiConfig {
+    NikiConfig::load(&std::env::current_dir().unwrap_or_default()).unwrap_or_default()
 }
 
 #[cfg(test)]
