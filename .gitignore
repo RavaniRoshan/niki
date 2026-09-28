@@ -24,8 +24,17 @@ evals/grades/*
 .kilo/
 research/
 
-# Dev-only and temporary demo scripts
-demo.sh
+# Dev-only and temporary demo scripts.
+#
+# Anchored to the repository root, deliberately. A bare `demo.sh` matches at
+# EVERY depth, so it silently excluded `scripts/demo.sh` — the one demo script
+# that ships, the one the README tells a stranger to run, and the one the CI
+# `demo` job executes. That job failed in CI with "No such file or directory"
+# while passing everywhere the file happened to exist on disk.
+#
+# Anything deeper in scripts/ that is a local scratch file should be named
+# explicitly, the way the three lines below are.
+# /demo.sh
 *.tape
 scripts/render_demo_terminal.py
 scripts/generate_screenshots.py
