@@ -86,6 +86,36 @@ fn status_glyph(status: &StageStatus) -> &'static str {
 
 pub struct ChatPage;
 
+/// The slash-command list, shown by `/help` and by `/?`.
+///
+/// One constant, and the help page renders the same list the command menu does,
+/// so a command cannot exist in one and not the other. It previously lived inline
+/// in a `trimmed == "/help"` arm, which is how `/providers` and `/mcp` ended up
+/// working while never being listed anywhere a user would look.
+const HELP_TEXT: &str = concat!(
+    "Available slash commands:\n",
+    "  /help            This list\n",
+    "  /config          Edit settings — saved to niki.toml\n",
+    "  /providers       See and change each agent's provider and model\n",
+    "  /mcp             See and change the MCP servers this run may use\n",
+    "  /theme           Pick a colour theme (with live preview)\n",
+    "  /skills          List the skills available to agents\n",
+    "  /model <name>    Switch the model for this session\n",
+    "  /status          Session status and model information\n",
+    "  /doctor          Check providers, keys, sandbox health\n",
+    "  /review          Trigger a code review audit on the workspace\n",
+    "  /diff            Full-screen unified diff\n",
+    "  /cost            Token spend and cost metrics\n",
+    "  /context         Context window utilisation\n",
+    "  /compact         Compact session history into memory\n",
+    "  /clear           Clear the conversation log\n",
+    "  /init            Scan the project and draft AGENTS.md\n",
+    "  /copy            Copy the last assistant message\n",
+    "  /export-md       Export the conversation as markdown\n",
+    "  /terminal-setup  Truecolor and OSC 52 clipboard setup\n",
+    "  /undo /redo      Undo or redo workspace checkpoints\n",
+    "  /steer <msg>     Send a live steering hint to a running agent",
+);
 impl ChatPage {
     pub fn new() -> Self {
         Self
@@ -597,12 +627,7 @@ impl Page for ChatPage {
             InputAction::Submit(text) => {
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
-                    if trimmed == "/help" {
-                        state.chat_log.push((
-                            "system".to_string(),
-                            "Available slash commands:\n  /doctor          Check providers, keys, sandbox health\n  /review          Trigger code review audit on workspace\n  /diff            View full-screen unified diff\n  /cost            Show token spend and cost metrics\n  /context         Show context window utilization\n  /compact         Compact session history into memory\n  /clear           Clear conversation log\n  /init            Scan project and draft AGENTS.md\n  /model <name>    Switch active LLM model\n  /theme           Pick a colour theme (with live preview)\n  /config          Edit settings, saved to niki.toml\n  /terminal-setup  Guide truecolor & OSC 52 clipboard setup\n  /undo · /redo    Undo or redo workspace checkpoints\n  /steer <msg>     Send a live steering hint to running agent".to_string(),
-                        ));
-                    } else if trimmed == "/clear" || trimmed == "/reset" {
+                    if trimmed == "/clear" || trimmed == "/reset" {
                         state.chat_log.clear();
                         state.chat_lines.clear();
                         state.set_notice("Conversation cleared", 2500);
@@ -837,15 +862,56 @@ impl Page for ChatPage {
                             },
                         ));
                     } else if trimmed == "/mcp" {
-                        state.chat_log.push((
-                            "system".to_string(),
-                            "MCP servers: configured via niki.toml [mcp] section. Use /config to edit.".to_string(),
-                        ));
+                        // Used to print "configured via niki.toml, use /config
+                        // to edit" — the stub shape. Now that `/config` is a real
+                        // editor this either does the thing or says plainly
+                        // that there is nothing to show.
+                        crate::display::sheets::open_sheet(
+                            state,
+                            crate::display::sheets::Sheet::Mcp(Default::default()),
+                        );
+                    } else if trimmed == "/providers" {
+                        crate::display::sheets::open_sheet(
+                            state,
+                            crate::display::sheets::Sheet::Providers(Default::default()),
+                        );
                     } else if trimmed == "/skills" {
-                        state.chat_log.push((
-                            "system".to_string(),
-                            "Skills: shared from ~/.agents/skills/ (read/write). Add a folder with /add-dir.".to_string(),
-                        ));
+                        // List what is actually there rather than naming a
+                        // directory and leaving the user to go and look.
+                        let mut dirs: Vec<String> = Vec::new();
+                        if let Ok(home) = std::env::var("HOME")
+                            .map(std::path::PathBuf::from)
+                            .or_else(|_| std::env::var("USERPROFILE").map(std::path::PathBuf::from))
+                        {
+                            let shared = home.join(".agents/skills");
+                            if let Ok(entries) = std::fs::read_dir(&shared) {
+                                for e in entries.flatten() {
+                                    if e.path().is_dir() {
+                                        dirs.push(e.file_name().to_string_lossy().to_string());
+                                    }
+                                }
+                            }
+                        }
+                        dirs.sort();
+                        let msg = if dirs.is_empty() {
+                            "Skills: none found. NIKI reads ~/.agents/skills/<name>/SKILL.md — \
+create one and it is available immediately."
+                                .to_string()
+                        } else {
+                            format!(
+                                "Skills ({}):\n{}",
+                                dirs.len(),
+                                dirs.iter()
+                                    .map(|d| format!("  {d}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
+                        };
+                        state.chat_log.push(("system".to_string(), msg));
+                    } else if trimmed == "/help" || trimmed == "/?" {
+                        state
+                            .chat_log
+                            .push(("system".to_string(), HELP_TEXT.to_string()));
                     } else if trimmed == "/copy" {
                         if let Some(last) =
                             state.chat_log.iter().rev().find(|(r, _)| r == "assistant")

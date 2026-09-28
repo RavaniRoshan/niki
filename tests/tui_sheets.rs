@@ -394,3 +394,173 @@ fn the_slash_commands_open_the_sheets_rather_than_a_page() {
         );
     }
 }
+
+// ── Providers and MCP: the surfaces that used to be a sentence ─────────────
+
+use niki::display::sheets::mcp::McpSheet;
+use niki::display::sheets::providers::ProviderSheet;
+
+#[test]
+fn the_provider_sheet_lists_every_agent_the_pipeline_runs() {
+    // The list used to be five names in a local array. The config has seven
+    // agents; leaving two out of the routing screen means the two whose provider
+    // you would most want to change — the Red agent and the security auditor —
+    // are the two you cannot see.
+    let listed: Vec<&str> = niki::display::sheets::providers::AGENTS.to_vec();
+    assert_eq!(
+        listed,
+        niki::config::types::AgentsConfig::NAMES.to_vec(),
+        "the sheet must list exactly the agents the config declares"
+    );
+    for name in [
+        "planner",
+        "coder",
+        "tester",
+        "reviewer",
+        "red",
+        "security_auditor",
+    ] {
+        assert!(
+            listed.contains(&name),
+            "{name} is missing from the routing sheet"
+        );
+    }
+}
+
+#[test]
+fn agent_lookup_does_not_fall_back_to_a_default_agent() {
+    // An accessor that returned the Planner's routing for an unknown name would
+    // point the right provider at the wrong agent, silently.
+    let agents = niki::config::types::AgentsConfig::default();
+    for name in niki::config::types::AgentsConfig::NAMES {
+        assert!(
+            agents.agent_named(name).is_some(),
+            "{name} is declared in NAMES but not resolvable"
+        );
+    }
+    assert!(agents.agent_named("plannner").is_none());
+    assert!(agents.agent_named("").is_none());
+}
+
+#[test]
+fn changing_an_agents_model_is_written_to_niki_toml() {
+    let dir = project();
+    let mut st = state_in(dir.path());
+    let mut sheet = ProviderSheet::new();
+
+    // Row 0 is the planner; Enter edits its model.
+    sheet.on_key(key(KeyCode::Enter), &mut st).unwrap();
+    for c in "qwen2.5-coder:7b".chars() {
+        sheet.on_key(key(KeyCode::Char(c)), &mut st).unwrap();
+    }
+    sheet.on_key(key(KeyCode::Enter), &mut st).unwrap();
+
+    let config = dir.path().join("niki.toml");
+    assert!(
+        std::fs::read_to_string(&config)
+            .unwrap()
+            .contains("qwen2.5-coder:7b"),
+        "the chosen model must reach niki.toml"
+    );
+    assert_eq!(
+        read(dir.path(), "agents.planner.model").as_deref(),
+        Some("qwen2.5-coder:7b")
+    );
+}
+
+#[test]
+fn the_provider_sheet_never_asks_for_an_api_key() {
+    // A key typed into a form passes through the frame buffer, the scrollback
+    // and any transcript of the session. `niki auth login` exists precisely to
+    // keep it out of files; a settings form that undoes that is a regression.
+    let src = include_str!("../src/display/sheets/providers.rs");
+    assert!(
+        !src.contains("api_key") || !src.contains("Field::ApiKey"),
+        "the routing sheet must not offer to edit an API key"
+    );
+    assert!(
+        src.contains("API keys come from the environment"),
+        "and it must say where keys actually come from, so their absence is not a mystery"
+    );
+}
+
+#[test]
+fn mcp_shows_the_configured_servers_and_can_toggle_one() {
+    let dir = project();
+    let config = dir.path().join("niki.toml");
+    std::fs::write(
+        &config,
+        "[mcp]\nenabled = true\n\n[[mcp.servers]]\nname = \"filesystem\"\ncommand = \"npx\"\nargs = [\"-y\", \"server\"]\n\n[[mcp.servers]]\nname = \"docs\"\nurl = \"https://example.invalid/mcp\"\n",
+    )
+    .unwrap();
+
+    let mut st = state_in(dir.path());
+    // Load the config the way the app would, so the sheet has servers to show.
+    st.config = niki::config::types::NikiConfig::load(dir.path()).unwrap();
+    assert_eq!(
+        st.config.mcp.servers.len(),
+        2,
+        "both servers must be loaded"
+    );
+
+    let mut sheet = McpSheet::new();
+    assert!(
+        sheet.title(&st).contains('2'),
+        "the title must report what is configured: {}",
+        sheet.title(&st)
+    );
+
+    sheet.on_key(key(KeyCode::Char('d')), &mut st).unwrap();
+    let after = std::fs::read_to_string(&config).unwrap();
+    assert!(
+        after.contains("enabled = false"),
+        "toggling must write to niki.toml:\n{after}"
+    );
+    assert!(
+        after.contains("[[mcp.servers]]") && after.contains("name = \"docs\""),
+        "and must not damage the other server:\n{after}"
+    );
+}
+
+#[test]
+fn an_mcp_list_with_no_servers_says_how_to_add_one() {
+    // "MCP servers: configured via niki.toml" told the user to go and read a
+    // file. The empty state now shows the shape to paste.
+    let dir = project();
+    let mut st = state_in(dir.path());
+    st.config = niki::config::types::NikiConfig::load(dir.path()).unwrap();
+    let sheet = McpSheet::new();
+    assert!(sheet.title(&st).contains("no servers"));
+    let src = include_str!("../src/display/sheets/mcp.rs");
+    assert!(
+        src.contains("[[mcp.servers]]"),
+        "the empty state must show the shape"
+    );
+    assert!(
+        src.contains("modelcontextprotocol"),
+        "and a working example"
+    );
+}
+
+#[test]
+fn the_help_text_lists_the_commands_that_now_do_something() {
+    // `/providers` and `/mcp` worked while appearing in no list a user would
+    // read, and `/help` itself was an inline string with no way to keep it in
+    // step. It is one constant now.
+    let src = include_str!("../src/display/pages/chat.rs");
+    let help = src
+        .split("const HELP_TEXT")
+        .nth(1)
+        .and_then(|rest| rest.split(");").next())
+        .expect("HELP_TEXT is a single constant");
+    for cmd in [
+        "/config",
+        "/providers",
+        "/mcp",
+        "/theme",
+        "/skills",
+        "/help",
+    ] {
+        assert!(help.contains(cmd), "{cmd} works but is not in /help");
+    }
+}
