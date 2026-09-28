@@ -204,15 +204,27 @@ pub fn render_status_bar(frame: &mut Frame, state: &AppState, area: Rect) {
     if let Some(notice) = &state.notice {
         // Slide in over the first 150ms of life; static when reduced.
         let age_ms = notice.since.elapsed().as_millis() as u64;
-        let slide = crate::display::motion::slide_prefix(
-            age_ms,
-            150,
-            3,
-            crate::display::motion::reduced(state.config.ui.reduced_motion),
-        );
+        let reduced = crate::display::motion::reduced(state.config.ui.reduced_motion);
+        let slide = crate::display::motion::slide_prefix(age_ms, 150, 3, reduced);
+        // ...and fade out over the last 200ms, so a notice leaves rather than
+        // ceasing to exist between two frames. A full TTL is the common case,
+        // so the fade window is the only part that varies.
+        let total_ms = notice
+            .until
+            .saturating_duration_since(notice.since)
+            .as_millis() as u64;
+        let fade = if reduced {
+            1.0
+        } else {
+            crate::display::motion::notice_fade(age_ms, total_ms)
+        };
         right_spans.push(Span::styled(
             format!("· {}{} ", slide, notice.msg),
-            Style::default().fg(theme::clay()),
+            Style::default().fg(crate::display::motion::lerp_color(
+                theme::bg_elevated(),
+                theme::clay(),
+                fade,
+            )),
         ));
     }
 
