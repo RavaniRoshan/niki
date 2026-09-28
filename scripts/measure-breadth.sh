@@ -26,15 +26,20 @@ PROJECT="${NIKI_BREADTH_PROJECT:-/tmp/niki-breadth}"
 # global config. The whole sweep reported "NVIDIA API key not configured" five
 # times, which is a fact about the harness and was reported as a fact about the
 # product.
-CONFIG="${NIKI_BREADTH_CONFIG:-}"
+# A per-user default, so the config does not have to live in /tmp: /tmp on this
+# box is cleaned underneath long runs, and a sweep that cannot find its config
+# exits 2 — which reads as a measurement failure rather than a missing file.
+DEFAULT_CONFIG="${NIKI_MEASURE_CONFIG:-$HOME/.niki-measure/ollama.toml}"
+CONFIG="${NIKI_BREADTH_CONFIG:-$DEFAULT_CONFIG}"
 if [ -z "$CONFIG" ] || [ ! -f "$CONFIG" ]; then
     cat >&2 <<'MSG'
-NIKI_BREADTH_CONFIG is not set to a niki.toml.
+NIKI_BREADTH_CONFIG is not set, and there is no default at $DEFAULT_CONFIG.
 
 The sweep measures whatever model the project is configured for, so it must be
 told. Without it a throwaway repo falls back to the global config, and the
 result is a measurement of the wrong machine entirely.
 
+  cp /path/to/niki.toml ~/.niki-measure/ollama.toml   # once
   NIKI_BREADTH_CONFIG=/path/to/niki.toml ./scripts/measure-breadth.sh
 MSG
     exit 2
