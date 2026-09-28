@@ -269,6 +269,22 @@ pub fn write_atomic(path: &Path, contents: &str) -> Result<()> {
     }
 }
 
+/// Parse a JSON object out of text that may be wrapped in a code fence.
+///
+/// For a model that was asked for a tool call and answered in prose anyway, the
+/// payload is usually still there, fenced.
+pub fn json_value_of(text: &str) -> Option<serde_json::Value> {
+    let trimmed = text.trim();
+    let candidate = if let Some(rest) = trimmed.strip_prefix("```json") {
+        rest.split("```").next().unwrap_or(rest)
+    } else if let Some(rest) = trimmed.strip_prefix("```") {
+        rest.split("```").next().unwrap_or(rest)
+    } else {
+        trimmed
+    };
+    serde_json::from_str(candidate.trim()).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

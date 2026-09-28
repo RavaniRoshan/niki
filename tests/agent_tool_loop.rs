@@ -375,3 +375,55 @@ fn a_failed_coder_loop_says_so_on_stderr_not_only_in_tracing() {
          invisible without RUST_LOG, and this is a CLI."
     );
 }
+
+/// A tool call returned as message text is still a tool call.
+///
+/// Measured on the model this project's README tells a first-time user to
+/// install: asked for a `submit_artifact` call, it produced one — as JSON in the
+/// message *content*, not in the structured `tool_calls` field. The provider
+/// looked only at the structured field, found nothing, and the stage fell back
+/// for a reason nothing in the logs explained. `niki doctor --measure` scored
+/// that model 0/4 while it was completing full four-agent runs.
+#[test]
+fn a_tool_call_returned_as_text_is_still_recovered() {
+    use niki::llm::ollama::parse_tool_calls_from_content;
+
+    // Ollama-style, fenced — what the model actually emitted.
+    let fenced = "```json\n{\n  \"name\": \"submit_artifact\",\n  \"arguments\": {\n    \"edits\": [{\"search\": \"old\", \"replace\": \"new\"}]\n  }\n}\n```";
+    let calls = parse_tool_calls_from_content(fenced);
+    assert_eq!(
+        calls.len(),
+        1,
+        "a fenced tool call in the content must be recovered"
+    );
+    assert_eq!(calls[0].name, "submit_artifact");
+    assert_eq!(calls[0].arguments["edits"][0]["search"], "old");
+
+    // Bare, unfenced.
+    let bare = r#"{"name":"read","arguments":{"path":"src/lib.rs"}}"#;
+    let calls = parse_tool_calls_from_content(bare);
+    assert_eq!(calls[0].name, "read");
+
+    // The chat-completions spelling, and stringified arguments.
+    let alt = r#"{"tool":"grep","parameters":"{\"query\":\"fn\"}"}"#;
+    let calls = parse_tool_calls_from_content(alt);
+    assert_eq!(calls[0].name, "grep");
+    assert_eq!(calls[0].arguments["query"], "fn");
+}
+
+#[test]
+fn prose_is_never_mistaken_for_a_tool_call() {
+    use niki::llm::ollama::parse_tool_calls_from_content;
+    // The failure this must not have: inventing a call out of ordinary text.
+    for text in [
+        "I have updated the function to sum the slice.",
+        "",
+        "```json\n{\"edits\": [{\"search\": \"a\", \"replace\": \"b\"}]}\n```", // an artifact, not a call
+        "The user asked me to read src/lib.rs and I did.",
+    ] {
+        assert!(
+            parse_tool_calls_from_content(text).is_empty(),
+            "prose must not become a tool call: {text:?}"
+        );
+    }
+}
