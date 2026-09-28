@@ -634,3 +634,111 @@ fn cargo_caching_precedes_every_workspace_build() {
         bounds.len()
     );
 }
+
+/// No step may declare both `uses` and `run`, or neither.
+///
+/// This is the failure that costs the most and shows up the least. A step with
+/// both keys is a schema error: GitHub rejects the *whole workflow file*, the
+/// run creates **zero jobs**, and every other check stops being reported — while
+/// the other four workflows in this repo stay green, so the repository still
+/// looks healthy. It happened twice in this file's history: once with a
+/// job-level `workflow_dispatch:`, and once when a cache step was spliced
+/// between a step's `- name:` and its `run:`, so `run: cargo build --release`
+/// silently became a key of the `uses:` step.
+///
+/// PyYAML accepts both. Only GitHub rejects them. So it is checked here, where
+/// a failure is a line of output rather than a CI run that quietly does
+/// nothing.
+#[test]
+fn every_step_declares_exactly_one_of_uses_or_run() {
+    /// Walking state, so the step-closing logic can live in one place without a
+    /// closure that also has to mutate the counter.
+    struct Walk {
+        job: String,
+        step_start: Option<usize>,
+        keys: Vec<String>,
+        steps: usize,
+        problems: Vec<String>,
+    }
+
+    impl Walk {
+        fn close(&mut self) {
+            let Some(start) = self.step_start.take() else {
+                return;
+            };
+            self.steps += 1;
+            let has_uses = self.keys.iter().any(|k| k == "uses");
+            let has_run = self.keys.iter().any(|k| k == "run");
+            if has_uses && has_run {
+                self.problems.push(format!(
+                    "job `{}` step at line {}: declares BOTH `uses` and `run` — GitHub rejects \
+                     the entire workflow and the run creates zero jobs",
+                    self.job,
+                    start + 1
+                ));
+            } else if !has_uses && !has_run {
+                self.problems.push(format!(
+                    "job `{}` step at line {}: declares neither `uses` nor `run`",
+                    self.job,
+                    start + 1
+                ));
+            }
+            self.keys.clear();
+        }
+    }
+
+    let ci = ci_yml();
+    let mut w = Walk {
+        job: String::new(),
+        step_start: None,
+        keys: Vec::new(),
+        steps: 0,
+        problems: Vec::new(),
+    };
+
+    for (i, line) in ci.lines().enumerate() {
+        let indent = line.len() - line.trim_start().len();
+        let t = line.trim();
+
+        // A new job.
+        if indent == 2 && t.ends_with(':') && !t.starts_with('#') {
+            w.close();
+            w.job = t.trim_end_matches(':').to_string();
+            continue;
+        }
+        // Left the steps list.
+        if indent > 0 && indent < 6 {
+            w.close();
+            continue;
+        }
+        if indent == 6 {
+            let starts_step = t.starts_with("- ");
+            w.close();
+            if starts_step {
+                w.step_start = Some(i);
+                if let Some((k, _)) = t.strip_prefix("- ").unwrap_or(t).split_once(':') {
+                    w.keys.push(k.trim().to_string());
+                }
+            }
+            continue;
+        }
+        if indent == 8
+            && w.step_start.is_some()
+            && let Some((k, _)) = t.strip_prefix('-').unwrap_or(t).trim().split_once(':')
+        {
+            w.keys.push(k.trim().to_string());
+        }
+    }
+    w.close();
+
+    assert!(
+        w.problems.is_empty(),
+        "workflow steps that GitHub would reject:\n{}",
+        w.problems.join("\n")
+    );
+    assert!(
+        w.steps > 60,
+        "only walked {} steps — the scanner drifted",
+        w.steps
+    );
+}
