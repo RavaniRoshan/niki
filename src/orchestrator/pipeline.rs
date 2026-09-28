@@ -1080,9 +1080,23 @@ async fn run_coder_tool_loop(
     let artifact = out.artifact?;
     let json = serde_json::to_string_pretty(&artifact).ok()?;
 
-    // Validate before accepting: a loop that produced something the stage
-    // cannot parse is no better than the one-shot call failing.
-    crate::artifacts::validate::validate_artifact(&json, schema_path).ok()?;
+    // Validate before accepting: a loop that produced something the stage cannot
+    // parse is no better than the one-shot call failing — but the two are
+    // *different* failures, and only the second one was visible. A live run
+    // showed the loop submitting an artifact with an empty `search`, silently
+    // falling back, and reporting the fallback's "model is too small" error —
+    // which named neither the loop nor the fact that it had run.
+    if let Err(e) = crate::artifacts::validate::validate_artifact(&json, schema_path) {
+        tracing::warn!(
+            target: "niki::pipeline",
+            role = "coder",
+            error = %e,
+            "the coder's tool loop submitted an artifact that failed validation; \
+             falling back to the one-shot path, and the user will be told about the \
+             fallback's error rather than this one",
+        );
+        return None;
+    }
 
     let latency_ms = start.elapsed().as_millis() as u64;
     let served = llm.served_by();
