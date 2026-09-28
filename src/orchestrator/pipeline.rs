@@ -1354,7 +1354,7 @@ pub fn coder_loop_fallback_notice(out: &crate::runtime::tools::LoopOutput) -> St
     };
     format!(
         "the Coder ran the tool loop for {} step(s) and never called submit_artifact{}. \
-         It said: {excerpt} \
+         It {}{excerpt} \
          Falling back to a single-shot call. The error that follows describes the \
          fallback, not this.",
         out.steps,
@@ -1362,6 +1362,15 @@ pub fn coder_loop_fallback_notice(out: &crate::runtime::tools::LoopOutput) -> St
             " (it made no tool calls at all)".to_string()
         } else {
             format!(" (it did use: {})", used.join(", "))
+        },
+        // A truncated answer is a different problem with a different fix, and
+        // the two used to be reported identically. "The model is too small"
+        // sends a user to buy a different model; "the response was cut off at
+        // the token limit" sends them to raise it.
+        if out.truncated {
+            "was CUT OFF at the token limit before it finished. It said: "
+        } else {
+            "said: "
         }
     )
 }

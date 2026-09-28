@@ -100,6 +100,60 @@ fn run(
     run_with(script, None)
 }
 
+/// Run the loop against an agent whose first answer is cut off and whose
+/// second is whatever `second` says.
+fn run_truncated_then_complete(
+    truncated: &str,
+    second: &str,
+) -> (niki::runtime::tools::LoopOutput, Vec<String>) {
+    let validate: niki::runtime::ArtifactValidator =
+        std::sync::Arc::new(|v: &serde_json::Value| match v.get("edits") {
+            Some(e) if e.as_array().is_some_and(|a| !a.is_empty()) => Ok(()),
+            _ => Err("no edits".into()),
+        });
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+    std::fs::write(dir.path().join("src/lib.rs"), "old\n").expect("write");
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let agent = ProseAgent {
+        prose: truncated.to_string(),
+        script: vec![None],
+        turn: AtomicUsize::new(0),
+        seen_prompts: seen.clone(),
+        after_first: Some(second.to_string()),
+        finish: Some("length".into()),
+    };
+    let registry = build_baseline_registry();
+    let c = ctx(dir.path());
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("rt");
+    let out = rt
+        .block_on(run_tool_loop_with(
+            LoopOptions {
+                submit_artifact: Some(submit_artifact_spec(serde_json::json!({
+                    "type": "object",
+                    "properties": artifact(),
+                    "required": ["edits", "files_changed"],
+                }))),
+                validate_artifact: Some(validate),
+            },
+            &agent,
+            "m",
+            &registry,
+            &c,
+            vec![LoopMessage::User("add sum()".into())],
+            None,
+            8,
+            None,
+            None,
+        ))
+        .expect("loop");
+    (out, seen.lock().expect("lock").clone())
+}
+
 /// Run the loop against an agent whose only answer is fixed prose.
 fn run_with_prose(
     prose: &str,
@@ -128,6 +182,8 @@ fn run_with_prose(
         script,
         turn: AtomicUsize::new(0),
         seen_prompts: seen.clone(),
+        after_first: None,
+        finish: None,
     };
     let registry = build_baseline_registry();
     let c = ctx(dir.path());
@@ -165,6 +221,10 @@ struct ProseAgent {
     script: Vec<Option<(String, serde_json::Value)>>,
     turn: AtomicUsize,
     seen_prompts: Arc<std::sync::Mutex<Vec<String>>>,
+    /// What the second and later turns say, when the test needs the model to
+    /// change its answer (a truncation retry, for instance).
+    after_first: Option<String>,
+    finish: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -200,11 +260,14 @@ impl LlmProvider for ProseAgent {
                 finish_reason: Some("tool_calls".into()),
             },
             None => CompletionResponse {
-                content: self.prose.clone(),
+                content: match (&self.after_first, n) {
+                    (Some(second), n) if n > 0 => second.clone(),
+                    _ => self.prose.clone(),
+                },
                 model: request.model.clone(),
                 usage: TokenUsage::default(),
                 tool_calls: Vec::new(),
-                finish_reason: Some("stop".into()),
+                finish_reason: Some(self.finish.clone().unwrap_or_else(|| "stop".into())),
             },
         })
     }
@@ -770,6 +833,7 @@ fn the_fallback_notice_says_what_happened() {
         steps: 1,
         tool_calls: vec![],
         usage: TokenUsage::default(),
+        truncated: false,
         artifact: None,
     };
     let msg = niki::orchestrator::pipeline::coder_loop_fallback_notice(&never_engaged);
@@ -797,6 +861,7 @@ fn the_fallback_notice_says_what_happened() {
             ("bash".to_string(), false),
         ],
         usage: TokenUsage::default(),
+        truncated: false,
         artifact: None,
     };
     let msg = niki::orchestrator::pipeline::coder_loop_fallback_notice(&explored);
@@ -958,5 +1023,90 @@ fn prose_that_is_not_a_valid_artifact_is_still_refused() {
     assert_eq!(
         out.artifact, None,
         "a model discussing JSON is not a model submitting one"
+    );
+}
+
+/// A response cut off mid-artifact is recoverable, like a truncated tool call.
+///
+/// Measured on a refactor task: the model produced a correct, schema-shaped
+/// artifact and stopped mid-object at the token limit. The loop found no
+/// tool call, the recovery found unbalanced braces, and the run fell through
+/// to a one-shot call that failed with "Failed to parse artifact JSON" — a
+/// message naming neither the truncation nor the fact that the answer was on
+/// its way to being right.
+///
+/// The guard for truncated *tool calls* already existed. This is the same
+/// treatment for a truncated answer.
+#[test]
+fn a_truncated_artifact_is_sent_back_to_be_re_emitted() {
+    let truncated = "```json\n{\"edits\": [{\"search\": \"old\", \"replace\": \"new\"}], \
+                     \"files_changed\": [{\"path\": \"src/lib.rs\", \"action\": \"modify\", \
+                     \"language\": \"rust\"}], \"implementation_notes\": \"renamed the function \
+                     and updated every call site, including the one in the module doc, which is";
+    let complete = format!("```json\n{}\n```", artifact());
+
+    let (out, prompts) = run_truncated_then_complete(truncated, &complete);
+    assert_eq!(
+        out.artifact,
+        Some(artifact()),
+        "the re-emitted artifact is the answer"
+    );
+    assert_eq!(out.steps, 2, "one truncated answer, one correct re-emit");
+    assert!(
+        prompts
+            .iter()
+            .any(|p| p.contains("cut off at the token limit")),
+        "the model must be told it was cut off, or it will simply be cut off again: {prompts:?}"
+    );
+}
+
+/// And when it never fits, the loop says so rather than retrying forever.
+#[test]
+fn a_truncation_that_never_resolves_is_reported_as_truncation() {
+    let truncated = "```json\n{\"edits\": [{\"search\": \"old\", \"replace\": \"new\"}], \
+                     \"files_changed\": [{\"path\": \"src/lib.rs\"}], \"implementation_notes\": and \
+                     then it kept going";
+    let (out, prompts) = run_truncated_then_complete(truncated, truncated);
+    assert_eq!(
+        out.artifact, None,
+        "an artifact that was never completed is not an artifact"
+    );
+    assert!(
+        out.truncated,
+        "and the caller has to be able to tell this from a model that simply declined"
+    );
+    assert!(
+        prompts.iter().filter(|p| p.contains("cut off")).count() == 1,
+        "exactly one retry: a model that cannot fit the artifact in the budget will not \
+         start fitting it on the fourth attempt. {prompts:?}"
+    );
+}
+
+/// The fallback notice has to name truncation, because the two diagnoses send
+/// a user to completely different places — raise the token limit, or change
+/// the model.
+#[test]
+fn the_fallback_notice_distinguishes_truncation_from_a_short_answer() {
+    use niki::llm::provider::TokenUsage;
+    use niki::runtime::tools::LoopOutput;
+    let notice = |truncated: bool| {
+        niki::orchestrator::pipeline::coder_loop_fallback_notice(&LoopOutput {
+            content: "```json\n{\"edits\": [{\"search\": \"old\", \"repl".into(),
+            steps: 1,
+            tool_calls: vec![],
+            usage: TokenUsage::default(),
+            truncated,
+            artifact: None,
+        })
+    };
+    assert!(
+        notice(true).contains("CUT OFF at the token limit"),
+        "a truncated answer must not be reported as an unusable one: {}",
+        notice(true)
+    );
+    assert!(
+        !notice(false).contains("CUT OFF"),
+        "and a short answer must not be reported as truncated: {}",
+        notice(false)
     );
 }
