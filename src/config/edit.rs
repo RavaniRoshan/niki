@@ -95,29 +95,83 @@ pub fn get_value(path: &Path, dotted: &str) -> Result<Option<toml_edit::Item>> {
 /// destroy a provider the user configured.
 pub fn set_value(path: &Path, dotted: &str, value: toml_edit::Value) -> Result<()> {
     let mut doc = read_doc(path)?;
-
-    // Collect rather than iterate with `next()`: the first version consumed the
-    // final segment in the descent loop and then found nothing left to set.
     let segments: Vec<&str> = dotted.split('.').collect();
     let (last, parents) = segments
         .split_last()
         .ok_or_else(|| anyhow::anyhow!("{dotted:?} is not a setting path"))?;
 
-    let mut table: &mut dyn toml_edit::TableLike = doc.as_table_mut();
-    for segment in parents {
-        // Descend, creating the table if it is missing.
-        if !table.contains_key(segment) {
-            table.insert(segment, toml_edit::Item::Table(toml_edit::Table::new()));
-        }
-        let entry = table
-            .get_mut(segment)
-            .expect("just inserted or confirmed present");
-        match entry.as_table_like_mut() {
-            Some(t) => table = t,
-            None => anyhow::bail!("cannot set {dotted:?}: {segment:?} is a value, not a table"),
-        }
+    // Where the walk currently is. A TOML document is a tree of tables, but
+    // `[[mcp.servers]]` stores its entries in an array of tables, and
+    // `TableLike` cannot see into one — the elements are `Table`s inside an
+    // `Item::Value::Array`. Modelling the cursor explicitly is what lets one
+    // dotted path address both.
+    enum Cursor<'a> {
+        Table(&'a mut dyn toml_edit::TableLike),
+        Array(&'a mut toml_edit::ArrayOfTables),
     }
 
+    let mut cursor = Cursor::Table(doc.as_table_mut());
+    for segment in parents {
+        cursor = match cursor {
+            Cursor::Table(t) => {
+                // An array of tables lives under a key; the *next* segment is
+                // the index.
+                let is_array = t
+                    .get(segment)
+                    .is_some_and(|i| i.as_array_of_tables().is_some());
+                if is_array {
+                    let item = t.get_mut(segment).ok_or_else(|| {
+                        anyhow::anyhow!("cannot set {dotted:?}: {segment:?} vanished")
+                    })?;
+                    let arr = item.as_array_of_tables_mut().ok_or_else(|| {
+                        anyhow::anyhow!("cannot set {dotted:?}: {segment:?} is not an array")
+                    })?;
+                    Cursor::Array(arr)
+                } else {
+                    if !t.contains_key(segment) {
+                        t.insert(segment, toml_edit::Item::Table(toml_edit::Table::new()));
+                    }
+                    let next = t.get_mut(segment).ok_or_else(|| {
+                        anyhow::anyhow!("cannot set {dotted:?}: {segment:?} vanished")
+                    })?;
+                    let next = next.as_table_like_mut().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "cannot set {dotted:?}: {segment:?} is a value, not a table"
+                        )
+                    })?;
+                    Cursor::Table(next)
+                }
+            }
+            Cursor::Array(a) => {
+                let index: usize = segment.parse().map_err(|_| {
+                    anyhow::anyhow!(
+                        "cannot set {dotted:?}: {segment:?} is not an index into an array"
+                    )
+                })?;
+                let len = a.len();
+                let entry = a.get_mut(index).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "cannot set {dotted:?}: index {index} is out of range ({len} entries)"
+                    )
+                })?;
+                Cursor::Table(entry)
+            }
+        };
+    }
+
+    let table = match cursor {
+        Cursor::Table(t) => t,
+        // A path may not end *inside* an array: `mcp.servers` is a list, and
+        // there is no value to put there.
+        Cursor::Array(_) => {
+            anyhow::bail!("cannot set {dotted:?}: the path ends at an array")
+        }
+    };
+
+    // A path that currently holds a *non-scalar* value (a table or array) is
+    // refused rather than replaced: a settings UI offering to overwrite
+    // `[agents.planner]` with a string is a bug, and silently doing it would
+    // destroy a provider the user configured.
     if let Some(existing) = table.get(last)
         && !existing.is_value()
     {
@@ -140,16 +194,16 @@ pub fn set_value(path: &Path, dotted: &str, value: toml_edit::Value) -> Result<(
     // itself. For a key that is not present yet there is nothing to preserve and
     // `insert` is the only option.
     match table.get_mut(last) {
-        Some(item) => {
-            if let Some(old) = item.as_value() {
+        Some(existing) => {
+            if let Some(old) = existing.as_value() {
                 let decor = old.decor().clone();
                 let mut new_item = toml_edit::value(value);
                 if let Some(v) = new_item.as_value_mut() {
                     *v.decor_mut() = decor;
                 }
-                *item = new_item;
+                *existing = new_item;
             } else {
-                *item = toml_edit::value(value);
+                *existing = toml_edit::value(value);
             }
         }
         None => {
@@ -359,5 +413,66 @@ theme = "kiln"
             leftovers.is_empty(),
             "temp files left behind: {leftovers:?}"
         );
+    }
+
+    #[test]
+    fn a_value_inside_an_array_of_tables_can_be_set() {
+        // `[[mcp.servers]]` stores its entries in an array of tables, and
+        // `TableLike` cannot see into one. The first version of `set_value`
+        // walked with `TableLike` throughout and failed with "servers is a
+        // value, not a table" — so no array-backed setting could be edited at
+        // all, which is most of what a list-shaped setting is.
+        let dir = tmp();
+        let path = dir.path().join("niki.toml");
+        std::fs::write(
+            &path,
+            "[[mcp.servers]]\nname = \"a\"\nenabled = true\n\n[[mcp.servers]]\nname = \"b\"\nenabled = true\n",
+        )
+        .unwrap();
+
+        set_value(
+            &path,
+            "mcp.servers.1.enabled",
+            toml_edit::Value::from(false),
+        )
+        .unwrap();
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("name = \"a\"\nenabled = true"),
+            "the first entry must be untouched:\n{after}"
+        );
+        assert!(
+            after.contains("name = \"b\"\nenabled = false"),
+            "the second entry must be the one that changed:\n{after}"
+        );
+        assert_eq!(
+            after.matches("[[mcp.servers]]").count(),
+            2,
+            "and the array must not have grown or shrunk:\n{after}"
+        );
+    }
+
+    #[test]
+    fn an_out_of_range_index_is_an_error_not_a_panic() {
+        let dir = tmp();
+        let path = dir.path().join("niki.toml");
+        std::fs::write(&path, "[[mcp.servers]]\nname = \"a\"\n").unwrap();
+        let err = set_value(
+            &path,
+            "mcp.servers.7.enabled",
+            toml_edit::Value::from(false),
+        )
+        .expect_err("an out-of-range index must be refused");
+        assert!(err.to_string().contains("out of range"), "{err}");
+    }
+
+    #[test]
+    fn a_path_may_not_end_inside_an_array() {
+        let dir = tmp();
+        let path = dir.path().join("niki.toml");
+        std::fs::write(&path, "[[mcp.servers]]\nname = \"a\"\n").unwrap();
+        set_value(&path, "mcp.servers", toml_edit::Value::from("nope"))
+            .expect_err("replacing a whole array with a scalar must be refused");
     }
 }

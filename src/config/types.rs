@@ -709,6 +709,19 @@ fn default_budget_max_wallclock_secs() -> u64 {
 pub struct McpServerConfigEntry {
     pub name: String,
     pub command: Option<String>,
+    /// Defaults to empty.
+    ///
+    /// Every other optional field here has a default, and this one did not, so
+    /// the minimal entry a user would reasonably write —
+    ///
+    ///     [[mcp.servers]]
+    ///     name  = "docs"
+    ///     url   = "https://example.com/mcp"
+    ///
+    /// — failed to parse with "missing field `args`", pointing at the wrong
+    /// line and implying something was missing from their config when nothing
+    /// was. A URL-based server has no arguments at all.
+    #[serde(default)]
     pub args: Vec<String>,
     pub url: Option<String>,
     #[serde(default = "default_mcp_server_enabled")]
@@ -1218,6 +1231,38 @@ pub struct AgentsConfig {
     pub red: AgentConfig,
 }
 
+impl AgentsConfig {
+    /// Every agent, in the order the pipeline runs them.
+    pub const NAMES: [&'static str; 7] = [
+        "planner",
+        "coder",
+        "tester",
+        "reviewer",
+        "synthesizer",
+        "security_auditor",
+        "red",
+    ];
+
+    /// Look an agent's routing up by name.
+    ///
+    /// `Option` rather than a default, because a typo in a name must not silently
+    /// return the Planner's routing — which is exactly what an accessor that
+    /// falls back would do, and the result would be the right provider pointed
+    /// at the wrong agent.
+    pub fn agent_named(&self, name: &str) -> Option<&AgentConfig> {
+        Some(match name {
+            "planner" => &self.planner,
+            "coder" => &self.coder,
+            "tester" => &self.tester,
+            "reviewer" => &self.reviewer,
+            "synthesizer" => &self.synthesizer,
+            "security_auditor" => &self.security_auditor,
+            "red" => &self.red,
+            _ => return None,
+        })
+    }
+}
+
 impl Default for AgentsConfig {
     fn default() -> Self {
         Self {
@@ -1591,6 +1636,51 @@ impl NikiConfig {
 
         for (k, v) in other.providers {
             self.providers.insert(k, v);
+        }
+
+        // `[mcp]` was never merged. `merge` walked the config field by field and
+        // simply had no line for it, so `NikiConfig::default()` survived with
+        // zero servers whatever the file said — a user could add a server,
+        // see it listed by the config, and have the run never contact it. The
+        // MCP client, the `[mcp]` section and the `/mcp` surface all existed;
+        // the section was inert.
+        //
+        // Assigned wholesale, with the same "only if the author set it" rule the
+        // docker block uses: a global config with no `[mcp]` must not wipe a
+        // project's servers, so an entirely-default section is treated as
+        // "not mentioned".
+        // Same story for `[compaction]` and `[instructions]`: both are read at
+        // runtime (`config.compaction.enabled` in the pipeline,
+        // `config.instructions.enabled` in the indexer) and neither was ever
+        // merged, so a user who turned auto-compact off in niki.toml got it
+        // back on, and a project could not point NIKI at its own instructions
+        // file. A section that parses, appears in the docs, and does nothing is
+        // worse than one that is absent.
+        let default_compaction = CompactionConfig::default();
+        if other.compaction.enabled != default_compaction.enabled
+            || other.compaction.threshold_pct != default_compaction.threshold_pct
+            || other.compaction.reserved_tokens != default_compaction.reserved_tokens
+            || other.compaction.auto_compact != default_compaction.auto_compact
+        {
+            self.compaction = other.compaction;
+        }
+
+        let default_instructions = InstructionsConfig::default();
+        if other.instructions.enabled != default_instructions.enabled
+            || !other.instructions.paths.is_empty()
+            || other.instructions.auto_detect_agents_md
+                != default_instructions.auto_detect_agents_md
+        {
+            self.instructions = other.instructions;
+        }
+
+        let default_mcp = McpConfig::default();
+        if !other.mcp.servers.is_empty()
+            || other.mcp.enabled != default_mcp.enabled
+            || other.mcp.timeout_ms != default_mcp.timeout_ms
+            || other.mcp.read_only != default_mcp.read_only
+        {
+            self.mcp = other.mcp;
         }
 
         self.agents = other.agents;

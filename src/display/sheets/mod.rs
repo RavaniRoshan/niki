@@ -48,13 +48,22 @@ pub enum Sheet {
     Settings(Box<settings::SettingsSheet>),
     /// Choose a colour theme, with live preview.
     Theme(Box<theme::ThemeSheet>),
+    /// See and change which provider and model each agent uses.
+    Providers(Box<providers::ProviderSheet>),
+    /// See and change the MCP servers this run may talk to.
+    Mcp(Box<mcp::McpSheet>),
 }
 
 impl Sheet {
-    pub fn title(&self) -> String {
+    /// The sheet's title. Takes `state` because a title may be derived from
+    /// what is configured — "MCP — 3 servers" — and a title that had to guess
+    /// would be a title that lies on first run.
+    pub fn title(&self, state: &AppState) -> String {
         match self {
             Sheet::Settings(s) => s.title(),
             Sheet::Theme(s) => s.title(),
+            Sheet::Providers(s) => s.title(),
+            Sheet::Mcp(s) => s.title(state),
         }
     }
 
@@ -63,6 +72,8 @@ impl Sheet {
         match self {
             Sheet::Settings(s) => s.hint(),
             Sheet::Theme(s) => s.hint(),
+            Sheet::Providers(s) => s.hint(),
+            Sheet::Mcp(s) => s.hint(),
         }
     }
 
@@ -70,6 +81,8 @@ impl Sheet {
         match self {
             Sheet::Settings(s) => s.render(frame, area, state),
             Sheet::Theme(s) => s.render(frame, area, state),
+            Sheet::Providers(s) => s.render(frame, area, state),
+            Sheet::Mcp(s) => s.render(frame, area, state),
         }
     }
 
@@ -81,6 +94,8 @@ impl Sheet {
         match self {
             Sheet::Settings(s) => s.on_key(key, state),
             Sheet::Theme(s) => s.on_key(key, state),
+            Sheet::Providers(s) => s.on_key(key, state),
+            Sheet::Mcp(s) => s.on_key(key, state),
         }
     }
 
@@ -90,6 +105,8 @@ impl Sheet {
         match self {
             Sheet::Settings(s) => s.on_child_accepted(),
             Sheet::Theme(_) => {}
+            Sheet::Providers(_) => {}
+            Sheet::Mcp(_) => {}
         }
     }
 }
@@ -159,6 +176,8 @@ pub fn chrome(frame: &mut Frame, area: Rect, title: &str, hint: &str, focused: b
     }
 }
 
+pub mod mcp;
+pub mod providers;
 pub mod settings;
 pub mod theme;
 
