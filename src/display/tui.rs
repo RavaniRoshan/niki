@@ -1296,187 +1296,203 @@ pub fn run_chat(
 
         let timeout = min_frame_interval.saturating_sub(last_frame.elapsed());
         if event::poll(timeout).unwrap_or(false) {
-            if let Ok(Event::Key(key)) = event::read() {
-                // One overlay ladder for both loops. It used to be two
-                // hand-ordered chains that could disagree — and did: `run_tui`
-                // checked the help overlay before onboarding, `run_chat` after.
-                match route_overlay_key(&mut state, &mut command_palette, key, &project_path) {
-                    OverlayOutcome::Consumed => {
+            match event::read() {
+                Ok(Event::Key(key)) => {
+                    // One overlay ladder for both loops. It used to be two
+                    // hand-ordered chains that could disagree — and did: `run_tui`
+                    // checked the help overlay before onboarding, `run_chat` after.
+                    match route_overlay_key(&mut state, &mut command_palette, key, &project_path) {
+                        OverlayOutcome::Consumed => {
+                            needs_render = true;
+                            continue;
+                        }
+                        OverlayOutcome::Quit => break,
+                        OverlayOutcome::Free => {}
+                    }
+
+                    // Through the keybinding table. This was a literal `Tab`, so
+                    // it happened to match the default and looked fine — but a
+                    // user who rebound `toggle_chat` in `niki.toml` got a binding
+                    // that did nothing in `niki chat` and worked everywhere else.
+                    // The default is still Tab.
+                    if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleChatPage) {
+                        // Both `current_page` (what is rendered) and `view` (what
+                        // the footer label reads) have to move together or the
+                        // footer claims a toggle that did not happen.
+                        let next = match state.current_page {
+                            PageId::Chat => PageId::Run,
+                            _ => PageId::Chat,
+                        };
+                        state.current_page = next;
+                        state.view = match next {
+                            PageId::Chat => crate::display::state::ViewMode::Chat,
+                            other => crate::display::state::ViewMode::Page(other),
+                        };
                         needs_render = true;
                         continue;
                     }
-                    OverlayOutcome::Quit => break,
-                    OverlayOutcome::Free => {}
-                }
 
-                // Through the keybinding table. This was a literal `Tab`, so
-                // it happened to match the default and looked fine — but a
-                // user who rebound `toggle_chat` in `niki.toml` got a binding
-                // that did nothing in `niki chat` and worked everywhere else.
-                // The default is still Tab.
-                if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleChatPage) {
-                    // Both `current_page` (what is rendered) and `view` (what
-                    // the footer label reads) have to move together or the
-                    // footer claims a toggle that did not happen.
-                    let next = match state.current_page {
-                        PageId::Chat => PageId::Run,
-                        _ => PageId::Chat,
-                    };
-                    state.current_page = next;
-                    state.view = match next {
-                        PageId::Chat => crate::display::state::ViewMode::Chat,
-                        other => crate::display::state::ViewMode::Page(other),
-                    };
-                    needs_render = true;
-                    continue;
-                }
-
-                // Page navigation, before the chat composer. `niki chat` runs
-                // this second event loop, so the handler added to the first
-                // loop did not apply here — arrows and digits were bound and
-                // advertised in the footer but did nothing. Page-scoped keys
-                // still win: this sits after the router and the Fleet/Session
-                // handlers below, and is skipped entirely in the composer.
-                if state.current_page != PageId::Chat
-                    && let Some(intent) = crate::display::nav::intent_from_key(
-                        &key,
-                        crate::display::nav::text_focus_active(&state),
-                    )
-                {
-                    use crate::display::nav::{self as nav, Dir, NavIntent};
-                    let before = state.current_page;
-                    match intent {
-                        NavIntent::Page(Dir::Next) => state.current_page = nav::next_page(before),
-                        NavIntent::Page(Dir::Prev) => state.current_page = nav::prev_page(before),
-                        NavIntent::Select(dir) => {
-                            let len = nav::page_item_count(&state);
-                            state.page_selection = nav::step_index(len, state.page_selection, dir);
-                        }
-                        NavIntent::GotoPage(n) => {
-                            if let Some(page) = nav::goto_page(n) {
-                                state.current_page = page;
-                                state.view = crate::display::state::ViewMode::Page(page);
+                    // Page navigation, before the chat composer. `niki chat` runs
+                    // this second event loop, so the handler added to the first
+                    // loop did not apply here — arrows and digits were bound and
+                    // advertised in the footer but did nothing. Page-scoped keys
+                    // still win: this sits after the router and the Fleet/Session
+                    // handlers below, and is skipped entirely in the composer.
+                    if state.current_page != PageId::Chat
+                        && let Some(intent) = crate::display::nav::intent_from_key(
+                            &key,
+                            crate::display::nav::text_focus_active(&state),
+                        )
+                    {
+                        use crate::display::nav::{self as nav, Dir, NavIntent};
+                        let before = state.current_page;
+                        match intent {
+                            NavIntent::Page(Dir::Next) => {
+                                state.current_page = nav::next_page(before)
                             }
+                            NavIntent::Page(Dir::Prev) => {
+                                state.current_page = nav::prev_page(before)
+                            }
+                            NavIntent::Select(dir) => {
+                                let len = nav::page_item_count(&state);
+                                state.page_selection =
+                                    nav::step_index(len, state.page_selection, dir);
+                            }
+                            NavIntent::GotoPage(n) => {
+                                if let Some(page) = nav::goto_page(n) {
+                                    state.current_page = page;
+                                    state.view = crate::display::state::ViewMode::Page(page);
+                                }
+                            }
+                            NavIntent::Quit => break,
                         }
-                        NavIntent::Quit => break,
+                        state.view = match state.current_page {
+                            PageId::Chat => crate::display::state::ViewMode::Chat,
+                            other => crate::display::state::ViewMode::Page(other),
+                        };
+                        if state.current_page != before || matches!(intent, NavIntent::Select(_)) {
+                            needs_render = true;
+                        }
+                        continue;
                     }
-                    state.view = match state.current_page {
-                        PageId::Chat => crate::display::state::ViewMode::Chat,
-                        other => crate::display::state::ViewMode::Page(other),
-                    };
-                    if state.current_page != before || matches!(intent, NavIntent::Select(_)) {
-                        needs_render = true;
-                    }
-                    continue;
-                }
 
-                if state.current_page == PageId::Chat {
-                    let before_len = state.chat_log.len();
-                    let mut chat_page = chat::ChatPage::new();
-                    chat_page.handle_key(key, &mut state);
-                    needs_render = true;
-                    // Forward any newly submitted user message to the session
-                    // processor (Phase 6 — user messages mid-session).
-                    if state.chat_log.len() > before_len {
-                        if let Some((role, text)) = state.chat_log.last() {
-                            if role == "user" {
-                                if let Some(tx) = &on_submit {
-                                    let _ = tx.send(text.clone());
+                    if state.current_page == PageId::Chat {
+                        let before_len = state.chat_log.len();
+                        let mut chat_page = chat::ChatPage::new();
+                        chat_page.handle_key(key, &mut state);
+                        needs_render = true;
+                        // Forward any newly submitted user message to the session
+                        // processor (Phase 6 — user messages mid-session).
+                        if state.chat_log.len() > before_len {
+                            if let Some((role, text)) = state.chat_log.last() {
+                                if role == "user" {
+                                    if let Some(tx) = &on_submit {
+                                        let _ = tx.send(text.clone());
+                                    }
                                 }
                             }
                         }
+                        persistence::save_chat_session(
+                            &project_path,
+                            &persistence::snapshot(&state),
+                        );
+                        continue;
                     }
-                    persistence::save_chat_session(&project_path, &persistence::snapshot(&state));
-                    continue;
-                }
 
-                // Fleet/Session own their navigation (tabs, selection); other
-                // keys fall back to global page jumps, same as run_tui.
-                if state.current_page == PageId::Fleet {
-                    if handle_fleet_nav(key, &mut state) {
-                        needs_render = true;
-                    } else if let Some(page) = global_page_jump(key) {
-                        state.current_page = page;
-                        needs_render = true;
-                    }
-                    continue;
-                }
-                if state.current_page == PageId::Session {
-                    if handle_session_nav(key, &mut state) {
-                        needs_render = true;
-                    } else if let Some(page) = global_page_jump(key) {
-                        state.current_page = page;
-                        needs_render = true;
-                    }
-                    continue;
-                }
-
-                // Through the keybinding table, and note the default is
-                // `ctrl+t`, not a bare `t`. So the bare `t` that used to work
-                // here was not the configured key at all, and the configured
-                // key did nothing: a user pressing Ctrl+T in `niki chat` got
-                // silence. Same shape as the palette binding, one turn back.
-                if state.keybindings.resolve(&key) == Some(GlobalAction::CycleTheme) {
-                    let new_pref = match state.config.ui.theme {
-                        crate::config::types::ThemePreference::Dark => {
-                            crate::config::types::ThemePreference::Light
-                        }
-                        crate::config::types::ThemePreference::Light => {
-                            crate::config::types::ThemePreference::Auto
-                        }
-                        crate::config::types::ThemePreference::Auto => {
-                            crate::config::types::ThemePreference::Dark
-                        }
-                    };
-                    let mode = match new_pref {
-                        crate::config::types::ThemePreference::Dark => theme::ThemeMode::Dark,
-                        crate::config::types::ThemePreference::Light => theme::ThemeMode::Light,
-                        crate::config::types::ThemePreference::Auto => theme::ThemeMode::Auto,
-                    };
-                    theme::set_mode(mode);
-                    state.config.ui.theme = new_pref;
-                    needs_render = true;
-                    continue;
-                }
-
-                match key.code {
-                    KeyCode::Char('q') => {
-                        state.modal = Some(crate::display::pages::Modal::Confirm {
-                            title: "Quit".into(),
-                            message: "Exit NIKI?".into(),
-                        });
-                        needs_render = true;
-                    }
-                    _ => {
-                        if router.handle_key(key, &mut state) {
+                    // Fleet/Session own their navigation (tabs, selection); other
+                    // keys fall back to global page jumps, same as run_tui.
+                    if state.current_page == PageId::Fleet {
+                        if handle_fleet_nav(key, &mut state) {
                             needs_render = true;
                         } else if let Some(page) = global_page_jump(key) {
-                            // Page bindings win; bare letters fall back to
-                            // global jumps so every page is reachable.
                             state.current_page = page;
                             needs_render = true;
                         }
+                        continue;
+                    }
+                    if state.current_page == PageId::Session {
+                        if handle_session_nav(key, &mut state) {
+                            needs_render = true;
+                        } else if let Some(page) = global_page_jump(key) {
+                            state.current_page = page;
+                            needs_render = true;
+                        }
+                        continue;
+                    }
+
+                    // Through the keybinding table, and note the default is
+                    // `ctrl+t`, not a bare `t`. So the bare `t` that used to work
+                    // here was not the configured key at all, and the configured
+                    // key did nothing: a user pressing Ctrl+T in `niki chat` got
+                    // silence. Same shape as the palette binding, one turn back.
+                    if state.keybindings.resolve(&key) == Some(GlobalAction::CycleTheme) {
+                        let new_pref = match state.config.ui.theme {
+                            crate::config::types::ThemePreference::Dark => {
+                                crate::config::types::ThemePreference::Light
+                            }
+                            crate::config::types::ThemePreference::Light => {
+                                crate::config::types::ThemePreference::Auto
+                            }
+                            crate::config::types::ThemePreference::Auto => {
+                                crate::config::types::ThemePreference::Dark
+                            }
+                        };
+                        let mode = match new_pref {
+                            crate::config::types::ThemePreference::Dark => theme::ThemeMode::Dark,
+                            crate::config::types::ThemePreference::Light => theme::ThemeMode::Light,
+                            crate::config::types::ThemePreference::Auto => theme::ThemeMode::Auto,
+                        };
+                        theme::set_mode(mode);
+                        state.config.ui.theme = new_pref;
+                        needs_render = true;
+                        continue;
+                    }
+
+                    match key.code {
+                        KeyCode::Char('q') => {
+                            state.modal = Some(crate::display::pages::Modal::Confirm {
+                                title: "Quit".into(),
+                                message: "Exit NIKI?".into(),
+                            });
+                            needs_render = true;
+                        }
+                        _ => {
+                            if router.handle_key(key, &mut state) {
+                                needs_render = true;
+                            } else if let Some(page) = global_page_jump(key) {
+                                // Page bindings win; bare letters fall back to
+                                // global jumps so every page is reachable.
+                                state.current_page = page;
+                                needs_render = true;
+                            }
+                        }
                     }
                 }
-            } else if let Ok(Event::Mouse(mouse)) = event::read() {
-                if state.current_page == PageId::Chat {
-                    let size = terminal.size().unwrap_or(ratatui::layout::Size {
-                        width: 80,
-                        height: 24,
-                    });
-                    chat::ChatPage::handle_mouse(
-                        &mut state,
-                        mouse,
-                        Rect::new(0, 0, size.width, size.height),
-                    );
+                Ok(Event::Mouse(mouse)) => {
+                    if state.current_page == PageId::Chat {
+                        let size = terminal.size().unwrap_or(ratatui::layout::Size {
+                            width: 80,
+                            height: 24,
+                        });
+                        chat::ChatPage::handle_mouse(
+                            &mut state,
+                            mouse,
+                            Rect::new(0, 0, size.width, size.height),
+                        );
+                        needs_render = true;
+                    }
+                }
+                Ok(Event::Paste(pasted)) => {
+                    state.input_state.insert_str(&pasted);
+                    state.input_state.start_paste_burst();
                     needs_render = true;
                 }
-            } else if let Ok(Event::Paste(pasted)) = event::read() {
-                state.input_state.insert_str(&pasted);
-                state.input_state.start_paste_burst();
-                needs_render = true;
-            } else if let Ok(Event::Resize(_, _)) = event::read() {
-                needs_render = true;
+                Ok(Event::Resize(_, _)) => {
+                    needs_render = true;
+                }
+                // Focus changes, KeyEventKind, and anything crossterm adds
+                // later. None of them need a redraw on their own.
+                _ => {}
             }
         }
 
@@ -2194,6 +2210,79 @@ mod tests {
         fn the_status_bar_is_exactly_one_row() {
             for (w, h) in [(100u16, 40u16), (100, 12), (60, 40), (80, 24)] {
                 assert_eq!(bands(Rect::new(0, 0, w, h)).status.height, 1, "at {w}x{h}");
+            }
+        }
+    }
+
+    // -- the four-reads freeze --------------------------------------------
+    //
+    // The chat event loop was an if/else-if ladder over FOUR separate
+    // `event::read()` calls:
+    //
+    //     if let Ok(Event::Key(key)) = event::read() { .. }
+    //     else if let Ok(Event::Mouse(m)) = event::read() { .. }
+    //     else if let Ok(Event::Paste(p)) = event::read() { .. }
+    //     else if let Ok(Event::Resize(_,_)) = event::read() { .. }
+    //
+    // `event::read()` blocks. A single mouse-motion event was consumed by the
+    // first read, failed the `Key` pattern, and the second read then BLOCKED
+    // waiting for another event. The same for `Paste` and `Resize`: move the
+    // mouse over the window, or resize the terminal, and the app stops redrawing
+    // and stops processing keystrokes until you happen to press a key.
+    //
+    // A user with a mouse over their terminal -- which is most users -- hit this
+    // constantly, and the symptom ("the app froze, I think it crashed") points
+    // away from the cause entirely.
+    //
+    // The fix is one read and one match. A freeze cannot be asserted in-process,
+    // so the property is asserted on the source: the loop reads once per
+    // iteration. That is a source-level check on purpose -- it is the only place
+    // the property is checkable, and the failure it guards is invisible to every
+    // other kind of test.
+    #[test]
+    fn the_chat_event_loop_reads_exactly_one_event_per_iteration() {
+        let src = include_str!("tui.rs");
+        let start = src
+            .find("if event::poll(timeout).unwrap_or(false) {")
+            .expect("the chat loop's poll call exists");
+        let body = &src[start..];
+
+        // Stop at the end of this `if` block: the next top-level statement is
+        // the agent-channel drain, which contains no reads.
+        let end = body
+            .find("\n        }\n")
+            .map(|i| i + 12)
+            .unwrap_or(body.len().min(4000));
+        let block = &body[..end];
+
+        let reads = block.matches("event::read()").count();
+        assert_eq!(
+            reads, 1,
+            "the chat event loop calls `event::read()` {reads} times in one branch. \
+             `event::read()` BLOCKS, so every extra call is a place the app can stop \
+             responding: a mouse-motion event fails the `Key` pattern, the next read blocks \
+             waiting for a keystroke, and the TUI appears to freeze."
+        );
+        assert!(
+            !block.contains("else if let Ok(Event::"),
+            "the ladder must be a `match` on one read, not `else if let Ok(Event::..)` chains"
+        );
+    }
+
+    /// The reason the assertion above cannot be satisfied by an unrelated read
+    /// elsewhere in the file: the chained-read shape must not exist at all.
+    #[test]
+    fn no_event_ladder_reads_more_than_once_anywhere() {
+        let src = include_str!("tui.rs");
+        for (i, line) in src.lines().enumerate() {
+            let t = line.trim();
+            if t.starts_with("else if let Ok(Event::") || t.starts_with("} else if let Ok(Event::")
+            {
+                panic!(
+                    "line {}: `{t}` is a chained read -- the event must be read once and matched, \
+                     not re-read per arm",
+                    i + 1
+                );
             }
         }
     }
