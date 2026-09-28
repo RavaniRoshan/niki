@@ -2584,6 +2584,13 @@ pub struct LoopOutput {
     /// Accumulated provider token usage across all loop iterations (Phase 3.2:
     /// tool loops participate in token accounting instead of discarding it).
     pub usage: crate::llm::provider::TokenUsage,
+    /// Whether the last response was cut off at the provider's token limit.
+    ///
+    /// Carried out rather than logged because a truncated answer and a complete
+    /// one are different problems with different fixes, and the caller has to be
+    /// able to tell them: "the model is too small" and "the response was cut in
+    /// half" send a user to completely different places.
+    pub truncated: bool,
     /// The artifact the agent submitted through `submit_artifact`, if it did.
     ///
     /// This is what lets a stage be a *loop* and still produce the typed,
@@ -2725,6 +2732,17 @@ fn recover_artifact_from_content(content: &str) -> Option<serde_json::Value> {
         return Some(value);
     }
     None
+}
+
+/// Whether a message body looks like an artifact that was cut off mid-write.
+///
+/// Deliberately loose: it only has to tell "this response was truncated and it
+/// was clearly building the artifact" from "this response was truncated while
+/// saying something else". Being wrong in the permissive direction costs one
+/// extra turn; being wrong in the strict direction loses a recoverable answer.
+fn looks_like_an_artifact(content: &str) -> bool {
+    let t = content.trim_start();
+    (t.starts_with('{') || t.contains("```json") || t.contains("\"edits\"")) && t.contains('{')
 }
 
 /// Take the artifact, whether it arrived as a tool call or as message text.
@@ -2925,6 +2943,11 @@ pub async fn run_tool_loop_with(
     // refuses those calls, and a loop full of refusals looks identical to a
     // loop where the model simply never used the tool.
     let mut last_finish_reason: Option<String> = None;
+    // How many times a truncated answer has been sent back. Bounded, because a
+    // model that cannot fit an artifact in the budget will not start fitting it
+    // on the fourth attempt — it will just be cut off again, more expensively.
+    let mut steps_failed_truncated: u32 = 0;
+    const MAX_TRUNCATED_ANSWER_RETRIES: u32 = 1;
 
     loop {
         if steps >= max_steps {
@@ -2962,6 +2985,36 @@ pub async fn run_tool_loop_with(
         }
 
         if response.tool_calls.is_empty() {
+            // A response cut off mid-artifact is recoverable, exactly like a
+            // truncated tool call: the model said the right thing and ran out
+            // of room. Without this it went straight to the one-shot fallback,
+            // which re-asked from scratch and reported a parse error that named
+            // neither the truncation nor the fact that the answer was on its way
+            // to being right.
+            //
+            // Measured: a refactor produced a correct, schema-shaped artifact
+            // that stopped mid-object at the token limit.
+            if was_truncated(response.finish_reason.as_deref())
+                && looks_like_an_artifact(&response.content)
+                && steps_failed_truncated < MAX_TRUNCATED_ANSWER_RETRIES
+            {
+                steps_failed_truncated += 1;
+                messages.push(LoopMessage::Assistant {
+                    content: response.content.clone(),
+                    tool_calls: Vec::new(),
+                });
+                messages.push(LoopMessage::User(format!(
+                    "Your previous answer was cut off at the token limit before it finished                      ({}). Re-emit the whole {} in a shorter form: keep the same edits, cut                      the commentary. {}",
+                    response.finish_reason.as_deref().unwrap_or("length"),
+                    "artifact",
+                    if opts.submit_artifact.is_some() {
+                        "Call submit_artifact with it."
+                    } else {
+                        "Reply with only the JSON."
+                    }
+                )));
+                continue;
+            }
             // A model that answered in prose is the case this branch exists for,
             // and it is exactly where a content-borne artifact has to be
             // recovered — recovering only at the end of the loop skipped every
@@ -2973,6 +3026,11 @@ pub async fn run_tool_loop_with(
                 steps,
                 tool_calls: call_log,
                 usage,
+                // Read off this response, not hardcoded. It was `false` here,
+                // which meant a caller asking "was this cut off?" was told no
+                // in exactly the case where it was — the one case the question
+                // exists for.
+                truncated: was_truncated(response.finish_reason.as_deref()) && recovered.is_none(),
                 artifact: recovered,
             });
         }
@@ -3067,6 +3125,7 @@ pub async fn run_tool_loop_with(
                     steps,
                     tool_calls: call_log,
                     usage,
+                    truncated: false,
                     artifact: submitted,
                 });
             }
@@ -3210,6 +3269,7 @@ pub async fn run_tool_loop_with(
         steps,
         tool_calls: call_log,
         usage,
+        truncated: was_truncated(last_finish_reason.as_deref()) && submitted.is_none(),
         artifact: submitted,
     })
 }
