@@ -170,6 +170,389 @@ pub fn spawn_tui(
     (tx, handle)
 }
 
+/// Route one mouse event to whatever owns it.
+///
+/// Returns `true` when the screen needs redrawing. This used to be a 378-line
+/// arm inside `run_tui`'s `match`, which made it untestable: there was no
+/// seam to drive a click through, which is why the phantom tab-bar handlers
+/// that sat in here could be exercised only by a test of the hit-test
+/// function and never by a test of the thing a user actually does.
+///
+/// The overlays still take the mouse in priority order — help, then whatever
+/// `active_focus` names, then the chat page — and that order is the point of
+/// having it in one function.
+#[allow(clippy::too_many_lines)]
+fn route_mouse(
+    state: &mut AppState,
+    router: &mut super::pages::PageRouter,
+    command_palette: &mut CommandPalette,
+    mouse: ratatui::crossterm::event::MouseEvent,
+    full: Option<ratatui::layout::Rect>,
+) -> bool {
+    let mut dirty = false;
+    use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+    // Clicking anywhere dismisses the help overlay.
+    if state.show_help {
+        state.show_help = false;
+        return true;
+    }
+    // Hover (move/drag) moves the highlight; a left press activates.
+    let hovering = matches!(mouse.kind, MouseEventKind::Moved | MouseEventKind::Drag(_));
+    let clicking = matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left));
+    let scrolling_up = matches!(mouse.kind, MouseEventKind::ScrollUp);
+    let scrolling_down = matches!(mouse.kind, MouseEventKind::ScrollDown);
+
+    // Route to the active overlay first; chat copy-mode only
+    // sees the mouse when no overlay owns it.
+    match active_focus(state) {
+        FocusState::Permission => {
+            if scrolling_up || scrolling_down {
+                let mut cursor = permission::cursor(state);
+                if scrolling_up {
+                    cursor.prev();
+                } else {
+                    cursor.next();
+                }
+                state.permission_selected = cursor.selected;
+                dirty = true;
+            } else if let Some(full) = full {
+                // Geometry comes from the request + detail flag,
+                // shared with the renderer (TUI-013).
+                let show_detail = state.show_permission_detail;
+                let hit = state.permission_request.as_ref().and_then(|req| {
+                    permission::click_index(full, mouse.column, mouse.row, req, show_detail)
+                });
+                if let Some(idx) = hit {
+                    let mut cursor = permission::cursor(state);
+                    if hovering {
+                        if cursor.hover(idx) {
+                            state.permission_selected = cursor.selected;
+                            dirty = true;
+                        }
+                    } else if clicking {
+                        if let Some(i) = cursor.click(idx) {
+                            state.permission_selected = i;
+                            if let Some(req) = state.permission_request.take() {
+                                let _ = req.response_tx.send(permission::action_for(i));
+                                state.show_permission_modal = false;
+                            }
+                            dirty = true;
+                        }
+                    }
+                }
+            }
+        }
+        FocusState::CommandPalette => {
+            if scrolling_up || scrolling_down {
+                if scrolling_up {
+                    command_palette.cursor.prev();
+                } else {
+                    command_palette.cursor.next();
+                }
+                state.command_selected = command_palette.cursor.selected;
+                dirty = true;
+            } else if let Some(full) = full
+                && let Some(idx) = super::command_palette::click_index(
+                    command_palette,
+                    full,
+                    mouse.column,
+                    mouse.row,
+                )
+            {
+                if hovering {
+                    if command_palette.hover(idx) {
+                        dirty = true;
+                    }
+                } else if clicking && command_palette.click(idx, state) {
+                    state.show_command_palette = false;
+                    dirty = true;
+                }
+            }
+        }
+        FocusState::CommandMenu => {
+            if scrolling_up || scrolling_down {
+                let mut cursor = command_menu::cursor(state);
+                if scrolling_up {
+                    cursor.prev();
+                } else {
+                    cursor.next();
+                }
+                state.command_selected = cursor.selected;
+                dirty = true;
+            } else if let Some(full) = full
+                && let Some(idx) = command_menu::click_index(state, full, mouse.column, mouse.row)
+            {
+                state.command_selected = idx;
+                // Execute the command on click (same as Enter)
+                if let Some(name) =
+                    crate::display::components::command_menu::get_selected_command(state)
+                {
+                    state.input_state.buffer = format!("/{}", name);
+                    state.input_state.cursor_pos = state.input_state.buffer.len();
+                    state.input_state.mode = InputMode::Insert;
+                    state.show_command_menu = false;
+                    state.command_filter.clear();
+                    state.command_selected = 0;
+                    let enter = event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+                    let mut page = chat::ChatPage::new();
+                    page.handle_key(enter, state);
+                }
+                dirty = true;
+            }
+        }
+        FocusState::Chat => {
+            // Open tool-detail modal owns left-clicks (TUI-013):
+            // inside is consumed, outside dismisses. The wheel
+            // path below chains into the modal scroll instead.
+            if state.tool_detail_index.is_some() && clicking {
+                if let Some(full) = full {
+                    super::components::tool_detail::route_click(
+                        state,
+                        mouse.column,
+                        mouse.row,
+                        full,
+                    );
+                    dirty = true;
+                }
+                return dirty;
+            }
+            if state.current_page == PageId::Chat
+                && let Some(full) = full
+            {
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(8),
+                        Constraint::Min(5),
+                        Constraint::Length(1),
+                    ])
+                    .split(full);
+                // Scroll wheel with innermost-first chaining (TUI-010):
+                // an open tool-detail modal consumes the wheel
+                // first; the remainder scrolls the chat behind it.
+                if scrolling_up || scrolling_down {
+                    let delta = if scrolling_up { -3 } else { 3 };
+                    let mut rest = delta;
+                    if let Some(idx) = state.tool_detail_index {
+                        if let Some(card) = state.tool_cards.get(idx) {
+                            let content =
+                                super::components::tool_detail::detail_content_lines(card);
+                            let viewport = super::components::tool_detail::detail_viewport(full);
+                            rest = state.tool_detail_scroll.scroll_by(rest, content, viewport);
+                        }
+                    }
+                    if rest != 0 {
+                        let total = state.chat_lines.len();
+                        let visible = chunks[1].height as usize;
+                        state.chat_scroll.scroll_by(rest, total, visible);
+                    }
+                    dirty = true;
+                } else {
+                    // Scrollbar click/drag-to-jump (gaps P0 — "Drag to scroll").
+                    let msg_area_h = chunks[1].height.saturating_sub(3) as usize;
+                    let sb_col = chunks[1].x + chunks[1].width.saturating_sub(1);
+                    let on_scrollbar = (clicking || matches!(mouse.kind, MouseEventKind::Drag(_)))
+                        && mouse.column == sb_col
+                        && mouse.row >= chunks[1].y
+                        && mouse.row < chunks[1].y + chunks[1].height.saturating_sub(3);
+                    if on_scrollbar {
+                        let total = state.chat_lines.len();
+                        if total > msg_area_h && msg_area_h > 0 {
+                            let frac = (mouse.row - chunks[1].y) as f64 / msg_area_h as f64;
+                            let target = (frac * total as f64).round() as usize;
+                            state.chat_scroll.jump_to(target, total, msg_area_h);
+                            dirty = true;
+                        }
+                    } else if hovering {
+                        // Hover hit-test for chat elements
+                        let row = mouse.row.saturating_sub(chunks[1].y) as usize;
+                        let total = state.chat_lines.len();
+                        let visible = chunks[1].height as usize;
+                        let offset = state.chat_scroll.view_offset(total, visible);
+                        let abs_row = offset + row;
+                        let new_target = if row < chunks[1].height as usize
+                            && let Some(line) = state.chat_lines.get(abs_row)
+                        {
+                            if line.header_stage.is_some() {
+                                HoverTarget::StageHeader(line.header_stage.unwrap_or(0))
+                            } else if line.is_input {
+                                HoverTarget::InputBox
+                            } else if line.msg_index != usize::MAX {
+                                HoverTarget::ChatMessage(line.msg_index)
+                            } else {
+                                HoverTarget::None
+                            }
+                        } else {
+                            HoverTarget::None
+                        };
+                        if state.hover_target != new_target {
+                            state.hover_target = new_target;
+                            state.hover_time = Some(std::time::Instant::now());
+                            dirty = true;
+                        }
+                    } else {
+                        chat::ChatPage::handle_mouse(state, mouse, chunks[1]);
+                        dirty = true;
+                    }
+                }
+                // Click-to-position cursor in input box
+                if clicking && state.current_page == PageId::Chat {
+                    let input_chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Min(3), Constraint::Length(3)])
+                        .split(chunks[1]);
+                    if super::components::input_box::handle_click(
+                        state,
+                        mouse.column,
+                        input_chunks[1],
+                    ) {
+                        dirty = true;
+                    }
+                }
+            }
+        }
+    }
+    // Modal click handling (always active when modal is present)
+    if clicking
+        && let Some(ref modal) = state.modal
+        && let Some(full) = full
+    {
+        if let Some(action) = modal::modal_hit_test(mouse.column, mouse.row, full, modal) {
+            match action {
+                ModalAction::Confirm => {
+                    state.modal = None;
+                    if let Some(req) = state.permission_request.take() {
+                        let _ = req
+                            .response_tx
+                            .send(crate::permissions::PermissionAction::Allow);
+                    }
+                    dirty = true;
+                }
+                ModalAction::Retry => {
+                    state.modal = None;
+                    // Retry is handled by the key handler
+                    dirty = true;
+                }
+                ModalAction::Config => {
+                    state.modal = None;
+                    state.current_page = PageId::Config;
+                    dirty = true;
+                }
+                ModalAction::Dismiss => {
+                    state.modal = None;
+                    dirty = true;
+                }
+                ModalAction::None => {}
+            }
+        }
+    }
+    // Status bar: hover *and* click, always active regardless of overlay focus.
+    //
+    // The whole block used to be `if hovering && ...`, with the click handler
+    // nested inside it. But `hovering` is Moved/Drag and `clicking` is
+    // Down(Left) — mutually exclusive — so the click branch could never run.
+    // The status bar highlighted on hover and told the user to click the mode
+    // badge, and nothing happened when they did. Only extracting this into a
+    // testable function made it findable: the test drove a click and the mode
+    // did not change.
+    if (hovering || clicking)
+        && let Some(full) = full
+    {
+        let status_area = Rect {
+            x: 0,
+            y: full.height.saturating_sub(1),
+            width: full.width,
+            height: 1,
+        };
+        if mouse.row == status_area.y {
+            let new_target =
+                super::components::status_bar::hover_test(mouse.column, status_area, state);
+            if hovering {
+                if state.hover_target != new_target {
+                    state.hover_target = new_target;
+                    state.hover_time = Some(std::time::Instant::now());
+                    dirty = true;
+                }
+            }
+            if clicking {
+                // Handle status bar clicks
+                match new_target {
+                    HoverTarget::StatusBarMode => {
+                        // Cycle permission modes
+                        state.permission_mode = match state.permission_mode {
+                            crate::display::state::PermissionMode::Default => {
+                                crate::display::state::PermissionMode::AcceptEdits
+                            }
+                            crate::display::state::PermissionMode::AcceptEdits => {
+                                crate::display::state::PermissionMode::Plan
+                            }
+                            crate::display::state::PermissionMode::Plan => {
+                                crate::display::state::PermissionMode::Auto
+                            }
+                            crate::display::state::PermissionMode::Auto => {
+                                crate::display::state::PermissionMode::DontAsk
+                            }
+                            crate::display::state::PermissionMode::DontAsk => {
+                                crate::display::state::PermissionMode::BypassPermissions
+                            }
+                            crate::display::state::PermissionMode::BypassPermissions => {
+                                crate::display::state::PermissionMode::Default
+                            }
+                        };
+                        state.set_notice(
+                            &format!("Permission mode: {:?}", state.permission_mode),
+                            1500,
+                        );
+                        dirty = true;
+                    }
+                    _ => {}
+                }
+            }
+        } else if matches!(
+            state.hover_target,
+            HoverTarget::StatusBarMode
+                | HoverTarget::StatusBarCost
+                | HoverTarget::StatusBarBranch
+                | HoverTarget::StatusBarCtx
+        ) {
+            // Mouse left the status bar
+            state.hover_target = HoverTarget::None;
+            dirty = true;
+        }
+    }
+    // There is no tab bar. `layout::render_page` was the only
+    // thing that drew one and it has no callers, so the click
+    // and hover handlers here were responding to a region with
+    // no pixels in it: clicking the top row of the screen
+    // teleported the user to an arbitrary page, and a test
+    // exercised the hit-test against a bar that is never drawn.
+    if clicking
+        && state.current_page == PageId::Fleet
+        && let Some(full) = full
+    {
+        if state.fleet.handle_click(mouse.column, mouse.row, full) {
+            dirty = true;
+        }
+    }
+    // Scroll wheel for non-chat pages (sends synthetic Up/Down keys)
+    if (scrolling_up || scrolling_down) && state.current_page != PageId::Chat {
+        let key_code = if scrolling_up {
+            KeyCode::Up
+        } else {
+            KeyCode::Down
+        };
+        let key = KeyEvent::new(key_code, KeyModifiers::NONE);
+        router.handle_key(key, state);
+        dirty = true;
+    }
+    // Click feedback flash (brief visual indicator on any click)
+    if clicking {
+        state.trigger_click_flash((mouse.column, mouse.row));
+        dirty = true;
+    }
+    dirty
+}
+
 fn run_tui(
     rx: Receiver<DisplayEvent>,
     description: String,
@@ -673,381 +1056,14 @@ fn run_tui(
                     }
                 }
                 Ok(Event::Mouse(mouse)) => {
-                    use ratatui::crossterm::event::{MouseButton, MouseEventKind};
-                    // Clicking anywhere dismisses the help overlay.
-                    if state.show_help {
-                        state.show_help = false;
-                        engine.mark_dirty();
-                        continue;
-                    }
-                    // Hover (move/drag) moves the highlight; a left press activates.
-                    let hovering =
-                        matches!(mouse.kind, MouseEventKind::Moved | MouseEventKind::Drag(_));
-                    let clicking = matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left));
-                    let scrolling_up = matches!(mouse.kind, MouseEventKind::ScrollUp);
-                    let scrolling_down = matches!(mouse.kind, MouseEventKind::ScrollDown);
                     let full = engine
                         .terminal()
                         .size()
                         .ok()
                         .map(|size| ratatui::layout::Rect::new(0, 0, size.width, size.height));
-
-                    // Route to the active overlay first; chat copy-mode only
-                    // sees the mouse when no overlay owns it.
-                    match active_focus(&state) {
-                        FocusState::Permission => {
-                            if scrolling_up || scrolling_down {
-                                let mut cursor = permission::cursor(&state);
-                                if scrolling_up {
-                                    cursor.prev();
-                                } else {
-                                    cursor.next();
-                                }
-                                state.permission_selected = cursor.selected;
-                                engine.mark_dirty();
-                            } else if let Some(full) = full {
-                                // Geometry comes from the request + detail flag,
-                                // shared with the renderer (TUI-013).
-                                let show_detail = state.show_permission_detail;
-                                let hit = state.permission_request.as_ref().and_then(|req| {
-                                    permission::click_index(
-                                        full,
-                                        mouse.column,
-                                        mouse.row,
-                                        req,
-                                        show_detail,
-                                    )
-                                });
-                                if let Some(idx) = hit {
-                                    let mut cursor = permission::cursor(&state);
-                                    if hovering {
-                                        if cursor.hover(idx) {
-                                            state.permission_selected = cursor.selected;
-                                            engine.mark_dirty();
-                                        }
-                                    } else if clicking {
-                                        if let Some(i) = cursor.click(idx) {
-                                            state.permission_selected = i;
-                                            if let Some(req) = state.permission_request.take() {
-                                                let _ =
-                                                    req.response_tx.send(permission::action_for(i));
-                                                state.show_permission_modal = false;
-                                            }
-                                            engine.mark_dirty();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        FocusState::CommandPalette => {
-                            if scrolling_up || scrolling_down {
-                                if scrolling_up {
-                                    command_palette.cursor.prev();
-                                } else {
-                                    command_palette.cursor.next();
-                                }
-                                state.command_selected = command_palette.cursor.selected;
-                                engine.mark_dirty();
-                            } else if let Some(full) = full
-                                && let Some(idx) = super::command_palette::click_index(
-                                    &command_palette,
-                                    full,
-                                    mouse.column,
-                                    mouse.row,
-                                )
-                            {
-                                if hovering {
-                                    if command_palette.hover(idx) {
-                                        engine.mark_dirty();
-                                    }
-                                } else if clicking && command_palette.click(idx, &mut state) {
-                                    state.show_command_palette = false;
-                                    engine.mark_dirty();
-                                }
-                            }
-                        }
-                        FocusState::CommandMenu => {
-                            if scrolling_up || scrolling_down {
-                                let mut cursor = command_menu::cursor(&state);
-                                if scrolling_up {
-                                    cursor.prev();
-                                } else {
-                                    cursor.next();
-                                }
-                                state.command_selected = cursor.selected;
-                                engine.mark_dirty();
-                            } else if let Some(full) = full
-                                && let Some(idx) =
-                                    command_menu::click_index(&state, full, mouse.column, mouse.row)
-                            {
-                                state.command_selected = idx;
-                                // Execute the command on click (same as Enter)
-                                if let Some(name) =
-                                    crate::display::components::command_menu::get_selected_command(
-                                        &state,
-                                    )
-                                {
-                                    state.input_state.buffer = format!("/{}", name);
-                                    state.input_state.cursor_pos = state.input_state.buffer.len();
-                                    state.input_state.mode = InputMode::Insert;
-                                    state.show_command_menu = false;
-                                    state.command_filter.clear();
-                                    state.command_selected = 0;
-                                    let enter =
-                                        event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-                                    let mut page = chat::ChatPage::new();
-                                    page.handle_key(enter, &mut state);
-                                }
-                                engine.mark_dirty();
-                            }
-                        }
-                        FocusState::Chat => {
-                            // Open tool-detail modal owns left-clicks (TUI-013):
-                            // inside is consumed, outside dismisses. The wheel
-                            // path below chains into the modal scroll instead.
-                            if state.tool_detail_index.is_some() && clicking {
-                                if let Some(full) = full {
-                                    super::components::tool_detail::route_click(
-                                        &mut state,
-                                        mouse.column,
-                                        mouse.row,
-                                        full,
-                                    );
-                                    engine.mark_dirty();
-                                }
-                                continue;
-                            }
-                            if state.current_page == PageId::Chat
-                                && let Some(full) = full
-                            {
-                                let chunks = Layout::default()
-                                    .direction(Direction::Vertical)
-                                    .constraints([
-                                        Constraint::Length(8),
-                                        Constraint::Min(5),
-                                        Constraint::Length(1),
-                                    ])
-                                    .split(full);
-                                // Scroll wheel with innermost-first chaining (TUI-010):
-                                // an open tool-detail modal consumes the wheel
-                                // first; the remainder scrolls the chat behind it.
-                                if scrolling_up || scrolling_down {
-                                    let delta = if scrolling_up { -3 } else { 3 };
-                                    let mut rest = delta;
-                                    if let Some(idx) = state.tool_detail_index {
-                                        if let Some(card) = state.tool_cards.get(idx) {
-                                            let content =
-                                                super::components::tool_detail::detail_content_lines(
-                                                    card,
-                                                );
-                                            let viewport =
-                                                super::components::tool_detail::detail_viewport(
-                                                    full,
-                                                );
-                                            rest = state
-                                                .tool_detail_scroll
-                                                .scroll_by(rest, content, viewport);
-                                        }
-                                    }
-                                    if rest != 0 {
-                                        let total = state.chat_lines.len();
-                                        let visible = chunks[1].height as usize;
-                                        state.chat_scroll.scroll_by(rest, total, visible);
-                                    }
-                                    engine.mark_dirty();
-                                } else {
-                                    // Scrollbar click/drag-to-jump (gaps P0 — "Drag to scroll").
-                                    let msg_area_h = chunks[1].height.saturating_sub(3) as usize;
-                                    let sb_col = chunks[1].x + chunks[1].width.saturating_sub(1);
-                                    let on_scrollbar = (clicking
-                                        || matches!(mouse.kind, MouseEventKind::Drag(_)))
-                                        && mouse.column == sb_col
-                                        && mouse.row >= chunks[1].y
-                                        && mouse.row
-                                            < chunks[1].y + chunks[1].height.saturating_sub(3);
-                                    if on_scrollbar {
-                                        let total = state.chat_lines.len();
-                                        if total > msg_area_h && msg_area_h > 0 {
-                                            let frac = (mouse.row - chunks[1].y) as f64
-                                                / msg_area_h as f64;
-                                            let target = (frac * total as f64).round() as usize;
-                                            state.chat_scroll.jump_to(target, total, msg_area_h);
-                                            engine.mark_dirty();
-                                        }
-                                    } else if hovering {
-                                        // Hover hit-test for chat elements
-                                        let row = mouse.row.saturating_sub(chunks[1].y) as usize;
-                                        let total = state.chat_lines.len();
-                                        let visible = chunks[1].height as usize;
-                                        let offset = state.chat_scroll.view_offset(total, visible);
-                                        let abs_row = offset + row;
-                                        let new_target = if row < chunks[1].height as usize
-                                            && let Some(line) = state.chat_lines.get(abs_row)
-                                        {
-                                            if line.header_stage.is_some() {
-                                                HoverTarget::StageHeader(
-                                                    line.header_stage.unwrap_or(0),
-                                                )
-                                            } else if line.is_input {
-                                                HoverTarget::InputBox
-                                            } else if line.msg_index != usize::MAX {
-                                                HoverTarget::ChatMessage(line.msg_index)
-                                            } else {
-                                                HoverTarget::None
-                                            }
-                                        } else {
-                                            HoverTarget::None
-                                        };
-                                        if state.hover_target != new_target {
-                                            state.hover_target = new_target;
-                                            state.hover_time = Some(std::time::Instant::now());
-                                            engine.mark_dirty();
-                                        }
-                                    } else {
-                                        chat::ChatPage::handle_mouse(&mut state, mouse, chunks[1]);
-                                        engine.mark_dirty();
-                                    }
-                                }
-                                // Click-to-position cursor in input box
-                                if clicking && state.current_page == PageId::Chat {
-                                    let input_chunks = Layout::default()
-                                        .direction(Direction::Vertical)
-                                        .constraints([Constraint::Min(3), Constraint::Length(3)])
-                                        .split(chunks[1]);
-                                    if super::components::input_box::handle_click(
-                                        &mut state,
-                                        mouse.column,
-                                        input_chunks[1],
-                                    ) {
-                                        engine.mark_dirty();
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // Modal click handling (always active when modal is present)
-                    if clicking
-                        && let Some(ref modal) = state.modal
-                        && let Some(full) = full
-                    {
-                        if let Some(action) =
-                            modal::modal_hit_test(mouse.column, mouse.row, full, modal)
-                        {
-                            match action {
-                                ModalAction::Confirm => {
-                                    state.modal = None;
-                                    if let Some(req) = state.permission_request.take() {
-                                        let _ = req
-                                            .response_tx
-                                            .send(crate::permissions::PermissionAction::Allow);
-                                    }
-                                    engine.mark_dirty();
-                                }
-                                ModalAction::Retry => {
-                                    state.modal = None;
-                                    // Retry is handled by the key handler
-                                    engine.mark_dirty();
-                                }
-                                ModalAction::Config => {
-                                    state.modal = None;
-                                    state.current_page = PageId::Config;
-                                    engine.mark_dirty();
-                                }
-                                ModalAction::Dismiss => {
-                                    state.modal = None;
-                                    engine.mark_dirty();
-                                }
-                                ModalAction::None => {}
-                            }
-                        }
-                    }
-                    // Status bar hover detection (always active, regardless of overlay focus)
-                    if hovering && let Some(full) = full {
-                        let status_area = Rect {
-                            x: 0,
-                            y: full.height.saturating_sub(1),
-                            width: full.width,
-                            height: 1,
-                        };
-                        if mouse.row == status_area.y {
-                            let new_target = super::components::status_bar::hover_test(
-                                mouse.column,
-                                status_area,
-                                &state,
-                            );
-                            if hovering {
-                                if state.hover_target != new_target {
-                                    state.hover_target = new_target;
-                                    state.hover_time = Some(std::time::Instant::now());
-                                    engine.mark_dirty();
-                                }
-                            }
-                            if clicking {
-                                // Handle status bar clicks
-                                match new_target {
-                                    HoverTarget::StatusBarMode => {
-                                        // Cycle permission modes
-                                        state.permission_mode = match state.permission_mode {
-                                            crate::display::state::PermissionMode::Default => crate::display::state::PermissionMode::AcceptEdits,
-                                            crate::display::state::PermissionMode::AcceptEdits => crate::display::state::PermissionMode::Plan,
-                                            crate::display::state::PermissionMode::Plan => crate::display::state::PermissionMode::Auto,
-                                            crate::display::state::PermissionMode::Auto => crate::display::state::PermissionMode::DontAsk,
-                                            crate::display::state::PermissionMode::DontAsk => crate::display::state::PermissionMode::BypassPermissions,
-                                            crate::display::state::PermissionMode::BypassPermissions => crate::display::state::PermissionMode::Default,
-                                        };
-                                        state.set_notice(
-                                            &format!(
-                                                "Permission mode: {:?}",
-                                                state.permission_mode
-                                            ),
-                                            1500,
-                                        );
-                                        engine.mark_dirty();
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        } else if matches!(
-                            state.hover_target,
-                            HoverTarget::StatusBarMode
-                                | HoverTarget::StatusBarCost
-                                | HoverTarget::StatusBarBranch
-                                | HoverTarget::StatusBarCtx
-                        ) {
-                            // Mouse left the status bar
-                            state.hover_target = HoverTarget::None;
-                            engine.mark_dirty();
-                        }
-                    }
-                    // There is no tab bar. `layout::render_page` was the only
-                    // thing that drew one and it has no callers, so the click
-                    // and hover handlers here were responding to a region with
-                    // no pixels in it: clicking the top row of the screen
-                    // teleported the user to an arbitrary page, and a test
-                    // exercised the hit-test against a bar that is never drawn.
-                    if clicking
-                        && state.current_page == PageId::Fleet
-                        && let Some(full) = full
-                    {
-                        if state.fleet.handle_click(mouse.column, mouse.row, full) {
-                            engine.mark_dirty();
-                        }
-                    }
-                    // Scroll wheel for non-chat pages (sends synthetic Up/Down keys)
-                    if (scrolling_up || scrolling_down) && state.current_page != PageId::Chat {
-                        let key_code = if scrolling_up {
-                            KeyCode::Up
-                        } else {
-                            KeyCode::Down
-                        };
-                        let key = KeyEvent::new(key_code, KeyModifiers::NONE);
-                        router.handle_key(key, &mut state);
+                    if route_mouse(&mut state, &mut router, &mut command_palette, mouse, full) {
                         engine.mark_dirty();
-                    }
-                    // Click feedback flash (brief visual indicator on any click)
-                    if clicking {
-                        state.trigger_click_flash((mouse.column, mouse.row));
-                        engine.mark_dirty();
+                        continue;
                     }
                 }
                 Ok(Event::Paste(pasted)) => {
@@ -1801,5 +1817,125 @@ mod tests {
         state.show_permission_modal = true;
         assert_eq!(active_focus(&state), FocusState::Permission);
         assert!(active_focus(&state).is_overlay());
+    }
+    /// Mouse routing was untestable: it lived as a 378-line `match` arm inside
+    /// `run_tui`, with no seam to drive an event through. That is not a
+    /// theoretical gap — it is why a click handler for a tab bar that is never
+    /// drawn could sit there passing review.
+    ///
+    /// These are the cases that could not be written before.
+    mod mouse {
+        use super::*;
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        fn state() -> AppState {
+            let config = crate::config::NikiConfig::default();
+            AppState::new("test".to_string(), config, ".".into())
+        }
+
+        fn ev(kind: MouseEventKind, col: u16, row: u16) -> MouseEvent {
+            MouseEvent {
+                kind,
+                column: col,
+                row,
+                modifiers: KeyModifiers::NONE,
+            }
+        }
+
+        fn full() -> ratatui::layout::Rect {
+            ratatui::layout::Rect::new(0, 0, 100, 30)
+        }
+
+        fn route(
+            st: &mut AppState,
+            palette: &mut CommandPalette,
+            router: &mut crate::display::pages::PageRouter,
+            e: MouseEvent,
+        ) -> bool {
+            route_mouse(st, router, palette, e, Some(full()))
+        }
+
+        /// The phantom tab bar: clicking the top row must not change the page,
+        /// because nothing is drawn there.
+        #[test]
+        fn clicking_the_top_row_does_not_navigate() {
+            let mut st = state();
+            let mut palette = CommandPalette::new();
+            let mut router = crate::display::pages::PageRouter::new();
+            st.current_page = PageId::Chat;
+            for col in [2u16, 20, 40, 60, 90] {
+                let kind = MouseEventKind::Down(MouseButton::Left);
+                route(&mut st, &mut palette, &mut router, ev(kind, col, 0));
+            }
+            assert_eq!(
+                st.current_page,
+                PageId::Chat,
+                "nothing is drawn on the top row, so a click there must do nothing"
+            );
+        }
+
+        /// The help overlay owns the mouse while it is up, whatever the click.
+        #[test]
+        fn a_click_anywhere_dismisses_help() {
+            let mut st = state();
+            let mut palette = CommandPalette::new();
+            let mut router = crate::display::pages::PageRouter::new();
+            st.show_help = true;
+            let kind = MouseEventKind::Down(MouseButton::Left);
+            assert!(route(&mut st, &mut palette, &mut router, ev(kind, 50, 20)));
+            assert!(!st.show_help, "help must close on any click");
+        }
+
+        /// A help click must not also fall through to whatever is underneath.
+        #[test]
+        fn a_help_click_does_not_also_reach_the_page_below() {
+            let mut st = state();
+            let mut palette = CommandPalette::new();
+            let mut router = crate::display::pages::PageRouter::new();
+            st.show_help = true;
+            st.current_page = PageId::Chat;
+            let before = st.current_page;
+            let kind = MouseEventKind::Down(MouseButton::Left);
+            route(&mut st, &mut palette, &mut router, ev(kind, 10, 3));
+            assert_eq!(st.current_page, before);
+        }
+
+        /// An overlay that owns the mouse consumes it: a click inside an open
+        /// tool-detail modal must not also reach the chat page behind it.
+        #[test]
+        fn an_open_overlay_consumes_the_click() {
+            let mut st = state();
+            let mut palette = CommandPalette::new();
+            let mut router = crate::display::pages::PageRouter::new();
+            st.current_page = PageId::Chat;
+            st.tool_detail_index = Some(0);
+            st.tool_cards
+                .push(crate::display::components::tool_card::ToolCard::new(
+                    "bash",
+                    "cargo test",
+                ));
+            let before = st.current_page;
+            let kind = MouseEventKind::Down(MouseButton::Left);
+            // Inside the modal: the click is consumed, nothing below is touched.
+            route(&mut st, &mut palette, &mut router, ev(kind, 50, 2));
+            assert_eq!(st.current_page, before);
+        }
+
+        /// The last row is the status bar, and clicking the mode badge cycles
+        /// the permission mode — the one mouse affordance that is drawn.
+        #[test]
+        fn clicking_the_permission_badge_cycles_the_mode() {
+            let mut st = state();
+            let mut palette = CommandPalette::new();
+            let mut router = crate::display::pages::PageRouter::new();
+            st.current_page = PageId::Chat;
+            let before = st.permission_mode;
+            let kind = MouseEventKind::Down(MouseButton::Left);
+            route(&mut st, &mut palette, &mut router, ev(kind, 97, 29));
+            assert_ne!(
+                st.permission_mode, before,
+                "the badge is drawn on the last row, so a click there must act"
+            );
+        }
     }
 }
