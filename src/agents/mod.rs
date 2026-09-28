@@ -447,7 +447,15 @@ pub async fn run_agent(
 /// perfectly usable small model onto the slow path.
 pub fn render_coder_probe_prompt() -> String {
     let (prompt_path, schema_path) = crate::orchestrator::pipeline::role_prompt(AgentRole::Coder);
-    let template = crate::load_asset(prompt_path).unwrap_or_default();
+    // `prompts/` is required: `role_prompt` returns a bare file name, and
+    // `load_asset` needs a path to know which embedded directory to search.
+    // Without it both loads failed, `unwrap_or_default` swallowed the failure
+    // into an empty string, and the capability probe measured a model against
+    // a blank system prompt and an empty schema — which is how a model that
+    // completes full four-agent runs got scored 0/4. I had previously blamed
+    // the probe for "asking a trivial question"; that was the wrong
+    // diagnosis, and it was covering for an empty prompt.
+    let template = crate::load_asset(&format!("prompts/{prompt_path}")).unwrap_or_default();
     let schema = crate::load_asset(schema_path).unwrap_or_default();
     //  borrows, so the prompt has to outlive the environment.
     let owned_template = template.clone();
@@ -475,6 +483,11 @@ pub fn render_coder_probe_prompt() -> String {
         current_files => current_files,
         mcp_tools => "",
         artifact_schema => schema,
+        // The Coder runs as a tool loop in production, so the probe has to
+        // render the prompt the Coder actually gets. Without this it renders
+        // the one-shot variant and scores the model against a path that is no
+        // longer the default.
+        tool_loop => true,
     };
     env.get_template("probe")
         .and_then(|t| t.render(ctx))

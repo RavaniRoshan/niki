@@ -60,9 +60,32 @@ seed() {
     printf '%s\n' "$content" >"$PROJECT/$file"
 }
 
+# One sweep at a time, and logs that cannot be confused with another sweep's.
+#
+# Two sweeps run concurrently used to write to the same
+# `/tmp/niki-breadth-<task>-<run>.log` paths. Each run's log was then a mix of
+# both, and the summary reported a confident result derived from them. The
+# measured number was an artefact of two 3B models sharing one box, and it was
+# reported as a fact about the product.
+#
+# `flock` makes a second sweep fail loudly instead of corrupting the first.
+LOCK="${NIKI_BREADTH_LOCK:-/tmp/niki-breadth.lock}"
+exec 9>"$LOCK"
+if ! flock -n 9; then
+    echo "another breadth sweep is already running (lock: $LOCK)" >&2
+    echo "wait for it, or set NIKI_BREADTH_LOCK to a different path to run two on purpose" >&2
+    exit 3
+fi
+
+# A per-sweep id, so a log on disk always says which sweep wrote it.
+SWEEP="${NIKI_BREADTH_SWEEP_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
+LOGDIR="/tmp/niki-breadth-logs/$SWEEP"
+mkdir -p "$LOGDIR"
+
 pass=0; fail=0
 declare -a notes=()
-echo "binary: $BIN   runs/task: $RUNS   timeout: ${TIMEOUT}s"
+echo "binary: $BIN   runs/task: $RUNS   timeout: ${TIMEOUT}s   sweep: $SWEEP"
+echo "logs: $LOGDIR"
 echo
 for spec in "${TASKS[@]}"; do
     IFS='|' read -r name file content task <<<"$spec"
@@ -74,12 +97,12 @@ for spec in "${TASKS[@]}"; do
         ( cd "$PROJECT" && git add -A && git commit -q -m "seed: $name" )
         printf '%-12s run %s: ' "$name" "$r"
         if timeout "$TIMEOUT" "$BIN" run --project "$PROJECT" --backend worktree --bare "$task" \
-            >"/tmp/niki-breadth-$name-$r.log" 2>&1; then
-            pass=$((pass + 1)); printf 'PASS %s\n' "$(grep -oE 'Latency: [0-9.]+s' "/tmp/niki-breadth-$name-$r.log" | tail -1)"
+            >"$LOGDIR/$name-$r.log" 2>&1; then
+            pass=$((pass + 1)); printf 'PASS %s\n' "$(grep -oE 'Latency: [0-9.]+s' "$LOGDIR/$name-$r.log" | tail -1)"
         else
             fail=$((fail + 1))
-            reason="$(grep -oE '(Error: .{0,64})' "/tmp/niki-breadth-$name-$r.log" | head -1)"
-            [ -z "$reason" ] && reason="(no error captured — see /tmp/niki-breadth-$name-$r.log)"
+            reason="$(grep -oE '(Error: .{0,64})' "$LOGDIR/$name-$r.log" | head -1)"
+            [ -z "$reason" ] && reason="(no error captured — see $LOGDIR/$name-$r.log)"
             printf 'FAIL %s\n' "$reason"
             notes+=("$name/$r: $reason")
         fi

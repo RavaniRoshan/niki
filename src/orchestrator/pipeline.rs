@@ -1105,10 +1105,25 @@ async fn run_coder_tool_loop(
     display: &mut AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
 ) -> Option<String> {
+    eprintln!("DIAG enter {template_name} {schema_path}");
     let schema_text = crate::load_asset(schema_path).ok()?;
     let schema_json: serde_json::Value = serde_json::from_str(&schema_text).ok()?;
-
-    let template = crate::load_asset(template_name).ok()?;
+    // `prompts/` matters, and getting it wrong is silent.
+    //
+    // `load_asset` resolves a *path*: it splits on the first `/` to decide
+    // which embedded directory to look in, and a bare `coder.md` has no
+    // directory, so the embedded lookup misses and the filesystem fallback
+    // looks for `$CARGO_MANIFEST_DIR/coder.md`, which does not exist. The
+    // `?` turned that into `None`, the caller read it as "the loop produced
+    // no artifact", and the Coder silently fell through to the one-shot path.
+    //
+    // So the tool loop returned `None` on its second line, on every run,
+    // since it was written — and nothing said so, because "no artifact" and
+    // "the loop never started" are the same value. The tests claimed to cover
+    // this were source-text greps, which cannot see a function that runs and
+    // immediately gives up.
+    let template = crate::load_asset(&format!("prompts/{template_name}")).ok()?;
+    eprintln!("DIAG template {} bytes", template.len());
     let mut env = minijinja::Environment::new();
     env.add_template("loop", &template).ok()?;
     let system_prompt = env.get_template("loop").ok()?.render(ctx).ok()?;
@@ -2928,26 +2943,64 @@ pub async fn execute_pipeline(
                 crate::audit::HookEvent::PreAgentStart,
                 agent_hook_payload(AgentRole::Coder, &task.id, 0),
             )?;
-            let solo_json = run_stage(
+            let solo_ctx = context! {
+                task_description => task.description.clone(),
+                project_knowledge => knowledge_str.clone(),
+                project_memory => memory_for_role(&task.project_path, AgentRole::Coder, bare, &state.context_budget),
+                current_files => current_files.clone(),
+                // The fast path gets the tool loop too.
+                //
+                // It did not, and that was backwards. The loop — read, grep,
+                // run, edit, then submit a typed artifact — only existed on
+                // the multi-agent path, so the *cheaper* topology was the one
+                // that could not explore, and the expensive one could. The
+                // compute-matched ablation says a single agent with a tool loop
+                // is the better default, and a single agent *without* one is
+                // the case that fails on a weak model.
+                //
+                // `solo.md` had no tool protocol either, so it would have
+                // answered in prose; the prompt now describes the protocol
+                // when `tool_loop` is set, and the one-shot fallback below is
+                // unchanged for a model that ignores it.
+                tool_loop => true,
+            };
+            // Loop first, one-shot only as the fallback — the same arrangement
+            // the multi-agent Coder uses, and for the same reason: the loop can
+            // only add capability, never take it away.
+            let solo_json = match run_coder_tool_loop(
                 AgentRole::Coder,
                 &**coder_llm,
                 &coder_stage.model,
                 &coder_stage.provider,
                 "solo.md",
-                context! {
-                    task_description => task.description.clone(),
-                    project_knowledge => knowledge_str.clone(),
-                    project_memory => memory_for_role(&task.project_path, AgentRole::Coder, bare, &state.context_budget),
-                    current_files => current_files.clone(),
-                },
+                solo_ctx.clone(),
                 "schemas/code_diff.schema.json",
+                &task.project_path,
+                coder_stage.max_tokens,
                 display,
                 &mut metrics,
-                coder_stage.max_tokens,
-                coder_stage.temperature,
-                steer_rx,
             )
-            .await?;
+            .await
+            {
+                Some(json) => json,
+                None => {
+                    run_stage(
+                        AgentRole::Coder,
+                        &**coder_llm,
+                        &coder_stage.model,
+                        &coder_stage.provider,
+                        "solo.md",
+                        solo_ctx,
+                        "schemas/code_diff.schema.json",
+                        display,
+                        &mut metrics,
+                        coder_stage.max_tokens,
+                        coder_stage.temperature,
+                        steer_rx,
+                    )
+                    .await?
+                }
+            };
             artifacts.push((AgentRole::Coder, solo_json.clone()));
             fire_hook(
                 &hook_bus,

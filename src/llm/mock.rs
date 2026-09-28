@@ -16,6 +16,24 @@ struct MockResponse {
     input_tokens: Option<u32>,
     output_tokens: Option<u32>,
     error: Option<MockError>,
+    /// Scripted tool calls.
+    ///
+    /// Without these the mock could only ever return prose, so it could not
+    /// exercise a single line of the tool loop — and the tests covering the
+    /// loop had to fall back on grepping the pipeline's source text. A stage
+    /// that answers in prose looks the same whether it was given tools or not,
+    /// so the Coder's tool loop was untestable at the pipeline level.
+    #[serde(default)]
+    tool_calls: Vec<MockToolCall>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct MockToolCall {
+    name: String,
+    #[serde(default)]
+    arguments: serde_json::Value,
+    #[serde(default)]
+    id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -122,6 +140,21 @@ impl LlmProvider for MockProvider {
                 _ => Err(anyhow!("unknown error kind '{}': {}", err.kind, msg)),
             }
         } else {
+            let calls: Vec<crate::llm::provider::ToolCall> = response
+                .tool_calls
+                .iter()
+                .enumerate()
+                .map(|(i, c)| crate::llm::provider::ToolCall {
+                    id: c.id.clone().unwrap_or_else(|| format!("mock-call-{i}")),
+                    name: c.name.clone(),
+                    arguments: c.arguments.clone(),
+                })
+                .collect();
+            let finish = if calls.is_empty() {
+                "stop"
+            } else {
+                "tool_calls"
+            };
             Ok(CompletionResponse {
                 content: response.text.unwrap_or_default(),
                 model: request.model.clone(),
@@ -130,8 +163,8 @@ impl LlmProvider for MockProvider {
                     output_tokens: response.output_tokens.unwrap_or(0),
                     ..Default::default()
                 },
-                tool_calls: Vec::new(),
-                finish_reason: Some("stop".to_string()),
+                tool_calls: calls,
+                finish_reason: Some(finish.to_string()),
             })
         }
     }

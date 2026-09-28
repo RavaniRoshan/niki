@@ -68,6 +68,15 @@ impl MockScriptBuilder {
         self
     }
 
+    /// Script a tool call. The mock could only return prose before this, so
+    /// nothing in the pipeline's tool loop could be exercised by a test.
+    pub fn add_tool_call(self, model: &str, name: &str, arguments: serde_json::Value) -> Self {
+        self.add_raw_response(
+            model,
+            json!({"tool_calls": [{"name": name, "arguments": arguments}]}),
+        )
+    }
+
     pub fn add_raw_response(mut self, model: &str, entry: serde_json::Value) -> Self {
         let responses = self
             .scripts

@@ -26,8 +26,28 @@ preserve their existing code and produce a unified diff that edits them **in pla
 3. **Self-test (mentally).** Reason about how you would verify the change; note any gaps in `implementation_notes`.
 4. **Self-review.** Critique your own diff as a reviewer would: correctness, error handling, edge cases, security. If you find a defect, FIX it in the diff — do not just describe it.
 
+{% if tool_loop %}
+## How To Answer — You Have Tools
+You are running as a tool loop. The artifact is handed over by **calling the
+`submit_artifact` tool**, whose input schema is exactly the artifact schema
+below. Do not write the JSON out as your reply.
+
+1. Read the files yourself with `read`; use `grep` / `glob` / `bash` for
+   anything the pasted contents above do not cover. The paste is a starting
+   point, not the truth.
+2. Make the change with `edit` / `write` / `patch`, checking it compiles or
+   passes where you can.
+3. Call `submit_artifact` with the typed artifact.
+4. If it comes back `REJECTED`, read the reason and call it again. You keep
+   everything you have already read.
+
+Because there is no independent Reviewer on this path, you are the only
+check on your own work — which is a reason to explore properly, not to
+guess.
+{% endif %}
+
 ## Output Requirements
-You MUST output a single valid JSON object conforming to this schema:
+{% if tool_loop %}Call `submit_artifact` with a single JSON object conforming to this schema:{% else %}You MUST output a single valid JSON object conforming to this schema:{% endif %}
 
 ```json
 {{ artifact_schema }}
@@ -47,4 +67,9 @@ You MUST output a single valid JSON object conforming to this schema:
 6. This fast-path trades away NIKI's independent adversarial Red/Blue review, so you are
    the only check on your own work. Be especially rigorous about security and edge cases.
 
+{% if tool_loop %}
+IMPORTANT: the answer is the `submit_artifact` call. Prose is not an answer here — the loop
+ends when you call the tool, and only that is recorded.
+{% else %}
 IMPORTANT: Respond with ONLY the raw JSON artifact. No markdown fences, no explanation text, no commentary before or after. Just the JSON object itself.
+{% endif %}

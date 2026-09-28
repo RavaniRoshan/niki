@@ -626,3 +626,72 @@ fn a_loop_that_never_submits_is_announced_not_silent() {
         "the message must say what actually happened, not that something fell back"
     );
 }
+
+/// Every asset the pipeline loads by bare name must actually load.
+///
+/// `load_asset` resolves a *path*: it splits on the first `/` to pick the
+/// embedded directory, and a bare `coder.md` has none — so the embedded lookup
+/// missed, the filesystem fallback looked for `$CARGO_MANIFEST_DIR/coder.md`,
+/// and it failed. `run_coder_tool_loop` swallowed that with `?` and returned
+/// `None`, which the caller reads as "the loop produced no artifact". So the
+/// Coder's tool loop returned on its second line, on every run, since the day
+/// it was written, and the Coder always fell through to the one-shot path.
+///
+/// The tests that "covered" the loop were source-text greps. A grep cannot
+/// see a function that runs and immediately gives up; it can only confirm the
+/// words are still there.
+///
+/// This pins the *convention* — a bare `role_prompt` name does not load, which
+/// is why every call site prefixes it. The call sites themselves are covered
+/// behaviourally by `pipeline_guards::the_coder_stage_answers_by_calling_
+/// submit_artifact`, which fails if either one drops the prefix.
+#[test]
+fn a_bare_role_prompt_name_does_not_load() {
+    let (prompt_path, schema_path) =
+        niki::orchestrator::pipeline::role_prompt(niki::artifacts::types::AgentRole::Coder);
+    // Bare name + `prompts/` — exactly what the two call sites do.
+    let prompt = niki::load_asset(&format!("prompts/{prompt_path}"))
+        .unwrap_or_else(|e| panic!("the Coder prompt must load: {e}"));
+    let schema =
+        niki::load_asset(schema_path).unwrap_or_else(|e| panic!("the Coder schema must load: {e}"));
+    assert!(
+        prompt.len() > 500,
+        "the Coder prompt is {} bytes — that is not a prompt",
+        prompt.len()
+    );
+    assert!(
+        schema.contains("\"edits\""),
+        "the Coder schema is not the code-diff schema"
+    );
+    assert!(
+        niki::load_asset(prompt_path).is_err(),
+        "this test is meaningless unless a bare name really does fail to load — if that \\
+         changes, `load_asset` got friendlier and the call sites should stop prefixing"
+    );
+}
+
+/// The capability probe must probe something.
+///
+/// `niki doctor --measure` renders the Coder prompt to test what a model can
+/// actually do. It loaded the prompt with a bare name, got an error, and
+/// `unwrap_or_default()` turned that into an empty system prompt and an empty
+/// schema. The probe was scoring models against a blank. I had previously
+/// concluded the probe was "confounded by a trivial ask" — that was the wrong
+/// diagnosis, and it was covering for a prompt that was never sent.
+#[test]
+fn the_capability_probe_renders_a_real_prompt() {
+    let probe = niki::agents::render_coder_probe_prompt();
+    assert!(
+        probe.len() > 500,
+        "the probe prompt is {} bytes; a probe with no prompt measures nothing",
+        probe.len()
+    );
+    assert!(
+        probe.contains("submit_artifact"),
+        "the probe must describe the tool the model has to call"
+    );
+    assert!(
+        probe.contains("edits"),
+        "the probe must carry the artifact schema the model has to satisfy"
+    );
+}
