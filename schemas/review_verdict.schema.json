@@ -55,9 +55,17 @@
             "enum": [
               "critical",
               "major",
+              "high",
               "minor",
-              "nit"
-            ]
+              "medium",
+              "moderate",
+              "nit",
+              "low",
+              "info",
+              "note",
+              "trivial"
+            ],
+            "description": "Canonical values are critical/major/minor/nit. high/medium/moderate/low/info/note/trivial are accepted too: they are the SecuritySeverity vocabulary, and a Reviewer reaching for the other scale was failing the run on a spelling, not on a meaning."
           },
           "category": {
             "type": "string",
@@ -154,9 +162,17 @@
                 "enum": [
                   "critical",
                   "major",
+                  "high",
                   "minor",
-                  "nit"
-                ]
+                  "medium",
+                  "moderate",
+                  "nit",
+                  "low",
+                  "info",
+                  "note",
+                  "trivial"
+                ],
+                "description": "Canonical values are critical/major/minor/nit. high/medium/moderate/low/info/note/trivial are accepted too: they are the SecuritySeverity vocabulary, and a Reviewer reaching for the other scale was failing the run on a spelling, not on a meaning."
               },
               "category": {
                 "type": "string",
