@@ -150,13 +150,14 @@ fn nextest_overrides_match_the_shared_list() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("filter = '") {
             pending_filter = rest.strip_suffix('\'').map(|s| s.to_string());
-        } else if let Some(rest) = line.strip_prefix("test-group = '") {
-            if let Some(group) = rest.strip_suffix('\'') {
-                let f = pending_filter.take().unwrap_or_else(|| {
-                    panic!("{NEXTEST_REL}: {group:?} has a test-group with no filter")
-                });
-                filter_for.insert(group.to_string(), f);
-            }
+        } else if let Some(group) = line
+            .strip_prefix("test-group = '")
+            .and_then(|rest| rest.strip_suffix('\''))
+        {
+            let f = pending_filter.take().unwrap_or_else(|| {
+                panic!("{NEXTEST_REL}: {group:?} has a test-group with no filter")
+            });
+            filter_for.insert(group.to_string(), f);
         }
     }
 

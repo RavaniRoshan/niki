@@ -343,14 +343,15 @@ fn every_needs_target_exists() {
     let mut current: Option<String> = None;
 
     for line in jobs_block.lines() {
-        if let Some(rest) = line.strip_prefix("  ").filter(|l| !l.starts_with("   ")) {
-            if let Some(name) = rest.strip_suffix(':') {
-                if !name.contains(' ') {
-                    current = Some(name.to_string());
-                    job_names.push(name.to_string());
-                    continue;
-                }
-            }
+        if let Some(name) = line
+            .strip_prefix("  ")
+            .filter(|l| !l.starts_with("   "))
+            .and_then(|rest| rest.strip_suffix(':'))
+            .filter(|name| !name.contains(' '))
+        {
+            current = Some(name.to_string());
+            job_names.push(name.to_string());
+            continue;
         }
         if let (Some(job), Some(rest)) = (current.as_ref(), line.trim().strip_prefix("needs:")) {
             let targets = rest
