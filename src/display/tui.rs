@@ -170,6 +170,40 @@ pub fn spawn_tui(
     (tx, handle)
 }
 
+/// The three horizontal bands the screen is split into.
+///
+/// One function, because painting and hit-testing both need them and were
+/// computing them separately: the renderer solved a `Layout`, while the mouse
+/// path assumed the status bar was `height - 1` and the header `y = 0`. Those
+/// agree today by arithmetic rather than by construction — the same shape as
+/// the tool-card height that let Enter open the wrong card.
+///
+/// Returning the bands instead of a `Rc<[Rect]>` keeps the hit-test honest at
+/// any size, which is the property that matters: a click resolves against the
+/// same rect the pixels were drawn into.
+pub struct Bands {
+    pub header: Rect,
+    pub content: Rect,
+    pub status: Rect,
+}
+
+pub fn bands(size: Rect) -> Bands {
+    let header_height = super::logo::preferred_logo_height(size.width, size.height);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(header_height), // adaptive logo / single-line header
+            Constraint::Min(5),                // page content
+            Constraint::Length(1),             // status line (footer meta)
+        ])
+        .split(size);
+    Bands {
+        header: chunks[0],
+        content: chunks[1],
+        status: chunks[2],
+    }
+}
+
 /// The overlay ladder: the first open overlay owns the keyboard.
 ///
 /// Returns `true` when the key was consumed and the caller must not route it
@@ -439,14 +473,14 @@ fn route_mouse(
             if state.current_page == PageId::Chat
                 && let Some(full) = full
             {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Length(8),
-                        Constraint::Min(5),
-                        Constraint::Length(1),
-                    ])
-                    .split(full);
+                // The same bands the renderer paints into. This used to solve
+                // its own layout with a hardcoded 8-row header, while the
+                // renderer asked `preferred_logo_height` — which returns 0 or 1
+                // on a short or narrow terminal. On anything that was not a
+                // large terminal the scroll region and the scrollbar were
+                // therefore measuring a content area that started somewhere
+                // other than where the content was drawn.
+                let chunks = bands(full);
                 // Scroll wheel with innermost-first chaining (TUI-010):
                 // an open tool-detail modal consumes the wheel
                 // first; the remainder scrolls the chat behind it.
@@ -463,34 +497,34 @@ fn route_mouse(
                     }
                     if rest != 0 {
                         let total = state.chat_lines.len();
-                        let visible = chunks[1].height as usize;
+                        let visible = chunks.content.height as usize;
                         state.chat_scroll.scroll_by(rest, total, visible);
                     }
                     dirty = true;
                 } else {
                     // Scrollbar click/drag-to-jump (gaps P0 — "Drag to scroll").
-                    let msg_area_h = chunks[1].height.saturating_sub(3) as usize;
-                    let sb_col = chunks[1].x + chunks[1].width.saturating_sub(1);
+                    let msg_area_h = chunks.content.height.saturating_sub(3) as usize;
+                    let sb_col = chunks.content.x + chunks.content.width.saturating_sub(1);
                     let on_scrollbar = (clicking || matches!(mouse.kind, MouseEventKind::Drag(_)))
                         && mouse.column == sb_col
-                        && mouse.row >= chunks[1].y
-                        && mouse.row < chunks[1].y + chunks[1].height.saturating_sub(3);
+                        && mouse.row >= chunks.content.y
+                        && mouse.row < chunks.content.y + chunks.content.height.saturating_sub(3);
                     if on_scrollbar {
                         let total = state.chat_lines.len();
                         if total > msg_area_h && msg_area_h > 0 {
-                            let frac = (mouse.row - chunks[1].y) as f64 / msg_area_h as f64;
+                            let frac = (mouse.row - chunks.content.y) as f64 / msg_area_h as f64;
                             let target = (frac * total as f64).round() as usize;
                             state.chat_scroll.jump_to(target, total, msg_area_h);
                             dirty = true;
                         }
                     } else if hovering {
                         // Hover hit-test for chat elements
-                        let row = mouse.row.saturating_sub(chunks[1].y) as usize;
+                        let row = mouse.row.saturating_sub(chunks.content.y) as usize;
                         let total = state.chat_lines.len();
-                        let visible = chunks[1].height as usize;
+                        let visible = chunks.content.height as usize;
                         let offset = state.chat_scroll.view_offset(total, visible);
                         let abs_row = offset + row;
-                        let new_target = if row < chunks[1].height as usize
+                        let new_target = if row < chunks.content.height as usize
                             && let Some(line) = state.chat_lines.get(abs_row)
                         {
                             if line.header_stage.is_some() {
@@ -511,7 +545,7 @@ fn route_mouse(
                             dirty = true;
                         }
                     } else {
-                        chat::ChatPage::handle_mouse(state, mouse, chunks[1]);
+                        chat::ChatPage::handle_mouse(state, mouse, chunks.content);
                         dirty = true;
                     }
                 }
@@ -520,7 +554,7 @@ fn route_mouse(
                     let input_chunks = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([Constraint::Min(3), Constraint::Length(3)])
-                        .split(chunks[1]);
+                        .split(chunks.content);
                     if super::components::input_box::handle_click(
                         state,
                         mouse.column,
@@ -1539,30 +1573,30 @@ fn render(
     let bg_block = ratatui::widgets::Block::default().style(Style::default().bg(theme::bg_color()));
     frame.render_widget(bg_block, size);
 
-    // Main layout: adaptive header + page content + status line
-    let header_height = super::logo::preferred_logo_height(size.width, size.height);
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(header_height), // adaptive logo / single-line header
-            Constraint::Min(5),                // page content
-            Constraint::Length(1),             // status line (footer meta)
-        ])
-        .split(size);
+    // Main layout: adaptive header + page content + status line.
+    let bands = bands(size);
 
     // Render adaptive header in the top area if allocated
-    if header_height > 0 {
-        super::logo::render_adaptive_header(frame, chunks[0], state);
+    if bands.header.height > 0 {
+        super::logo::render_adaptive_header(frame, bands.header, state);
     }
 
     // Render the current page in the content area
     match state.current_page {
         PageId::Fleet => {
-            crate::display::pages::fleet::render_fleet(&state.fleet, chunks[1], frame.buffer_mut());
+            crate::display::pages::fleet::render_fleet(
+                &state.fleet,
+                bands.content,
+                frame.buffer_mut(),
+            );
         }
         PageId::Session => {
             if let Some(ref sv) = state.session_view {
-                crate::display::pages::session::render_session(sv, chunks[1], frame.buffer_mut());
+                crate::display::pages::session::render_session(
+                    sv,
+                    bands.content,
+                    frame.buffer_mut(),
+                );
             } else {
                 // No session open: explicit empty state, never a blank screen.
                 use ratatui::widgets::Paragraph;
@@ -1575,18 +1609,18 @@ fn render(
                             ratatui::style::Style::default().fg(crate::display::theme::fg_dim()),
                         )),
                     ]),
-                    chunks[1],
+                    bands.content,
                 );
             }
         }
         PageId::Chat => {
-            crate::display::layout::render_chat(frame, chunks[1], state);
+            crate::display::layout::render_chat(frame, bands.content, state);
         }
-        _ => router.render_current(frame, chunks[1], state),
+        _ => router.render_current(frame, bands.content, state),
     }
 
     // Render status line (product "footer meta")
-    render_status_line(frame, chunks[2], state);
+    render_status_line(frame, bands.status, state);
 
     // Render modal overlay if present
     if let Some(ref modal) = state.modal {
@@ -2063,6 +2097,95 @@ mod tests {
             });
             assert_eq!(ladder(&mut st, KeyCode::Esc), OverlayOutcome::Consumed);
             assert!(st.modal.is_none(), "esc dismisses without leaving");
+        }
+    }
+    /// Painting and hit-testing must agree about where the bands are.
+    ///
+    /// The mouse path used to solve its own layout with a hardcoded 8-row
+    /// header while the renderer asked `preferred_logo_height`, which returns
+    /// 0 on a short terminal and 1 on a narrow one. On anything that was not a
+    /// large terminal, the chat's scroll region and scrollbar were measuring a
+    /// content area that started somewhere other than where the content was
+    /// drawn — so scrolling and the scrollbar were both wrong, and the two
+    /// agreed only in the one configuration someone tested in.
+    mod band_layout {
+        use super::*;
+
+        /// The header is only 8 rows on a large terminal. On anything else the
+        /// renderer's header shrinks, and a hit-test that assumed 8 would
+        /// address the wrong band.
+        #[test]
+        fn the_header_is_not_always_eight_rows() {
+            let big = Rect::new(0, 0, 100, 40);
+            let small = Rect::new(0, 0, 100, 12);
+            let narrow = Rect::new(0, 0, 60, 40);
+            assert_eq!(
+                bands(big).header.height,
+                8,
+                "a large terminal gets the full logo"
+            );
+            assert_eq!(
+                bands(small).header.height,
+                0,
+                "a short terminal gets no header at all"
+            );
+            assert_eq!(
+                bands(narrow).header.height,
+                1,
+                "a narrow terminal gets the single-line header"
+            );
+        }
+
+        /// The bands must tile the screen: no gaps, no overlap, in the order
+        /// header → content → status. That is what makes a click on a row
+        /// unambiguously a click on exactly one of them.
+        #[test]
+        fn the_bands_tile_the_screen_exactly() {
+            for (w, h) in [(100u16, 40u16), (100, 12), (60, 40), (80, 24), (40, 8)] {
+                let b = bands(Rect::new(0, 0, w, h));
+                assert_eq!(b.header.y, 0, "header starts at the top ({w}x{h})");
+                assert_eq!(
+                    b.status.y + b.status.height,
+                    h,
+                    "status ends the screen ({w}x{h})"
+                );
+                assert_eq!(
+                    b.content.y,
+                    b.header.y + b.header.height,
+                    "content follows the header ({w}x{h})"
+                );
+                assert_eq!(
+                    b.status.y,
+                    b.content.y + b.content.height,
+                    "status follows the content ({w}x{h})"
+                );
+                for band in [b.header, b.content, b.status] {
+                    assert_eq!(band.width, w, "bands span the width ({w}x{h})");
+                }
+            }
+        }
+
+        /// A click on the last row is a click on the status bar — at any size,
+        /// which is the property the hardcoded 8-row header broke.
+        #[test]
+        fn the_last_row_is_always_the_status_bar() {
+            for (w, h) in [(100u16, 40u16), (100, 12), (60, 40), (80, 24)] {
+                let b = bands(Rect::new(0, 0, w, h));
+                assert_eq!(
+                    b.status.y,
+                    h - 1,
+                    "the status bar is the last row at {w}x{h}"
+                );
+            }
+        }
+
+        /// The status bar is one row, so its height is what makes "last row"
+        /// mean the same thing to a click and to the painter.
+        #[test]
+        fn the_status_bar_is_exactly_one_row() {
+            for (w, h) in [(100u16, 40u16), (100, 12), (60, 40), (80, 24)] {
+                assert_eq!(bands(Rect::new(0, 0, w, h)).status.height, 1, "at {w}x{h}");
+            }
         }
     }
 }
