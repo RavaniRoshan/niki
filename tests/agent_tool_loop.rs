@@ -100,6 +100,116 @@ fn run(
     run_with(script, None)
 }
 
+/// Run the loop against an agent whose only answer is fixed prose.
+fn run_with_prose(
+    prose: &str,
+    script: Vec<Option<(String, serde_json::Value)>>,
+) -> (niki::runtime::tools::LoopOutput, Vec<String>) {
+    let validate: niki::runtime::ArtifactValidator =
+        std::sync::Arc::new(|v: &serde_json::Value| {
+            if v.get("edits")
+                .map(|e| e.as_array().is_some_and(|a| a.is_empty()))
+                == Some(true)
+            {
+                return Err("`edits` is empty".into());
+            }
+            match v.get("edits") {
+                None => Err("no edits".into()),
+                Some(_) => Ok(()),
+            }
+        });
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+    std::fs::write(dir.path().join("src/lib.rs"), "old\n").expect("write");
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let agent = ProseAgent {
+        prose: prose.to_string(),
+        script,
+        turn: AtomicUsize::new(0),
+        seen_prompts: seen.clone(),
+    };
+    let registry = build_baseline_registry();
+    let c = ctx(dir.path());
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("rt");
+    let out = rt
+        .block_on(run_tool_loop_with(
+            LoopOptions {
+                submit_artifact: Some(submit_artifact_spec(serde_json::json!({
+                    "type": "object",
+                    "properties": artifact(),
+                    "required": ["edits", "files_changed"],
+                }))),
+                validate_artifact: Some(validate),
+            },
+            &agent,
+            "m",
+            &registry,
+            &c,
+            vec![LoopMessage::User("add sum()".into())],
+            None,
+            8,
+            None,
+            None,
+        ))
+        .expect("loop");
+    (out, seen.lock().expect("lock").clone())
+}
+
+/// A scripted agent that answers with fixed prose on its last turn.
+struct ProseAgent {
+    prose: String,
+    script: Vec<Option<(String, serde_json::Value)>>,
+    turn: AtomicUsize,
+    seen_prompts: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for ProseAgent {
+    fn provider_name(&self) -> &str {
+        "prose"
+    }
+
+    async fn stream(
+        &self,
+        _request: CompletionRequest,
+    ) -> Result<Pin<Box<dyn futures::Stream<Item = Result<StreamChunk>> + Send>>> {
+        unimplemented!("the tool loop uses complete()")
+    }
+
+    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse> {
+        self.seen_prompts
+            .lock()
+            .expect("lock")
+            .push(request.user_message.clone());
+        let n = self.turn.fetch_add(1, Ordering::SeqCst);
+        let step = self.script.get(n).cloned().flatten();
+        Ok(match step {
+            Some((name, arguments)) => CompletionResponse {
+                content: String::new(),
+                model: request.model.clone(),
+                usage: TokenUsage::default(),
+                tool_calls: vec![niki::llm::provider::ToolCall {
+                    id: format!("p{n}"),
+                    name,
+                    arguments,
+                }],
+                finish_reason: Some("tool_calls".into()),
+            },
+            None => CompletionResponse {
+                content: self.prose.clone(),
+                model: request.model.clone(),
+                usage: TokenUsage::default(),
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".into()),
+            },
+        })
+    }
+}
+
 fn run_with(
     script: Vec<Option<(String, serde_json::Value)>>,
     validate_artifact: Option<niki::runtime::ArtifactValidator>,
@@ -792,5 +902,61 @@ fn the_capability_probe_renders_a_real_prompt() {
     assert!(
         probe.contains("edits"),
         "the probe must carry the artifact schema the model has to satisfy"
+    );
+}
+
+/// A model that wrote the artifact as prose still wrote it.
+///
+/// Measured on `qwen2.5-coder:3b`, the model this project's README tells
+/// first-time users to install: asked to call `submit_artifact`, it produced a
+/// correct, schema-valid artifact as a fenced JSON block in the message body
+/// and no tool call. The loop threw it away, the stage fell through to a
+/// one-shot call, and the run failed with "the model is too small" — which
+/// named neither the loop, nor the fact that the model had answered, nor the
+/// fact that its answer was right.
+///
+/// Ollama already recovers *tool calls* that arrive this way. The artifact now
+/// gets the same treatment, under the same schema check: prose that merely
+/// looks like JSON is still not accepted.
+#[test]
+fn an_artifact_written_as_prose_is_still_the_artifact() {
+    let prose = format!("Here is the change:\n\n```json\n{}\n```\n", artifact());
+    let script: Vec<Option<(String, serde_json::Value)>> = vec![None];
+    // The scripted agent answers in prose, so drive the loop with one that has
+    // no tool call to make.
+    let (out, _) = run_with_prose(&prose, script);
+    assert_eq!(
+        out.artifact,
+        Some(artifact()),
+        "a schema-valid artifact in the message body is the answer, whatever shape it \
+         arrived in"
+    );
+    assert!(
+        out.tool_calls
+            .iter()
+            .any(|(n, ok)| n == "submit_artifact" && *ok),
+        "and the recovery is recorded, so the call log says the artifact arrived"
+    );
+}
+
+/// Prose that is not a valid artifact is not a submission.
+///
+/// The recovery is a convenience, not a hole: the same validator that gates a
+/// real `submit_artifact` call gates this, so a model that discusses JSON, or
+/// emits a half-formed artifact, still gets nothing.
+#[test]
+fn prose_that_is_not_a_valid_artifact_is_still_refused() {
+    let prose = "```json\n{ \"edits\": [] }\n```";
+    let (out, _) = run_with_prose(prose, vec![None]);
+    assert_eq!(
+        out.artifact, None,
+        "an artifact with no edits is not an implementation, however it arrived"
+    );
+
+    let discussion = "Here is how I would write it: {\"edits\": [";
+    let (out, _) = run_with_prose(discussion, vec![None]);
+    assert_eq!(
+        out.artifact, None,
+        "a model discussing JSON is not a model submitting one"
     );
 }

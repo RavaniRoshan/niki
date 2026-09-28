@@ -2702,6 +2702,129 @@ pub fn was_truncated(finish_reason: Option<&str>) -> bool {
     }
 }
 
+/// The artifact a model wrote into its message body instead of calling
+/// `submit_artifact`.
+///
+/// The same shape the Ollama provider already recognises for tool calls:
+/// fenced or bare JSON carrying a `name` of `submit_artifact`, or a bare
+/// artifact object. Returns `None` for anything that is not JSON, so ordinary
+/// prose is never mistaken for a submission.
+fn recover_artifact_from_content(content: &str) -> Option<serde_json::Value> {
+    let value = crate::config::edit::json_value_of(content)
+        .or_else(|| fenced_json_anywhere(content))
+        .or_else(|| first_json_object(content))?;
+    if value.get("name").and_then(|n| n.as_str()) == Some("submit_artifact") {
+        return value
+            .get("arguments")
+            .or_else(|| value.get("parameters"))
+            .cloned();
+    }
+    // A bare artifact: it has to look like one, or a model that merely
+    // discussed JSON would be taken at its word.
+    if value.get("edits").is_some() || value.get("verdict").is_some() {
+        return Some(value);
+    }
+    None
+}
+
+/// Take the artifact, whether it arrived as a tool call or as message text.
+///
+/// A model asked to call `submit_artifact` frequently answers with the
+/// artifact as a fenced JSON block in the message body and no tool call —
+/// measured on `qwen2.5-coder:3b`, the model this project's own README tells
+/// first-time users to install. Ollama already recovers *tool calls* that
+/// arrive this way; the artifact was being thrown away, and the run then failed
+/// with "the model is too small", naming neither the loop nor the fact that the
+/// model had answered correctly.
+///
+/// The stage's own validator gates this exactly as it gates a real submission,
+/// so prose that merely looks like JSON is still not a submission.
+fn recover_submission(
+    submitted: Option<serde_json::Value>,
+    content: &str,
+    opts: &LoopOptions,
+    role: &str,
+    call_log: &mut Vec<(String, bool)>,
+) -> Option<serde_json::Value> {
+    if submitted.is_some() {
+        return submitted;
+    }
+    let Some(validate) = &opts.validate_artifact else {
+        return None;
+    };
+    let value = recover_artifact_from_content(content)?;
+    match validate(&value) {
+        Ok(()) => {
+            tracing::warn!(
+                target: "niki::runtime",
+                role = %role,
+                "recovered the artifact from message content rather than a tool call"
+            );
+            call_log.push(("submit_artifact".to_string(), true));
+            Some(value)
+        }
+        Err(reason) => {
+            tracing::warn!(
+                target: "niki::runtime",
+                role = %role,
+                reason = %reason,
+                "message content held JSON, but not a valid artifact"
+            );
+            None
+        }
+    }
+}
+
+/// The contents of the first fenced block in `text`, if there is one.
+///
+/// `json_value_of` only strips a fence the text *starts* with, which is right
+/// for a config file and wrong here: a model asked for JSON routinely
+/// prefaces it — "Here is the change:" and then a block. Measured output from
+/// `qwen2.5-coder:3b` did exactly that.
+fn fenced_json_anywhere(text: &str) -> Option<serde_json::Value> {
+    let start = text.find("```")?;
+    let rest = &text[start + 3..];
+    let after_tag = rest
+        .strip_prefix("json")
+        .or_else(|| rest.strip_prefix("JSON"))
+        .unwrap_or(rest);
+    let body = match after_tag.find("```") {
+        Some(end) => &after_tag[..end],
+        None => after_tag,
+    };
+    serde_json::from_str(body.trim()).ok()
+}
+
+/// The first balanced `{…}` in `text`.
+///
+/// A model that answers in prose with an unlabelled object is still answering;
+/// this is the last shape worth trying before giving up.
+fn first_json_object(text: &str) -> Option<serde_json::Value> {
+    let start = text.find('{')?;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (i, c) in text[start..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match c {
+            '\\' if in_string => escaped = true,
+            '"' => in_string = !in_string,
+            '{' if !in_string => depth += 1,
+            '}' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    return serde_json::from_str(&text[start..=start + i]).ok();
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 pub async fn run_tool_loop(
     provider: &dyn LlmProvider,
     model: &str,
@@ -2839,12 +2962,18 @@ pub async fn run_tool_loop_with(
         }
 
         if response.tool_calls.is_empty() {
+            // A model that answered in prose is the case this branch exists for,
+            // and it is exactly where a content-borne artifact has to be
+            // recovered — recovering only at the end of the loop skipped every
+            // model that stops after one turn, which is most small models.
+            let recovered =
+                recover_submission(None, &response.content, &opts, &ctx.role, &mut call_log);
             return Ok(LoopOutput {
                 content: response.content,
                 steps,
                 tool_calls: call_log,
                 usage,
-                artifact: None,
+                artifact: recovered,
             });
         }
 
@@ -3060,6 +3189,21 @@ pub async fn run_tool_loop_with(
             "tool loop exhausted without submitting an artifact",
         );
     }
+
+    // A model that produced the artifact as prose still produced it.
+    //
+    // Small local models overwhelmingly answer a tool-calling prompt with a
+    // fenced JSON block in the message body instead of a structured tool call
+    // — measured on `qwen2.5-coder:3b`, the model this project's own README
+    // tells first-time users to install. Ollama already recovers *tool calls*
+    // that arrive this way; the artifact was not being recovered the same way,
+    // so the loop threw away a well-formed, correct submission and the stage
+    // fell through to a one-shot call that failed with "the model is too
+    // small". Five breadth runs, five identical uninformative failures.
+    //
+    // The same guard applies as for a real submission: it has to satisfy the
+    // stage's own schema. Prose that merely looks like JSON is not accepted.
+    let submitted = recover_submission(submitted, &last_content, &opts, &ctx.role, &mut call_log);
 
     Ok(LoopOutput {
         content: last_content,
