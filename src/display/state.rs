@@ -955,6 +955,12 @@ pub struct AppState {
     pub config: NikiConfig,
     /// Active modal overlay.
     pub modal: Option<Modal>,
+    /// Transient surfaces stacked over the current page: the settings form, the
+    /// theme picker, and whatever comes next. A stack rather than an `Option`
+    /// so a sheet can open another and come back — and so the TUI can grow a
+    /// settings form that is the *whole* product surface rather than a viewer
+    /// for the CLI.
+    pub sheets: crate::display::sheets::SheetStack,
     /// Onboarding state.
     pub onboarding: Option<OnboardingModal>,
     /// Whether onboarding is complete.
@@ -1162,6 +1168,7 @@ impl AppState {
             chat_width: std::cell::Cell::new(80),
             config,
             modal: None,
+            sheets: Vec::new(),
             onboarding: None,
             onboarded: false,
             tips: TipsBanner::new(tips_enabled, tips_rotation),

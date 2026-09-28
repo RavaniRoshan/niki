@@ -267,3 +267,141 @@ async def test_arrow_keys_still_reach_the_composer(chat):
     assert chat.screen.contains("aXb"), (
         f"Left must move the caret inside the composer, not change page; screen: {chat.screen.text!r}"
     )
+
+
+# ── Sheets: the TUI must be able to change things, not only show them ──────
+#
+# The Config page has existed for a long time and is read-only — Tab moves a
+# cursor across fifteen fields, nothing can be changed and nothing can be
+# saved. A user who wanted to change a setting had to leave the product and edit
+# TOML by hand, which is the opposite of what a terminal agent is for.
+#
+# These drive the real binary under a real PTY and then read the file. Asserting
+# on the rendered screen alone would pass for a form that looks correct and
+# writes nothing, which is exactly the failure being fixed.
+
+
+@pytest.fixture
+async def project_dir():
+    """A throwaway project directory, cleaned up by the OS."""
+    return tempfile.mkdtemp(prefix="niki-tui-")
+
+
+@pytest.fixture
+async def editor(project_dir):
+    """(session, project_dir) for the tests that assert on what was written."""
+    s = _session()
+    await s.start(
+        [BIN, "chat", "-p", project_dir],
+        cols=COLS,
+        rows=ROWS,
+        env={"TERM": "ghostty", "TERM_PROGRAM": "ghostty"},
+    )
+    try:
+        await _dismiss_onboarding(s)
+        await _wait_chat_ready(s)
+        yield s, project_dir
+    finally:
+        await s.stop(timeout=3.0)
+
+
+async def _open_settings(s):
+    await s.type("/config")
+    await s.press("enter")
+    # The hint line, which only the form renders.
+    await s.wait_for_text("space change", timeout=10)
+    await s.wait_for_stable(quiet_ms=200, timeout=5)
+
+
+async def test_config_opens_an_editable_form(chat):
+    await _open_settings(chat)
+    # The hint names the key that changes a value, and the selected row's help
+    # is on screen. The read-only page had neither.
+    assert chat.screen.contains("space change")
+    assert chat.screen.contains("terminal's background")
+
+
+async def test_config_writes_a_setting_to_niki_toml(editor):
+    s, project = editor
+    await _open_settings(s)
+    await s.press("down")        # Theme -> Max revision rounds
+    await s.press("space")       # begin editing
+    for ch in "7":
+        await s.type(ch)
+    await s.press("enter")       # stage the field
+    await s.press("enter")       # save
+    await s.wait_for_text("saved", timeout=10)
+
+    config = os.path.join(project, "niki.toml")
+    assert os.path.exists(config), f"{config} was not written"
+    assert "max_revision_rounds = 7" in open(config).read()
+
+
+async def test_config_keeps_the_comments_in_niki_toml(editor):
+    s, project = editor
+    config = os.path.join(project, "niki.toml")
+    # A user keeps notes in this file. A settings screen that deletes them is a
+    # regression, not a feature.
+    with open(config, "w") as f:
+        f.write(
+            "# my project settings\n"
+            "[general]\n"
+            "# how many revisions before the run reports what it has\n"
+            "max_revision_rounds = 3\n"
+        )
+
+    await _open_settings(s)
+    await s.press("down")
+    await s.press("space")
+    for ch in "9":
+        await s.type(ch)
+    await s.press("enter")
+    await s.press("enter")
+    await s.wait_for_text("saved", timeout=10)
+
+    after = open(config).read()
+    assert "# my project settings" in after, after
+    assert "# how many revisions" in after, after
+    assert "max_revision_rounds = 9" in after, after
+
+
+async def test_escape_closes_the_sheet_and_returns_to_the_conversation(chat):
+    await _open_settings(chat)
+    # Esc leaves a field, then discards a draft, then closes. A form that
+    # swallows the key is a trap.
+    #
+    # The negative assertion looks for the form's own hint chrome. The first
+    # version looked for "space change", which is also in the chat-log line the
+    # /config handler pushes — so it failed in all three colour states, having
+    # passed against a form that was working perfectly.
+    for _ in range(3):
+        await chat.press("escape")
+        await chat.wait_for_stable(quiet_ms=150, timeout=4)
+    assert not chat.screen.contains("move"), "the form chrome is still up"
+    assert chat.screen.contains("Describe a change"), "and the composer is back"
+
+
+async def test_theme_opens_a_picker_listing_what_the_product_supports(chat):
+    await chat.type("/theme")
+    await chat.press("enter")
+    # "Theme" on its own is a bad thing to wait for: the settings form has a row
+    # called Theme, so this passed against the wrong sheet whenever the picker
+    # was slower to paint. Only colour mode lost that race here, which is a
+    # useful reminder that a flaky wait is a flaky wait.
+    await chat.wait_for_text("apply and save", timeout=10)
+    # A list with descriptions, not a cycling key that tells you nothing about
+    # what exists or how to get back.
+    for name in ("auto", "dark", "light"):
+        assert chat.screen.contains(name)
+    assert chat.screen.contains("preview")
+
+
+async def test_a_cancelled_theme_picker_restores_the_previous_theme(chat):
+    await chat.type("/theme")
+    await chat.press("enter")
+    await chat.wait_for_text("apply and save", timeout=10)
+    await chat.press("down")     # preview something else
+    await chat.wait_for_stable(quiet_ms=250, timeout=5)
+    await chat.press("escape")   # back out
+    await chat.wait_for_stable(quiet_ms=250, timeout=5)
+    assert not chat.screen.contains("apply and save")

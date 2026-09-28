@@ -28,6 +28,7 @@ pub mod pipeline_status;
 pub mod sanitize;
 pub mod scroll;
 pub mod search;
+pub mod sheets;
 pub mod state;
 pub mod theme;
 pub mod tips;
