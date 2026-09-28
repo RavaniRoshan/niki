@@ -162,6 +162,20 @@ pub struct CompletionResponse {
     pub usage: TokenUsage,
     /// Tool invocations requested by the model. Empty for plain-text responses.
     pub tool_calls: Vec<ToolCall>,
+    /// Why the model stopped, in the provider's own vocabulary:
+    /// `stop`, `length`, `max_tokens`, `tool_calls`, ...
+    ///
+    /// This exists for one reason: a response cut off at the token limit has
+    /// tool-call arguments that are *silently truncated JSON*. Executing those
+    /// is the worst kind of wrong — a `write` tool with half a path, a `bash`
+    /// tool with half a command — and it looks like a successful run. Codex
+    /// guards against it by failing every tool call carried by a message that
+    /// stopped on `length` (`agent-loop.ts:263-269`). We could not, because
+    /// nothing here carried the reason at all.
+    ///
+    /// `None` means the provider does not report it, which callers must treat
+    /// as "unknown", never as "definitely not truncated".
+    pub finish_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]

@@ -204,6 +204,9 @@ impl LlmProvider for OpenAiProvider {
         }
 
         Ok(CompletionResponse {
+            finish_reason: data["choices"][0]["finish_reason"]
+                .as_str()
+                .map(|s| s.to_string()),
             content,
             model: request.model,
             usage: TokenUsage {
@@ -434,6 +437,9 @@ impl LlmProvider for OpenAiProvider {
         );
 
         Ok(CompletionResponse {
+            finish_reason: data["choices"][0]["finish_reason"]
+                .as_str()
+                .map(|s| s.to_string()),
             content,
             model: request.model,
             usage: TokenUsage {

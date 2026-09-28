@@ -96,6 +96,9 @@ impl LlmProvider for GoogleProvider {
             crate::llm::json_path_u32(&data, &["usageMetadata", "thoughtsTokenCount"]);
 
         Ok(CompletionResponse {
+            finish_reason: data["candidates"][0]["finishReason"]
+                .as_str()
+                .map(|s| s.to_string()),
             content,
             model: request.model,
             usage: TokenUsage {
