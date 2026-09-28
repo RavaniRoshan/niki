@@ -829,4 +829,21 @@ fn the_breadth_sweep_covers_more_than_one_shape_of_task() {
         executable.contains("breadth:"),
         "and it must report a per-kind result, so a single kind cannot hide behind the others"
     );
+    // The sweep must be told which model to measure.
+    //
+    // The first version seeded a bare repo and let it inherit the developer's
+    // global config. Every one of the five runs then failed with "NVIDIA API key
+    // not configured" — a fact about the harness, reported as a fact about the
+    // product, and a 0/5 that would have been very easy to write up as "NIKI
+    // fails every kind of task".
+    assert!(
+        executable.contains("NIKI_BREADTH_CONFIG"),
+        "the sweep must require an explicit model config. Inheriting ambient config measures \
+         whatever machine the developer happens to be on."
+    );
+    assert!(
+        executable.contains("cp \"$CONFIG\"") || executable.contains("$PROJECT/niki.toml"),
+        "and it must actually put that config in the seeded project, or the requirement is \
+         decoration"
+    );
 }
