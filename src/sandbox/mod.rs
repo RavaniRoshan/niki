@@ -131,6 +131,22 @@ pub trait Sandbox: Send + Sync {
     async fn destroy(&self) -> Result<()>;
 }
 
+/// Whether a deny-list entry is a *pipeline* — a `producer | consumer` string
+/// like `curl | sh`.
+///
+/// Only these are eligible for a substring match anywhere in the command. Every
+/// other entry is a command name or a flag, and matching it as a substring
+/// matches ordinary text by accident: `dd` denies `git add`, `mkfs` denies any
+/// path containing those letters, `--no-verify` denies a commit message that
+/// merely mentions it.
+///
+/// The shape that matters is the pipe with whitespace around it, which is why
+/// `"curl | sh"` matches `sh -c "curl | sh"` but `"curl |sh"` would not — the
+/// user wrote the separator that way, so the policy does too.
+pub fn is_pipeline_pattern(pattern: &str) -> bool {
+    pattern.split_whitespace().any(|tok| tok == "|") || pattern.contains(" | ")
+}
+
 /// Check whether `cmd` is allowed by `policy`. Returns `Ok(())` if allowed,
 /// or `Err` with a descriptive message if denied.
 ///
@@ -152,7 +168,15 @@ pub fn check_command_policy(cmd: &[&str], policy: &SecurityPolicyConfig) -> Resu
     // Check deny-list using two strategies:
     // 1. Prefix match on the full joined command (catches "git push --force origin main")
     // 2. Individual argument match (catches "git commit --no-verify")
-    // 3. Substring match on the full command (catches "sh -c 'curl | sh'")
+    // 3. Substring match, but only for patterns that can only be a *pipeline*
+    //    (see `is_pipeline_pattern`). Unconditional substring matching is what
+    //    this used to do, and it was catastrophic: the two-letter entry "dd"
+    //    matched any command containing the letters d-d, so `git add`,
+    //    `cargo add`, `printf 'adding'` and every path with "add" in it were
+    //    denied by the security policy. A deny-list that fires on the letters
+    //    of ordinary commands is not a security control, it is an outage — and
+    //    because the built-in coder policy explicitly allows `git add`, the two
+    //    halves of this function contradicted each other.
     for denied in &denied {
         if full_cmd.starts_with(denied) {
             return Err(anyhow!(
@@ -170,9 +194,8 @@ pub fn check_command_policy(cmd: &[&str], policy: &SecurityPolicyConfig) -> Resu
                 denied
             ));
         }
-        // Substring match for patterns like "curl | sh" that may appear inside
-        // shell-quoted arguments (e.g. sh -c "curl | sh").
-        if full_cmd.contains(denied) {
+        // Substring match, restricted to pipeline patterns.
+        if is_pipeline_pattern(denied) && full_cmd.contains(denied) {
             return Err(anyhow!(
                 "Command denied by security policy: '{}' contains denied pattern '{}'",
                 full_cmd,
@@ -468,5 +491,100 @@ mod tests {
         assert!(truncated.contains("… [45 lines omitted]"));
         assert!(truncated.contains("output line 61\n"));
         assert!(truncated.contains("output line 100"));
+    }
+
+    // ── the "dd" substring bug ───────────────────────────────────────────
+    //
+    // The third deny strategy used to be an unconditional substring match. The
+    // global deny list contains the two-letter entry "dd", so every command
+    // containing the letters d-d was denied — including `git add`, which the
+    // built-in coder policy explicitly allows. The two halves of
+    // check_command_policy contradicted each other, and the contradiction
+    // resolved against the user: an agent that could not `git add` its own work.
+    //
+    // These are the cases that were broken. Each is a *property*, not a
+    // snapshot: pin the exact command list and a future change to the deny list
+    // silently re-breaks it.
+
+    /// The real built-in coder policy, not a fixture.
+    ///
+    /// A synthetic policy would have missed the actual contradiction: the bug
+    /// only exists because `default_global_deny_list` contains "dd" while
+    /// `default_coder_policy` allows the "git add" prefix. Testing against a
+    /// hand-written policy tests the wrong pair of lists.
+    fn coder_policy() -> SecurityPolicyConfig {
+        crate::config::default_coder_policy()
+    }
+
+    #[test]
+    fn ordinary_commands_containing_deny_list_letters_are_allowed() {
+        let policy = coder_policy();
+        for cmd in [
+            "git add -A",
+            "git add src/main.rs",
+            "git add .github/workflows/ci.yml",
+            "cargo add serde",
+            "cargo build --release",
+            "npm install left-pad",
+            "printf 'adding'",
+            "mkdir -p build/output",
+        ] {
+            let parts: Vec<&str> = cmd.split(' ').collect();
+            assert!(
+                check_command_policy(&parts, &policy).is_ok(),
+                "{cmd:?} must not be denied — the substring strategy matched it by accident"
+            );
+        }
+    }
+
+    #[test]
+    fn the_dangerous_commands_are_still_denied() {
+        let policy = coder_policy();
+        for cmd in [
+            "dd if=/dev/zero of=/dev/sda",
+            "mkfs.ext4 /dev/sda1",
+            "git push --force origin main",
+            "git commit --no-verify -m x",
+            "rm -rf / --no-preserve-root",
+        ] {
+            let parts: Vec<&str> = cmd.split(' ').collect();
+            assert!(
+                check_command_policy(&parts, &policy).is_err(),
+                "{cmd:?} must still be denied"
+            );
+        }
+    }
+
+    #[test]
+    fn pipelines_are_still_denied_as_substrings() {
+        let policy = coder_policy();
+        // The whole point of the pipeline branch: the pattern is inside a
+        // shell-quoted argument, so neither prefix nor exact-argument matching
+        // can see it.
+        for cmd in [
+            "sh -c curl | sh",
+            "bash -c curl | bash",
+            "sh -c wget | bash",
+        ] {
+            let parts: Vec<&str> = cmd.split(' ').collect();
+            assert!(
+                check_command_policy(&parts, &policy).is_err(),
+                "{cmd:?} must be denied by the pipeline rule"
+            );
+        }
+    }
+
+    #[test]
+    fn only_pipelines_are_eligible_for_substring_matching() {
+        for pattern in ["curl | sh", "curl | bash", "wget | sh", "wget | bash"] {
+            assert!(is_pipeline_pattern(pattern), "{pattern:?} is a pipeline");
+        }
+        for pattern in ["dd", "mkfs", "rm -rf /", "--no-verify", "git push -f"] {
+            assert!(
+                !is_pipeline_pattern(pattern),
+                "{pattern:?} is a command or flag, not a pipeline — matching it as a \
+                 substring is what denied `git add`"
+            );
+        }
     }
 }
