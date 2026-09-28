@@ -107,6 +107,27 @@ niki run "Add a GET /health endpoint returning { status: 'ok', uptime }" --proje
 
 Every run leaves behind a `niki/<id>` branch, a `changes.patch`, a human-readable `report.md`, and per-agent JSON artifacts — the entire decision trail is inspectable.
 
+### Try it in 30 seconds, with no API key
+
+```bash
+git clone https://github.com/RavaniRoshan/niki && cd niki
+cargo build --release
+./scripts/demo.sh
+```
+
+That runs the **real** pipeline — four agents, schema validation, the worktree
+sandbox, diff capture, branch creation — against a scripted local model server.
+You end with a real `niki/<id>` branch and a diff you can read.
+
+What is real and what is not: the agents, the handoff, the contracts, the review
+gate and the branch hand-off are all genuine. The model's *answers* are canned,
+because there is no key to spend. It demonstrates the harness, not model
+quality. For that, point NIKI at a real provider and run the same command.
+
+Requirements: `git`, `node`, `npm`, `python3`, `curl` on your `PATH`. No
+container runtime, no Docker, no API key. The script preflights and tells you
+what is missing.
+
 > **Proof, not promises.** Every claim about NIKI is backed by artifacts NIKI itself produces. Each run writes a `report.md` plus per-agent JSON artifacts (`artifacts/*.json`) capturing exactly what every agent decided and why — the entire decision trail is inspectable and reproducible. See the `docs/launch-audit.md` for the methodology and honest findings behind NIKI's design.
 
 ## Why Niki

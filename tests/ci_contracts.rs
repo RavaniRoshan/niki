@@ -380,3 +380,64 @@ fn every_needs_target_exists() {
         }
     }
 }
+
+/// The demo job must actually assert something about the demo's output.
+///
+/// `scripts/demo.sh` exits non-zero when it produces no branch, so a job that
+/// only runs it already catches the worst case. What it does not catch is a
+/// branch with an empty diff — which is exactly what a mock server that stops
+/// matching its fixture produces, and it would leave the demo "passing" while
+/// handing a visitor a branch with nothing in it. The assertion is on
+/// insertions, and it depends on `--keep`, without which the script deletes the
+/// scratch project on exit and the check inspects a directory that no longer
+/// exists.
+#[test]
+fn the_demo_job_checks_the_branch_is_not_empty() {
+    let ci = ci_yml();
+    let body = ci
+        .split("\n  demo:")
+        .nth(1)
+        .and_then(|rest| rest.split("\n  # ──").next())
+        .expect("the demo job exists in ci.yml");
+
+    assert!(
+        body.contains("./scripts/demo.sh --keep"),
+        "the demo job must pass --keep, or the scratch project is deleted before the \
+         result can be inspected"
+    );
+    assert!(
+        body.contains("*insertion*"),
+        "the demo job must assert the produced branch contains insertions; a branch with an \
+         empty diff is what a mock that stopped matching its fixture looks like, and it \
+         would pass a bare exit-code check"
+    );
+    assert!(
+        body.contains("%(refname:short)"),
+        "the demo job must read the branch with --format='%(refname:short)'; \
+         `git branch --list` decorates the checked-out branch with '* ', which puts a \
+         literal asterisk into the refspec"
+    );
+}
+
+/// The demo is the first thing a stranger runs, so the README has to point at it
+/// where someone will look — and it has to say plainly which half is real.
+#[test]
+fn the_readme_documents_the_demo_and_its_limits() {
+    let readme = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md"))
+        .expect("README.md");
+
+    assert!(
+        readme.contains("./scripts/demo.sh"),
+        "README.md must tell a first-time visitor how to try the product without a key"
+    );
+    assert!(
+        readme.contains("no API key") || readme.contains("no api key"),
+        "the demo's selling point — no key required — must be stated where it is offered"
+    );
+    assert!(
+        readme.contains("canned"),
+        "the README must say the demo's model answers are canned. A visitor who assumes \
+         otherwise concludes the tool is worse than it is, in the one place they are \
+         deciding whether to trust it."
+    );
+}
