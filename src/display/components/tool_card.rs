@@ -184,34 +184,123 @@ pub fn render_tool_card(card: &ToolCard, area_width: u16) -> Vec<Line<'static>> 
     lines
 }
 
-/// Estimate the height a card will occupy at the given width.
-pub fn tool_card_height(card: &ToolCard, _area_width: u16) -> usize {
-    let mut h = 1; // header
-    if card.expanded {
-        if let Some(output) = &card.output {
-            let line_count = output.lines().count();
-            h += line_count.min(5);
-            if line_count > 5 {
-                h += 1; // "N more lines" hint
-            }
-        }
-        if card.timing().is_some() {
-            h += 1;
+// Alias for consistency with naming convention.
+/// Every line one tool card occupies in the transcript, trailing hint included.
+///
+/// This exists so a card's height is *measured from its own output* rather than
+/// recomputed by a second function. It used to be two independent
+/// computations that happened to agree: the renderer emitted
+/// `render_tool_card(..)` plus, when the card was expanded, a separate
+/// "Enter to view all output" line, while the hit-test summed
+/// `tool_card_height`, which counted neither the hint nor the extra width the
+/// renderer actually used. Every expanded card was therefore one row taller on
+/// screen than in the hit-test, and from the second card onward the rows
+/// desynchronised — Enter opened the detail modal for whichever card happened
+/// to land under the cursor.
+///
+/// `expanded` and `detail_open` are passed in rather than read from `AppState`
+/// so the transcript and the hit-test can each state what they are laying out.
+pub fn tool_card_block(
+    card: &ToolCard,
+    width: u16,
+    expanded: bool,
+    detail_open: bool,
+) -> Vec<Line<'static>> {
+    let mut out = render_tool_card(card, width);
+    if expanded && !detail_open {
+        out.push(Line::from(Span::styled(
+            "  └─ Enter to view all output · y to copy ──────┘",
+            Style::default().fg(theme::fg_subtle()),
+        )));
+    }
+    out
+}
+
+#[cfg(test)]
+mod block_tests {
+    use super::*;
+
+    fn card(expanded: bool, output: Option<&str>) -> ToolCard {
+        ToolCard {
+            tool_name: "bash".into(),
+            status: ToolStatus::Success { duration_ms: 1200 },
+            summary: "cargo test --verbose".into(),
+            output: output.map(|s| s.to_string()),
+            expanded,
         }
     }
-    h
-}
 
-/// Hit-test a mouse row against a tool card at the given offset.
-/// Returns true if the click landed on this card.
-pub fn hit_test_card(card: &ToolCard, row_offset: u16, area_width: u16) -> bool {
-    let height = tool_card_card_height(card, area_width);
-    (row_offset as usize) < height
-}
+    /// The invariant the whole transcript depends on: a cell's height is
+    /// measured from its own output.
+    ///
+    /// `tool_card_height` used to be a *second* computation of the same number
+    /// the renderer produced by building lines — different width, and it never
+    /// counted the trailing hint — so every expanded card was one row taller on
+    /// screen than in the hit-test, and from the second card onward Enter
+    /// opened the wrong card's detail.
+    #[test]
+    fn the_measured_height_is_the_rendered_height() {
+        let cases = [
+            (card(false, None), false, false),
+            (card(false, Some("one line")), false, false),
+            (card(true, Some("a\nb\nc")), true, false),
+            (card(true, Some("a\nb\nc\nd\ne\nf\ng")), true, false),
+            // The trailing hint is part of the cell, so it must be counted.
+            (card(true, Some("x")), true, false),
+            // ...and it disappears when a detail modal is open.
+            (card(true, Some("x")), true, true),
+        ];
+        for width in [12u16, 20, 40, 80, 200] {
+            for (c, expanded, detail) in &cases {
+                let block = tool_card_block(c, width, *expanded, *detail);
+                // Every row the transcript pushes is a row the hit-test can
+                // reach, so a card is never zero rows and the hint — when it is
+                // shown — is exactly one of them.
+                assert!(
+                    !block.is_empty(),
+                    "a card is never zero rows at width {width}"
+                );
+                let without_hint = tool_card_block(c, width, *expanded, true).len();
+                if *expanded && !*detail {
+                    assert_eq!(
+                        block.len(),
+                        without_hint + 1,
+                        "the trailing hint is exactly one row, at width {width}"
+                    );
+                } else {
+                    assert_eq!(
+                        block.len(),
+                        without_hint,
+                        "no hint means no extra row, at width {width}"
+                    );
+                }
+            }
+        }
+    }
 
-// Alias for consistency with naming convention.
-fn tool_card_card_height(card: &ToolCard, area_width: u16) -> usize {
-    tool_card_height(card, area_width)
+    #[test]
+    fn an_expanded_card_is_taller_than_a_collapsed_one() {
+        let collapsed = tool_card_block(&card(false, None), 80, false, false).len();
+        let expanded = tool_card_block(&card(true, Some("a\nb")), 80, true, false).len();
+        assert!(
+            expanded > collapsed,
+            "expanding must add rows, or the transcript hides the output it just revealed"
+        );
+    }
+
+    #[test]
+    fn the_trailing_hint_is_only_present_when_it_should_be() {
+        let c = card(true, Some("out"));
+        assert!(
+            tool_card_block(&c, 80, true, false).len() > tool_card_block(&c, 80, true, true).len(),
+            "the hint is hidden while a detail modal is open"
+        );
+        assert_eq!(
+            tool_card_block(&c, 80, false, false).len(),
+            tool_card_block(&c, 80, false, true).len(),
+            "a collapsed card has no hint to hide"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -312,31 +401,6 @@ mod tests {
         assert!(header.len() < 200);
         assert!(header.contains("..."));
     }
-
-    #[test]
-    fn height_estimate() {
-        let card = ToolCard::new("Bash", "echo hi");
-        assert_eq!(tool_card_height(&card, 80), 1);
-
-        let mut card = ToolCard::new("Bash", "echo hi");
-        card.expanded = true;
-        card.output = Some("line1\nline2\nline3".to_string());
-        card.status = ToolStatus::Success { duration_ms: 10 };
-        assert_eq!(tool_card_height(&card, 80), 1 + 3 + 1); // header + 3 lines + timing
-    }
-
-    #[test]
-    fn hit_test_card_within_bounds() {
-        let card = ToolCard::new("Bash", "test");
-        assert!(hit_test_card(&card, 0, 80));
-    }
-
-    #[test]
-    fn hit_test_card_outside_bounds() {
-        let card = ToolCard::new("Bash", "test");
-        assert!(!hit_test_card(&card, 5, 80));
-    }
-
     #[test]
     fn render_unicode_summary_and_output_no_panic() {
         // TUI-020: byte slicing here used to panic on multibyte text.
@@ -347,7 +411,7 @@ mod tests {
         );
         let lines = render_tool_card(&card, 30);
         assert!(!lines.is_empty());
-        let height = tool_card_height(&card, 30);
+        let height = tool_card_block(&card, 30, false, false).len();
         assert!(height >= lines.len() - 1);
     }
 }
