@@ -85,7 +85,17 @@ cmd_check() {
   # the single most expensive lint step in this repo; `dev-loop.sh gate` runs it.
   dim "clippy (lib+bins, -j $JOBS)"
   cargo clippy -j "$JOBS" --lib --bins -- -D warnings || return 1
-  grn "check: clean"
+  cat <<'NOTE'
+
+  check: clean — but this is NOT the pre-push gate.
+
+  It lints the library and binaries only. The tests are not linted, and CI runs
+  `clippy --all-targets`, so a lint error in tests/*.rs passes here and fails
+  the build. That is not hypothetical: two collapsible-`if` lints in new test
+  files went through this check and broke CI.
+
+  Before pushing:  ./scripts/dev-loop.sh gate
+NOTE
 }
 
 cmd_test() {
