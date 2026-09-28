@@ -170,6 +170,122 @@ pub fn spawn_tui(
     (tx, handle)
 }
 
+/// The overlay ladder: the first open overlay owns the keyboard.
+///
+/// Returns `true` when the key was consumed and the caller must not route it
+/// any further. This is the top of key dispatch, and it now exists once for
+/// both loops rather than as two hand-ordered chains that could disagree.
+///
+/// The order is a decision, not an accident:
+/// 1. **Onboarding** and **permission** first. Both are states the program
+///    cannot proceed past, and a permission prompt arriving while a help
+///    overlay is up must not be hidden behind it — a security question the
+///    user cannot see is one they cannot answer.
+/// 2. **Help** next: a full-screen overlay that swallows everything below it.
+/// 3. **Modal** and the **command palette** last; they sit above a page rather
+///    than above each other.
+///
+/// `run_tui` used to check help *before* onboarding and `run_chat` after it.
+/// That difference is now impossible to express.
+fn route_overlay_key(
+    state: &mut AppState,
+    command_palette: &mut CommandPalette,
+    key: ratatui::crossterm::event::KeyEvent,
+    project_path: &std::path::Path,
+) -> OverlayOutcome {
+    use ratatui::crossterm::event::KeyCode;
+
+    if let Some(ref mut onboard) = state.onboarding {
+        match onboard.handle_key(key) {
+            OnboardingAction::None => {}
+            OnboardingAction::Skip | OnboardingAction::Finish => {
+                if onboard.dont_show_again {
+                    onboarding::persist_state(project_path);
+                    state.onboarded = true;
+                }
+                state.onboarding = None;
+            }
+        }
+        return OverlayOutcome::Consumed;
+    }
+
+    if permission::handle_key(&key, state) {
+        return OverlayOutcome::Consumed;
+    }
+
+    // The two globals that must work over a help overlay: they toggle it, and
+    // the toggle is the only way out of it.
+    if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleHelp) {
+        state.show_help = !state.show_help;
+        return OverlayOutcome::Consumed;
+    }
+    if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleMouseCapture) {
+        state.mouse_capture = !state.mouse_capture;
+        if state.mouse_capture {
+            let _ = ratatui::crossterm::execute!(std::io::stdout(), EnableMouseCapture);
+            let _ = crate::display::mouse::enable_tracking();
+        } else {
+            let _ = crate::display::mouse::disable_tracking();
+            let _ = ratatui::crossterm::execute!(std::io::stdout(), DisableMouseCapture);
+        }
+        return OverlayOutcome::Consumed;
+    }
+
+    if state.show_help {
+        if key.code == KeyCode::Esc {
+            state.show_help = false;
+        }
+        return OverlayOutcome::Consumed;
+    }
+
+    if let Some(ref modal) = state.modal.clone() {
+        match modal::handle_modal_key(key, modal) {
+            ModalAction::Dismiss => {
+                state.modal = None;
+                return OverlayOutcome::Consumed;
+            }
+            ModalAction::Confirm | ModalAction::Retry => return OverlayOutcome::Quit,
+            ModalAction::Config => {
+                state.current_page = PageId::Config;
+                state.modal = None;
+                return OverlayOutcome::Consumed;
+            }
+            ModalAction::None => {}
+        }
+    }
+
+    if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        state.show_command_palette = !state.show_command_palette;
+        if state.show_command_palette {
+            *command_palette = CommandPalette::new();
+        }
+        return OverlayOutcome::Consumed;
+    }
+    if state.show_command_palette {
+        if command_palette.handle_key(key, state) {
+            state.show_command_palette = false;
+        }
+        // Both loops mirror the cursor into `state.command_selected`; without
+        // it the status bar names the first command while the highlight sits
+        // on the fourth.
+        state.command_selected = command_palette.cursor.selected;
+        return OverlayOutcome::Consumed;
+    }
+
+    OverlayOutcome::Free
+}
+
+/// What [`route_overlay_key`] decided about a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OverlayOutcome {
+    /// An overlay had it; the page below must not see it.
+    Consumed,
+    /// No overlay wanted it.
+    Free,
+    /// A modal asked to leave.
+    Quit,
+}
+
 /// Route one mouse event to whatever owns it.
 ///
 /// Returns `true` when the screen needs redrawing. This used to be a 378-line
@@ -737,93 +853,19 @@ fn run_tui(
                     engine.mark_dirty_reason("key");
                     // Global keys that work even inside chat input (TUI-003:
                     // resolved through the central keybinding table).
-                    if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleHelp) {
-                        // `?` toggles the which-key style keybinding overlay.
-                        state.show_help = !state.show_help;
-                        engine.mark_dirty();
-                        continue;
-                    }
-                    if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleMouseCapture) {
-                        // Ctrl+E toggles mouse capture so the terminal's native
-                        // drag-to-select works. Keyboard scrolling stays the
-                        // default; this reconciles scroll vs text-selection.
-                        state.mouse_capture = !state.mouse_capture;
-                        if state.mouse_capture {
-                            let _ =
-                                ratatui::crossterm::execute!(std::io::stdout(), EnableMouseCapture);
-                            let _ = crate::display::mouse::enable_tracking();
-                        } else {
-                            let _ = crate::display::mouse::disable_tracking();
-                            let _ = ratatui::crossterm::execute!(
-                                std::io::stdout(),
-                                DisableMouseCapture
-                            );
-                        }
-                        engine.mark_dirty();
-                        continue;
-                    }
-                    // Help overlay captures all input until dismissed.
-                    if state.show_help {
-                        if key.code == KeyCode::Esc {
-                            state.show_help = false;
-                        }
-                        engine.mark_dirty();
-                        continue;
-                    }
-                    // Onboarding modal takes priority
-                    if let Some(ref mut onboard) = state.onboarding {
-                        match onboard.handle_key(key) {
-                            OnboardingAction::None => {}
-                            OnboardingAction::Skip | OnboardingAction::Finish => {
-                                if onboard.dont_show_again {
-                                    onboarding::persist_state(&project_path);
-                                    state.onboarded = true;
-                                }
-                                state.onboarding = None;
-                                engine.mark_dirty();
-                            }
-                        }
-                    } else if let Some(ref modal) = state.modal {
-                        // Regular modal key handling
-                        match modal::handle_modal_key(key, modal) {
-                            ModalAction::Dismiss => {
-                                state.modal = None;
-                                engine.mark_dirty();
-                            }
-                            ModalAction::Confirm => {
-                                state.modal = None;
-                                if key.code == KeyCode::Enter {
-                                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                                    break;
-                                }
-                                engine.mark_dirty();
-                            }
-                            ModalAction::Retry => {
-                                state.modal = None;
-                                engine.mark_dirty();
-                            }
-                            ModalAction::Config => {
-                                state.modal = None;
-                                state.current_page = PageId::Config;
-                                engine.mark_dirty();
-                            }
-                            ModalAction::None => {}
-                        }
-                    } else if permission::handle_key(&key, &mut state) {
-                        // The prompt owns input while it is up. This used to be
-                        // an inline copy of the same logic; `niki chat` had no
-                        // copy at all, so a permission request there rendered,
-                        // answered nothing, and expired into a Deny.
-                        engine.mark_dirty();
-                    } else if state.show_command_palette {
-                        // Command palette takes priority
-                        if command_palette.handle_key(key, &mut state) {
-                            state.show_command_palette = false;
+                    // One overlay ladder for both loops. The inline chain
+                    // this replaces checked the help overlay before onboarding
+                    // and permission after; `run_chat` had the opposite order.
+                    // Ordering is now a single decision, stated in one place.
+                    match route_overlay_key(&mut state, &mut command_palette, key, &project_path) {
+                        OverlayOutcome::Consumed => {
                             engine.mark_dirty();
-                        } else {
-                            engine.mark_dirty();
+                            continue;
                         }
-                    } else if state.keybindings.resolve(&key) == Some(GlobalAction::CancelOrExit) {
+                        OverlayOutcome::Quit => break,
+                        OverlayOutcome::Free => {}
+                    }
+                    if state.keybindings.resolve(&key) == Some(GlobalAction::CancelOrExit) {
                         // Ctrl+C: first press cancels a running stage / clears input;
                         // a second press within 2s exits the TUI.
                         if state.has_running_stage() {
@@ -1216,104 +1258,16 @@ pub fn run_chat(
         let timeout = min_frame_interval.saturating_sub(last_frame.elapsed());
         if event::poll(timeout).unwrap_or(false) {
             if let Ok(Event::Key(key)) = event::read() {
-                if let Some(ref mut onboard) = state.onboarding {
-                    match onboard.handle_key(key) {
-                        OnboardingAction::None => {}
-                        OnboardingAction::Skip | OnboardingAction::Finish => {
-                            if onboard.dont_show_again {
-                                onboarding::persist_state(&project_path);
-                                state.onboarded = true;
-                            }
-                            state.onboarding = None;
-                            needs_render = true;
-                        }
+                // One overlay ladder for both loops. It used to be two
+                // hand-ordered chains that could disagree — and did: `run_tui`
+                // checked the help overlay before onboarding, `run_chat` after.
+                match route_overlay_key(&mut state, &mut command_palette, key, &project_path) {
+                    OverlayOutcome::Consumed => {
+                        needs_render = true;
+                        continue;
                     }
-                    continue;
-                }
-
-                // A permission prompt outranks everything below, including the
-                // global keys and the composer. It used to be handled in
-                // `run_tui` and nowhere else, so in `niki chat` the modal
-                // rendered with no key that could answer it and the sandbox's
-                // five-second timeout turned it into a `Deny` the user never
-                // chose — a permission question the program asked itself.
-                if permission::handle_key(&key, &mut state) {
-                    needs_render = true;
-                    continue;
-                }
-                // Global keys that work even inside chat input (TUI-003: the two
-                // keys run_chat shares with run_tui resolve through the table;
-                // run_chat's other literals (bare-t theme, q quit, Tab) stay
-                // as-is until dispatch unification.
-                if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleHelp) {
-                    state.show_help = !state.show_help;
-                    needs_render = true;
-                    continue;
-                }
-                if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleMouseCapture) {
-                    state.mouse_capture = !state.mouse_capture;
-                    if state.mouse_capture {
-                        let _ = ratatui::crossterm::execute!(std::io::stdout(), EnableMouseCapture);
-                        let _ = crate::display::mouse::enable_tracking();
-                    } else {
-                        let _ = crate::display::mouse::disable_tracking();
-                        let _ =
-                            ratatui::crossterm::execute!(std::io::stdout(), DisableMouseCapture);
-                    }
-                    needs_render = true;
-                    continue;
-                }
-
-                // Help overlay captures all input until dismissed.
-                if state.show_help {
-                    if key.code == KeyCode::Esc {
-                        state.show_help = false;
-                    }
-                    needs_render = true;
-                    continue;
-                }
-
-                if let Some(ref modal) = state.modal.clone() {
-                    match modal::handle_modal_key(key, modal) {
-                        ModalAction::Dismiss => {
-                            state.modal = None;
-                            needs_render = true;
-                        }
-                        ModalAction::Confirm | ModalAction::Retry => {
-                            break;
-                        }
-                        ModalAction::Config => {
-                            state.current_page = PageId::Config;
-                            state.modal = None;
-                            needs_render = true;
-                        }
-                        ModalAction::None => {}
-                    }
-                    continue;
-                }
-
-                if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                    state.show_command_palette = !state.show_command_palette;
-                    if state.show_command_palette {
-                        command_palette = CommandPalette::new();
-                    }
-                    needs_render = true;
-                    continue;
-                }
-                if state.show_command_palette {
-                    let closed = command_palette.handle_key(key, &mut state);
-                    if closed {
-                        state.show_command_palette = false;
-                    }
-                    // `run_tui` mirrors the palette's cursor into
-                    // `state.command_selected`; without it the status bar keeps
-                    // naming the first command while the highlight is on the
-                    // fourth. The highlight itself was fine — that reads the
-                    // palette's own cursor — so this was a status bar lying
-                    // about what was selected.
-                    state.command_selected = command_palette.cursor.selected;
-                    needs_render = true;
-                    continue;
+                    OverlayOutcome::Quit => break,
+                    OverlayOutcome::Free => {}
                 }
 
                 if key.code == KeyCode::Tab {
@@ -1936,6 +1890,135 @@ mod tests {
                 st.permission_mode, before,
                 "the badge is drawn on the last row, so a click there must act"
             );
+        }
+    }
+    /// The overlay ladder is the top of key dispatch, and until this turn it
+    /// existed as two hand-ordered chains — one in each loop — that had
+    /// already drifted: `run_tui` checked the help overlay before onboarding,
+    /// `run_chat` after it.
+    mod overlay_ladder {
+        use super::*;
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        fn state() -> AppState {
+            let config = crate::config::NikiConfig::default();
+            AppState::new("test".to_string(), config, ".".into())
+        }
+
+        fn ladder(st: &mut AppState, k: KeyCode) -> OverlayOutcome {
+            let mut palette = CommandPalette::new();
+            route_overlay_key(
+                st,
+                &mut palette,
+                KeyEvent::new(k, KeyModifiers::NONE),
+                std::path::Path::new("."),
+            )
+        }
+
+        /// Nothing open: the page gets the key. Every other case below is a
+        /// deviation from this, so it is the baseline that makes the rest
+        /// meaningful.
+        #[test]
+        fn with_nothing_open_the_key_reaches_the_page() {
+            let mut st = state();
+            assert_eq!(ladder(&mut st, KeyCode::Char('a')), OverlayOutcome::Free);
+        }
+
+        #[test]
+        fn a_permission_prompt_outranks_the_help_overlay() {
+            // A security question hidden behind a help overlay is a question
+            // the user cannot answer. Whichever overlay is on top, the prompt
+            // has to be reachable — and it is the one that can be forgotten.
+            let mut st = state();
+            st.show_help = true;
+            let (tx, _rx) = std::sync::mpsc::channel();
+            st.permission_request = Some(crate::display::state::PermissionRequest {
+                tool_name: "sandbox_exec".into(),
+                command: "rm -rf /".into(),
+                description: String::new(),
+                params: None,
+                response_tx: tx,
+            });
+            st.show_permission_modal = true;
+            assert_eq!(
+                ladder(&mut st, KeyCode::Char('n')),
+                OverlayOutcome::Consumed,
+                "the prompt must take the key, not the overlay behind it"
+            );
+            assert!(!st.show_help || !st.show_permission_modal);
+        }
+
+        #[test]
+        fn onboarding_outranks_everything() {
+            let mut st = state();
+            st.onboarding = Some(crate::display::onboarding::OnboardingModal::new());
+            st.show_help = true;
+            assert_eq!(
+                ladder(&mut st, KeyCode::Char('a')),
+                OverlayOutcome::Consumed
+            );
+            assert!(
+                st.onboarding.is_some(),
+                "onboarding owns the key; nothing below it may act"
+            );
+        }
+
+        #[test]
+        fn help_swallows_everything_but_its_own_toggle() {
+            let mut st = state();
+            st.show_help = true;
+            // A letter is swallowed and does not reach the page.
+            assert_eq!(
+                ladder(&mut st, KeyCode::Char('a')),
+                OverlayOutcome::Consumed
+            );
+            assert!(st.show_help, "help stays up");
+            // Esc is the way out.
+            assert_eq!(ladder(&mut st, KeyCode::Esc), OverlayOutcome::Consumed);
+            assert!(!st.show_help, "esc closes it");
+        }
+
+        #[test]
+        fn the_palette_opens_on_ctrl_p_and_swallows_the_next_key() {
+            let mut st = state();
+            let mut palette = CommandPalette::new();
+            route_overlay_key(
+                &mut st,
+                &mut palette,
+                KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+                std::path::Path::new("."),
+            );
+            assert!(st.show_command_palette);
+            // While it is open, a bare key is the palette's, not the page's.
+            let out = route_overlay_key(
+                &mut st,
+                &mut palette,
+                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+                std::path::Path::new("."),
+            );
+            assert_eq!(out, OverlayOutcome::Consumed);
+            assert_eq!(st.command_selected, palette.cursor.selected);
+        }
+
+        #[test]
+        fn a_confirm_modal_asks_to_leave() {
+            let mut st = state();
+            st.modal = Some(crate::display::state::Modal::Confirm {
+                title: "Quit".into(),
+                message: "Exit NIKI?".into(),
+            });
+            assert_eq!(ladder(&mut st, KeyCode::Enter), OverlayOutcome::Quit);
+        }
+
+        #[test]
+        fn a_dismissed_modal_keeps_the_run_alive() {
+            let mut st = state();
+            st.modal = Some(crate::display::state::Modal::Confirm {
+                title: "Quit".into(),
+                message: "Exit NIKI?".into(),
+            });
+            assert_eq!(ladder(&mut st, KeyCode::Esc), OverlayOutcome::Consumed);
+            assert!(st.modal.is_none(), "esc dismisses without leaving");
         }
     }
 }
