@@ -317,6 +317,11 @@ jobs:
       # is slower than no cache at all. Per-job is correct without being clever;
       # sharing is a further win once the repo's cache budget is known.
       - uses: Swatinem/rust-cache@v2
+        with:
+          # The cross-compiled legs must not share a key with the host build:
+          # they produce a different `target/` and would evict each other.
+          shared-key: ${{ runner.os }}-${{ matrix.target }}
+      - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
