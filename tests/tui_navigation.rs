@@ -1620,3 +1620,45 @@ fn a_second_stage_failure_does_not_replace_the_first_modal() {
          {first:?} became {now:?}"
     );
 }
+
+/// No configurable keybinding may sit behind a literal key test.
+///
+/// The chat loop tested `key.code == KeyCode::Tab` and `Char('t')` directly.
+/// Both happened to be defensible-looking and both were wrong: `toggle_chat`
+/// defaults to Tab so the literal matched, and `cycle_theme` defaults to
+/// **ctrl+t** — so the bare `t` that worked was never the configured key, and
+/// the configured key did nothing. A user who rebound either one got a binding
+/// that silently did nothing in `niki chat` and worked in `niki`.
+///
+/// The defaults are pinned here because the bug was invisible precisely
+/// because they were not written down anywhere the tests could check.
+#[test]
+fn the_defaults_for_the_keys_the_chat_loop_used_to_hardcode() {
+    use niki::display::keybindings::{GlobalAction, KeyBindings};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let kb = KeyBindings::default();
+
+    // `toggle_chat` is Tab, so the literal matched by luck.
+    assert_eq!(
+        kb.resolve(&KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        Some(GlobalAction::ToggleChatPage)
+    );
+    // `cycle_theme` is ctrl+t. A bare `t` is NOT the configured key — which
+    // is why the literal `Char('t')` was a bug that no default matched.
+    assert_eq!(
+        kb.resolve(&KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL)),
+        Some(GlobalAction::CycleTheme)
+    );
+    assert_ne!(
+        kb.resolve(&KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE)),
+        Some(GlobalAction::CycleTheme),
+        "a bare `t` must not be the theme key; if this ever becomes true the \\
+         hardcoded handler it replaced would have been right for the wrong reason"
+    );
+    // And the palette, from two turns back, for the same reason.
+    assert_eq!(
+        kb.resolve(&KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL)),
+        Some(GlobalAction::CommandPalette)
+    );
+}

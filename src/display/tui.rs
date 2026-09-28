@@ -1309,14 +1309,15 @@ pub fn run_chat(
                     OverlayOutcome::Free => {}
                 }
 
-                if key.code == KeyCode::Tab {
-                    // `niki chat` runs the second of two event loops in this
-                    // file, and this handler was a duplicate of the one in the
-                    // first loop — carrying the same defect, so the fix applied
-                    // there did not reach this path. Both `current_page`
-                    // (what is rendered) and `view` (what the footer label
-                    // reads) have to move together or the footer claims a
-                    // toggle that did not happen.
+                // Through the keybinding table. This was a literal `Tab`, so
+                // it happened to match the default and looked fine — but a
+                // user who rebound `toggle_chat` in `niki.toml` got a binding
+                // that did nothing in `niki chat` and worked everywhere else.
+                // The default is still Tab.
+                if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleChatPage) {
+                    // Both `current_page` (what is rendered) and `view` (what
+                    // the footer label reads) have to move together or the
+                    // footer claims a toggle that did not happen.
                     let next = match state.current_page {
                         PageId::Chat => PageId::Run,
                         _ => PageId::Chat,
@@ -1410,28 +1411,35 @@ pub fn run_chat(
                     continue;
                 }
 
+                // Through the keybinding table, and note the default is
+                // `ctrl+t`, not a bare `t`. So the bare `t` that used to work
+                // here was not the configured key at all, and the configured
+                // key did nothing: a user pressing Ctrl+T in `niki chat` got
+                // silence. Same shape as the palette binding, one turn back.
+                if state.keybindings.resolve(&key) == Some(GlobalAction::CycleTheme) {
+                    let new_pref = match state.config.ui.theme {
+                        crate::config::types::ThemePreference::Dark => {
+                            crate::config::types::ThemePreference::Light
+                        }
+                        crate::config::types::ThemePreference::Light => {
+                            crate::config::types::ThemePreference::Auto
+                        }
+                        crate::config::types::ThemePreference::Auto => {
+                            crate::config::types::ThemePreference::Dark
+                        }
+                    };
+                    let mode = match new_pref {
+                        crate::config::types::ThemePreference::Dark => theme::ThemeMode::Dark,
+                        crate::config::types::ThemePreference::Light => theme::ThemeMode::Light,
+                        crate::config::types::ThemePreference::Auto => theme::ThemeMode::Auto,
+                    };
+                    theme::set_mode(mode);
+                    state.config.ui.theme = new_pref;
+                    needs_render = true;
+                    continue;
+                }
+
                 match key.code {
-                    KeyCode::Char('t') if key.modifiers.is_empty() => {
-                        let new_pref = match state.config.ui.theme {
-                            crate::config::types::ThemePreference::Dark => {
-                                crate::config::types::ThemePreference::Light
-                            }
-                            crate::config::types::ThemePreference::Light => {
-                                crate::config::types::ThemePreference::Auto
-                            }
-                            crate::config::types::ThemePreference::Auto => {
-                                crate::config::types::ThemePreference::Dark
-                            }
-                        };
-                        let mode = match new_pref {
-                            crate::config::types::ThemePreference::Dark => theme::ThemeMode::Dark,
-                            crate::config::types::ThemePreference::Light => theme::ThemeMode::Light,
-                            crate::config::types::ThemePreference::Auto => theme::ThemeMode::Auto,
-                        };
-                        theme::set_mode(mode);
-                        state.config.ui.theme = new_pref;
-                        needs_render = true;
-                    }
                     KeyCode::Char('q') => {
                         state.modal = Some(crate::display::pages::Modal::Confirm {
                             title: "Quit".into(),

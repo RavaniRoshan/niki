@@ -123,8 +123,33 @@ pub fn render_adaptive_header(
 
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     } else {
-        render_logo(frame, area);
+        // The full banner is six rows of art with two spare. Those two rows
+        // carried nothing, so a user arriving at `niki` had no indication that
+        // a keybinding reference existed at all — the footer's `? keys` hint is
+        // easy to read past, and the help overlay itself is only reachable by
+        // pressing a key you do not know about.
+        //
+        // The hint is built from the live keybinding table, not typed here, so
+        // it names the key the user actually has — including a rebound one.
+        let hint = keybinding_hint(state);
+        render_logo_with_subtitle(frame, area, &hint);
     }
+}
+
+/// The banner's keybinding hint, built from the resolved bindings.
+///
+/// Read from the table rather than written out so a user who rebinds
+/// `toggle_help` is told the key they have, not the one this code was written
+/// against. Falls back to a description of the overlay when the hint cannot
+/// be built, because naming the feature is more useful than saying nothing.
+fn keybinding_hint(state: &crate::display::state::AppState) -> String {
+    use crate::display::keybindings::GlobalAction;
+
+    let kb = &state.keybindings;
+    let help = kb.label_for(GlobalAction::ToggleHelp, "?");
+    let palette = kb.label_for(GlobalAction::CommandPalette, "^p");
+    let chat = kb.label_for(GlobalAction::ToggleChatPage, "tab");
+    format!("{help} for keybindings · {palette} commands · {chat} switches view")
 }
 
 /// Render the logo with a subtitle line below it.
@@ -189,5 +214,58 @@ mod tests {
         assert_eq!(preferred_logo_height(60, 40), 1);
         assert_eq!(preferred_logo_height(100, 25), 1);
         assert_eq!(preferred_logo_height(120, 40), 8);
+    }
+}
+
+#[cfg(test)]
+mod hint_tests {
+    use super::*;
+    use crate::display::keybindings::{GlobalAction, KeyBindings};
+    use std::collections::HashMap;
+
+    fn state_with(kb: KeyBindings) -> crate::display::state::AppState {
+        let config = crate::config::NikiConfig::default();
+        let mut st = crate::display::state::AppState::new("t".to_string(), config, ".".into());
+        st.keybindings = kb;
+        st
+    }
+
+    /// The hint must name the key the user *has*, not the one this code was
+    /// written against. A user who rebinds `toggle_help` and is told `?` will
+    /// press a key that does nothing.
+    #[test]
+    fn the_hint_follows_a_rebound_key() {
+        let mut overrides: HashMap<String, Vec<String>> = HashMap::new();
+        overrides.insert("toggle_help".to_string(), vec!["ctrl+h".to_string()]);
+        let (kb, _c) = KeyBindings::with_overrides(&overrides);
+        let hint = keybinding_hint(&state_with(kb));
+        assert!(
+            hint.contains("Ctrl+H") || hint.contains("ctrl+h"),
+            "the hint must name the rebound key, got: {hint}"
+        );
+    }
+
+    #[test]
+    fn the_hint_names_the_help_affordance() {
+        let (kb, _c) = KeyBindings::with_overrides(&HashMap::new());
+        let hint = keybinding_hint(&state_with(kb));
+        assert!(
+            hint.contains("keybindings"),
+            "the hint has to say what the key does, not just the key: {hint}"
+        );
+    }
+
+    /// `label_for` is what makes the hint follow a rebinding; pin it directly.
+    ///
+    /// The fallback branch — for an action a clash has left unbound — is
+    /// defensive and not exercised here: every action in the table has a
+    /// default, so producing an unbound one needs a deliberate clash, and a
+    /// test for it would be asserting that a gap renders as a gap. Worth
+    /// knowing that it is untested rather than discovering it later.
+    #[test]
+    fn label_for_reports_the_resolved_key() {
+        let (kb, _c) = KeyBindings::with_overrides(&HashMap::new());
+        assert_eq!(kb.label_for(GlobalAction::CommandPalette, "^p"), "Ctrl+P");
+        assert_eq!(kb.label_for(GlobalAction::ToggleHelp, "?"), "?");
     }
 }
