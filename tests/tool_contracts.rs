@@ -13,11 +13,25 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+/// The production half of `src/runtime/tools.rs`.
+///
+/// The `#[cfg(test)]` half declares a `DummyTool` that deliberately reuses the
+/// name `read`, which would otherwise overwrite the real one in the map below
+/// and make this test quietly check a fixture instead of the registry.
 fn tools_source() -> String {
-    std::fs::read_to_string(
+    let src = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/runtime/tools.rs"),
     )
-    .expect("src/runtime/tools.rs is readable")
+    .expect("src/runtime/tools.rs is readable");
+    let cut = src
+        .lines()
+        .position(|l| l.trim_start().starts_with("#[cfg(test)]"))
+        .unwrap_or_else(|| {
+            src.lines()
+                .position(|l| l.trim() == "mod tests {")
+                .expect("src/runtime/tools.rs has a test module")
+        });
+    src.lines().take(cut).collect::<Vec<_>>().join("\n")
 }
 
 /// Pair each `name:` with the `parameters:` that follows it in the same
@@ -38,6 +52,11 @@ fn named_schemas(src: &str) -> BTreeMap<String, serde_json::Value> {
                 .trim_end_matches('#')
                 .trim_end_matches('"');
             if let Some(name) = pending.take() {
+                assert!(
+                    !out.contains_key(&name),
+                    "two tools are named `{name}` — the schema map would silently \
+                     keep only the last one, so this test would check the wrong tool"
+                );
                 let value: serde_json::Value = serde_json::from_str(raw)
                     .unwrap_or_else(|e| panic!("{name}: schema is not JSON: {e}\n{raw}"));
                 out.insert(name, value);

@@ -97,6 +97,13 @@ fn artifact() -> serde_json::Value {
 fn run(
     script: Vec<Option<(String, serde_json::Value)>>,
 ) -> (niki::runtime::tools::LoopOutput, Vec<String>) {
+    run_with(script, None)
+}
+
+fn run_with(
+    script: Vec<Option<(String, serde_json::Value)>>,
+    validate_artifact: Option<niki::runtime::ArtifactValidator>,
+) -> (niki::runtime::tools::LoopOutput, Vec<String>) {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(dir.path().join("src.rs").join("x").as_os_str(), "").ok();
     std::fs::create_dir_all(dir.path().join("src")).expect("mkdir");
@@ -122,6 +129,7 @@ fn run(
                     "properties": artifact(),
                     "required": ["edits", "files_changed"],
                 }))),
+                validate_artifact,
             },
             &agent,
             "m",
@@ -426,4 +434,101 @@ fn prose_is_never_mistaken_for_a_tool_call() {
             "prose must not become a tool call: {text:?}"
         );
     }
+}
+
+/// The model submitted something the stage cannot accept. The loop must hand
+/// the reason back and let it try again — not end the run on the first
+/// malformed artifact, and not discard everything the model had already read.
+///
+/// Measured: a breadth sweep lost four of five runs to
+/// `edits[0] has an empty search`. The loop submitted it, the loop returned,
+/// the caller fell back to a fresh one-shot call that re-read nothing and
+/// produced the same thing — so a first-attempt mistake was unrecoverable.
+#[test]
+fn a_rejected_artifact_goes_back_to_the_model_with_the_reason() {
+    let bad = serde_json::json!({
+        "edits": [{ "search": "", "replace": "new" }],
+        "files_changed": [{ "path": "src/lib.rs", "action": "modify", "language": "rust" }],
+        "implementation_notes": "x",
+        "spec_adherence": "y"
+    });
+    let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = attempts.clone();
+    let validate: niki::runtime::ArtifactValidator =
+        std::sync::Arc::new(move |v: &serde_json::Value| {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if v["edits"][0]["search"] == serde_json::Value::String(String::new()) {
+                Err("edits[0] has an empty `search`".to_string())
+            } else {
+                Ok(())
+            }
+        });
+
+    let (out, prompts) = run_with(
+        vec![
+            Some(("read".into(), serde_json::json!({ "path": "src/lib.rs" }))),
+            Some(("submit_artifact".into(), bad)),
+            Some(("submit_artifact".into(), artifact())),
+        ],
+        Some(validate),
+    );
+
+    assert_eq!(
+        out.artifact,
+        Some(artifact()),
+        "the second, corrected submission must be the one that comes back"
+    );
+    assert_eq!(out.steps, 3, "read, rejected submit, accepted submit");
+    assert_eq!(
+        attempts.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the validator runs once per submission"
+    );
+    assert!(
+        prompts
+            .iter()
+            .any(|p| p.contains("REJECTED") && p.contains("edits[0] has an empty `search`")),
+        "the model must be shown the reason, not just a refusal: {prompts:?}"
+    );
+    assert!(
+        prompts
+            .iter()
+            .any(|p| p.contains("old") || p.contains("src/lib.rs")),
+        "the earlier exploration stays in context — the correction must not have to start over"
+    );
+}
+
+/// A rejection that never resolves must end the loop, not spin.
+#[test]
+fn a_model_that_never_conforms_gives_up_at_the_step_budget() {
+    let bad = serde_json::json!({ "edits": [] });
+    let validate: niki::runtime::ArtifactValidator =
+        std::sync::Arc::new(|_v: &serde_json::Value| Err("never good enough".to_string()));
+
+    let (out, _) = run_with(
+        vec![
+            Some(("submit_artifact".into(), bad.clone())),
+            Some(("submit_artifact".into(), bad.clone())),
+            Some(("submit_artifact".into(), bad.clone())),
+        ],
+        Some(validate),
+    );
+
+    assert!(
+        out.artifact.is_none(),
+        "an artifact that was never accepted must not be reported as the answer"
+    );
+    assert!(
+        out.steps >= 3,
+        "the loop used its budget trying, it did not stop at the first rejection"
+    );
+}
+
+/// Without a validator the loop behaves exactly as before: the first
+/// submission is the answer.
+#[test]
+fn a_loop_without_a_validator_accepts_the_first_submission() {
+    let out = run(vec![Some(("submit_artifact".into(), artifact()))]).0;
+    assert_eq!(out.artifact, Some(artifact()));
+    assert_eq!(out.steps, 1);
 }

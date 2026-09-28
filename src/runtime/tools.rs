@@ -2729,11 +2729,40 @@ pub async fn run_tool_loop(
 }
 
 /// Extra configuration for the tool loop.
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct LoopOptions {
     /// When set, the agent is offered this tool and the loop ends when it calls
     /// it, handing back `LoopOutput::artifact`.
     pub submit_artifact: Option<crate::llm::provider::ToolSpec>,
+    /// Checks a submitted artifact. On failure the loop does **not** end: the
+    /// reason goes back to the model as the tool result and it gets another
+    /// turn, with everything it already read still in context.
+    ///
+    /// This is the whole difference between a loop that can correct itself and
+    /// one that cannot. The Coder loop used to return whatever the model
+    /// submitted and validate it *outside*, where the only options were accept
+    /// it or throw the entire exploration away and start a fresh one-shot
+    /// call — which re-reads nothing and, on a small model, produced the same
+    /// invalid artifact and then failed the run. Measured: five breadth runs,
+    /// four of them lost this way with `edits[0] has an empty search`.
+    ///
+    /// This mirrors how a failing tool call behaves everywhere else in the
+    /// loop, and in Codex, where a rejected submission is an error result the
+    /// model reads and answers.
+    pub validate_artifact: Option<ArtifactValidator>,
+}
+
+/// Validates a submitted artifact; `Err` is a message shown to the model.
+pub type ArtifactValidator =
+    std::sync::Arc<dyn Fn(&serde_json::Value) -> Result<(), String> + Send + Sync>;
+
+impl std::fmt::Debug for LoopOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoopOptions")
+            .field("submit_artifact", &self.submit_artifact)
+            .field("validate_artifact", &self.validate_artifact.is_some())
+            .finish()
+    }
 }
 
 pub async fn run_tool_loop_with(
@@ -2875,6 +2904,28 @@ pub async fn run_tool_loop_with(
             // intercepted here rather than registered because it is not a tool
             // that touches the machine — it is the loop's own exit.
             if tc.name == "submit_artifact" {
+                // A rejected submission is not a dead end: the model is told
+                // why and gets another turn with its exploration intact.
+                if let Some(validate) = &opts.validate_artifact
+                    && let Err(reason) = validate(&tc.arguments)
+                {
+                    call_log.push((tc.name.clone(), false));
+                    let notice = format!(
+                        "REJECTED — the artifact was not accepted: {reason}\n\
+                         Fix that and call submit_artifact again. Do not re-explore unless the \
+                         reason says the wrong file was read."
+                    );
+                    tracing::warn!(
+                        target: "niki::runtime",
+                        reason = %reason,
+                        "submitted artifact rejected; returning the reason to the model"
+                    );
+                    messages.push(LoopMessage::ToolResult {
+                        tool_call_id: tc.id.clone(),
+                        content: notice,
+                    });
+                    continue;
+                }
                 let content = response.content.clone();
                 submitted = Some(tc.arguments.clone());
                 call_log.push((tc.name.clone(), true));
