@@ -1180,24 +1180,7 @@ async fn run_coder_tool_loop(
     // indistinguishable from the loop not existing, which is how the tool
     // loop shipped with a prompt that contradicted it and nobody noticed.
     let Some(artifact) = out.artifact else {
-        let said = out
-            .tool_calls
-            .iter()
-            .filter(|(name, ok)| !name.starts_with("submit_artifact") && *ok)
-            .map(|(name, _)| name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let msg = format!(
-            "the Coder ran the tool loop for {} step(s) and never called submit_artifact{}. \
-             Falling back to a single-shot call. The error that follows describes the \
-             fallback, not this.",
-            out.steps,
-            if said.is_empty() {
-                " (it made no tool calls at all)".to_string()
-            } else {
-                format!(" (it did use: {said})")
-            }
-        );
+        let msg = coder_loop_fallback_notice(&out);
         tracing::warn!(target: "niki::pipeline", role = "coder", steps = out.steps, "{}", msg);
         eprintln!("niki: {msg}");
         return None;
@@ -1245,6 +1228,32 @@ async fn run_coder_tool_loop(
         ttft_ms: 0,
     });
     Some(json)
+}
+
+/// What to tell the user when the Coder's tool loop produced no artifact.
+///
+/// Public so the wording is testable. That it reaches *stderr* rather than
+/// only `tracing` is not unit-observable — `tracing` is invisible without
+/// RUST_LOG — so `tests/agent_tool_loop.rs` checks the `eprintln!` directly,
+/// and this checks that the message says something a user can act on.
+pub fn coder_loop_fallback_notice(out: &crate::runtime::tools::LoopOutput) -> String {
+    let used: Vec<&str> = out
+        .tool_calls
+        .iter()
+        .filter(|(name, ok)| *ok && name != "submit_artifact")
+        .map(|(name, _)| name.as_str())
+        .collect();
+    format!(
+        "the Coder ran the tool loop for {} step(s) and never called submit_artifact{}. \
+         Falling back to a single-shot call. The error that follows describes the \
+         fallback, not this.",
+        out.steps,
+        if used.is_empty() {
+            " (it made no tool calls at all)".to_string()
+        } else {
+            format!(" (it did use: {})", used.join(", "))
+        }
+    )
 }
 
 /// Prompt template + JSON schema for a given role.

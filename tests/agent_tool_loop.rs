@@ -220,43 +220,21 @@ fn the_submit_tool_carries_the_artifact_schema_verbatim() {
         "the submit tool's parameters must be the artifact schema itself"
     );
 }
-
-/// The Coder stage must actually be a loop.
+/// Superseded by `pipeline_guards::the_coder_stage_answers_by_calling_
+/// submit_artifact`.
 ///
-/// The loop and the `submit_artifact` tool existed and were tested in isolation
-/// for a while, with `grep -c run_tool_loop_with src/orchestrator/pipeline.rs`
-/// returning 0 — built, and wired to nothing. A live multi-agent run against
-/// `qwen2.5-coder:3b` still died at the Coder with "Failed to parse artifact
-/// JSON", which is what prompted the wiring.
+/// This used to assert that the pipeline source contains
+/// `let json = if role == AgentRole::Coder {` and `match run_coder_tool_loop(`.
+/// A source-text test cannot see the thing it was guarding: `run_coder_tool_loop`
+/// loaded its prompt with a bare asset name, failed on the second line, and
+/// returned `None` — so the loop was wired to nothing, in the most literal
+/// sense, for its entire life, while every word this test looked for sat
+/// exactly where it expected them.
 ///
-/// This is a source-level assertion on purpose. A stage's execution is not
-/// observable from a unit test, and "it works on my machine with a good model"
-/// is not a property — the same code fails or succeeds depending on the model.
-#[test]
-fn the_coder_stage_runs_on_the_tool_loop() {
-    let src = include_str!("../src/orchestrator/pipeline.rs");
-    // BOTH halves: the gate must actually select the Coder, and the function must
-    // actually be called from it.
-    //
-    // The first version asserted only that the function *existed*, so changing
-    // `if role == AgentRole::Coder` to `if false && role == ...` -- the exact
-    // "built and wired to nothing" state this test exists to prevent -- left it
-    // green. Two mutations of the pipeline later proved it, and both "passed".
-    assert!(
-        src.contains("let json = if role == AgentRole::Coder {"),
-        "the Coder stage must be gated on the role, not disabled. Found the loop wired to \
-         nothing, or not wired at all."
-    );
-    assert!(
-        src.contains("match run_coder_tool_loop("),
-        "the Coder stage must CALL the tool loop, not merely define it"
-    );
-    assert!(
-        src.contains("submit_artifact_spec"),
-        "and the loop must end by submitting the typed artifact, so the audit trail survives"
-    );
-}
-
+/// The replacement runs the Coder through the pipeline and checks the artifact
+/// it produced, which is the only version of this that can fail for the real
+/// reason.
+///
 /// A model that ignores the tool and answers in prose must fall back to the
 /// one-shot path, not fail.
 ///
@@ -277,34 +255,94 @@ fn a_loop_that_submits_nothing_falls_back_instead_of_failing() {
     );
 }
 
-/// Ollama must surface tool calls, and send the tools.
+/// Ollama must send the tools, and read the calls back.
 ///
 /// This provider returned `tool_calls: Vec::new()` unconditionally, with a
 /// comment claiming Ollama has no native tool support. It does — and it is the
 /// provider the README's zero-setup path tells a first-time user to install
 /// (`ollama pull qwen2.5-coder:3b`). So the Coder's tool loop could never run
 /// for the product's headline setup: the model was never shown the tools, and
-/// anything it returned was discarded. The loop always fell back to a single
-/// call, and the stage failed intermittently for reasons that had nothing to do
-/// with the model's ability.
+/// anything it returned was discarded.
 ///
-/// The whole rest of Phase 1 is downstream of this: a loop whose provider cannot
-/// express a tool call is a loop that never runs.
-#[test]
-fn ollama_sends_and_returns_tool_calls() {
-    let src = include_str!("../src/llm/ollama.rs");
-    assert!(
-        src.contains("payload[\"tools\"]"),
-        "the Ollama provider must send the tools it is given, or the model is never told \
-         they exist"
+/// The previous version grepped `src/llm/ollama.rs` for `payload["tools"]` —
+/// the same weakness the Coder loop's test had, where the string can be
+/// present in the file while no request ever carries it. This points the
+/// provider at a recording server and asserts on the bytes.
+#[tokio::test]
+async fn ollama_sends_the_tools_and_returns_the_calls() {
+    use niki::config::ProviderConfig;
+    use niki::llm::provider::{CompletionRequest, LlmProvider, ToolSpec};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "model": "qwen2.5-coder:3b",
+            "message": {
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": "read", "arguments": {"path": "src/lib.rs"}}}
+                ]
+            },
+            "done": true,
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = niki::llm::ollama::OllamaProvider::new(&ProviderConfig {
+        api_key: Some("ollama".into()),
+        base_url: Some(server.uri()),
+        default_model: "qwen2.5-coder:3b".into(),
+    })
+    .expect("provider");
+
+    let response = provider
+        .complete(CompletionRequest {
+            model: "qwen2.5-coder:3b".into(),
+            user_message: "read src/lib.rs".into(),
+            tools: Some(vec![ToolSpec {
+                name: "read".into(),
+                description: "Read file content with line numbers".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"]
+                }),
+            }]),
+            ..Default::default()
+        })
+        .await
+        .expect("the provider completes");
+
+    assert_eq!(
+        response.tool_calls.len(),
+        1,
+        "Ollama's tool calls must reach the loop, not be discarded"
     );
+    assert_eq!(response.tool_calls[0].name, "read");
+    assert_eq!(response.tool_calls[0].arguments["path"], "src/lib.rs");
+
+    let requests = server.received_requests().await.unwrap_or_default();
     assert!(
-        src.contains("parse_tool_calls(&data)"),
-        "and must read the calls back instead of discarding them"
+        !requests.is_empty(),
+        "the mock server recorded no request — the test proved nothing"
     );
-    assert!(
-        !src.contains("no native tool support on this provider"),
-        "that claim was the bug's cover story; it is false and must not come back"
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).expect("json body");
+    let sent = body
+        .get("tools")
+        .and_then(|t| t.as_array())
+        .unwrap_or_else(|| panic!("the request carried no `tools` array: {body}"));
+    assert_eq!(sent.len(), 1, "exactly the tool we offered");
+    let name = sent[0]
+        .get("function")
+        .and_then(|f| f.get("name"))
+        .and_then(|n| n.as_str())
+        .unwrap_or_else(|| panic!("tool name missing: {}", sent[0]));
+    assert_eq!(
+        name, "read",
+        "the model must be told the tool exists, by name"
     );
 }
 
@@ -600,30 +638,91 @@ fn the_one_shot_prompt_still_asks_for_raw_json() {
     );
 }
 
-/// A loop that produces nothing has to announce itself.
+/// A loop that produces nothing has to say so, in words a user can use.
 ///
-/// The notice used to cover only a *rejected* submission. A model that never
-/// called the tool at all returned empty with no message anywhere, so the run
-/// became the one-shot path and looked exactly like a build without the loop.
+/// The notice used to fire only when the loop *submitted* something invalid.
+/// A model that never called the tool at all returned empty with no message
+/// anywhere, and the run silently became the one-shot path — indistinguishable
+/// from a build without the loop. That is how the loop shipped with a prompt
+/// that contradicted it and nobody noticed.
+///
+/// The wording is tested here because that is the part a unit test can see.
+/// That it reaches *stderr* is the one thing it cannot, and it is checked
+/// separately below against the source — the single non-behavioural assertion
+/// left in this file, kept because there is no other way to observe it.
 #[test]
-fn a_loop_that_never_submits_is_announced_not_silent() {
+fn the_fallback_notice_says_what_happened() {
+    use niki::llm::provider::TokenUsage;
+    use niki::runtime::tools::LoopOutput;
+
+    let never_engaged = LoopOutput {
+        content: "I would add a total() function.".into(),
+        steps: 1,
+        tool_calls: vec![],
+        usage: TokenUsage::default(),
+        artifact: None,
+    };
+    let msg = niki::orchestrator::pipeline::coder_loop_fallback_notice(&never_engaged);
+    assert!(
+        msg.contains("never called submit_artifact"),
+        "the message must name what did not happen: {msg}"
+    );
+    assert!(
+        msg.contains("no tool calls at all"),
+        "and distinguish 'tried and gave up' from 'never engaged': {msg}"
+    );
+    assert!(
+        msg.contains("describes the fallback, not this"),
+        "and say which of the two errors the user is about to read: {msg}"
+    );
+
+    // A loop that used tools but never submitted is a different situation, and
+    // the message has to say which one it was.
+    let explored = LoopOutput {
+        content: String::new(),
+        steps: 4,
+        tool_calls: vec![
+            ("read".to_string(), true),
+            ("grep".to_string(), true),
+            ("bash".to_string(), false),
+        ],
+        usage: TokenUsage::default(),
+        artifact: None,
+    };
+    let msg = niki::orchestrator::pipeline::coder_loop_fallback_notice(&explored);
+    assert!(
+        msg.contains("it did use: read, grep"),
+        "the tools that did work are the clue to why it gave up: {msg}"
+    );
+    assert!(
+        !msg.contains("bash"),
+        "a tool that failed is not evidence the loop engaged: {msg}"
+    );
+}
+
+/// The notice goes to stderr, not only to `tracing`.
+///
+/// `main` installs an ERROR-only `EnvFilter`, so `tracing::warn!` is invisible
+/// unless `RUST_LOG` is set — and this is a CLI, where the user is already
+/// looking at stderr. A test cannot observe a running process's stderr
+/// (libtest captures the `eprintln!` family before the syscall), so this
+/// checks the call exists and says plainly that it is the one thing here that
+/// is not behavioural.
+#[test]
+fn the_fallback_notice_is_written_to_stderr() {
     let src = include_str!("../src/orchestrator/pipeline.rs");
     let start = src
         .find("fn run_coder_tool_loop")
         .expect("the function exists");
     let body = &src[start..];
     let branch = body
-        .find("let Some(artifact) = out.artifact else")
-        .expect("the empty-loop branch exists");
-    let window = &body[branch..(branch + 1400).min(body.len())];
+        .find("coder_loop_fallback_notice(&out)")
+        .expect("the empty-loop branch calls the notice builder");
+    let window = &body[branch..(branch + 400).min(body.len())];
     assert!(
         window.contains("eprintln!"),
-        "a loop that returned nothing must be reported on stderr; a `tracing::warn!` alone is \\
-         invisible without RUST_LOG and this is a CLI"
-    );
-    assert!(
-        window.contains("never called submit_artifact"),
-        "the message must say what actually happened, not that something fell back"
+        "a loop that returned nothing must be reported on stderr; a `tracing::warn!` alone \
+         is invisible without RUST_LOG and this is a CLI"
     );
 }
 
