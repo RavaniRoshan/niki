@@ -801,7 +801,6 @@ pub enum HoverTarget {
     StatusBarCost,
     StatusBarBranch,
     StatusBarCtx,
-    TabBar(usize),
     ModalConfirm,
     ModalCancel,
     ModalRetry,
