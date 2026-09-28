@@ -254,7 +254,11 @@ fn route_overlay_key(
         }
     }
 
-    if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
+    // Through the table, like the two globals above. `run_chat` used to test a
+    // literal Ctrl+P, so a user who rebound `command_palette` in
+    // `niki.toml` got a binding that did nothing there and worked everywhere
+    // else.
+    if state.keybindings.resolve(&key) == Some(GlobalAction::CommandPalette) {
         state.show_command_palette = !state.show_command_palette;
         if state.show_command_palette {
             *command_palette = CommandPalette::new();
@@ -1976,6 +1980,46 @@ mod tests {
             // Esc is the way out.
             assert_eq!(ladder(&mut st, KeyCode::Esc), OverlayOutcome::Consumed);
             assert!(!st.show_help, "esc closes it");
+        }
+
+        /// A rebound key must work, not just the built-in one.
+        ///
+        /// The ladder used to test a literal Ctrl+P, copied from the chat loop,
+        /// while the other two globals resolved through the table. A user who
+        /// rebound `command_palette` in `niki.toml` got a binding that worked
+        /// in `niki` and did nothing in `niki chat` — the same one-loop-two-
+        /// behaviours defect, in a third form.
+        #[test]
+        fn a_rebound_palette_key_opens_the_palette() {
+            use std::collections::HashMap;
+            let mut overrides: HashMap<String, Vec<String>> = HashMap::new();
+            overrides.insert("command_palette".to_string(), vec!["ctrl+g".to_string()]);
+            let (kb, _conflicts) =
+                crate::display::keybindings::KeyBindings::with_overrides(&overrides);
+
+            let mut st = state();
+            st.keybindings = kb;
+            let mut palette = CommandPalette::new();
+            let g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL);
+
+            // The rebound key opens it.
+            assert_eq!(
+                route_overlay_key(&mut st, &mut palette, g, std::path::Path::new(".")),
+                OverlayOutcome::Consumed
+            );
+            assert!(
+                st.show_command_palette,
+                "the configured key must open the palette"
+            );
+
+            // And the built-in key no longer does — it was rebound away.
+            st.show_command_palette = false;
+            let p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+            assert_eq!(
+                route_overlay_key(&mut st, &mut palette, p, std::path::Path::new(".")),
+                OverlayOutcome::Free,
+                "a rebound-away key must not still open it"
+            );
         }
 
         #[test]
