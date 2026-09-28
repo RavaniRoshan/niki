@@ -88,114 +88,161 @@ pub async fn run_agent(
 
     // ===== Phase 1: Retry transient API errors (429/503/timeout/network) =====
     const MAX_TRANSIENT_RETRIES: u32 = 3;
-    let stream_start = Instant::now();
-    let mut retry_count: u32 = 0;
-    let mut last_err = None;
-    let mut stream = None;
-    for attempt in 0..=MAX_TRANSIENT_RETRIES {
-        match llm.stream(request.clone()).await {
-            Ok(s) => {
-                stream = Some(s);
-                break;
-            }
-            Err(e) => {
-                let err_str = e.to_string().to_lowercase();
-                let is_transient = err_str.contains("timeout")
-                    || err_str.contains("rate")
-                    || err_str.contains("429")
-                    || err_str.contains("503")
-                    || err_str.contains("overloaded")
-                    || err_str.contains("connection")
-                    || err_str.contains("network");
+    /// How many times a stream that dies *mid-response* is re-established.
+    ///
+    /// Establishing the connection was already retried; a connection that drops
+    /// partway through a long response was not, and it is the more common of
+    /// the two against a local model. Measured: three live runs against
+    /// qwen2.5-coder:3b, the Coder succeeded in all three, and two of them
+    /// then died at the Tester with `Stream error: error decoding response
+    /// body` — discarding a finished run over a dropped connection.
+    const MAX_MID_STREAM_RETRIES: u32 = 2;
 
-                if is_transient && attempt < MAX_TRANSIENT_RETRIES {
-                    retry_count += 1;
-                    let delay = jitter_delay(attempt, 1000, 32000);
-                    tracing::warn!(
-                        target: "niki::agent",
-                        role = ?role,
-                        attempt = attempt + 1,
-                        max = MAX_TRANSIENT_RETRIES + 1,
-                        delay_ms = delay,
-                        "LLM transient error, retrying"
-                    );
-                    tokio::time::sleep(Duration::from_millis(delay)).await;
-                    last_err = Some(e);
-                    continue;
-                }
-                display.agent_failed(role, &e.to_string());
-                return Err(e);
-            }
-        }
-    }
-    let mut stream = stream
-        .ok_or_else(|| last_err.unwrap_or_else(|| anyhow!("LLM stream failed after retries")))?;
-
-    // ===== Stream and collect content =====
     use futures::StreamExt;
     let mut full_content = String::new();
     let mut usage: Option<TokenUsage> = None;
     let mut estimated_output_tokens: u32 = 0;
     let mut first_text_time: Option<Instant> = None;
+    let mut mid_stream_retries: u32 = 0;
+    // Reported in the stage metric, so it outlives any single attempt. TTFT is
+    // measured per attempt, and restarts with the stream below.
+    let mut retry_count: u32 = 0;
+    // Re-armed per attempt below; read after the loop for the reported TTFT.
+    let mut stream_start;
 
-    while let Some(chunk_res) = stream.next().await {
-        match chunk_res {
-            Ok(StreamChunk::Text(token)) => {
-                if first_text_time.is_none() {
-                    first_text_time = Some(Instant::now());
+    'attempt: loop {
+        let mut last_err = None;
+        let mut stream = None;
+        for attempt in 0..=MAX_TRANSIENT_RETRIES {
+            match llm.stream(request.clone()).await {
+                Ok(s) => {
+                    stream = Some(s);
+                    break;
                 }
-                full_content.push_str(&token);
-                estimated_output_tokens += (token.len() / 4).max(1) as u32;
-                display.stream_token(&token);
-            }
-            Ok(StreamChunk::Usage(u)) => {
-                // `.max()` is correct *within a single stream*: every usage
-                // chunk here describes the same request. Anthropic emits two
-                // disjoint chunks for one call (message_start carries
-                // input_tokens, message_delta carries output_tokens), and
-                // OpenAI-style providers emit a final cumulative snapshot, so
-                // taking the per-field max avoids double counting. Summing
-                // across separate requests is what would be wrong — see the
-                // repair-retry path below.
-                let input_tokens = u
-                    .input_tokens
-                    .max(usage.map(|x| x.input_tokens).unwrap_or(0));
-                let output_tokens = u
-                    .output_tokens
-                    .max(usage.map(|x| x.output_tokens).unwrap_or(0));
-                let cached_input_tokens = u
-                    .cached_input_tokens
-                    .max(usage.map(|x| x.cached_input_tokens).unwrap_or(0));
-                let reasoning_tokens = u
-                    .reasoning_tokens
-                    .max(usage.map(|x| x.reasoning_tokens).unwrap_or(0));
-                usage = Some(TokenUsage {
-                    input_tokens,
-                    output_tokens,
-                    cached_input_tokens,
-                    reasoning_tokens,
-                });
-            }
-            Err(e) => {
-                display.agent_failed(role, &e.to_string());
-                return Err(e);
+                Err(e) => {
+                    let err_str = e.to_string().to_lowercase();
+                    let is_transient = err_str.contains("timeout")
+                        || err_str.contains("rate")
+                        || err_str.contains("429")
+                        || err_str.contains("503")
+                        || err_str.contains("overloaded")
+                        || err_str.contains("connection")
+                        || err_str.contains("network");
+
+                    if is_transient && attempt < MAX_TRANSIENT_RETRIES {
+                        retry_count += 1;
+                        let delay = jitter_delay(attempt, 1000, 32000);
+                        tracing::warn!(
+                            target: "niki::agent",
+                            role = ?role,
+                            attempt = attempt + 1,
+                            max = MAX_TRANSIENT_RETRIES + 1,
+                            delay_ms = delay,
+                            "LLM transient error, retrying"
+                        );
+                        tokio::time::sleep(Duration::from_millis(delay)).await;
+                        last_err = Some(e);
+                        continue;
+                    }
+                    display.agent_failed(role, &e.to_string());
+                    return Err(e);
+                }
             }
         }
+        let mut stream = stream.ok_or_else(|| {
+            last_err.unwrap_or_else(|| anyhow!("LLM stream failed after retries"))
+        })?;
+        // A first token after a retry is not a first token for the original
+        // request, so TTFT is measured from this attempt, not the first one.
+        stream_start = Instant::now();
 
-        // T12: Check for /steer corrections between chunks.
-        if let Some(arc) = steer_rx {
-            if let Ok(mut guard) = arc.lock() {
-                if let Some(msg) = guard.take() {
-                    tracing::info!(target: "niki::agent", role = ?role, "steer correction: {}", msg);
-                    let _ = display.tui_tx().map(|tx| {
-                        tx.send(crate::display::tui::DisplayEvent::ChatMessage {
-                            role: "system".to_string(),
-                            text: format!("[steer] {}", msg),
-                        })
+        while let Some(chunk_res) = stream.next().await {
+            match chunk_res {
+                Ok(StreamChunk::Text(token)) => {
+                    if first_text_time.is_none() {
+                        first_text_time = Some(Instant::now());
+                    }
+                    full_content.push_str(&token);
+                    estimated_output_tokens += (token.len() / 4).max(1) as u32;
+                    display.stream_token(&token);
+                }
+                Ok(StreamChunk::Usage(u)) => {
+                    // `.max()` is correct *within a single stream*: every usage
+                    // chunk here describes the same request. Anthropic emits two
+                    // disjoint chunks for one call (message_start carries
+                    // input_tokens, message_delta carries output_tokens), and
+                    // OpenAI-style providers emit a final cumulative snapshot, so
+                    // taking the per-field max avoids double counting. Summing
+                    // across separate requests is what would be wrong — see the
+                    // repair-retry path below.
+                    let input_tokens = u
+                        .input_tokens
+                        .max(usage.map(|x| x.input_tokens).unwrap_or(0));
+                    let output_tokens = u
+                        .output_tokens
+                        .max(usage.map(|x| x.output_tokens).unwrap_or(0));
+                    let cached_input_tokens = u
+                        .cached_input_tokens
+                        .max(usage.map(|x| x.cached_input_tokens).unwrap_or(0));
+                    let reasoning_tokens = u
+                        .reasoning_tokens
+                        .max(usage.map(|x| x.reasoning_tokens).unwrap_or(0));
+                    usage = Some(TokenUsage {
+                        input_tokens,
+                        output_tokens,
+                        cached_input_tokens,
+                        reasoning_tokens,
                     });
                 }
+                Err(e)
+                    if is_mid_stream_retryable(&e)
+                        && mid_stream_retries < MAX_MID_STREAM_RETRIES =>
+                {
+                    // The connection dropped partway through. Restart the request
+                    // rather than ending the run: everything the model produced so
+                    // far is incomplete by definition, and re-asking is cheaper
+                    // than throwing away a finished pipeline over a socket.
+                    mid_stream_retries += 1;
+                    retry_count += 1;
+                    tracing::warn!(
+                        target: "niki::agent",
+                        role = ?role,
+                        attempt = mid_stream_retries,
+                        error = %e,
+                        "stream dropped mid-response; re-establishing the request"
+                    );
+                    // Say so. A silent retry looks like a hang, and a user watching
+                    // a three-minute run deserves to know it is still working.
+                    display.agent_start(role);
+                    full_content.clear();
+                    usage = None;
+                    estimated_output_tokens = 0;
+                    first_text_time = None;
+                    continue 'attempt;
+                }
+                Err(e) => {
+                    display.agent_failed(role, &e.to_string());
+                    return Err(e);
+                }
+            }
+
+            // T12: Check for /steer corrections between chunks.
+            if let Some(arc) = steer_rx {
+                if let Ok(mut guard) = arc.lock() {
+                    if let Some(msg) = guard.take() {
+                        tracing::info!(target: "niki::agent", role = ?role, "steer correction: {}", msg);
+                        let _ = display.tui_tx().map(|tx| {
+                            tx.send(crate::display::tui::DisplayEvent::ChatMessage {
+                                role: "system".to_string(),
+                                text: format!("[steer] {}", msg),
+                            })
+                        });
+                    }
+                }
             }
         }
+
+        break 'attempt;
     }
 
     // NB: the usage total is assembled at the *end* of this function, not
@@ -434,4 +481,35 @@ pub fn render_coder_probe_prompt() -> String {
     env.get_template("probe")
         .and_then(|t| t.render(ctx))
         .unwrap_or_else(|_| String::new())
+}
+
+/// Whether a mid-stream error is worth re-establishing the request for.
+///
+/// Scoped deliberately narrow. A decode failure, a truncated body, or a
+/// dropped connection is the *transport* dying, and the model had no say in it.
+/// A 429, a 500 or a timeout is already retried at connection time. Anything
+/// that looks like the model itself — a refusal, a bad request, a context
+/// overflow, a content filter — must NOT be retried here, because a second
+/// identical request will fail identically and burn the user's tokens proving
+/// it.
+pub fn is_mid_stream_retryable(e: &anyhow::Error) -> bool {
+    let msg = e.to_string().to_ascii_lowercase();
+    const RETRYABLE: [&str; 5] = [
+        "error decoding response body",
+        "connection reset",
+        "connection closed",
+        "incomplete message",
+        "connection error",
+    ];
+    const FATAL: [&str; 5] = [
+        "context length",
+        "too long",
+        "content filter",
+        "invalid request",
+        "refusal",
+    ];
+    if FATAL.iter().any(|f| msg.contains(f)) {
+        return false;
+    }
+    RETRYABLE.iter().any(|r| msg.contains(r))
 }

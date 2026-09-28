@@ -237,3 +237,69 @@ fn an_ordinary_replacement_is_still_applied_every_time_it_differs() {
         .expect("matched");
     assert_eq!(again, "let x = 3;\n");
 }
+
+// ── a stream that dies mid-response ────────────────────────────────────────
+//
+// Establishing the connection retries three times. A connection that drops
+// *partway through* a long response did not: it returned immediately, and it is
+// the more common of the two against a local model.
+//
+// Measured: three live runs against qwen2.5-coder:3b. The Coder succeeded in
+// all three, and two of them then died at the Tester with exactly this error.
+// The work was finished and thrown away by a socket.
+
+use niki::agents::is_mid_stream_retryable;
+
+#[test]
+fn a_dropped_connection_is_worth_re_asking_for() {
+    for msg in [
+        "Stream error: error decoding response body",
+        "connection reset by peer",
+        "connection closed before message completed",
+        "incomplete message",
+    ] {
+        assert!(
+            is_mid_stream_retryable(&anyhow::anyhow!("{msg}")),
+            "{msg:?} is a transport failure and should be retried"
+        );
+    }
+}
+
+#[test]
+fn a_model_that_refused_is_not_asked_again() {
+    // The cost of getting this wrong is the user's tokens. A second identical
+    // request to a model that refused, or that rejected the request, fails the
+    // same way — and the user pays for the demonstration.
+    for msg in [
+        "content filter triggered",
+        "invalid request: messages must be non-empty",
+        "this request exceeds the context length",
+        "prompt is too long",
+        "the model refused to generate output",
+    ] {
+        assert!(
+            !is_mid_stream_retryable(&anyhow::anyhow!("{msg}")),
+            "{msg:?} is a permanent failure; retrying burns tokens to learn nothing"
+        );
+    }
+}
+
+#[test]
+fn the_retry_is_bounded_and_covers_the_transport_classes() {
+    // Source-level, because the bound itself is the property: an unbounded retry
+    // against a local model that is reliably dropping connections is a hang.
+    let src = include_str!("../src/agents/mod.rs");
+    assert!(
+        src.contains("const MAX_MID_STREAM_RETRIES: u32 = 2;"),
+        "the mid-stream retry must be bounded"
+    );
+    assert!(
+        src.contains("continue 'attempt;"),
+        "a mid-stream failure must re-establish the request, not just be noted"
+    );
+    assert!(
+        src.contains("full_content.clear();"),
+        "and must reset the partially-collected content, or the retry splices two \\
+         responses together"
+    );
+}
