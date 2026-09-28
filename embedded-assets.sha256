@@ -3,7 +3,7 @@
 # other signal, so this file makes each such edit an explicit one-line diff.
 # Regenerate: cargo test --test embedded_assets -- --ignored --nocapture
 f8678078ec79e700  prompts/base.md
-f2605d3f9310ad6b  prompts/coder.md
+e289abbfb101007a  prompts/coder.md
 22ed918b2811f15c  prompts/critic.md
 6fd7f9f37c5abe43  prompts/planner.md
 449503eb6fd46e3d  prompts/red.md
