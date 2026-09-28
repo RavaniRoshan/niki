@@ -298,18 +298,47 @@ fn the_retry_is_bounded_and_covers_the_transport_classes() {
         "a mid-stream failure must re-establish the request, not just be noted"
     );
     // A repeat of the SAME error is the transport being down, not one unlucky
-    // read. Measured: a live run restarted a stage three times on an identical
-    // error and then failed, having spent three times the wall clock to learn
-    // nothing. So the guard is on repetition, not on a count.
-    // The condition, not the name. The first version of this assertion was
-    // `src.contains("last_mid_stream_error")`, which passed with the guard's
-    // condition deleted — the variable's declaration alone satisfies a substring
-    // check, so the test was pinning the plumbing rather than the behaviour.
+    // read. Asserted on the *decision*, not on the source text: the previous
+    // version grepped for the guard's condition, and every attempt to mutate
+    // it away either failed to compile or still matched, so it pinned the
+    // shape of the code rather than the behaviour.
+    let dropped = || anyhow::anyhow!("Stream error: error decoding response body");
+    let refused = || anyhow::anyhow!("refusal: the model declined");
+
+    // First failure: a transport error, nothing seen before → retry.
     assert!(
-        src.contains("last_mid_stream_error.as_deref() != Some(&e.to_string())"),
-        "an unchanged repeat must not be retried; a *different* error is a different problem \
-         and still gets its retry"
+        niki::agents::should_retry_mid_stream(&dropped(), 0, None),
+        "a first dropped connection is worth re-establishing"
     );
+    // Second identical failure → stop. This is the whole point of the guard:
+    // a live run restarted a stage three times on the identical error and then
+    // died, having spent three times the wall clock to learn nothing.
+    assert!(
+        !niki::agents::should_retry_mid_stream(&dropped(), 1, Some(&dropped().to_string())),
+        "an unchanged repeat must not be retried"
+    );
+    // A *different* transport error is a different problem, and gets its retry.
+    let reset = || anyhow::anyhow!("connection reset by peer");
+    assert!(
+        niki::agents::should_retry_mid_stream(&reset(), 1, Some(&dropped().to_string())),
+        "a different error is a different problem and still gets its retry"
+    );
+    // The bound still holds, whatever the errors look like.
+    assert!(
+        !niki::agents::should_retry_mid_stream(
+            &reset(),
+            niki::agents::MAX_MID_STREAM_RETRIES,
+            Some(&dropped().to_string())
+        ),
+        "the retry must be bounded; an unbounded retry against a local model that is \
+         reliably dropping connections is a hang"
+    );
+    // A permanent failure is never retried, however many attempts remain.
+    assert!(
+        !niki::agents::should_retry_mid_stream(&refused(), 0, None),
+        "a refusal is the model's own answer, not a transport problem"
+    );
+
     assert!(
         src.contains("full_content.clear();"),
         "and must reset the partially-collected content, or the retry splices two \\
