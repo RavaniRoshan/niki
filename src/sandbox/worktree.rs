@@ -354,14 +354,29 @@ impl Sandbox for WorktreeSandbox {
                                 full
                             ));
                         }
-                        // No TUI listening — fall back to Allow (headless mode).
-                        // Loud by design: silent auto-approval is how agents end
-                        // up running `curl | sh` in CI. Use --permission-mode to
-                        // make the posture explicit, or run attached to review.
+                        // No TUI listening, and the run is not fail-closed, so
+                        // this command is auto-approved.
+                        //
+                        // `tracing::warn!` was the only signal, and `tracing` is
+                        // off unless RUST_LOG is set — so in the default
+                        // headless `niki run` path, the single case where the
+                        // permission system is not actually consulting anyone
+                        // was completely silent. A user whose run auto-approved
+                        // a destructive command had no way to find out.
+                        //
+                        // Stderr is the right channel: it survives regardless of
+                        // log configuration, and `--output-format json` already
+                        // reserves stdout for the envelope.
+                        eprintln!(
+                            "niki: auto-approved '{}' — the run is headless and \
+                             [permissions] fail_closed_headless is off, so a command that \
+                             needs approval was allowed without a prompt.",
+                            full
+                        );
                         tracing::warn!(
                             target: "niki::permissions",
                             command = full.as_str(),
-                            "no TUI listening — Ask fell back to Allow (headless). Pass --permission-mode explicitly to silence this per-run posture."
+                            "no TUI listening — Ask fell back to Allow (headless)"
                         );
                     } else {
                         let action = tokio::task::block_in_place(|| {
