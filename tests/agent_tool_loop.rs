@@ -212,3 +212,59 @@ fn the_submit_tool_carries_the_artifact_schema_verbatim() {
         "the submit tool's parameters must be the artifact schema itself"
     );
 }
+
+/// The Coder stage must actually be a loop.
+///
+/// The loop and the `submit_artifact` tool existed and were tested in isolation
+/// for a while, with `grep -c run_tool_loop_with src/orchestrator/pipeline.rs`
+/// returning 0 — built, and wired to nothing. A live multi-agent run against
+/// `qwen2.5-coder:3b` still died at the Coder with "Failed to parse artifact
+/// JSON", which is what prompted the wiring.
+///
+/// This is a source-level assertion on purpose. A stage's execution is not
+/// observable from a unit test, and "it works on my machine with a good model"
+/// is not a property — the same code fails or succeeds depending on the model.
+#[test]
+fn the_coder_stage_runs_on_the_tool_loop() {
+    let src = include_str!("../src/orchestrator/pipeline.rs");
+    // BOTH halves: the gate must actually select the Coder, and the function must
+    // actually be called from it.
+    //
+    // The first version asserted only that the function *existed*, so changing
+    // `if role == AgentRole::Coder` to `if false && role == ...` -- the exact
+    // "built and wired to nothing" state this test exists to prevent -- left it
+    // green. Two mutations of the pipeline later proved it, and both "passed".
+    assert!(
+        src.contains("let json = if role == AgentRole::Coder {"),
+        "the Coder stage must be gated on the role, not disabled. Found the loop wired to \
+         nothing, or not wired at all."
+    );
+    assert!(
+        src.contains("match run_coder_tool_loop("),
+        "the Coder stage must CALL the tool loop, not merely define it"
+    );
+    assert!(
+        src.contains("submit_artifact_spec"),
+        "and the loop must end by submitting the typed artifact, so the audit trail survives"
+    );
+}
+
+/// A model that ignores the tool and answers in prose must fall back to the
+/// one-shot path, not fail.
+///
+/// The loop can only add capability. If it made a previously-working
+/// configuration worse — a provider with no tool calling, a model that answers
+/// in prose — the change would be a regression dressed as an improvement.
+#[test]
+fn a_loop_that_submits_nothing_falls_back_instead_of_failing() {
+    let out = run(vec![Some((
+        "read".into(),
+        serde_json::json!({ "path": "src/lib.rs" }),
+    ))])
+    .0;
+    assert_eq!(
+        out.artifact, None,
+        "a model that never submitted produces no artifact — the caller falls back to the \
+         one-shot path on exactly this signal"
+    );
+}

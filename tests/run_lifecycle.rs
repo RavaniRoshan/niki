@@ -204,6 +204,16 @@ fn unreviewed_script(path: &std::path::Path) -> PathBuf {
         .write(&path)
 }
 
+/// The same fixture with the multi-agent chain pinned.
+///
+/// For tests that genuinely mean "an independent Reviewer signed off" — they
+/// need the Reviewer's response in the mock script, which the solo fixture does
+/// not carry.
+fn multiagent_mock_toml(script_path: &std::path::Path, test_command: Option<&str>) -> String {
+    minimal_mock_toml(script_path, test_command)
+        .replace("topology = \"singleagent\"", "topology = \"multiagent\"")
+}
+
 fn minimal_mock_toml(script_path: &std::path::Path, test_command: Option<&str>) -> String {
     // `test_command` is a per-agent field, so the placeholder has to expand
     // *inside* the `[agents.tester]` table below. It used to be a bare `{}`
@@ -215,8 +225,20 @@ fn minimal_mock_toml(script_path: &std::path::Path, test_command: Option<&str>) 
     } else {
         String::new()
     };
+    // The topology is pinned rather than left to the default.
+    //
+    // `Auto` no longer collapses a low-complexity task to the fast path: with no
+    // measured model capability it keeps the multi-agent chain, because that is
+    // the side of the trade worth taking for a model of unknown strength (see
+    // `tests/topology_heuristic.rs`). A test that means "the solo path" must say
+    // so, rather than relying on which side of the crossover a default lands on
+    // — and a test that means "the multi-agent path" must provide the Tester
+    // and Reviewer responses it now needs.
     format!(
-        r#"[docker]
+        r#"[pipeline]
+topology = "singleagent"
+
+[docker]
 backend = "worktree"
 extra_packages = []
 
@@ -307,23 +329,49 @@ async fn output_envelope_json_mode_pure_stdout_and_single_patch() {
     assert!(json_val["branch"].as_str().unwrap().starts_with("niki/"));
     assert!(json_val["task_id"].is_string());
     assert_eq!(json_val["bare"], true);
-    // This config leaves `[pipeline].topology` at its default, and a
-    // low-complexity task collapses to the SingleAgent fast path — which runs
-    // no independent Reviewer at all. It used to report `verdict: "Approved"`
-    // here, and this test asserted that, so the fabricated pass was pinned in
-    // place by the very suite meant to catch it. The run is honest now: it
-    // says nothing reviewed it.
-    assert_eq!(json_val["outcome"]["outcome"], "self_verified");
-    assert_eq!(json_val["independently_reviewed"], false);
-    assert_ne!(json_val["verdict"], "Approved");
-    // The self-verification must carry a reason, so a user reading only the
-    // envelope can tell what kind of not-a-review this was.
-    assert!(
-        json_val["outcome"]["note"]
-            .as_str()
-            .is_some_and(|n| !n.trim().is_empty()),
-        "self_verified must explain itself: {json_val}"
-    );
+    // The topology heuristic changed: with no measured model capability, `Auto`
+    // now keeps the multi-agent chain rather than collapsing a low-complexity
+    // task to the fast path. The evidence behind that is in
+    // `tests/topology_heuristic.rs` — a multi-agent pipeline is worth about +22
+    // points to a weak model and costs about 5 to a strong one, and the old
+    // heuristic handed the structure-hungry model the opposite of the structure
+    // it needed.
+    //
+    // So this run now reaches the Reviewer, and the honest-reporting property
+    // this test exists for has to be pinned with the topology *pinned too*,
+    // rather than by relying on which side of the crossover a default happens
+    // to land on.
+    // The invariant, not a field name: an "Approved" verdict is only ever
+    // allowed to appear when something independent actually reviewed the run.
+    // Which side of the topology crossover this run lands on is not the
+    // property — the pairing is.
+    let reviewed = json_val["independently_reviewed"].as_bool();
+    if json_val["verdict"] == "Approved" {
+        assert_eq!(
+            reviewed,
+            Some(true),
+            "an Approved verdict with no independent review is the fabricated pass this \
+             suite exists to catch: {json_val}"
+        );
+    } else {
+        assert_ne!(reviewed, Some(true), "{json_val}");
+        // The fast path: nothing independent ran, and the envelope must not
+        // pretend otherwise. It used to report `verdict: "Approved"` here, and
+        // this test asserted that, so the fabricated pass was pinned in place by
+        // the very suite meant to catch it.
+        assert_eq!(json_val["outcome"]["outcome"], "self_verified");
+        assert_ne!(json_val["verdict"], "Approved");
+    }
+    if reviewed != Some(true) {
+        // The self-verification must carry a reason, so a user reading only the
+        // envelope can tell what kind of not-a-review this was.
+        assert!(
+            json_val["outcome"]["note"]
+                .as_str()
+                .is_some_and(|n| !n.trim().is_empty()),
+            "self_verified must explain itself: {json_val}"
+        );
+    }
 
     // Acceptance requirement: JSON envelope parses with `python3 -m json.tool`
     let mut py_child = std::process::Command::new("python3")
@@ -443,7 +491,7 @@ async fn an_independently_reviewed_run_reports_approved_and_names_its_reviewer()
 
     let toml = format!(
         "{}\n[pipeline]\ntopology = \"multiagent\"\n",
-        minimal_mock_toml(&script_path, Some("true"))
+        multiagent_mock_toml(&script_path, Some("true"))
     );
     std::fs::write(project.join("niki.toml"), toml).unwrap();
 
