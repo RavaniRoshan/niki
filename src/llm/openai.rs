@@ -165,19 +165,23 @@ impl LlmProvider for OpenAiProvider {
         }
 
         let data: serde_json::Value = resp.json().await?;
-        let content = data["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        // Every read below goes through `json_path*` rather than `Index`.
+        // `data["usage"]` on a response with no `usage` key is `Null`, and the
+        // next `["prompt_tokens"]` on that is a panic, not a default. An
+        // OpenAI-compatible server is not obliged to send usage on every
+        // response, and a provider that panics on one is a provider that takes
+        // the run down with it.
+        let content =
+            crate::llm::json_path_str(&data, &["choices", "0", "message", "content"]).to_string();
 
-        let input_tokens = data["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
-        let output_tokens = data["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
-        let cached_input_tokens = data["usage"]["prompt_tokens_details"]["cached_tokens"]
-            .as_u64()
-            .unwrap_or(0) as u32;
-        let reasoning_tokens = data["usage"]["completion_tokens_details"]["reasoning_tokens"]
-            .as_u64()
-            .unwrap_or(0) as u32;
+        let input_tokens = crate::llm::json_path_u32(&data, &["usage", "prompt_tokens"]);
+        let output_tokens = crate::llm::json_path_u32(&data, &["usage", "completion_tokens"]);
+        let cached_input_tokens =
+            crate::llm::json_path_u32(&data, &["usage", "prompt_tokens_details", "cached_tokens"]);
+        let reasoning_tokens = crate::llm::json_path_u32(
+            &data,
+            &["usage", "completion_tokens_details", "reasoning_tokens"],
+        );
 
         // Parse native tool calls (Phase 3.1), capping returned arguments.
         let mut tool_calls = Vec::new();
@@ -284,28 +288,40 @@ impl LlmProvider for OpenAiProvider {
                                     continue;
                                 }
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                                    if let Some(usage) = json["usage"].as_object() {
+                                    if json.get("usage").map(|u| u.is_object()).unwrap_or(false) {
                                         // Final usage chunk (choices is empty / absent).
+                                        // `json["usage"]` here is safe — it is
+                                        // guarded — but the reads inside are not,
+                                        // because `prompt_tokens_details` is
+                                        // optional and indexing a missing one
+                                        // panics. The whole path is walked
+                                        // instead.
                                         if tx
                                             .send(Ok(StreamChunk::Usage(TokenUsage {
-                                                input_tokens: usage["prompt_tokens"]
-                                                    .as_u64()
-                                                    .unwrap_or(0)
-                                                    as u32,
-                                                output_tokens: usage["completion_tokens"]
-                                                    .as_u64()
-                                                    .unwrap_or(0)
-                                                    as u32,
-                                                cached_input_tokens: usage["prompt_tokens_details"]
-                                                    ["cached_tokens"]
-                                                    .as_u64()
-                                                    .unwrap_or(0)
-                                                    as u32,
-                                                reasoning_tokens: usage["completion_tokens_details"]
-                                                    ["reasoning_tokens"]
-                                                    .as_u64()
-                                                    .unwrap_or(0)
-                                                    as u32,
+                                                input_tokens: crate::llm::json_path_u32(
+                                                    &json,
+                                                    &["usage", "prompt_tokens"],
+                                                ),
+                                                output_tokens: crate::llm::json_path_u32(
+                                                    &json,
+                                                    &["usage", "completion_tokens"],
+                                                ),
+                                                cached_input_tokens: crate::llm::json_path_u32(
+                                                    &json,
+                                                    &[
+                                                        "usage",
+                                                        "prompt_tokens_details",
+                                                        "cached_tokens",
+                                                    ],
+                                                ),
+                                                reasoning_tokens: crate::llm::json_path_u32(
+                                                    &json,
+                                                    &[
+                                                        "usage",
+                                                        "completion_tokens_details",
+                                                        "reasoning_tokens",
+                                                    ],
+                                                ),
                                             })))
                                             .is_err()
                                         {
@@ -399,19 +415,23 @@ impl LlmProvider for OpenAiProvider {
         }
 
         let data: serde_json::Value = resp.json().await?;
-        let content = data["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        // Every read below goes through `json_path*` rather than `Index`.
+        // `data["usage"]` on a response with no `usage` key is `Null`, and the
+        // next `["prompt_tokens"]` on that is a panic, not a default. An
+        // OpenAI-compatible server is not obliged to send usage on every
+        // response, and a provider that panics on one is a provider that takes
+        // the run down with it.
+        let content =
+            crate::llm::json_path_str(&data, &["choices", "0", "message", "content"]).to_string();
 
-        let input_tokens = data["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
-        let output_tokens = data["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
-        let cached_input_tokens = data["usage"]["prompt_tokens_details"]["cached_tokens"]
-            .as_u64()
-            .unwrap_or(0) as u32;
-        let reasoning_tokens = data["usage"]["completion_tokens_details"]["reasoning_tokens"]
-            .as_u64()
-            .unwrap_or(0) as u32;
+        let input_tokens = crate::llm::json_path_u32(&data, &["usage", "prompt_tokens"]);
+        let output_tokens = crate::llm::json_path_u32(&data, &["usage", "completion_tokens"]);
+        let cached_input_tokens =
+            crate::llm::json_path_u32(&data, &["usage", "prompt_tokens_details", "cached_tokens"]);
+        let reasoning_tokens = crate::llm::json_path_u32(
+            &data,
+            &["usage", "completion_tokens_details", "reasoning_tokens"],
+        );
 
         Ok(CompletionResponse {
             content,

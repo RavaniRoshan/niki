@@ -2311,3 +2311,59 @@ model = "custom-override-model"
         assert_eq!(config.agents.reviewer.model, "custom-override-model");
     }
 }
+
+#[cfg(test)]
+mod topology_spellings {
+    use super::*;
+
+    /// `[pipeline] topology` is a user-facing config string, and the spellings
+    /// a user will reach for are not all the same. `TopologyMode` carries
+    /// `#[serde(rename_all = "lowercase")]` plus explicit aliases, so
+    /// "multiagent", "MultiAgent" and "multi_agent" all work — but that is
+    /// three spellings pinned by one attribute and two alias lines, which is
+    /// exactly the kind of thing that gets tidied into a single canonical form
+    /// and silently narrows what a config may say.
+    ///
+    /// A bad value is a hard serde error, not a silent default, so the failure
+    /// mode here is "a working config stops working" — which is the kind of
+    /// break that only shows up on someone else's machine.
+    fn parse(value: &str) -> Result<TopologyMode, serde_json::Error> {
+        serde_json::from_value::<PipelineConfig>(serde_json::json!({
+            "stages": [],
+            "topology": value,
+        }))
+        .map(|c| c.topology)
+    }
+
+    #[test]
+    fn every_reasonable_spelling_of_a_topology_is_accepted() {
+        for (spelling, expected) in [
+            ("auto", TopologyMode::Auto),
+            ("Auto", TopologyMode::Auto),
+            ("multiagent", TopologyMode::MultiAgent),
+            ("MultiAgent", TopologyMode::MultiAgent),
+            ("multi_agent", TopologyMode::MultiAgent),
+            ("singleagent", TopologyMode::SingleAgent),
+            ("SingleAgent", TopologyMode::SingleAgent),
+            ("single_agent", TopologyMode::SingleAgent),
+        ] {
+            assert_eq!(
+                parse(spelling).unwrap_or_else(|e| panic!("{spelling:?} must parse: {e}")),
+                expected,
+                "{spelling:?} should mean {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_nonsense_topology_is_an_error_not_a_silent_default() {
+        // The other half of the property: accepting everything would be just as
+        // broken as accepting nothing, because a typo would quietly give the
+        // user the single-agent fast path.
+        let err = parse("multagent").expect_err("a typo must not resolve");
+        assert!(
+            err.to_string().contains("multagent"),
+            "the error must name the offending value so it can be fixed: {err}"
+        );
+    }
+}
