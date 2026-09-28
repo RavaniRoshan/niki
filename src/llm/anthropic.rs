@@ -154,6 +154,7 @@ impl LlmProvider for AnthropicProvider {
                 + crate::llm::json_path_u32(&data, &["usage", "cache_read_input_tokens"]);
 
         Ok(CompletionResponse {
+            finish_reason: data["stop_reason"].as_str().map(|s| s.to_string()),
             content,
             model: request.model,
             usage: TokenUsage {

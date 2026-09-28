@@ -84,6 +84,7 @@ impl LlmProvider for OllamaProvider {
         let output_tokens = crate::llm::json_path_u32(&data, &["eval_count"]);
 
         Ok(CompletionResponse {
+            finish_reason: data["done_reason"].as_str().map(|s| s.to_string()),
             content,
             model: self.config.default_model.clone(),
             usage: TokenUsage {

@@ -2610,6 +2610,26 @@ fn display_role(role: &str) -> crate::artifacts::types::AgentRole {
 /// and their results are appended as `ToolResult` messages; the loop repeats.
 /// The loop terminates when the model returns no tool calls, or after
 /// `max_steps` round-trips.
+/// Whether a provider's finish reason means the response was cut short.
+///
+/// The vocabularies differ and a new one would otherwise be silently treated as
+/// "fine": OpenAI says `length`, Anthropic says `max_tokens`, Ollama says
+/// `eval_limit`, Google says `MAX_TOKENS`. Everything else — including `None` —
+/// is treated as complete, because a provider that does not report a reason
+/// must not have every one of its tool calls refused.
+pub fn was_truncated(finish_reason: Option<&str>) -> bool {
+    match finish_reason {
+        None => false,
+        Some(r) => {
+            let r = r.trim().to_ascii_lowercase();
+            matches!(
+                r.as_str(),
+                "length" | "max_tokens" | "maxtokens" | "eval_limit" | "token_limit"
+            )
+        }
+    }
+}
+
 pub async fn run_tool_loop(
     provider: &dyn LlmProvider,
     model: &str,
@@ -2681,6 +2701,50 @@ pub async fn run_tool_loop(
                 tool_calls: call_log,
                 usage,
             });
+        }
+
+        // Truncated-response guard.
+        //
+        // A response cut off at the token limit carries tool-call arguments
+        // that are silently half-written JSON. Executing those is the worst
+        // kind of wrong: a `write` with a truncated path, a `bash` with a
+        // truncated command, and a run that looks successful. Codex fails every
+        // tool call carried by a message that stopped on `length`
+        // (`agent-loop.ts:263-269`, `failToolCallsFromTruncatedMessage`).
+        //
+        // We could not do the same before `finish_reason` existed, because
+        // nothing here carried the reason at all. `None` means "the provider
+        // did not say" and is treated as safe; only an explicit truncation
+        // reason blocks execution.
+        if was_truncated(response.finish_reason.as_deref()) {
+            let names: Vec<&str> = response
+                .tool_calls
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect();
+            let notice = format!(
+                "NOT executed: the model stopped mid-response ({}) and this message's tool \
+                 arguments are truncated. Re-issue the call in a shorter form.",
+                response.finish_reason.as_deref().unwrap_or("length")
+            );
+            for tc in &response.tool_calls {
+                call_log.push((tc.name.clone(), false));
+                messages.push(LoopMessage::ToolResult {
+                    tool_call_id: tc.id.clone(),
+                    content: notice.clone(),
+                });
+            }
+            messages.push(LoopMessage::Assistant {
+                content: response.content,
+                tool_calls: response.tool_calls.clone(),
+            });
+            tracing::warn!(
+                target: "niki::runtime",
+                tools = ?names,
+                finish_reason = response.finish_reason.as_deref().unwrap_or("length"),
+                "refused to execute tool calls from a truncated response"
+            );
+            continue;
         }
 
         // Record the assistant turn (with its requested tool calls).
@@ -2877,6 +2941,9 @@ mod tests {
                     content: String::new(),
                     model: "fake".into(),
                     usage: crate::llm::provider::TokenUsage::default(),
+                    // A test double always produces a complete response, which is exactly what the
+                    // truncated cases are contrasted against.
+                    finish_reason: Some("stop".to_string()),
                     tool_calls: vec![crate::llm::provider::ToolCall {
                         id: "call_1".into(),
                         name: "bash".into(),
@@ -2888,6 +2955,9 @@ mod tests {
                     content: "finished".into(),
                     model: "fake".into(),
                     usage: crate::llm::provider::TokenUsage::default(),
+                    // A test double always produces a complete response, which is exactly what the
+                    // truncated cases are contrasted against.
+                    finish_reason: Some("stop".to_string()),
                     tool_calls: vec![],
                 })
             }
@@ -3025,6 +3095,9 @@ mod tests {
                     content: String::new(),
                     model: "fake".into(),
                     usage,
+                    // A test double always produces a complete response, which is exactly what the
+                    // truncated cases are contrasted against.
+                    finish_reason: Some("stop".to_string()),
                     tool_calls: vec![crate::llm::provider::ToolCall {
                         id: "call_read".into(),
                         name: "read".into(),
@@ -3037,6 +3110,9 @@ mod tests {
                     content: "done".into(),
                     model: "fake".into(),
                     usage,
+                    // A test double always produces a complete response, which is exactly what the
+                    // truncated cases are contrasted against.
+                    finish_reason: Some("stop".to_string()),
                     tool_calls: vec![],
                 })
             }

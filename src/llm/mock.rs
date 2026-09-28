@@ -114,6 +114,9 @@ impl LlmProvider for MockProvider {
                             ..Default::default()
                         },
                         tool_calls: Vec::new(),
+                        // A scripted response is never cut short, so this is
+                        // the one provider that can honestly say so.
+                        finish_reason: Some("stop".to_string()),
                     });
                 }
                 _ => Err(anyhow!("unknown error kind '{}': {}", err.kind, msg)),
@@ -128,6 +131,7 @@ impl LlmProvider for MockProvider {
                     ..Default::default()
                 },
                 tool_calls: Vec::new(),
+                finish_reason: Some("stop".to_string()),
             })
         }
     }
