@@ -127,6 +127,21 @@ pub trait Sandbox: Send + Sync {
     /// command is checked against the deny-list before execution. Denied
     /// commands are rejected with a clear error message.
     async fn exec(&self, cmd: &[&str], role: Option<&AgentRole>) -> Result<ExecOutput>;
+    /// The directory an agent's edits actually land in, when it is not the
+    /// project directory.
+    ///
+    /// The Coder has to be shown the *current* contents of the files it is about
+    /// to edit, and on the worktree backend those live in the worktree, not in
+    /// the project. Nothing bridged the two: every Coder invocation read the
+    /// project, so a revision round was shown the file as it looked *before* the
+    /// previous round's patch and asked to fix a review of code it could not
+    /// see. Round 0 applied by coincidence — worktree and project were
+    /// identical — and every round after it targeted text that no longer
+    /// existed.
+    fn work_root(&self) -> Option<&std::path::Path> {
+        None
+    }
+
     /// Tear the sandbox down (remove containers / worktrees).
     async fn destroy(&self) -> Result<()>;
 }

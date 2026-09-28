@@ -431,6 +431,10 @@ impl Sandbox for WorktreeSandbox {
         }
     }
 
+    fn work_root(&self) -> Option<&std::path::Path> {
+        Some(&self.worktree_path)
+    }
+
     async fn destroy(&self) -> Result<()> {
         // Mark first: Drop must not repeat an explicit teardown even when the
         // removal below partially fails (the 24h prune is the backstop).

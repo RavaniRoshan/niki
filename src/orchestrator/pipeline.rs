@@ -2333,6 +2333,11 @@ pub async fn execute_pipeline(
                         let llm = provider_cache.get(&cache_key).ok_or_else(|| {
                             anyhow::anyhow!("Provider '{}' not found in cache", stage.provider)
                         })?;
+                        // Re-resolved every round: the sandbox root is fixed
+                        // for a run, but the *files* in it change as patches
+                        // land, and `build_current_files` reads from disk.
+                        let stage_root: Option<std::path::PathBuf> =
+                            sandbox.work_root().map(|p| p.to_path_buf());
                         let (json, summary, role_output) = run_role(
                             stage.role,
                             &**llm,
@@ -2346,7 +2351,12 @@ pub async fn execute_pipeline(
                             &security_json,
                             round,
                             &knowledge_str,
-                            &task.project_path,
+                            // The tree the Coder's edits land in, not the
+                            // project it was asked about. On the worktree
+                            // backend these differ from round 1 onwards, and a
+                            // Coder shown the pre-run file cannot produce an
+                            // edit that matches what is already there.
+                            stage_root.as_deref().unwrap_or(&task.project_path),
                             review_feedback.as_ref(),
                             display,
                             &mut metrics,
