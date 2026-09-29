@@ -1003,6 +1003,77 @@ fn the_mock_server_answers_a_model_catalogue() {
 /// gates stop being gates. But "not a gate" must not decay into "not run":
 /// the workflow has to exist, be dispatchable, and say out loud when it had
 /// no key instead of exiting green.
+/// A gate that has only ever been seen green is not known to be a gate.
+///
+/// `scripts/mega-e2e.sh` asserts that the code the agent wrote actually
+/// works. Nothing had ever shown that assertion firing: every run of it was a
+/// run in which the product did the right thing, so a version that checked
+/// nothing at all would have looked exactly the same. The self-test is what
+/// closes that, and it has to stay in CI — a gate that can be deleted without
+/// anything going red is not protecting anything.
+///
+/// The three failure cases are not decoration. Each is a way this product can
+/// look successful and be useless: a well-formed patch that does not compile,
+/// a run that completes and produces nothing, and advice printed in the same
+/// voice whether or not it was ever checked.
+#[test]
+fn the_mega_legs_own_gate_is_proved_to_be_able_to_fail() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/mega-e2e-selftest.sh");
+    let s = std::fs::read_to_string(&path).expect("scripts/mega-e2e-selftest.sh must exist");
+    let body: String = s
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    for mode in ["broken", "no-branch", "no-model"] {
+        assert!(
+            body.contains(&format!("run_case {mode} fail")),
+            "the self-test must assert that `{mode}` is REJECTED. A mode with no \
+             `fail` expectation proves the gate can pass a run that should not \
+             have passed, which is the failure this file exists to prevent."
+        );
+    }
+    assert!(
+        body.contains("run_case good pass"),
+        "and one case that must be accepted, or the script is simply broken and \
+         every 'fail' above would pass for the wrong reason"
+    );
+
+    // And it has to be wired to the job, or it is a script nobody runs.
+    let ci = ci_yml();
+    let job = job_body_without_comments(&ci, "mega-e2e");
+    assert!(
+        job.contains("mega-e2e-selftest.sh"),
+        "the mega job must run the self-test; otherwise the gate below it is a \
+         gate of unknown strength"
+    );
+}
+
+/// The fixture has to be able to tell a right answer from a wrong one.
+///
+/// Found by the self-test, not by review: with only the odd-length case in
+/// `median`'s suite, `ordered[n // 2]` — wrong for every even-length input —
+/// passed. The suite went red before the change and green after, the branch
+/// was produced, every artifact validated, and a function that is wrong half
+/// the time sailed through. A test that cannot distinguish the two answers is
+/// decoration, and it is the most expensive kind of decoration because it
+/// looks like coverage.
+#[test]
+fn the_mega_fixture_can_tell_a_wrong_implementation_from_a_right_one() {
+    let s = mega_script();
+    assert!(
+        s.contains("test_median_of_an_even_count_averages_the_middle_two"),
+        "the fixture must cover the even-length case, or a median that ignores \
+         it passes every check the repository has"
+    );
+    assert!(
+        s.contains("== 2.5"),
+        "and it must assert the value a correct implementation returns, not \
+         merely that the function exists"
+    );
+}
+
 #[test]
 fn the_real_provider_leg_is_dispatchable_and_does_not_fake_a_pass() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/mega-e2e.yml");

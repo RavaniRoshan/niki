@@ -716,6 +716,18 @@ jobs:
         run: python3 -m pip install --quiet pytest
       - name: Build release binary
         run: cargo build --release
+      - name: The gate must be able to fail
+        # Before anything else, and for a reason that has nothing to do with
+        # speed: a check that has only ever been green is not known to be a
+        # check. This runs the mega leg against a stand-in binary that
+        # produces a plausible patch which does not work, a run that hands
+        # back nothing, and a report that admits it is unverified — and the
+        # leg has to reject all three.
+        #
+        # It is the only part of this file that can be red without anything
+        # being wrong with the product, and that is the point: it is what
+        # makes the green run below mean something.
+        run: ./scripts/mega-e2e-selftest.sh
       - name: Start the scripted model server
         env:
           MOCK_LLM_PORT: "8091"
