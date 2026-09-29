@@ -17,7 +17,7 @@
 //! legitimate once `INV-HEAD-UNTOUCHED` and a real rollback path exist; the
 //! fix then belongs in this file, not by deleting the test.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -134,4 +134,156 @@ fn the_replacement_tips_describe_real_behaviour() {
         tips.contains("git status"),
         "the replacement safety tip must warn that a blocked run can still touch the tree"
     );
+}
+
+/// Every `niki <word>` in a user-facing string must be a command that exists.
+///
+/// This file exists because two prompts shipped claims that were provably
+/// false, and the general shape of both was the same: the program telling the
+/// user to do something it cannot do. The first two here were narrower
+/// instances of it, caught by reading the code.
+///
+/// * `src/mcp/mod.rs:342` told a user to run `niki mcp trust <server>`. There
+///   is no `mcp` subcommand. The user copies the command, gets a usage error,
+///   and learns that the tool does not know what it is talking about.
+/// * The `niki chat` config error points at `niki config check`, which had to
+///   be added in the same change — a remedy added to a message before the
+///   command exists is a remedy that does not work.
+///
+/// Backticks are the signal. A user-facing string in this codebase writes a
+/// command in backticks precisely so it can be copied, which is exactly the
+/// set of strings where a wrong name does the most damage.
+#[test]
+fn every_backticked_niki_command_in_a_user_facing_string_exists() {
+    let root = repo_root();
+    let mut known: Vec<String> = Vec::new();
+    let main_rs = std::fs::read_to_string(root.join("src/main.rs")).expect("main.rs");
+    let body = &main_rs[main_rs.find("enum Commands {").expect("Commands")..];
+    let body = &body[..body.find("\n#[tokio::main]").unwrap_or(body.len())];
+    for variant in re_derive_variants(body) {
+        let snake = to_snake(&variant);
+        known.push(snake.clone());
+        // Subcommands: `niki config init`, `niki providers models`, ...
+        for sub in subcommands_of(&root, &snake) {
+            known.push(format!("{snake} {sub}"));
+        }
+    }
+
+    let mut checked = 0usize;
+    for (path, text) in rust_sources(&root) {
+        for reference in backticked_niki_commands(&text) {
+            let word = reference.split_whitespace().next().unwrap_or("");
+            if word.ends_with(".toml") || word == "niki" {
+                continue;
+            }
+            let invocation: Vec<&str> = reference
+                .split_whitespace()
+                .take(2)
+                .map(|s| s.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.'))
+                .collect();
+            let invocation = invocation.join(" ");
+            if !known.iter().any(|k| k == &invocation) {
+                panic!(
+                    "{path} tells the user to run `{invocation}`, which is not a \\
+                     command. Known: {}",
+                    known.join(", ")
+                );
+            }
+            checked += 1;
+        }
+    }
+    assert!(
+        checked > 0,
+        "the scan found nothing, so it is not scanning the strings it claims to"
+    );
+}
+
+/// `Variant,` / `Variant {` / `Variant(` at the start of a line in the enum.
+fn re_derive_variants(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in body.lines() {
+        let t = line.trim();
+        let Some(first) = t.chars().next() else {
+            continue;
+        };
+        if !first.is_uppercase() {
+            continue;
+        }
+        let name: String = t
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
+        if name.len() > 1 {
+            out.push(name);
+        }
+    }
+    out
+}
+
+fn to_snake(s: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push('_');
+        }
+        out.extend(c.to_lowercase());
+    }
+    out
+}
+
+/// The `Subcommand` enum variants under `src/cli/<name>.rs`.
+fn subcommands_of(root: &Path, snake: &str) -> Vec<String> {
+    let path = root.join(format!("src/cli/{snake}.rs"));
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Some(start) = text.find("enum ") else {
+        return Vec::new();
+    };
+    let body = &text[start..];
+    let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
+    re_derive_variants(body)
+}
+
+fn rust_sources(root: &Path) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let Ok(rd) = std::fs::read_dir(root.join("src")) else {
+        return out;
+    };
+    for e in rd.flatten() {
+        collect_rs(&e.path(), &mut out);
+    }
+    out
+}
+
+fn collect_rs(dir: &Path, out: &mut Vec<(String, String)>) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            collect_rs(&p, out);
+        } else if p.extension().is_some_and(|x| x == "rs")
+            && let Ok(t) = std::fs::read_to_string(&p)
+        {
+            out.push((p.display().to_string(), t));
+        }
+    }
+}
+
+/// `` `niki foo bar` `` — a backticked span that starts with the binary name.
+fn backticked_niki_commands(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find('`') {
+        let after = &rest[i + 1..];
+        let Some(j) = after.find('`') else { break };
+        let span = &after[..j];
+        if span.starts_with("niki ") {
+            out.push(span.to_string());
+        }
+        rest = &after[j + 1..];
+    }
+    out
 }

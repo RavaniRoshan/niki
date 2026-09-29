@@ -1837,6 +1837,18 @@ impl NikiConfig {
         self.general.max_revision_rounds = other.general.max_revision_rounds;
         self.general.output_dir = other.general.output_dir;
         self.general.spend_cap_usd = other.general.spend_cap_usd;
+        // `language` was missing. `merge` walks the config field by field and
+        // had no line for this one, so `[general] language = "en"` parsed,
+        // was accepted, validated, and was then thrown away — the section
+        // read as configured while the setting did nothing.
+        //
+        // That is the shape of bug `niki config check` exists to make
+        // visible, and it is invisible to that command too: a dropped value
+        // and a value that was never set are the same on disk. So the check
+        // for it is behavioural — write the value, read it back.
+        if other.general.language.is_some() {
+            self.general.language = other.general.language;
+        }
         if other.general.max_diff_lines != default_max_diff_lines() {
             self.general.max_diff_lines = other.general.max_diff_lines;
         }
@@ -2882,19 +2894,35 @@ mod topology_spellings {
     }
 
     /// A section that is real but unwired is a different problem with a
-    /// different fix, and lumping it in with a typo would send someone
-    /// hunting for a misspelling that is not there.
+    /// different fix, and lumping it in with a typo would send someone hunting
+    /// for a misspelling that is not there.
+    ///
+    /// `DEAD_TABLES` is currently empty, so the branch cannot be exercised —
+    /// and this test says so rather than pretending otherwise. When a section
+    /// *is* added to that list, the assertion below starts running against a
+    /// real one, which is the moment the message matters.
+    ///
+    /// The empty case is itself worth pinning: a `warn_unknown_sections` note
+    /// that can never fire is code nobody has run.
     #[test]
     fn a_dead_section_says_it_is_not_wired_rather_than_misspelled() {
+        let Some(dead) = NikiConfig::DEAD_TABLES.first() else {
+            // Nothing is known to be dead, so nothing may be reported as dead.
+            let dir = tempfile::tempdir().expect("tmp");
+            let path = dir.path().join("niki.toml");
+            std::fs::write(&path, "[general]\noutput_dir = \".niki\"\n").expect("write");
+            NikiConfig::load_file_only(&path)
+                .expect("with an empty DEAD_TABLES, no real section may be reported as unwired");
+            return;
+        };
         let dir = tempfile::tempdir().expect("tmp");
         let path = dir.path().join("niki.toml");
-        let dead = NikiConfig::DEAD_TABLES.first().expect("at least one");
         std::fs::write(&path, format!("[{dead}]\n")).expect("write");
         let err = NikiConfig::load_file_only(&path).expect_err("must be an error");
         assert!(
             err.contains("not wired") || err.contains("no effect"),
-            "the message must distinguish 'you typed it wrong' from 'we do \
-             not use it yet': {err}"
+            "the message must distinguish 'you typed it wrong' from 'we do not \
+             use it yet': {err}"
         );
     }
 
