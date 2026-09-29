@@ -677,6 +677,31 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
         None => env::current_dir()?,
     };
 
+    // A git repository, checked before anything is spent.
+    //
+    // Every backend ends the run by creating a `niki/<id>` branch and handing
+    // it back, so a directory that is not a repository cannot produce a
+    // result — but nothing said so until the run was over. On the container
+    // backend that is the whole pipeline: a spec, a diff, a test report and a
+    // review, four paid model calls, and then a bare git2 string at the point
+    // where the branch would have been made. The user paid for a run that
+    // could not have succeeded, and the error named a C library rather than
+    // the one-line fix.
+    //
+    // Cost: one `git rev-parse`, before the Planner is called.
+    if let Err(e) = git2::Repository::discover(&project_dir) {
+        anyhow::bail!(
+            "{} is not inside a git repository, so there is nowhere to put the \
+             change.\n\
+             NIKI hands back a `niki/<id>` branch, which is the whole deliverable — \
+             without a repository there is nothing to hand back to.\n\
+             Fix:  cd {} && git init && git add -A && git commit -m \"initial\"\n\
+             ({e})",
+            project_dir.display(),
+            project_dir.display(),
+        );
+    }
+
     let mut config = NikiConfig::load(&project_dir)?;
 
     // Zero-config discoverability: no config file anywhere (project or
