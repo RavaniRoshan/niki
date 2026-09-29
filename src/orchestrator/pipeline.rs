@@ -600,6 +600,50 @@ fn bridge_feedback_from_issues(issues: &[ReviewIssue], round: u32) -> Option<Rev
     })
 }
 
+/// What to do about a Coder patch that validated but would not apply.
+///
+/// Split out because the distinction matters and is invisible from a full
+/// pipeline run: a *mechanical* error — a `search` that is not in the file —
+/// is not a judgment about quality, so charging it to the Reviewer's revision
+/// budget spends a round the Reviewer asked for on something it never asked
+/// about. Measured: a run whose Reviewer was still finding real issues burned
+/// its last round this way and failed with the change it had already made
+/// twice discarded.
+///
+/// Separate and smaller, because unlike a quality round this one is not
+/// converging by definition: the same anchor will not match next time either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatchRepair {
+    /// Send it back and try again, without spending a revision round.
+    Retry,
+    /// Out of attempts. Carries no text — the reason is the caller's to phrase.
+    GiveUp,
+}
+
+/// How many unappliable patches are sent back before the run stops.
+pub const MAX_PATCH_REPAIR_ATTEMPTS: u32 = 2;
+
+// Small on purpose, and it has to stay smaller than the quality budget. A
+// revision loop that is still finding real issues has barely started, and a
+// mechanical failure that spends its budget is how a run failed with a change
+// it had already made twice — measured. The default revision budget is 3, so
+// anything at or above it would let a patch that will not apply consume the
+// whole allowance. A compile-time assertion because this is a property of two
+// numbers, not of any run, and because it should fail the build rather than
+// wait for a user to hit it.
+const _: () = assert!(
+    MAX_PATCH_REPAIR_ATTEMPTS < 3,
+    "the mechanical allowance must stay below the default revision budget of 3"
+);
+
+pub fn patch_repair(attempts_made: u32) -> PatchRepair {
+    if attempts_made > MAX_PATCH_REPAIR_ATTEMPTS {
+        PatchRepair::GiveUp
+    } else {
+        PatchRepair::Retry
+    }
+}
+
 /// Why the revision loop must stop, even though a stage asked for a revision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RevisionHold {
@@ -2547,6 +2591,9 @@ pub async fn execute_pipeline(
     // rest of the round is skipped and the Coder is asked again with the
     // reason, rather than the run ending.
     let mut patch_failure: Option<String> = None;
+    // How many unappliable patches have been sent back. Counted separately
+    // from `round`, which is the Reviewer's budget.
+    let mut patch_repair_attempts: u32 = 0;
     // The signature of the findings the *previous* round was run against, so a
     // repeat of the same critique is recognisable.
     let mut last_findings: Option<String> = None;
@@ -3053,25 +3100,47 @@ pub async fn execute_pipeline(
                         }
                     }
 
+                    // A patch that will not apply gets its own allowance.
+                    //
+                    // It is a *mechanical* error — a `search` that is not in
+                    // the file — not a judgment about quality, so charging it
+                    // against the Reviewer's revision budget spends a round the
+                    // Reviewer asked for on something it never asked about.
+                    // Measured: a run whose Reviewer was still finding real
+                    // issues burned its last round on a patch that would not
+                    // apply, and failed with the change it had already made
+                    // twice thrown away.
+                    //
+                    // Separate and smaller, because unlike a quality round this
+                    // one is not converging by definition: the same anchor will
+                    // not match next time either.
                     if let Some(reason) = patch_failure.take() {
-                        if round + 1 >= max_rounds {
-                            return Err(anyhow::anyhow!(
-                                "the Coder's patch did not apply and there are no revision \
-                                 rounds left (round {round} of {max_rounds}): {reason}"
-                            ));
+                        patch_repair_attempts += 1;
+                        match patch_repair(patch_repair_attempts) {
+                            PatchRepair::GiveUp => {
+                                return Err(anyhow::anyhow!(
+                                    "the Coder's patch did not apply {} times in a row, and \
+                                     none of it was written to the tree: {reason}",
+                                    MAX_PATCH_REPAIR_ATTEMPTS
+                                ));
+                            }
+                            PatchRepair::Retry => {
+                                review_feedback = Some(reason);
+                                display.agent_warning(
+                                    AgentRole::Coder,
+                                    &format!(
+                                        "the patch did not apply — asking the Coder to rebuild \
+                                         it (attempt {} of {})",
+                                        patch_repair_attempts,
+                                        MAX_PATCH_REPAIR_ATTEMPTS + 1
+                                    ),
+                                );
+                                // Deliberately does not advance `round`: the
+                                // Reviewer has not been consulted about
+                                // anything yet, so its budget is untouched.
+                                continue;
+                            }
                         }
-                        review_feedback = Some(reason);
-                        display.agent_warning(
-                            AgentRole::Coder,
-                            &format!(
-                                "the patch did not apply — asking for another round \
-                                 ({}/{})",
-                                round + 1,
-                                max_rounds
-                            ),
-                        );
-                        round += 1;
-                        continue;
                     }
 
                     // A round is only worth running if it can act on something.
@@ -4168,6 +4237,27 @@ mod tests {
     /// Measured: a 3B Reviewer returned `revision_needed` with zero issues. The
     /// Coder was handed that, could not act on it, and its next output failed
     /// to parse — taking down a task whose tests had already passed 5/5.
+    /// The mechanical-repair allowance is separate from, and smaller than, the
+    /// Reviewer's.
+    ///
+    /// An unappliable patch is a `search` that is not in the file — a mistake,
+    /// not a judgment — and unlike a quality round it is not converging by
+    /// definition. Bounded hard, because the same anchor will not match next
+    /// time either.
+    #[test]
+    fn an_unappliable_patch_gets_its_own_small_allowance() {
+        use crate::orchestrator::pipeline::{MAX_PATCH_REPAIR_ATTEMPTS, patch_repair};
+        assert_eq!(patch_repair(1), PatchRepair::Retry);
+        assert_eq!(patch_repair(MAX_PATCH_REPAIR_ATTEMPTS), PatchRepair::Retry);
+        assert_eq!(
+            patch_repair(MAX_PATCH_REPAIR_ATTEMPTS + 1),
+            PatchRepair::GiveUp
+        );
+        // The bound relative to the quality budget is a compile-time assertion
+        // beside the constant, not a runtime one: it is a property of two
+        // numbers rather than of any run.
+    }
+
     #[test]
     fn a_revision_with_no_issues_is_not_worth_a_round() {
         let feedback = ReviewFeedback {
