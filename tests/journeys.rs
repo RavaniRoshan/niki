@@ -604,6 +604,82 @@ fn j_a_non_git_project_is_refused_before_the_run(ctx: &JourneyCtx) -> JourneyRes
     JourneyResult::Pass
 }
 
+/// J16 — a misspelled config section parses, is accepted, and does nothing.
+///
+/// `[agentz.coder]` is a typo that no layer objects to. The user configures
+/// it, runs the pipeline, gets the defaults they never asked for, and has no
+/// signal that their file was ignored. `niki config check` is the command
+/// that turns it into an error — and an error message in this program now
+/// points at it, so it has to exist and it has to work.
+fn j_config_check_catches_a_misspelled_section(ctx: &JourneyCtx) -> JourneyResult {
+    std::fs::write(
+        ctx.project.join("niki.toml"),
+        "[agentz.coder]\nmodel = \"x\"\n",
+    )
+    .expect("write config");
+    let out = ctx.run(&["config", "check"]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+
+    if combined.contains("panicked at") {
+        return JourneyResult::Fail("`niki config check` panicked".to_string());
+    }
+    if out.status.success() {
+        return JourneyResult::Fail(format!(
+            "`niki config check` passed a file whose only section is a typo: {combined}"
+        ));
+    }
+    if !combined.contains("agentz") {
+        return JourneyResult::Fail(format!(
+            "the report does not name the section that is wrong: {combined}"
+        ));
+    }
+    JourneyResult::Pass
+}
+
+/// And the inverse. A command whose every run says something is wrong is a
+/// command people stop running, and then the run that mattered is the one
+/// they did not read.
+fn j_config_check_passes_a_good_file(ctx: &JourneyCtx) -> JourneyResult {
+    std::fs::write(
+        ctx.project.join("niki.toml"),
+        "[general]\noutput_dir = \".niki\"\n\n[agents.coder]\nmodel = \"x\"\n",
+    )
+    .expect("write config");
+    let out = ctx.run(&["config", "check"]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+
+    if combined.contains("panicked at") {
+        return JourneyResult::Fail("`niki config check` panicked on a valid file".to_string());
+    }
+    if !out.status.success() {
+        return JourneyResult::Fail(format!(
+            "`niki config check` rejected a valid file: {combined}"
+        ));
+    }
+    if !combined.contains("no problems") {
+        return JourneyResult::Fail(format!(
+            "it succeeded without saying so, so the user cannot tell a pass \
+             from a crash: {combined}"
+        ));
+    }
+    JourneyResult::Pass
+}
+
+/// No config at all is a normal state, not a problem. Zero-config is a
+/// documented path and the command must not report it as a failure.
+fn j_config_check_is_quiet_with_no_file(ctx: &JourneyCtx) -> JourneyResult {
+    let _ = std::fs::remove_file(ctx.project.join("niki.toml"));
+    let out = ctx.run(&["config", "check"]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    if !out.status.success() {
+        return JourneyResult::Fail(format!(
+            "`niki config check` failed with no config file present, which is a \
+             supported setup: {combined}"
+        ));
+    }
+    JourneyResult::Pass
+}
+
 static JOURNEYS: &[Journey] = &[
     Journey {
         id: "J00",
@@ -674,6 +750,24 @@ static JOURNEYS: &[Journey] = &[
         intent: "pass a project path that does not exist",
         guards: "users typo paths; a panic here is the first thing a new user sees",
         run: j_nonexistent_project_is_a_clean_error,
+    },
+    Journey {
+        id: "J16",
+        intent: "check a niki.toml whose only section is a typo",
+        guards: "it parses, it is accepted, and it does nothing",
+        run: j_config_check_catches_a_misspelled_section,
+    },
+    Journey {
+        id: "J17",
+        intent: "check a valid niki.toml, and check with no file at all",
+        guards: "a check that always fails is a check nobody reads",
+        run: j_config_check_passes_a_good_file,
+    },
+    Journey {
+        id: "J18",
+        intent: "check a project that has never been configured",
+        guards: "zero-config is a documented path, not a problem",
+        run: j_config_check_is_quiet_with_no_file,
     },
     Journey {
         id: "J15",
