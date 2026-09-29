@@ -1223,6 +1223,29 @@ pub struct ProviderConfig {
     pub default_model: String,
 }
 
+impl ProviderConfig {
+    /// Whether anyone actually pointed this provider at something.
+    ///
+    /// `NikiConfig::apply_env_lookup` seeds every known provider slug into
+    /// `providers` so that an environment key has somewhere to land, which
+    /// means `providers.len()` is 12 on a machine that has configured none of
+    /// them. Anything that asks "which providers can this account reach?" by
+    /// counting entries is therefore asking the wrong question, and gets 12.
+    ///
+    /// The effects were not subtle. `niki providers check` printed twelve red
+    /// crosses and `0/12 providers healthy` on a fresh install, telling a user
+    /// with no keys that they had configured twelve providers. And
+    /// `niki recommend` — which reads each provider's model catalogue over the
+    /// network — fired twelve requests to print advice about an account that
+    /// had none, then reported its own advice as unverified because ten of the
+    /// twelve had no key. The right answer to both is zero.
+    pub fn is_configured(&self) -> bool {
+        self.api_key.as_deref().is_some_and(|k| !k.is_empty())
+            || self.base_url.as_deref().is_some_and(|b| !b.is_empty())
+            || !self.default_model.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentsConfig {
     #[serde(default = "default_anthropic_agent")]
@@ -2521,5 +2544,42 @@ mod topology_spellings {
             err.to_string().contains("multagent"),
             "the error must name the offending value so it can be fixed: {err}"
         );
+    }
+
+    /// `providers` is never empty, and that is the trap.
+    ///
+    /// `apply_env_lookup` seeds a slot for every known provider slug so an
+    /// environment key has somewhere to land. So the obvious question —
+    /// "is this user configured with anything?" — cannot be answered by
+    /// `providers.is_empty()`, which is permanently false.
+    ///
+    /// The cost of getting that wrong was visible on a fresh install:
+    /// `niki providers check` printed twelve red crosses and
+    /// `0/12 providers healthy`, telling someone who has configured nothing
+    /// that they have configured twelve, all of them broken.
+    #[test]
+    fn a_seeded_provider_slot_is_not_a_configured_provider() {
+        let mut cfg = NikiConfig::default();
+        cfg.apply_env_lookup(&|_| None);
+
+        assert!(
+            !cfg.providers.is_empty(),
+            "the seeding this test defends must still be happening, or the test \
+             is guarding nothing"
+        );
+        assert!(
+            !cfg.providers.values().any(|p| p.is_configured()),
+            "a default config must report zero reachable providers, not twelve"
+        );
+
+        // And one real key is exactly one configured provider.
+        cfg.apply_env_lookup(&|k| (k == "OPENAI_API_KEY").then(|| "sk-test".to_string()));
+        let configured: Vec<&str> = cfg
+            .providers
+            .iter()
+            .filter(|(_, p)| p.is_configured())
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert_eq!(configured, vec!["openai"]);
     }
 }

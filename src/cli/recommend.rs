@@ -23,7 +23,17 @@ pub type Catalogues = HashMap<String, Vec<crate::cli::catalogue::CatalogueEntry>
 /// will actually take.
 fn probe_targets(config: &crate::config::NikiConfig) -> Vec<String> {
     use std::collections::BTreeSet;
-    let mut names: BTreeSet<String> = config.providers.keys().cloned().collect();
+    // `config.providers` has a slot for every known slug whether or not
+    // anyone filled it in — see `ProviderConfig::is_configured`. Counting
+    // slots made this report "12 of 12" for a fresh install, which put the
+    // Unverified banner on every user's advice permanently and fired twelve
+    // catalogue requests at an account that has none.
+    let mut names: BTreeSet<String> = config
+        .providers
+        .iter()
+        .filter(|(_, cfg)| cfg.is_configured())
+        .map(|(name, _)| name.clone())
+        .collect();
     for name in crate::config::types::AgentsConfig::NAMES {
         let Some(agent) = config.agents.agent_named(name) else {
             continue;
@@ -502,6 +512,48 @@ mod tests {
         assert!(
             targets.contains(&"groq".to_string()),
             "a fallback is a provider the run can land on: {targets:?}"
+        );
+    }
+
+    /// The count has to mean something.
+    ///
+    /// `NikiConfig` seeds a slot for all twelve known providers, so counting
+    /// `providers` entries makes every project look like it has twelve
+    /// reachable providers. `recommend` would then fire twelve catalogue
+    /// requests at an account that has none, and — because ten of the twelve
+    /// have no key — report its own advice as "Partly unverified" for every
+    /// user, permanently, on a command whose job is to be believed.
+    ///
+    /// This is the regression this check was added for: it was written into
+    /// `probe_targets` and the bug shipped in the same commit.
+    #[test]
+    fn a_fresh_install_probes_nothing_rather_than_twelve_providers() {
+        let mut config = crate::config::NikiConfig::default();
+        config.providers.clear();
+        for name in crate::config::types::AgentsConfig::NAMES {
+            config.agents.agent_named_mut(name).unwrap().provider = String::new();
+        }
+        let targets = probe_targets(&config);
+        assert!(
+            targets.is_empty(),
+            "an agent pointed at nothing cannot reach anything, but the probe \
+             list was {targets:?}"
+        );
+    }
+
+    /// And the sealed config is the shape a real fresh install has. If this
+    /// fails, the map is no longer pre-seeded and the guards above are
+    /// defending a condition that no longer exists — which is worth knowing,
+    /// because they would then be silently dead.
+    #[test]
+    fn the_sealed_config_does_not_make_every_provider_look_reachable() {
+        let mut config = crate::config::NikiConfig::default();
+        config.apply_env_lookup(&|_| None);
+        let targets = probe_targets(&config);
+        assert!(
+            targets.len() < 3,
+            "expected only the default agent providers, got {}: {targets:?}",
+            targets.len()
         );
     }
 

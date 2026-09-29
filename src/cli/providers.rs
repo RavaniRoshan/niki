@@ -47,13 +47,28 @@ pub async fn handle(args: &ProvidersArgs) -> Result<()> {
 async fn handle_models(provider: Option<&str>, plain: bool) -> Result<()> {
     let config = NikiConfig::load(std::path::Path::new("."))?;
 
+    // Not `config.providers.is_empty()`. That map always holds twelve entries
+    // — `apply_env_lookup` seeds a slot for every known provider — so the
+    // guard could never fire, and `niki providers models` on a fresh install
+    // printed twelve "no key" failures rather than the one useful sentence.
+    let configured: Vec<String> = config
+        .providers
+        .iter()
+        .filter(|(_, c)| c.is_configured())
+        .map(|(n, _)| n.clone())
+        .collect();
+
     let names: Vec<String> = match provider {
         Some(p) => vec![p.to_string()],
-        None if config.providers.is_empty() => {
-            println!("No providers configured. Add providers to niki.toml first.");
+        None if configured.is_empty() => {
+            println!(
+                "No providers configured. Add one to `niki.toml`, or set \
+                 ANTHROPIC_API_KEY, OPENAI_API_KEY or OPENROUTER_API_KEY in the \
+                 environment, then run this again."
+            );
             return Ok(());
         }
-        None => config.providers.keys().cloned().collect(),
+        None => configured,
     };
 
     let mut any = false;
@@ -125,8 +140,18 @@ async fn handle_models(provider: Option<&str>, plain: bool) -> Result<()> {
 async fn handle_check() -> Result<()> {
     let config = NikiConfig::load(std::path::Path::new("."))?;
 
-    if config.providers.is_empty() {
-        println!("No providers configured. Add providers to niki.toml first.");
+    // Same dead guard as in `handle_models`, and it cost more here: every
+    // seeded slot was health-checked, so a machine with no keys printed
+    // twelve red crosses and `0/12 providers healthy` — which reads as "you
+    // have twelve providers and they are all broken" rather than "you have
+    // none". `check_provider_health` filters the empty slots too, so both
+    // halves of the count agree.
+    if !config.providers.values().any(|c| c.is_configured()) {
+        println!(
+            "No providers configured. Add one to `niki.toml`, or set \
+             ANTHROPIC_API_KEY, OPENAI_API_KEY or OPENROUTER_API_KEY in the \
+             environment, then run this again."
+        );
         return Ok(());
     }
 

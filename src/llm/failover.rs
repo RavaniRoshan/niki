@@ -491,6 +491,17 @@ pub async fn check_provider_health(
         if name == "mock" {
             continue;
         }
+        // And skip the empty slots.
+        //
+        // `NikiConfig::apply_env_lookup` seeds all twelve known slugs into
+        // `providers` so an environment key has somewhere to land, so this
+        // map is never short. Without this filter `niki providers check` on a
+        // machine with no keys at all printed twelve red crosses and
+        // `0/12 providers healthy` — a user who has configured nothing being
+        // told they have configured twelve, eleven of which failed.
+        if !cfg.is_configured() {
+            continue;
+        }
 
         let start = Instant::now();
         let result = check_single_provider(name, cfg).await;
