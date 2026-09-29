@@ -567,9 +567,28 @@ pub struct ToolContext {
     pub project_path: PathBuf,
     pub permissions: HashMap<String, PermissionRequirement>,
     /// Permission mode governing `Ask` tools (`manual`/`auto`/`dontask`/`bypass`,
-    /// mirroring `[permissions] mode`; default `manual`). The tool loop has no
-    /// approval UI, so `Ask` under `manual` fails closed.
+    /// mirroring `[permissions] mode`; default `manual`).
     pub permission_mode: String,
+    /// What `manual` does when there is no approval UI listening, which is
+    /// always: the tool loop has none. Mirrors
+    /// `[permissions] fail_closed_headless`, default `false`.
+    ///
+    /// The two fields together are the documented contract, and the
+    /// implementation used to honour only the first:
+    ///
+    /// * `[permissions] mode = "manual"` is documented as *"Ask prompts in TUI,
+    ///   allows headless with a warning"*.
+    /// * `fail_closed_headless` is documented as *"an Ask with no TUI listening
+    ///   denies instead of allowing with a warning"* — an **opt-in**.
+    ///
+    /// The loop denied unconditionally, so the opt-in could not be un-opt-in:
+    /// setting the flag changed nothing, because the behaviour it was
+    /// introduced to control was already on. And the consequence was not a
+    /// subtle narrowing — `bash`, `write`, `edit`, `patch` and `git` are all
+    /// `Ask`, so on the default path, with no configuration at all, the Coder
+    /// could not run the build, could not run the tests it had just written,
+    /// and could not use the edit tools its own prompt tells it to use.
+    pub fail_closed_headless: bool,
     /// Shared sub-task state for `task_spawn`/`task_status`/`task_cancel`.
     pub task_store: Option<std::sync::Arc<TaskStore>>,
 }
@@ -793,8 +812,28 @@ impl ToolRegistry {
             }
             PermissionRequirement::Ask => match ctx.permission_mode.as_str() {
                 "bypass" | "dontask" | "auto" => None,
+                // `manual` with no approval UI. The documented behaviour is to
+                // allow with a warning; `fail_closed_headless` is the opt-in
+                // that makes it deny instead. Denying here unconditionally
+                // made that opt-in meaningless, and cost the Coder every tool
+                // it needs to check its own work.
+                _ if !ctx.fail_closed_headless => {
+                    // Once per tool name per loop rather than per call: the
+                    // model may retry, and a warning repeated on every attempt
+                    // is noise that trains people to ignore it.
+                    tracing::warn!(
+                        target: "niki::runtime",
+                        tool = name,
+                        "running an approval-gated tool with no approval UI \
+                         available (permission mode 'manual'). Set \
+                         [permissions] fail_closed_headless = true to deny instead."
+                    );
+                    None
+                }
                 _ => Some(format!(
-                    "tool '{name}' requires approval (Ask) but permission mode '{}' has no approval UI in the tool loop — denied fail-closed",
+                    "tool '{name}' requires approval (Ask), permission mode '{}' has \
+                     no approval UI in the tool loop, and \
+                     [permissions] fail_closed_headless = true",
                     ctx.permission_mode
                 )),
             },
@@ -3552,6 +3591,7 @@ mod tests {
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
+            fail_closed_headless: false,
             task_store: None,
         };
         let messages = vec![
@@ -3585,6 +3625,7 @@ mod tests {
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
+            fail_closed_headless: false,
             task_store: None,
         };
         let messages = vec![LoopMessage::User("run echo hi".into())];
@@ -3690,6 +3731,7 @@ mod tests {
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
+            fail_closed_headless: false,
             task_store: None,
         };
 
@@ -3743,6 +3785,7 @@ mod tests {
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
+            fail_closed_headless: false,
             task_store: None,
         };
         run_tool_loop_with(
@@ -3782,6 +3825,7 @@ mod tests {
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
+            fail_closed_headless: false,
             task_store: None,
         };
         let messages = vec![LoopMessage::User("hi".into())];
@@ -3879,6 +3923,7 @@ mod tests {
             project_path: dir.clone(),
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
+            fail_closed_headless: false,
             task_store: None,
         };
         let messages = vec![LoopMessage::User("read the note".into())];
@@ -3919,6 +3964,7 @@ mod tests {
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
+            fail_closed_headless: false,
             task_store: None,
         };
         let (tx, rx) = std::sync::mpsc::channel();
@@ -3990,7 +4036,98 @@ mod tests {
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
             permission_mode: "manual".into(),
+            fail_closed_headless: false,
             task_store: None,
+        }
+    }
+
+    /// `manual` with no approval UI must allow, because that is what it is
+    /// documented to do — and the Coder's ability to check its own work
+    /// depends on it.
+    ///
+    /// `[permissions] mode = "manual"` is documented as *"Ask prompts in TUI,
+    /// allows headless with a warning"*. `fail_closed_headless` is documented
+    /// as *"an Ask with no TUI listening denies instead of allowing with a
+    /// warning"* — an **opt-in**.
+    ///
+    /// The loop denied unconditionally, so the opt-in could not be undone: the
+    /// behaviour it was introduced to control was already on. And because
+    /// `bash`, `write`, `edit`, `patch` and `git` are all `Ask`, the cost was
+    /// not abstract. On the default path, with no configuration at all, the
+    /// Coder could not run the build, could not run the tests it had just
+    /// written, and could not use the edit tools its own prompt tells it to
+    /// use. It was told to do the work and then had every tool for it denied.
+    #[test]
+    fn manual_allows_an_ask_with_no_approval_ui() {
+        let registry = build_baseline_registry();
+        let mut ctx = manual_ctx();
+        ctx.fail_closed_headless = false;
+        let def = registry
+            .get("bash")
+            .expect("bash is in the baseline registry")
+            .def();
+        assert!(
+            ToolRegistry::permission_denial("bash", def, &ctx).is_none(),
+            "manual with no approval UI is documented to allow, and the Coder \
+             cannot check its own work without it"
+        );
+    }
+
+    /// The opt-in, and the reason the test above is not "always allow".
+    ///
+    /// An unattended run where silent auto-approval is unacceptable is a real
+    /// case — a server, a cron job — and it is exactly what the flag exists
+    /// for. It could not be expressed before: the answer was already "deny",
+    /// so setting the flag changed nothing and unsetting it changed nothing.
+    #[test]
+    fn fail_closed_headless_is_what_makes_manual_deny() {
+        let registry = build_baseline_registry();
+        let mut ctx = manual_ctx();
+        ctx.fail_closed_headless = true;
+        let def = registry
+            .get("bash")
+            .expect("bash is in the baseline registry")
+            .def();
+        let denial =
+            ToolRegistry::permission_denial("bash", def, &ctx).expect("the opt-in must deny");
+        assert!(
+            denial.contains("fail_closed_headless"),
+            "the message must name the setting that caused it, or the user is \
+             left reading a denial they cannot act on: {denial}"
+        );
+    }
+
+    /// `Deny` is policy, not mode, and no posture setting may undo it.
+    ///
+    /// The first test says "manual allows an Ask". It must not be read as
+    /// "manual allows everything" — a tool declared `Deny` is denied in every
+    /// mode, including `bypass`, or the flag is a switch that turns the whole
+    /// permission system off.
+    #[test]
+    fn a_denied_tool_stays_denied_in_every_posture() {
+        // No tool in the baseline registry is declared `Deny` — the branch is
+        // reachable only through a configured rule — so this constructs one,
+        // the way `deny_permission_blocks_before_tool` does.
+        let registry = build_baseline_registry();
+        for mode in ["manual", "auto", "dontask", "bypass"] {
+            for fail_closed in [true, false] {
+                let mut ctx = manual_ctx();
+                ctx.permission_mode = mode.to_string();
+                ctx.fail_closed_headless = fail_closed;
+                ctx.permissions
+                    .insert("bash".into(), PermissionRequirement::Deny);
+                let def = registry
+                    .get("bash")
+                    .expect("bash is in the baseline registry")
+                    .def();
+                let denied = ToolRegistry::permission_denial("bash", def, &ctx)
+                    .expect("a policy Deny must survive every posture");
+                assert!(
+                    denied.contains("denied by policy"),
+                    "mode={mode} fail_closed={fail_closed} turned a policy \
+                     denial into something else: {denied}"
+                );
+            }
         }
     }
 
@@ -4135,6 +4272,7 @@ mod tests {
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
+            fail_closed_headless: false,
             task_store: Some(std::sync::Arc::new(TaskStore::new())),
         }
     }
@@ -4147,6 +4285,7 @@ mod tests {
             project_path: dir.to_path_buf(),
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
+            fail_closed_headless: false,
             task_store: None,
         }
     }
@@ -4289,6 +4428,7 @@ mod tests {
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
+            fail_closed_headless: false,
             task_store: None,
         }
     }
@@ -4348,6 +4488,7 @@ mod network_egress_permission_tests {
             project_path: std::env::temp_dir(),
             permissions: HashMap::new(),
             permission_mode: mode.to_string(),
+            fail_closed_headless: false,
             task_store: None,
         }
     }
@@ -4582,6 +4723,7 @@ mod network_egress_permission_tests {
             project_path: dir.path().to_path_buf(),
             permissions: HashMap::new(),
             permission_mode: "bypass".into(),
+            fail_closed_headless: false,
             task_store: None,
         };
         let input = ToolInput {

@@ -162,6 +162,7 @@ async fn test_tool_router_and_policy_enforcement() {
         project_path: tmp.path().to_path_buf(),
         permissions: std::collections::HashMap::new(),
         permission_mode: "manual".to_string(),
+        fail_closed_headless: false,
         task_store: None,
     };
 

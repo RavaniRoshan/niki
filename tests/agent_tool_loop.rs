@@ -94,6 +94,7 @@ fn ctx(dir: &std::path::Path) -> niki::runtime::ToolContext {
         project_path: dir.to_path_buf(),
         permissions: std::collections::HashMap::new(),
         permission_mode: "bypass".into(),
+        fail_closed_headless: false,
         task_store: None,
     }
 }
