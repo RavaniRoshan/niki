@@ -1180,6 +1180,21 @@ pub fn grep_argv(query: &str, include: Option<&str>, search_path: &str) -> Vec<S
     argv
 }
 
+/// Default deadline for a `bash` call: 30s, as the tool's own schema says.
+const DEFAULT_BASH_TIMEOUT_MS: u64 = 30_000;
+/// Floor. Below this a command is killed before it can do anything, and the
+/// model is better served by a clear failure than by a loop of instant
+/// timeouts.
+const MIN_BASH_TIMEOUT_MS: u64 = 1_000;
+/// Ceiling.
+///
+/// `[security] max_exec_seconds` defaults to 300 and is documented as the
+/// bound on agent commands; this is the same number, applied where the setting
+/// is not reachable. The tool has no `&NikiConfig` — the same reason the
+/// permission mode had to be threaded in — so the ceiling is a constant rather
+/// than a setting that appears to work and does not.
+const MAX_BASH_TIMEOUT_MS: u64 = 300_000;
+
 /// Grep tool — search file contents.
 pub struct GrepTool;
 
@@ -1530,7 +1545,23 @@ impl Tool for BashTool {
                 metadata: HashMap::new(),
             };
         }
-        let timeout_ms = input.int("timeout_ms").unwrap_or(30_000) as u64;
+        // Clamped, and the clamp is the point.
+        //
+        // `timeout_ms` is model-authored, and `as u64` on a negative integer
+        // wraps: `-1` becomes 18446744073709551615 ms, so the process-group
+        // kill deadline is effectively disabled and `sleep 99999999` runs
+        // until the user kills the run by hand. A model does not need to be
+        // hostile to hit it — it needs to compute a timeout wrong once.
+        //
+        // This was masked while the Coder loop denied `bash` outright. It is
+        // live again now that `manual` honours its documented behaviour, which
+        // is exactly the note the audit left on it.
+        let requested = input
+            .int("timeout_ms")
+            .unwrap_or(DEFAULT_BASH_TIMEOUT_MS as i64);
+        let timeout_ms = requested
+            .unsigned_abs()
+            .clamp(MIN_BASH_TIMEOUT_MS, MAX_BASH_TIMEOUT_MS);
 
         // The deadline is enforced by `exec_with_timeout`, which signals the
         // whole process group. Wrapping `Command::output()` in a timeout
@@ -4170,6 +4201,61 @@ mod tests {
             !stdin_owned_by_tui(),
             "the flag must be clear once the TUI is done with it, or every \
              later question in the same process is unanswerable"
+        );
+    }
+
+    /// A model cannot buy itself an unbounded command.
+    ///
+    /// `timeout_ms` is model-authored and was converted with `as u64`, so `-1`
+    /// became 18446744073709551615 ms — the process-group kill deadline is
+    /// effectively switched off and `sleep 99999999` runs until the user kills
+    /// the run by hand. A hostile model does not need to be clever to hit it;
+    /// it needs to compute a timeout wrong once.
+    ///
+    /// This was masked while the Coder loop denied `bash` outright, and became
+    /// live the moment `manual` was made to honour its documented behaviour.
+    /// That is the note the audit left on it, and it is the reason this sits
+    /// directly after the permission change rather than in a later batch.
+    #[test]
+    fn a_model_supplied_bash_timeout_cannot_disable_the_deadline() {
+        // A pure clamp, so the assertion is about the arithmetic rather than
+        // about spawning processes and waiting.
+        let clamp = |requested: i64| {
+            requested
+                .unsigned_abs()
+                .clamp(MIN_BASH_TIMEOUT_MS, MAX_BASH_TIMEOUT_MS)
+        };
+        assert_eq!(
+            clamp(-1),
+            MAX_BASH_TIMEOUT_MS,
+            "a negative is a cap, not a wrap"
+        );
+        assert_eq!(clamp(i64::MIN.unsigned_abs() as i64), MAX_BASH_TIMEOUT_MS);
+        assert_eq!(clamp(0), MIN_BASH_TIMEOUT_MS, "zero is not 'no timeout'");
+        assert_eq!(clamp(-30_000), 30_000, "a negated normal value still works");
+        assert_eq!(clamp(30_000), 30_000, "an ordinary value is untouched");
+        assert_eq!(
+            clamp(10_000_000),
+            MAX_BASH_TIMEOUT_MS,
+            "and a model cannot ask for ten thousand seconds"
+        );
+    }
+
+    /// The ceiling matches the setting the config documents, so the number the
+    /// user reads is the number that applies.
+    ///
+    /// `[security] max_exec_seconds` defaults to 300. The tool cannot read the
+    /// config — it has no `&NikiConfig`, the same reason the permission mode
+    /// had to be threaded in — so it is a constant, and it had better be the
+    /// same one.
+    #[test]
+    fn the_bash_ceiling_matches_the_documented_exec_limit() {
+        let documented = crate::config::types::SecurityPolicyConfig::default().max_exec_seconds;
+        assert_eq!(
+            MAX_BASH_TIMEOUT_MS / 1000,
+            documented,
+            "the tool's hard ceiling and [security] max_exec_seconds must be \
+             the same number, or one of them is a setting that lies"
         );
     }
 
