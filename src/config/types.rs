@@ -1602,6 +1602,70 @@ impl NikiConfig {
         }
     }
 
+    /// Parse one `niki.toml` on its own, reporting what is wrong with it.
+    ///
+    /// Separate from `load` on purpose. `load` merges two files and then
+    /// applies environment variables, so by the time it returns an error the
+    /// message cannot say *which file* or *which line* — and a file that
+    /// parses perfectly but contains a section nobody reads produces no error
+    /// at all. `niki config check` needs the per-file answer, and so does
+    /// anyone trying to work out why their settings are being ignored.
+    ///
+    /// Unknown sections are an **error** here, where `load` only warns. That
+    /// is the whole value of the command: `[agentz.coder]` is a typo that
+    /// parses, is accepted, and silently does nothing, so a user can run with
+    /// defaults for weeks without a word from the program.
+    pub fn load_file_only(path: &Path) -> std::result::Result<(), String> {
+        let content = fs::read_to_string(path)
+            .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+        let _: NikiConfig = toml::from_str(&content)
+            .map_err(|e| format!("could not parse {}: {e}", path.display()))?;
+
+        if let Ok(raw) = content.parse::<toml::Value>()
+            && let Some(table) = raw.as_table()
+        {
+            let unknown: Vec<&str> = table
+                .keys()
+                .filter(|k| !Self::KNOWN_SECTIONS.contains(&k.as_str()))
+                .map(|k| k.as_str())
+                .collect();
+            if !unknown.is_empty() {
+                let mut msg = format!("{} has section(s) NIKI does not read: ", path.display());
+                msg.push_str(
+                    &unknown
+                        .iter()
+                        .map(|s| format!("`[{s}]`"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                msg.push_str(
+                    ". They parse, so nothing complained, and they do nothing. \
+                     Check the spelling, or run `niki config schema` for the list \
+                     of real sections.",
+                );
+                return Err(msg);
+            }
+
+            let dead: Vec<&str> = Self::DEAD_TABLES
+                .iter()
+                .copied()
+                .filter(|known| table.contains_key(*known))
+                .collect();
+            if !dead.is_empty() {
+                return Err(format!(
+                    "{} sets {} — parsed, but not wired to any runtime behaviour, so \
+                     the setting has no effect yet.",
+                    path.display(),
+                    dead.iter()
+                        .map(|s| format!("`[{s}]`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// The directory this config was loaded from.
     ///
     /// Carried so a decision that depends on *measured* state — the topology
@@ -2581,5 +2645,82 @@ mod topology_spellings {
             .map(|(n, _)| n.as_str())
             .collect();
         assert_eq!(configured, vec!["openai"]);
+    }
+
+    /// A misspelled section is the failure nobody sees.
+    ///
+    /// It parses. It is accepted. It is then ignored, because nothing reads
+    /// it — so the user configures `[agentz.coder]`, runs the pipeline, gets
+    /// the defaults they never asked for, and has no signal that their file
+    /// was ignored. `load` warns; that warning goes to stderr on a code path
+    /// several commands never reach because they swallow the error first.
+    ///
+    /// `niki config check` exists to make it loud, which means it has to
+    /// treat this as an error rather than a note.
+    #[test]
+    fn a_misspelled_section_is_reported_not_ignored() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("niki.toml");
+        std::fs::write(&path, "[agentz.coder]\nmodel = \"x\"\n").expect("write");
+        let err = NikiConfig::load_file_only(&path).expect_err("must be an error");
+        assert!(
+            err.contains("[agentz.coder]"),
+            "the message must name the section the user typed: {err}"
+        );
+        assert!(
+            err.contains("do nothing") || err.contains("does not read"),
+            "and must say what will happen to it, or the user does not know              whether it matters: {err}"
+        );
+    }
+
+    /// A section that is real but unwired is a different problem with a
+    /// different fix, and lumping it in with a typo would send someone
+    /// hunting for a misspelling that is not there.
+    #[test]
+    fn a_dead_section_says_it_is_not_wired_rather_than_misspelled() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("niki.toml");
+        let dead = NikiConfig::DEAD_TABLES.first().expect("at least one");
+        std::fs::write(&path, format!("[{dead}]\n")).expect("write");
+        let err = NikiConfig::load_file_only(&path).expect_err("must be an error");
+        assert!(
+            err.contains("not wired") || err.contains("no effect"),
+            "the message must distinguish 'you typed it wrong' from 'we do \
+             not use it yet': {err}"
+        );
+    }
+
+    /// The inverse, and the reason the other two are not a test that always
+    /// passes: a file that is fine must be reported as fine, or every run of
+    /// `niki config check` says something is wrong and the command is noise.
+    #[test]
+    fn a_good_file_passes() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("niki.toml");
+        std::fs::write(
+            &path,
+            "[general]\noutput_dir = \".niki\"\n\n[agents.coder]\nmodel = \"x\"\n",
+        )
+        .expect("write");
+        NikiConfig::load_file_only(&path).expect("a valid file must pass");
+    }
+
+    /// And a file that does not parse must say so, with the file named.
+    ///
+    /// This is the case every caller used to throw away: `load` returned
+    /// `Err`, thirteen command sites did `.unwrap_or_default()`, and the user
+    /// got a program running on defaults with no indication that a file they
+    /// had written was never read.
+    #[test]
+    fn a_file_that_does_not_parse_names_itself() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("niki.toml");
+        std::fs::write(&path, "this is not = valid = toml [[[").expect("write");
+        let err = NikiConfig::load_file_only(&path).expect_err("must be an error");
+        assert!(
+            err.contains("niki.toml"),
+            "the message must name the file, because there are two of them and \
+             only one is broken: {err}"
+        );
     }
 }

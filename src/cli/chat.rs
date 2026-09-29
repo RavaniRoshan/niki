@@ -201,7 +201,26 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
         args.project.clone()
     };
 
-    let config = NikiConfig::load(&project_path).unwrap_or_default();
+    // A broken `niki.toml` is not the same as no `niki.toml`.
+    //
+    // This is the landing page — bare `niki` opens it — and a parse error was
+    // swallowed into the default config. The user then talked to an assistant
+    // configured with nothing they had written, and nothing anywhere said why.
+    // They debugged the wrong thing for as long as it took to notice.
+    //
+    // The default is still right when there is no file; it is wrong when the
+    // file exists and cannot be read. `NikiConfig::load` returns an error for
+    // exactly the second case and `Ok` for the first, so the error can be
+    // told apart from the absence.
+    let config = NikiConfig::load(&project_path).map_err(|e| {
+        anyhow::anyhow!(
+            "Could not read your configuration: {e}\n\
+             Nothing has been changed. Fix the file, or move it aside to run with \
+             defaults.\n  {}\n\
+             `niki config check` will tell you what is wrong with it.",
+            project_path.join("niki.toml").display()
+        )
+    })?;
 
     // Headless contract: `--message` with piped stdout prints the reply as
     // plain text and exits, instead of launching the TUI (which would render

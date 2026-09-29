@@ -3,6 +3,7 @@ use clap::Subcommand;
 use std::fs;
 
 use crate::cli::auth::{PROVIDERS, resolve_api_key};
+use crate::config::NikiConfig;
 
 #[derive(Subcommand)]
 pub enum ConfigCommands {
@@ -18,13 +19,87 @@ pub enum ConfigCommands {
     },
     /// Export the JSON schema for niki.toml (for editor autocomplete)
     Schema,
+    /// Report what is wrong with niki.toml, and exit non-zero if anything is
+    Check,
 }
 
 pub async fn handle(command: &ConfigCommands) -> Result<()> {
     match command {
         ConfigCommands::Init { interactive, scan } => cmd_init(*interactive, *scan).await,
         ConfigCommands::Schema => cmd_schema(),
+        ConfigCommands::Check => cmd_check(),
     }
+}
+
+/// Say what is wrong with the configuration, and exit non-zero if anything is.
+///
+/// Exists because the error message that points at it did not. Every command
+/// that loads config used to swallow a parse failure into the defaults, so a
+/// typo in `niki.toml` produced no diagnostic anywhere: the assistant replied
+/// as if nothing had been written, the pipeline ran with Anthropic's defaults,
+/// and the user had no way to know their file was the problem.
+///
+/// Two kinds of problem, both silent until now:
+///
+/// * a **syntax** error, which made `NikiConfig::load` return `Err` and every
+///   caller throw it away;
+/// * an **unknown section**, which parses perfectly and is then ignored —
+///   `[agentz.coder]` with a `z` is not a warning you notice when you are
+///   looking at your bill.
+///
+/// The unknown-section report is the more valuable half. A file that fails to
+/// parse tells you it failed. A file that parses and is ignored looks exactly
+/// like a file that works.
+fn cmd_check() -> Result<()> {
+    let project_dir = std::env::current_dir()?;
+    let local = project_dir.join("niki.toml");
+    let global = dirs::home_dir().map(|h| h.join(".config/niki/niki.toml"));
+
+    let mut problems = 0usize;
+    let mut checked = 0usize;
+
+    for path in [Some(local), global].into_iter().flatten() {
+        if !path.exists() {
+            continue;
+        }
+        checked += 1;
+        println!("checking {}", path.display());
+        match NikiConfig::load_file_only(&path) {
+            Ok(()) => {}
+            Err(e) => {
+                problems += 1;
+                println!("  ✗ {e}");
+            }
+        }
+    }
+
+    if checked == 0 {
+        println!("No niki.toml found. Nothing to check — this is fine.");
+        return Ok(());
+    }
+
+    // Loading the merged config is a second, different check: each file can
+    // parse on its own and still be invalid once the defaults are applied.
+    match NikiConfig::load(&project_dir) {
+        Ok(_) => {
+            if problems == 0 {
+                println!("\n{checked} file(s) checked, no problems found.");
+            }
+        }
+        Err(e) => {
+            problems += 1;
+            println!("  ✗ the merged configuration is invalid: {e}");
+        }
+    }
+
+    if problems > 0 {
+        println!(
+            "\n{problems} problem(s). The configuration was not applied — commands \
+             that load it fall back to defaults."
+        );
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 async fn cmd_init(interactive: bool, scan: bool) -> Result<()> {
