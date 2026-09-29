@@ -628,3 +628,88 @@ fn a_whitespace_only_anchor_appends() {
         "an anchor that is not in the file must not be treated as an append"
     );
 }
+
+/// An anchor that matches twice is refused, not applied to the first.
+///
+/// `find` took the first occurrence, so a `search` that appears twice silently
+/// edited the first one: the edit applied, the run reported success, and the
+/// change landed somewhere the model did not name. That is the worst failure
+/// class there is — a wrong-place edit that looks like a win.
+///
+/// Every reference harness refuses it. opencode: *"Provide more surrounding
+/// context or set replaceAll to true."* Cline: `"…multiple occurrences…"`.
+/// OpenHands lists the line numbers. pi counts occurrences in normalized space.
+/// Aider only matches a chunk long enough to be unique. Codex advances a
+/// monotonic line index across hunks so an early miss cannot retarget a later
+/// one. We were the only one that just took the first.
+#[test]
+fn an_ambiguous_anchor_is_refused_rather_than_applied_to_the_first_match() {
+    let content = "fn a() { 1 }\nfn b() { 2 }\nfn a() { 3 }\n";
+
+    let err =
+        niki::sandbox::edit_format::apply_single_edit_block(content, "fn a() {", "fn a() { 9 }")
+            .expect_err("two matches is not a choice the harness may make for the model");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("matches 2 times"),
+        "the error must say the anchor is ambiguous, and how many — not a byte offset          dressed up as a count: {msg}"
+    );
+    assert!(
+        msg.contains("line 1"),
+        "and where the first one is, in a unit a person can act on: {msg}"
+    );
+    assert!(
+        msg.contains("more surrounding context"),
+        "and how to fix it, or the model repeats itself: {msg}"
+    );
+
+    // And nothing was written — refusing is only worth anything if it is not
+    // "refuse, then apply it anyway one strategy down".
+    let second_attempt =
+        niki::sandbox::edit_format::apply_single_edit_block(content, "fn a() {", "fn a() { 9 }");
+    assert!(
+        second_attempt.is_err(),
+        "an ambiguous anchor must not be rescued by a looser strategy below"
+    );
+}
+
+/// The reported count is the real one.
+///
+/// A first version of the guard printed the second match's *byte offset* as
+/// the count — "matches 26 times" for a file containing two — and the test
+/// passed, because every fixture happened to match twice and 2 was the right
+/// answer. A count nobody can trust is worse than no count.
+#[test]
+fn the_ambiguity_message_reports_the_real_count_and_a_usable_line() {
+    let three = "fn a() { 1 }\nfn b() {}\nfn a() { 2 }\nfn c() {}\nfn a() { 3 }\n";
+    let err = niki::sandbox::edit_format::apply_single_edit_block(three, "fn a() {", "x")
+        .expect_err("three matches is still ambiguous");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("matches 3 times"),
+        "the count must be the count: {msg}"
+    );
+    // Line 1, not a byte offset — the reader is looking at a file, not a buffer.
+    assert!(
+        msg.contains("line 1"),
+        "the location must be in a unit the reader can use: {msg}"
+    );
+    assert!(
+        !msg.contains("byte"),
+        "and must not leak a byte offset: {msg}"
+    );
+}
+
+/// A unique anchor still works — the guard must not cost us the common case.
+#[test]
+fn a_unique_anchor_still_applies() {
+    let content = "fn a() { 1 }\nfn b() { 2 }\nfn a() { 3 }\n";
+    let out = niki::sandbox::edit_format::apply_single_edit_block(
+        content,
+        "fn a() { 1 }",
+        "fn a() { 9 }",
+    )
+    .expect("a unique anchor applies")
+    .expect("and produces content");
+    assert_eq!(out, "fn a() { 9 }\nfn b() { 2 }\nfn a() { 3 }\n");
+}
