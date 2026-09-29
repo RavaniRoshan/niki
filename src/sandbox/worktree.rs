@@ -315,8 +315,8 @@ impl Sandbox for WorktreeSandbox {
                 // stage never leaves a half-applied worktree behind.
                 if !unmatched.is_empty() {
                     return Err(anyhow!(
-                        "No edit block matched its target file in the worktree ({} unmatched); nothing was written",
-                        unmatched.len()
+                        "{}",
+                        describe_unmatched(&edit_blocks, &unmatched, &contents, &paths)
                     ));
                 }
                 for file_path in changed_files {
@@ -651,4 +651,142 @@ pub fn cleanup_stale_worktrees(source_repo: &Path, max_age: std::time::Duration)
     }
 
     cleaned
+}
+
+/// Say what did not match, and what is actually in the file instead.
+///
+/// The old message was "No edit block matched its target file in the worktree
+/// (N unmatched); nothing was written" — true, and useless. A model reading it
+/// has no idea which of its anchors was wrong, what it sent, or what the file
+/// really says, and it is about to guess.
+///
+/// Aider builds this report deliberately, and it is the difference between a
+/// retry that converges and one that repeats: the failed SEARCH verbatim, a
+/// "Did you mean to match some of these actual lines?" suggestion taken from
+/// the real file, and — where it applies — a note that the other blocks
+/// already applied and must not be re-sent. We are all-or-nothing per patch,
+/// so nothing partially applied and that last part would be false here; the
+/// first two carry the weight.
+///
+/// The near-miss is deliberately cheap and dependency-free, and capped: it is a
+/// hint, not a resolver. The harness must not start choosing an anchor on the
+/// model's behalf — that is how a change lands in the wrong place.
+fn describe_unmatched(
+    blocks: &[crate::sandbox::edit_format::EditBlock],
+    unmatched: &[usize],
+    contents: &std::collections::HashMap<std::path::PathBuf, String>,
+    paths: &[std::path::PathBuf],
+) -> String {
+    use std::fmt::Write as _;
+    let mut out = format!(
+        "{} of your {} edit blocks did not match anything in the worktree, so none of them \
+         was written.\n",
+        unmatched.len(),
+        blocks.len()
+    );
+
+    for &i in unmatched {
+        let block = &blocks[i];
+        let _ = write!(out, "\n--- edit {} ---\n", i + 1);
+        if let Some(target) = &block.file {
+            let _ = writeln!(out, "you targeted: {target}");
+        }
+        let search = block.search.trim();
+        if search.is_empty() {
+            let _ = write!(out, "this edit has an empty anchor (an append).");
+            if block.file.is_none() {
+                let _ = write!(
+                    out,
+                    " An append needs a target file: put a `FILE: <path>` line before the block."
+                );
+            }
+            let _ = writeln!(out);
+            continue;
+        }
+        let _ = write!(out, "you searched for:\n{}\n", truncate_middle(search, 400));
+
+        if let Some((score, text, where_)) =
+            nearest_lines(&search.lines().collect::<Vec<_>>(), contents, paths)
+        {
+            let _ = write!(
+                out,
+                "the closest lines in the file ({:.0}% similar, in {}):\n{}\n",
+                score * 100.0,
+                where_,
+                truncate_middle(&text, 400)
+            );
+        }
+    }
+
+    out.push_str(
+        "\nRe-read each file and copy the surrounding lines EXACTLY — indentation included, no \
+         line numbers, no ellipsis, enough of them to be unique. Then resubmit only the edits \
+         that failed.",
+    );
+    out
+}
+
+/// The highest-scoring equal-length window in any file, with its path.
+fn nearest_lines(
+    needle: &[&str],
+    contents: &std::collections::HashMap<std::path::PathBuf, String>,
+    paths: &[std::path::PathBuf],
+) -> Option<(f64, String, String)> {
+    if needle.is_empty() {
+        return None;
+    }
+    let mut best: Option<(f64, String, String)> = None;
+    for path in paths {
+        let Some(content) = contents.get(path) else {
+            continue;
+        };
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.len() < needle.len() {
+            continue;
+        }
+        for start in 0..=(lines.len() - needle.len()) {
+            let window = &lines[start..start + needle.len()];
+            let score = similarity(needle, window);
+            if best.as_ref().is_none_or(|(b, _, _)| score > *b) {
+                best = Some((score, window.join("\n"), path.display().to_string()));
+            }
+        }
+    }
+    best.filter(|(score, _, _)| *score >= 0.5)
+}
+
+/// How alike two equal-length line runs are, in `[0, 1]`.
+///
+/// A cheap stand-in for difflib's ratio. Weighted toward the exact count and
+/// toward the leading lines: an anchor that is right at the top and drifts is
+/// still recognisably a near miss, and one that is only right at the bottom
+/// much less so.
+fn similarity(a: &[&str], b: &[&str]) -> f64 {
+    if a.is_empty() || a.len() != b.len() {
+        return 0.0;
+    }
+    let n = a.len() as f64;
+    let exact = a.iter().zip(b).filter(|(x, y)| x == y).count() as f64;
+    let trimmed = a
+        .iter()
+        .zip(b)
+        .filter(|(x, y)| x.trim() == y.trim())
+        .count() as f64;
+    let prefix = a
+        .iter()
+        .zip(b)
+        .take_while(|(x, y)| x.trim() == y.trim())
+        .count() as f64;
+    exact / n * 0.5 + trimmed / n * 0.2 + prefix / n * 0.3
+}
+
+/// Keep both ends of a long string — the difference is usually at one of them.
+fn truncate_middle(s: &str, max: usize) -> String {
+    let len = s.chars().count();
+    if len <= max {
+        return s.to_string();
+    }
+    let head: String = s.chars().take(max * 2 / 3).collect();
+    let tail: String = s.chars().skip(len - max / 3).collect();
+    format!("{head}\n… {len} characters omitted …\n{tail}")
 }
