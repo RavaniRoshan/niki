@@ -38,8 +38,23 @@ enum CheckResult {
     Fail(String),
 }
 
+/// The categories `--category` accepts.
+///
+/// They are declared here rather than inferred from check names, because the
+/// previous filter was `name.contains(category)` and two of the four values
+/// the `--help` text advertised matched nothing: no check is called anything
+/// like "install", and the provider checks are named "Anthropic provider" —
+/// singular. `niki doctor --category install` therefore ran zero checks and
+/// printed, with a straight face, "All checks passed!".
+///
+/// A filter that can select nothing must say so. Silence plus a green summary
+/// is the worst possible answer, because it is indistinguishable from the
+/// answer for a machine where every check genuinely passed.
+const CATEGORIES: [&str; 4] = ["install", "config", "providers", "sandbox"];
+
 struct Check {
     name: String,
+    category: &'static str,
     result: CheckResult,
 }
 
@@ -112,12 +127,32 @@ pub fn handle(args: &DoctorArgs) -> Result<()> {
     }
 
     let filtered: Vec<&Check> = match &args.category {
-        Some(cat) => checks
-            .iter()
-            .filter(|c| c.name.to_lowercase().contains(cat))
-            .collect(),
+        // Match the declared category *or* the check name, so both
+        // `--category providers` and `--category "Anthropic provider"` work.
+        // Matching the name alone is what broke this: it is the only reason
+        // the advertised categories were unusable.
+        Some(cat) => {
+            let needle = cat.to_lowercase();
+            checks
+                .iter()
+                .filter(|c| c.category == needle || c.name.to_lowercase().contains(&needle))
+                .collect()
+        }
         None => checks.iter().collect(),
     };
+
+    // A filter that selected nothing has not passed anything.
+    if filtered.is_empty() {
+        let available: Vec<&str> = CATEGORIES.to_vec();
+        eprintln!(
+            "No check matches category '{}'.\n\
+             Available categories: {}\n\
+             Or pass a substring of a check's name, e.g. `--category git`.",
+            args.category.as_deref().unwrap_or(""),
+            available.join(", ")
+        );
+        std::process::exit(2);
+    }
 
     let mut errors = 0;
     let mut warnings = 0;
@@ -157,16 +192,31 @@ pub fn handle(args: &DoctorArgs) -> Result<()> {
         println!("\nAll checks passed!");
     }
 
+    // The exit code is the point. `niki doctor` is a diagnostic a person or a
+    // script runs *to find out whether things are set up*, and it returned 0
+    // no matter what it found — so `niki doctor && niki run` gated nothing,
+    // and a CI job or a setup script reading it saw green over a red report.
+    // Printing the failure and exiting 0 is the same as not checking.
+    //
+    // Warnings deliberately stay 0: on a machine with no container runtime, a
+    // missing key and a clean tree, `doctor` is expected to have something to
+    // say, and a non-zero exit there trains people to ignore the exit code.
+    if errors > 0 {
+        std::process::exit(1);
+    }
+
     Ok(())
 }
 
 fn check_install() -> Vec<Check> {
     vec![
         Check {
+            category: "install",
             name: "niki version".to_string(),
             result: CheckResult::Pass(env!("CARGO_PKG_VERSION").to_string()),
         },
         Check {
+            category: "install",
             name: "rust toolchain".to_string(),
             result: match Command::new("rustc").arg("--version").output() {
                 Ok(output) => {
@@ -206,6 +256,7 @@ fn check_config() -> Vec<Check> {
 
     vec![
         Check {
+            category: "config",
             name: "local config".to_string(),
             result: if local_path.exists() {
                 CheckResult::Pass(format!("found at {}", local_path.display()))
@@ -214,6 +265,7 @@ fn check_config() -> Vec<Check> {
             },
         },
         Check {
+            category: "config",
             name: "global config".to_string(),
             result: match &global_path {
                 Some(p) if p.exists() => CheckResult::Pass(format!("found at {}", p.display())),
@@ -235,6 +287,7 @@ fn check_providers() -> Vec<Check> {
             if name == &"ollama" {
                 let running = crate::cli::auth::ollama_running();
                 return Check {
+                    category: "providers",
                     name: format!("{} provider", label),
                     result: if running {
                         CheckResult::Pass("running locally (no key needed)".to_string())
@@ -248,6 +301,7 @@ fn check_providers() -> Vec<Check> {
             }
             let configured = existing.contains_key(*name) || env_keys.contains_key(*name);
             Check {
+                category: "providers",
                 name: format!("{} provider", label),
                 result: if configured {
                     let source = if env_keys.contains_key(*name) {
@@ -275,6 +329,7 @@ fn check_security() -> Vec<Check> {
             check_security_for(&cfg)
         }
         None => vec![Check {
+            category: "security",
             name: "security config".to_string(),
             result: CheckResult::Warn(
                 "no niki.toml loaded; run `niki init` so egress/cap/image checks can run"
@@ -292,6 +347,7 @@ fn check_security_for(cfg: &NikiConfig) -> Vec<Check> {
     // 1. Spend ceiling — warn-only if unset (0.0 == unlimited).
     let cap = cfg.general.spend_cap_usd;
     checks.push(Check {
+        category: "security",
         name: "spend cap".to_string(),
         result: if cap > 0.0 {
             CheckResult::Pass(format!("${:.2}/run (hard-enforced mid-run)", cap))
@@ -305,6 +361,7 @@ fn check_security_for(cfg: &NikiConfig) -> Vec<Check> {
     // 2. Network egress — blocked by default; allowlist widens it.
     let (disabled, allowlist) = (cfg.docker.network_disabled, &cfg.docker.network_allowlist);
     checks.push(Check {
+        category: "security",
         name: "network egress".to_string(),
         result: if disabled || allowlist.is_empty() {
             CheckResult::Pass("blocked by default (network_disabled=true)".to_string())
@@ -331,6 +388,7 @@ fn check_security_for(cfg: &NikiConfig) -> Vec<Check> {
         }
     }
     checks.push(Check {
+        category: "security",
         name: "outbound hosts".to_string(),
         result: if outbound.is_empty() {
             CheckResult::Pass(
@@ -347,6 +405,7 @@ fn check_security_for(cfg: &NikiConfig) -> Vec<Check> {
 
     // 4. Secret redaction — compile-time, always-on (regex covers sk-/AKIA/ghp_/AIza/Bearer/Key=).
     checks.push(Check {
+        category: "security",
         name: "secret redaction".to_string(),
         result: CheckResult::Pass(
             "always-on: provider keys redacted from logs, reports, artifacts (provider.rs)"
@@ -357,6 +416,7 @@ fn check_security_for(cfg: &NikiConfig) -> Vec<Check> {
     // 5. Sandbox image pinning — digest pinning is the supply-chain hardening.
     let image = &cfg.docker.base_image;
     checks.push(Check {
+        category: "security",
         name: "sandbox image".to_string(),
         result: if image.contains("@sha256:") {
             CheckResult::Pass(format!("pinned: {}", image))
@@ -405,6 +465,7 @@ fn check_sandbox_image(base_image: &str) -> Check {
         ))
     };
     Check {
+        category: "sandbox",
         name: "sandbox image present".to_string(),
         result,
     }
@@ -449,10 +510,12 @@ fn check_sandbox() -> Vec<Check> {
 
     vec![
         Check {
+            category: "sandbox",
             name: "container runtime".to_string(),
             result: docker_result,
         },
         Check {
+            category: "sandbox",
             name: "git".to_string(),
             result: git_result,
         },
@@ -665,5 +728,59 @@ mod tests {
         let checks = check_security_for(&cfg);
         let img = checks.iter().find(|c| c.name == "sandbox image").unwrap();
         assert!(matches!(img.result, CheckResult::Warn(_)));
+    }
+
+    /// The filter is a gate, and a gate that can select nothing is a gate
+    /// that reports success.
+    ///
+    /// This is not hypothetical: the previous filter matched `--category`
+    /// against check *names*, and two of the four values the `--help` text
+    /// offered matched none of them — no check is called "install", and the
+    /// provider checks are named "Anthropic provider", singular. So
+    /// `niki doctor --category install` ran zero checks and printed
+    /// "All checks passed!" with a summary line reading `0 checks, 0 failed`.
+    /// A user checking whether their install was sound got a green answer
+    /// from a command that had checked nothing.
+    #[test]
+    fn every_category_the_help_advertises_actually_selects_something() {
+        let mut all: Vec<Check> = Vec::new();
+        all.extend(check_install());
+        all.extend(check_config());
+        all.extend(check_providers());
+        all.extend(check_sandbox());
+        all.extend(check_security());
+        for cat in CATEGORIES {
+            let matched = all.iter().filter(|c| c.category == cat).count();
+            assert!(
+                matched > 0,
+                "`--category {cat}` is advertised in --help but selects no check"
+            );
+        }
+    }
+
+    /// The inverse, and the reason the test above is not enough on its own: a
+    /// category that silently degrades to matching nothing is worse than one
+    /// that is absent, so no check may claim a category this command does not
+    /// advertise.
+    #[test]
+    fn a_check_carries_a_category_from_the_declared_list() {
+        let mut all: Vec<Check> = Vec::new();
+        all.extend(check_install());
+        all.extend(check_config());
+        all.extend(check_providers());
+        all.extend(check_sandbox());
+        all.extend(check_security());
+        assert!(!all.is_empty(), "doctor must actually have checks to run");
+        for c in &all {
+            assert!(
+                CATEGORIES.contains(&c.category) || c.category == "security",
+                "check `{}` claims category `{}`, which --help does not list — \
+                 so `--category {}` would select it while the help says it does \
+                 not exist",
+                c.name,
+                c.category,
+                c.category
+            );
+        }
     }
 }
