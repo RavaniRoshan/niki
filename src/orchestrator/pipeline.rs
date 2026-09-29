@@ -169,6 +169,7 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
                 skip: false,
                 max_tokens: agent.effective_max_tokens(),
                 temperature: agent.effective_temperature(),
+                reasoning_effort: agent.reasoning_effort.clone(),
                 fallbacks: agent.fallbacks.clone(),
             });
         }
@@ -194,6 +195,7 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
                 skip: false,
                 max_tokens: agent.effective_max_tokens(),
                 temperature: agent.effective_temperature(),
+                reasoning_effort: agent.reasoning_effort.clone(),
                 fallbacks: agent.fallbacks.clone(),
             };
             // Ahead of the Reviewer, not after it. An auditor whose findings
@@ -222,6 +224,7 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
             max_tokens: agent.effective_max_tokens(),
             temperature: agent.effective_temperature(),
             fallbacks: agent.fallbacks.clone(),
+            reasoning_effort: None,
         });
     }
 
@@ -252,6 +255,7 @@ pub fn resolve_stages(config: &NikiConfig) -> Vec<PipelineStageConfig> {
                 skip: false,
                 max_tokens: agent.effective_max_tokens(),
                 temperature: agent.effective_temperature(),
+                reasoning_effort: agent.reasoning_effort.clone(),
                 fallbacks: agent.fallbacks.clone(),
             },
         );
@@ -341,6 +345,7 @@ pub fn apply_risk_stages(
             max_tokens: agent.effective_max_tokens(),
             temperature: agent.effective_temperature(),
             fallbacks: agent.fallbacks.clone(),
+            reasoning_effort: None,
         };
         // Ahead of the Reviewer, for the same reason as in `resolve_stages`:
         // a risk-injected auditor that runs last is a check nothing reads.
@@ -361,6 +366,7 @@ pub fn apply_risk_stages(
             max_tokens: config.critic.effective_max_tokens(),
             temperature: config.critic.temperature,
             fallbacks: Vec::new(),
+            reasoning_effort: None,
         };
         match out.iter().position(|s| s.role == AgentRole::Reviewer) {
             Some(pos) => out.insert(pos + 1, stage),
@@ -994,6 +1000,7 @@ fn ensure_planner(
             max_tokens: agent.effective_max_tokens(),
             temperature: agent.effective_temperature(),
             fallbacks: agent.fallbacks.clone(),
+            reasoning_effort: None,
         }];
         out.extend(stages);
         out
@@ -1145,6 +1152,7 @@ async fn run_parallel_coders(
                 &mut local_metrics,
                 0,   // max_tokens: use agent default
                 0.0, // temperature: use agent default
+                None,
                 &mcp_tools,
                 config_max_diff_lines(&config),
                 bare_memory,
@@ -1306,6 +1314,8 @@ async fn run_stage(
     metrics: &mut Vec<StageMetric>,
     max_tokens: u32,
     temperature: f32,
+    // Sent to the provider, not applied locally — see `AgentConfig::reasoning_effort`.
+    reasoning_effort: Option<&str>,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<String> {
     let start = Instant::now();
@@ -1319,6 +1329,7 @@ async fn run_stage(
         display,
         max_tokens,
         temperature,
+        reasoning_effort,
         steer_rx,
     )
     .await?;
@@ -1609,6 +1620,8 @@ async fn run_role(
     metrics: &mut Vec<StageMetric>,
     max_tokens: u32,
     temperature: f32,
+    // The provider's reasoning-effort control, forwarded untouched.
+    reasoning_effort: Option<&str>,
     mcp_tools: &str,
     max_diff_lines: Option<usize>,
     // Bare mode: skip project-memory injection (ambient history off).
@@ -1828,6 +1841,7 @@ async fn run_role(
                     metrics,
                     max_tokens,
                     temperature,
+                    reasoning_effort,
                     steer_rx,
                 )
                 .await?
@@ -1846,6 +1860,7 @@ async fn run_role(
             metrics,
             max_tokens,
             temperature,
+            reasoning_effort,
             steer_rx,
         )
         .await?
@@ -1947,6 +1962,7 @@ async fn run_bookkept_stage(
         metrics,
         stage.max_tokens,
         stage.temperature,
+        stage.reasoning_effort.as_deref(),
         mcp_tools,
         config_max_diff_lines(config),
         bare,
@@ -2455,7 +2471,8 @@ pub async fn execute_pipeline(
             }
         }
 
-        let planned = run_stage(
+        let planned =
+run_stage(
             AgentRole::Planner,
             planner_llm.as_ref(),
             &planner_stage.model,
@@ -2472,8 +2489,10 @@ pub async fn execute_pipeline(
             &mut metrics,
             planner_stage.max_tokens,
             planner_stage.temperature,
+            planner_stage.reasoning_effort.as_deref(),
             steer_rx,
         )
+
         .await?;
         // Phase 5.5: accrue the Planner stage (and any earlier unaccounted
         // metric) at this boundary — unconditional, not just when the
@@ -2855,6 +2874,7 @@ pub async fn execute_pipeline(
                     &mut metrics,
                     synth_stage.max_tokens,
                     synth_stage.temperature,
+                    synth_stage.reasoning_effort.as_deref(),
                     &mcp_tools,
                     config_max_diff_lines(config),
                     bare,
@@ -2940,6 +2960,7 @@ pub async fn execute_pipeline(
                         &mut metrics,
                         stage.max_tokens,
                         stage.temperature,
+                        stage.reasoning_effort.as_deref(),
                         &mcp_tools,
                         config_max_diff_lines(config),
                         bare,
@@ -3064,6 +3085,7 @@ pub async fn execute_pipeline(
                             &mut metrics,
                             stage.max_tokens,
                             stage.temperature,
+                            stage.reasoning_effort.as_deref(),
                             &mcp_tools,
                             config_max_diff_lines(config),
                             bare,
@@ -3481,6 +3503,7 @@ pub async fn execute_pipeline(
                         &mut metrics,
                         coder_stage.max_tokens,
                         coder_stage.temperature,
+                        coder_stage.reasoning_effort.as_deref(),
                         steer_rx,
                     )
                     .await?
@@ -3559,7 +3582,8 @@ pub async fn execute_pipeline(
                     crate::audit::HookEvent::PreAgentStart,
                     agent_hook_payload(AgentRole::Coder, &task.id, 1),
                 )?;
-                let repair_json = run_stage(
+                let repair_json =
+run_stage(
                     AgentRole::Coder,
                     &**coder_llm,
                     &coder_stage.model,
@@ -3579,8 +3603,10 @@ pub async fn execute_pipeline(
                     &mut metrics,
                     coder_stage.max_tokens,
                     coder_stage.temperature,
+                    coder_stage.reasoning_effort.as_deref(),
                     steer_rx,
                 )
+
                 .await?;
                 artifacts.push((AgentRole::Coder, repair_json.clone()));
                 fire_hook(
@@ -4979,6 +5005,7 @@ mod tests {
                 max_tokens: 0,
                 temperature: 0.0,
                 fallbacks: Vec::new(),
+                reasoning_effort: None,
             },
             PipelineStageConfig {
                 role: AgentRole::Tester,
@@ -4988,6 +5015,7 @@ mod tests {
                 max_tokens: 0,
                 temperature: 0.0,
                 fallbacks: Vec::new(),
+                reasoning_effort: None,
             },
             PipelineStageConfig {
                 role: AgentRole::Reviewer,
@@ -4997,6 +5025,7 @@ mod tests {
                 max_tokens: 0,
                 temperature: 0.0,
                 fallbacks: Vec::new(),
+                reasoning_effort: None,
             },
         ];
         // Single-agent collapses everything but the Coder.

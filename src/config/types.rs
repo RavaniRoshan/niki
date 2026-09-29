@@ -1156,6 +1156,11 @@ pub struct PipelineStageConfig {
     /// Temperature for this stage. 0.0 = use agent default (0.2).
     #[serde(default)]
     pub temperature: f32,
+    /// The provider's reasoning-effort control, carried on the stage so a stage
+    /// is self-describing — the same value every consumer sees, and the same
+    /// one that goes on the wire.
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 
     /// Fallback providers to try if the primary fails on transient errors.
     #[serde(default)]
@@ -1292,6 +1297,7 @@ fn default_red_agent() -> AgentConfig {
         model: "claude-opus-4".to_string(),
         max_tokens: 0,
         temperature: 0.0,
+        reasoning_effort: None,
         fallbacks: Vec::new(),
         test_command: None,
         mutation_command: None,
@@ -1305,6 +1311,7 @@ fn default_anthropic_agent() -> AgentConfig {
         model: "claude-sonnet-4-20250514".to_string(),
         max_tokens: 0,
         temperature: 0.0,
+        reasoning_effort: None,
         fallbacks: Vec::new(),
         test_command: None,
         mutation_command: None,
@@ -1318,6 +1325,7 @@ fn default_openai_agent() -> AgentConfig {
         model: "gpt-4o-mini".to_string(),
         max_tokens: 0,
         temperature: 0.0,
+        reasoning_effort: None,
         fallbacks: Vec::new(),
         test_command: None,
         mutation_command: None,
@@ -1357,6 +1365,20 @@ pub struct AgentConfig {
     /// `--force` is passed, exactly like a failing suite.
     #[serde(default)]
     pub mutation_command: Option<String>,
+    /// The provider's own reasoning-effort control: `low`, `medium`, `high`, or
+    /// whatever a given model accepts (`minimal`, `xhigh`).
+    ///
+    /// NOT the same as `effort` below, and the two are easy to confuse:
+    /// `effort` is NIKI's preset, expanded locally into `max_tokens` and
+    /// `temperature` and understood by nobody else; this is sent to the
+    /// provider, which spends a thinking budget on it. It applies only to
+    /// models that expose one, and it is the axis driving both price and
+    /// latency on a reasoning model.
+    ///
+    /// Unset sends nothing, which is the safe default: a provider that does
+    /// not know the field may reject the whole request.
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     /// Effort preset for this agent: `low` (focused, deterministic),
     /// `medium` (default balance), or `high` (expansive). Applies ONLY when
     /// `max_tokens`/`temperature` are unset (0) — explicit values always win.
@@ -1372,6 +1394,7 @@ impl Default for AgentConfig {
             model: String::new(),
             max_tokens: 0,
             temperature: 0.0,
+            reasoning_effort: None,
             fallbacks: Vec::new(),
             test_command: None,
             mutation_command: None,
