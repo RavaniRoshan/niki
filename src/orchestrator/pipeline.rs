@@ -1103,6 +1103,10 @@ async fn run_parallel_coders(
     // Split, like the step cap: N coders each allowed the whole remaining
     // budget is how one cap becomes N.
     parallel_cost_ceiling: Option<f64>,
+    // Split like the budgets: N coders must not each get the whole posture,
+    // and these are not consumable so they are simply shared.
+    permission_mode: String,
+    fail_closed_headless: bool,
 ) -> Result<Vec<CodeDiff>> {
     let event_tx = base_display
         .tui_tx()
@@ -1122,6 +1126,10 @@ async fn run_parallel_coders(
         let mcp_tools = mcp_tools.to_string();
         let event_tx = event_tx.clone();
         let hook_bus = hook_bus.clone();
+        // The spawned task is `async move`, so it takes ownership of its own
+        // copy rather than borrowing the caller's — which is why this cannot
+        // simply be read at the use site below.
+        let permission_mode = permission_mode.clone();
 
         tasks.push(tokio::spawn(async move {
             // Own worktree sandbox per coder → isolated changes.
@@ -1174,6 +1182,8 @@ async fn run_parallel_coders(
                 // what the user asked for.
                 parallel_step_cap,
                 parallel_cost_ceiling,
+                permission_mode.clone(),
+                fail_closed_headless,
             )
             .await?;
             let output = solo.output;
@@ -1253,6 +1263,7 @@ async fn run_experimental_research(
         permission_mode: crate::runtime::ToolContext::parse_permission_mode(
             &config.permissions.mode,
         ),
+        fail_closed_headless: config.permissions.fail_closed_headless,
         task_store: None,
     };
     let messages = vec![
@@ -1499,6 +1510,11 @@ async fn run_coder_tool_loop(
     // The run's remaining dollar allowance, so the loop can stop at the
     // ceiling instead of discovering it at the next stage boundary.
     cost_ceiling_usd: Option<f64>,
+    // `[permissions] mode` and `fail_closed_headless`, carried as plain values
+    // for the same reason `step_cap` is: the loop builds its own context and
+    // must not need a borrow of the configuration to do it.
+    permission_mode: &str,
+    fail_closed_headless: bool,
     // Sent to the provider on every request the loop makes. See
     // `LoopOptions::reasoning_effort` for why this is a parameter at all.
     reasoning_effort: Option<&str>,
@@ -1533,7 +1549,17 @@ async fn run_coder_tool_loop(
         role: "coder".into(),
         project_path: project_path.to_path_buf(),
         permissions: HashMap::new(),
-        permission_mode: crate::runtime::ToolContext::parse_permission_mode("manual"),
+        // The configured posture, not a hardcoded string.
+        //
+        // This was `"manual"` — so `[permissions] mode` and
+        // `niki run --permission-mode` had no effect on the path that runs the
+        // Coder, which is the only path most users ever take. A user who set
+        // `dontask` for an unattended run still got every `Ask` tool denied.
+        permission_mode: crate::runtime::ToolContext::parse_permission_mode(permission_mode),
+        // And the opt-in that makes `manual` deny rather than allow, so
+        // `fail_closed_headless` is finally able to fail *open* by default and
+        // closed on request, as it is documented to.
+        fail_closed_headless,
         task_store: None,
     };
 
@@ -1829,6 +1855,10 @@ async fn run_role(
     // the thing that accounts, and lending one to the other is how the two
     // ended up unable to see each other.
     cost_ceiling: Option<f64>,
+    // `[permissions] mode` and `fail_closed_headless`, for the Coder's tool
+    // loop. Plain strings and a bool for the same reason as `step_cap`.
+    permission_mode: String,
+    fail_closed_headless: bool,
 ) -> Result<RoleRun> {
     // Recovery turns the Coder's tool loop spends on its own reasons, handed on
     // so the pipeline's shared allowance starts where the loop's left off.
@@ -2019,6 +2049,8 @@ async fn run_role(
             max_tokens,
             step_cap,
             cost_ceiling,
+            &permission_mode,
+            fail_closed_headless,
             reasoning_effort,
             display,
             metrics,
@@ -2172,6 +2204,8 @@ async fn run_bookkept_stage(
         steer_rx,
         state.run_budget.remaining_steps(),
         state.run_budget.remaining_usd(),
+        config.permissions.mode.clone(),
+        config.permissions.fail_closed_headless,
     )
     .await?;
     let RoleRun {
@@ -3037,6 +3071,8 @@ run_stage(
                         .run_budget
                         .remaining_usd()
                         .map(|u| u / config.parallel.coder_count.max(1) as f64),
+                    config.permissions.mode.clone(),
+                    config.permissions.fail_closed_headless,
                 )
                 .await?;
                 // Phase 5.5: close the parallel-coder spend hole — N coders
@@ -3100,6 +3136,8 @@ run_stage(
                     steer_rx,
                     state.run_budget.remaining_steps(),
                     state.run_budget.remaining_usd(),
+                    config.permissions.mode.clone(),
+                    config.permissions.fail_closed_headless,
                 )
                 .await?;
                 let (json, summary, role_output) =
@@ -3188,6 +3226,8 @@ run_stage(
                         steer_rx,
                         state.run_budget.remaining_steps(),
                         state.run_budget.remaining_usd(),
+                        config.permissions.mode.clone(),
+                        config.permissions.fail_closed_headless,
                     )
                     .await?;
                     let (json, summary, role_output) =
@@ -3315,6 +3355,8 @@ run_stage(
                             steer_rx,
                             state.run_budget.remaining_steps(),
                             state.run_budget.remaining_usd(),
+                            config.permissions.mode.clone(),
+                            config.permissions.fail_closed_headless,
                         )
                         .await?;
                         if stage.role == AgentRole::Coder {
@@ -3711,6 +3753,8 @@ run_stage(
                 coder_stage.max_tokens,
                 state.run_budget.remaining_steps(),
                 state.run_budget.remaining_usd(),
+                &config.permissions.mode,
+                config.permissions.fail_closed_headless,
                 coder_stage.reasoning_effort.as_deref(),
                 display,
                 &mut metrics,
@@ -5298,6 +5342,49 @@ mod tests {
         assert_eq!(
             coder2.temperature, 0.7,
             "explicit temperature overrides effort"
+        );
+    }
+
+    /// The Coder's tool loop must see the configured posture.
+    ///
+    /// It was built with a literal `"manual"`, and the function had no
+    /// `&NikiConfig` to change it with — so `[permissions] mode` and
+    /// `niki run --permission-mode` had **no effect on the path that runs the
+    /// Coder**, which is the only path most users ever take. A user who set
+    /// `dontask` for an unattended run still got every `Ask` tool denied.
+    ///
+    /// The sibling loop (`run_experimental_research`) has always threaded it,
+    /// which is what makes this a bug and not a decision.
+    #[test]
+    fn the_coder_loop_is_given_the_configured_permission_mode() {
+        let src = include_str!("pipeline.rs");
+
+        // The literal that started all of it.
+        assert!(
+            !src.contains(r#"parse_permission_mode("manual")"#),
+            "the Coder loop must not hardcode a permission mode: `[permissions] \
+             mode` and `--permission-mode` are documented to apply, and the \
+             sibling research loop already threads them"
+        );
+
+        // And it must actually read the configuration, at every call site.
+        let loop_start = src
+            .find("async fn run_coder_tool_loop(")
+            .expect("the loop exists");
+        let loop_end = src[loop_start..]
+            .find("\n/// What to tell the user when the Coder's tool loop")
+            .map(|i| loop_start + i)
+            .expect("the loop ends before the notice helper");
+        let body = &src[loop_start..loop_end];
+        assert!(
+            body.contains("parse_permission_mode(permission_mode)"),
+            "the loop must derive its mode from the value it was given, not \
+             from a literal"
+        );
+        assert!(
+            body.contains("fail_closed_headless"),
+            "and it must carry `fail_closed_headless`, which is the opt-in that \
+             decides whether `manual` allows or denies"
         );
     }
 }

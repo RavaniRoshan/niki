@@ -89,6 +89,7 @@ fn ctx() -> niki::runtime::ToolContext {
         project_path: std::env::temp_dir(),
         permissions: std::collections::HashMap::new(),
         permission_mode: "bypass".into(),
+        fail_closed_headless: false,
         task_store: None,
     }
 }
