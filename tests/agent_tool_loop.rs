@@ -22,6 +22,15 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// The `reasoning_effort` of every request `ScriptedAgent` was handed.
+///
+/// A module-level recorder rather than a struct field, because adding a field
+/// meant touching every `ScriptedAgent` literal in a 1700-line file — and the
+/// alternative, asserting on `LoopOptions`, is the exact mistake this test
+/// exists to catch: it would pass with the field present and the value never
+/// read.
+static SEEN_EFFORTS: std::sync::Mutex<Vec<Option<String>>> = std::sync::Mutex::new(Vec::new());
+
 /// A script: read a file, then submit an artifact.
 struct ScriptedAgent {
     /// Per-turn: the tool call to make, or `None` to answer in prose.
@@ -48,6 +57,10 @@ impl LlmProvider for ScriptedAgent {
             .lock()
             .expect("lock")
             .push(request.user_message.clone());
+        SEEN_EFFORTS
+            .lock()
+            .expect("lock")
+            .push(request.reasoning_effort.clone());
         let n = self.turn.fetch_add(1, Ordering::SeqCst);
         let step = self.script.get(n).cloned().flatten();
         Ok(match step {
@@ -133,6 +146,7 @@ fn run_truncated_then_complete(
     let out = rt
         .block_on(run_tool_loop_with(
             LoopOptions {
+                reasoning_effort: None,
                 submit_artifact: Some(submit_artifact_spec(serde_json::json!({
                     "type": "object",
                     "properties": artifact(),
@@ -194,6 +208,7 @@ fn run_with_prose(
     let out = rt
         .block_on(run_tool_loop_with(
             LoopOptions {
+                reasoning_effort: None,
                 submit_artifact: Some(submit_artifact_spec(serde_json::json!({
                     "type": "object",
                     "properties": artifact(),
@@ -297,6 +312,7 @@ fn run_with(
     let out = rt
         .block_on(run_tool_loop_with(
             LoopOptions {
+                reasoning_effort: None,
                 submit_artifact: Some(submit_artifact_spec(serde_json::json!({
                     "type": "object",
                     "properties": artifact(),
@@ -1713,5 +1729,71 @@ fn a_recommendation_the_provider_cannot_serve_says_so_and_offers_a_real_one() {
     assert_eq!(
         niki::recommend::availability(None, "m"),
         niki::recommend::Availability::Unknown
+    );
+}
+
+/// The loop's own request builder must carry the stage's reasoning effort.
+///
+/// This is the smallest reproduction of the defect
+/// `a_configured_reasoning_effort_reaches_the_provider_on_a_real_run` found
+/// end to end, kept separately so the failure names the layer instead of the
+/// journey. Every earlier test of `reasoning_effort` checked a hop: that the
+/// config parses, that the stage carries it, that `run_agent` forwards it.
+/// The loop builds its *own* `CompletionRequest`, so it was a fourth
+/// constructor nobody had looked at — and the Coder, the stage where a
+/// thinking budget matters most and the one most likely to be configured with
+/// one, runs through it exclusively.
+///
+/// The assertion is on the request the provider was handed, not on the struct
+/// that carries it. A test that reads `LoopOptions` proves the field exists;
+/// only this proves the value arrives.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_tool_loop_puts_the_reasoning_effort_on_the_wire() {
+    SEEN_EFFORTS.lock().expect("lock").clear();
+    let dir = tempfile::tempdir().expect("tmp");
+    let agent = ScriptedAgent {
+        script: vec![Some((
+            "submit_artifact".to_string(),
+            serde_json::json!({"edits": [], "files_changed": []}),
+        ))],
+        turn: AtomicUsize::new(0),
+        seen_prompts: Arc::new(std::sync::Mutex::new(Vec::new())),
+    };
+
+    run_tool_loop_with(
+        LoopOptions {
+            reasoning_effort: Some("high".to_string()),
+            submit_artifact: Some(submit_artifact_spec(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "edits": {"type": "array"},
+                    "files_changed": {"type": "array"},
+                },
+                "required": ["edits", "files_changed"],
+            }))),
+            validate_artifact: None,
+        },
+        &agent,
+        "m",
+        &build_baseline_registry(),
+        &ctx(dir.path()),
+        vec![LoopMessage::User("add sum()".into())],
+        None,
+        4,
+        None,
+        None,
+    )
+    .await
+    .expect("the loop runs");
+
+    let sent = SEEN_EFFORTS.lock().expect("lock").clone();
+    assert!(
+        !sent.is_empty(),
+        "the loop must have made at least one request; it made none"
+    );
+    assert!(
+        sent.iter().all(|e| e.as_deref() == Some("high")),
+        "every request in the loop belongs to this stage and must carry the \
+         effort; it sent {sent:?}"
     );
 }

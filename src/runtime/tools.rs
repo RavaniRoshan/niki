@@ -2899,6 +2899,24 @@ pub struct LoopOptions {
     /// loop, and in Codex, where a rejected submission is an error result the
     /// model reads and answers.
     pub validate_artifact: Option<ArtifactValidator>,
+    /// The stage's reasoning-effort control, carried on every request the loop
+    /// makes.
+    ///
+    /// This field is the whole reason `reasoning_effort` works. The Coder runs
+    /// as a tool loop rather than a one-shot call, and the loop builds its own
+    /// `CompletionRequest` from scratch — so a value carried as far as the
+    /// stage, threaded through `run_agent` on every other path, and correct in
+    /// every unit test of every hop, stopped here. The setting read as
+    /// configured, parsed, and did nothing, for the one role it is most likely
+    /// to be configured on. `LoopOptions` was the only request builder in the
+    /// codebase that did not set the field, and nothing asserted that, because
+    /// asserting on it meant asserting on the struct rather than on the wire.
+    ///
+    /// Found by `a_configured_reasoning_effort_reaches_the_provider_on_a_real_run`,
+    /// which records what the mock was asked for and reads the value back off
+    /// the request. Every test before it checked a hop; that one checks the
+    /// destination, and the destination was wrong.
+    pub reasoning_effort: Option<String>,
 }
 
 /// Validates a submitted artifact; `Err` is a message shown to the model.
@@ -2910,6 +2928,7 @@ impl std::fmt::Debug for LoopOptions {
         f.debug_struct("LoopOptions")
             .field("submit_artifact", &self.submit_artifact)
             .field("validate_artifact", &self.validate_artifact.is_some())
+            .field("reasoning_effort", &self.reasoning_effort)
             .finish()
     }
 }
@@ -2971,7 +2990,10 @@ pub async fn run_tool_loop_with(
             temperature: 0.7,
             json_schema: None,
             tools: tools.clone(),
-            ..Default::default()
+            // On every step, not just the first: a multi-turn loop is one
+            // conversation the model is deepening, and the dial belongs to the
+            // stage rather than to any single turn of it.
+            reasoning_effort: opts.reasoning_effort.clone(),
         };
 
         let response = provider.complete(request).await?;
