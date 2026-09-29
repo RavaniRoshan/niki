@@ -13,7 +13,7 @@ env:
 jobs:
   integration-mock-pipeline:
     name: Mock LLM Pipeline
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7

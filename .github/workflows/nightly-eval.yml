@@ -21,7 +21,7 @@ jobs:
   # in-sample rate would be flattering itself.
   canary:
     name: Canary kill-rate gate
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -42,7 +42,7 @@ jobs:
   # shipped CI jobs that passed while executing nothing.
   journeys-nightly:
     name: Consumer journeys
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -59,7 +59,7 @@ jobs:
   # check, so the test skips rather than passing vacuously.
   differential:
     name: Backend differential
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -78,7 +78,7 @@ jobs:
   # crossing it by 0.01% is the same as crossing it by 10.
   coverage:
     name: Coverage report
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -102,7 +102,7 @@ jobs:
   # reported rather than asserted, and gated here on a schedule a human sees.
   price-table:
     name: Price table freshness
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -130,7 +130,7 @@ jobs:
 
   eval-replay:
     name: Eval replay + manifest
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7

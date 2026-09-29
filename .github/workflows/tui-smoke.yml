@@ -28,7 +28,7 @@ env:
 jobs:
   tui-smoke:
     name: TUI smoke (tmux PTY)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7

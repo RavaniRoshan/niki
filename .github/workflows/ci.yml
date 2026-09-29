@@ -31,7 +31,7 @@ jobs:
   # ── Phase 1: Fast checks (fail fast) ──────────────────────────────
   check:
     name: Check (fmt + clippy)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -46,7 +46,7 @@ jobs:
   # ── Phase 1-msrv: Minimum Supported Rust Version (1.88) ─────────────
   msrv:
     name: MSRV (1.88)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -59,7 +59,7 @@ jobs:
   # ── Phase 1-features: Build without default features ────────────────
   no-default-features:
     name: Build (--no-default-features)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -69,7 +69,7 @@ jobs:
   # ── Phase 1b: Supply-chain audit (cargo-audit + cargo-deny) ────────
   audit:
     name: Audit (supply chain)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -99,7 +99,7 @@ jobs:
   # invariant: every download URL referenced by a manifest must exist.
   manifest-parity:
     name: Manifest parity
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
       - name: Check manifest download URLs resolve
@@ -149,7 +149,7 @@ jobs:
   # ── Phase 2: Unit + integration tests ─────────────────────────────
   test:
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [check, msrv, no-default-features]
     steps:
       - uses: actions/checkout@v7
@@ -178,7 +178,7 @@ jobs:
   # niki at all. This job is the gate that keeps it working.
   install:
     name: Install path
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -197,7 +197,7 @@ jobs:
   # ── Phase 2c: release-packaging contract ──────────────────────────
   dist-contract:
     name: Release packaging contract
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -217,11 +217,11 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: blacksmith-4vcpu-ubuntu-2404
           - target: x86_64-apple-darwin
-            os: macos-latest
+            os: blacksmith-6vcpu-macos-15
           - target: aarch64-apple-darwin
-            os: macos-latest
+            os: blacksmith-6vcpu-macos-15
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -239,7 +239,7 @@ jobs:
   e2e-mock:
     name: E2E Pipeline (Mock LLM)
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -329,7 +329,7 @@ jobs:
   # and was never wired to anything — 11 passing tests nobody ran.
   tui-headless:
     name: Headless PTY TUI (${{ matrix.colour }})
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     # Both colour states, as separate jobs on separate runners — not as two
     # invocations in one job. The suite is timing-sensitive by construction:
@@ -396,7 +396,7 @@ jobs:
   # already shipped CI jobs that went green while executing nothing.
   journeys:
     name: Consumer journeys
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -415,7 +415,7 @@ jobs:
   # advertised in the footer and did nothing. Every other suite passed.
   tui-pty:
     name: Real PTY TUI
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -454,7 +454,7 @@ jobs:
   # `kill_on_drop`) are exactly the ones a Linux runner cannot exercise.
   windows:
     name: Windows (build + smoke)
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -480,7 +480,7 @@ jobs:
   visual:
     name: Visual regression (VHS)
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     env:
       NIKI_CI: "1"
@@ -527,7 +527,7 @@ jobs:
   validate-intel-mac:
     name: Validate x86_64 on Intel Mac
     needs: build-matrix
-    runs-on: macos-15-intel
+    runs-on: blacksmith-6vcpu-macos-15
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -589,7 +589,7 @@ jobs:
   product-verify:
     name: Product Acceptance Suite
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
