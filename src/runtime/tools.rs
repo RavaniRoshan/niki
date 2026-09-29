@@ -4180,9 +4180,22 @@ mod tests {
 
     #[tokio::test]
     async fn ask_under_manual_denies_fail_closed() {
-        // Phase 3.4: `Ask` with no approval UI in the loop denies headless.
+        // The opt-in case, which is what this test's name has always claimed
+        // to be checking.
+        //
+        // It was not. It built a context with the default
+        // `fail_closed_headless: false` and asserted a denial — so it passed
+        // only because the loop denied *unconditionally*, and it would have
+        // kept passing if the documented behaviour had been implemented and
+        // the flag had been ignored. A test named for the fail-closed path
+        // that never enables fail-closed is worse than no test: it looks like
+        // coverage of the switch while pinning the opposite of it.
+        //
+        // The default case — `manual` with no approval UI allows, with a
+        // warning — is `manual_allows_an_ask_with_no_approval_ui` above.
         let registry = build_baseline_registry();
-        let ctx = manual_ctx();
+        let mut ctx = manual_ctx();
+        ctx.fail_closed_headless = true;
         let result = registry
             .execute(
                 "bash",
@@ -4192,8 +4205,11 @@ mod tests {
             .await;
         assert_eq!(result.status, ToolStatus::PermissionDenied);
         assert!(
-            result.diagnostics.iter().any(|d| d.contains("fail-closed"))
-                || result.summary.contains("approval"),
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.contains("fail_closed_headless"))
+                || result.summary.contains("fail_closed_headless"),
             "{:?}",
             result.diagnostics
         );
