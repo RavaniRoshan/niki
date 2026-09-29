@@ -1376,6 +1376,9 @@ async fn run_coder_tool_loop(
     // The loop's own step budget bounds the spend, so the stage's
     // per-response  does not apply to it.
     _max_tokens: u32,
+    // Sent to the provider on every request the loop makes. See
+    // `LoopOptions::reasoning_effort` for why this is a parameter at all.
+    reasoning_effort: Option<&str>,
     display: &mut AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
 ) -> Option<(String, u32)> {
@@ -1426,6 +1429,13 @@ async fn run_coder_tool_loop(
         crate::runtime::LoopOptions {
             submit_artifact: Some(crate::runtime::submit_artifact_spec(schema_json)),
             validate_artifact: Some(validator),
+            // The Coder is the one stage that runs as a loop rather than a
+            // single call, so this is the one place the value would have been
+            // dropped: every other stage's path threads it into `run_agent`,
+            // and the loop builds its own request without it. A user who set
+            // `reasoning_effort` on the Coder — the stage where a thinking
+            // budget helps most — was paying for a dial that did nothing.
+            reasoning_effort: reasoning_effort.map(str::to_string),
         },
         llm,
         model,
@@ -1819,6 +1829,7 @@ async fn run_role(
             schema,
             project_path,
             max_tokens,
+            reasoning_effort,
             display,
             metrics,
         )
@@ -3484,6 +3495,7 @@ run_stage(
                 "schemas/code_diff.schema.json",
                 &task.project_path,
                 coder_stage.max_tokens,
+                coder_stage.reasoning_effort.as_deref(),
                 display,
                 &mut metrics,
             )

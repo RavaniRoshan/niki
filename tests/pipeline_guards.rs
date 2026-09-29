@@ -975,7 +975,7 @@ async fn a_configured_reasoning_effort_reaches_the_provider_on_a_real_run() {
     assert_eq!(
         sent.iter().filter(|r| r.reasoning_effort.is_none()).count(),
         sent.iter()
-            .filter(|r| r.model != "mock-coder" && !r.reasoning_effort.is_some())
+            .filter(|r| r.model != "mock-coder" && r.reasoning_effort.is_none())
             .count(),
         "every non-Coder request must leave it unset"
     );
