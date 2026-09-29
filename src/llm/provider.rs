@@ -152,6 +152,17 @@ pub struct CompletionRequest {
     /// to) text. Providers without native support simply ignore this field and
     /// return `tool_calls` empty, so callers fall through to plain text.
     pub tools: Option<Vec<ToolSpec>>,
+    /// Reasoning effort, for models that expose one: `low`, `medium`, `high`,
+    /// and whatever else a provider offers.
+    ///
+    /// `None` sends no such field at all, which is the default and the safe
+    /// setting — an OpenAI-compatible provider that does not recognise the key
+    /// may reject the entire request, so this is something a user opts into
+    /// rather than something NIKI chooses. Providers that do recognise it are
+    /// the ones where it matters most: a reasoning model is billed and made to
+    /// wait by its thinking budget, and the model name never tells you the
+    /// range a given model accepts.
+    pub reasoning_effort: Option<String>,
 }
 
 /// A single tool exposed to the LLM for native tool calling.

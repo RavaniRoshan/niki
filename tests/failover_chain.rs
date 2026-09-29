@@ -70,6 +70,7 @@ async fn failover_chain_falls_back_on_429() {
         temperature: 0.0,
         json_schema: None,
         tools: None,
+        reasoning_effort: None,
     };
 
     let resp = provider.complete(request).await.unwrap();

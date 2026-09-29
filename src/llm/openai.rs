@@ -120,6 +120,15 @@ impl LlmProvider for OpenAiProvider {
                 }
             ]
         });
+        // Only when set. An OpenAI-compatible provider that does not know the
+        // key may reject the whole request, so this is opt-in and never
+        // inferred from a model name — the accepted range is a property of the
+        // model, and guessing it turns a working run into a 400.
+        if let Some(effort) = &request.reasoning_effort
+            && !effort.is_empty()
+        {
+            payload["reasoning_effort"] = json!(effort);
+        }
 
         // Native tool calling (Phase 3.1): serialize capped specs so the model
         // can emit `tool_calls`; absent/empty tools leave the payload unchanged.

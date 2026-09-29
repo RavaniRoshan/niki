@@ -82,6 +82,7 @@ pub async fn run_agent(
         temperature,
         json_schema: None,
         tools: None,
+        ..Default::default()
     };
 
     display.agent_start(role);

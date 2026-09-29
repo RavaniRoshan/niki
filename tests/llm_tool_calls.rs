@@ -25,6 +25,7 @@ fn tool_request(model: &str) -> CompletionRequest {
                 "properties": {"path": {"type": "string"}}
             }),
         }]),
+        reasoning_effort: None,
     }
 }
 

@@ -551,6 +551,7 @@ async fn measure_capability(
             temperature: 0.0,
             json_schema: None,
             tools: Some(vec![spec.clone()]),
+            ..Default::default()
         };
         match provider.complete(request).await {
             Ok(response) => {

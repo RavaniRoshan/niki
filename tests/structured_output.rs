@@ -79,6 +79,7 @@ fn test_request_structured_default_fallback() {
         temperature: 0.0,
         json_schema: None,
         tools: None,
+        reasoning_effort: None,
     };
 
     // Just verify the method compiles and has the right type

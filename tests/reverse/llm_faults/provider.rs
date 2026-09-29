@@ -29,6 +29,7 @@ fn request(model: &str) -> CompletionRequest {
         temperature: 0.0,
         json_schema: None,
         tools: None,
+        reasoning_effort: None,
     }
 }
 

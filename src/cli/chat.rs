@@ -173,6 +173,7 @@ async fn reply_text(config: &NikiConfig, user_text: &str) -> String {
                 temperature: 0.7,
                 json_schema: None,
                 tools: None,
+                ..Default::default()
             };
             match provider.complete(req).await {
                 Ok(resp) => resp.content,

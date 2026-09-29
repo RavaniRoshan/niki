@@ -1382,3 +1382,81 @@ async fn a_catalogue_without_a_key_explains_how_to_set_one() {
         "and the command that sets it: {msg}"
     );
 }
+
+/// Reasoning effort reaches the wire — and stays off unless asked for.
+///
+/// Two things have to be true, and the second is the dangerous one:
+///
+/// * when set, `reasoning_effort` is in the request body, because on a
+///   reasoning model it is what drives both price and latency, and a
+///   harness that cannot set it is leaving the most important dial
+///   untouched;
+/// * when unset, the key is **absent**, not null. A provider that does not
+///   know the field may reject the whole request, so a harness that sent it
+///   by default would turn every run on every non-reasoning provider into a
+///   400 — and it would look like the provider was broken.
+///
+/// The value is never inferred from a model name. The accepted range is a
+/// property of the model, so guessing it is exactly the failure above.
+#[tokio::test]
+async fn reasoning_effort_reaches_the_wire_only_when_set() {
+    use niki::config::ProviderConfig;
+    use niki::llm::provider::{CompletionRequest, LlmProvider, TokenUsage};
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = niki::llm::openai::OpenAiProvider::new_named(
+        &ProviderConfig {
+            api_key: Some("k".into()),
+            base_url: Some(server.uri()),
+            default_model: "o3-mini".into(),
+        },
+        "openrouter",
+    )
+    .expect("provider");
+
+    let request = |effort: Option<&str>| CompletionRequest {
+        model: "o3-mini".into(),
+        user_message: "hi".into(),
+        reasoning_effort: effort.map(str::to_string),
+        ..Default::default()
+    };
+
+    provider
+        .complete(request(Some("high")))
+        .await
+        .expect("completes");
+    provider.complete(request(None)).await.expect("completes");
+
+    let bodies: Vec<serde_json::Value> = server
+        .received_requests()
+        .await
+        .expect("requests")
+        .iter()
+        .map(|r| serde_json::from_slice(&r.body).expect("json"))
+        .collect();
+    assert_eq!(bodies.len(), 2, "both requests recorded");
+
+    assert_eq!(
+        bodies[0]["reasoning_effort"],
+        serde_json::json!("high"),
+        "a set effort must reach the provider"
+    );
+    assert!(
+        bodies[1].get("reasoning_effort").is_none(),
+        "an unset effort must be absent, not null — a provider that does not know the \\
+         field may reject the whole request. Got: {}",
+        bodies[1]
+    );
+
+    let _ = TokenUsage::default();
+}
