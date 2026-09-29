@@ -96,13 +96,26 @@ pub fn render_input_box(frame: &mut Frame, state: &AppState, area: Rect) {
         // cursor_pos is a byte index; rendering counts characters.
         let cursor = state.input_state.cursor_char_idx().min(buffer_chars.len());
 
-        // Horizontal scroll window calculation
+        // Horizontal scroll window calculation.
+        //
+        // `avail` is `inner_width - (mode_len + 1)` and `mode_len` is 8, so
+        // the terminal-width guard at the top of this function (which allows
+        // anything from 8 columns) still leaves `avail == 0` for a window of
+        // 8–11 columns. In that band the `else` arm computed
+        // `start = cursor + 1 = 1` and the slice below asked for
+        // `buffer_chars[1..0]` — "slice index starts at 1 but ends at 0".
+        //
+        // Reachable by dragging a window narrow, or a tmux split. The window
+        // is zero wide, so there is genuinely nothing to draw; clamping to
+        // `(0, 0)` renders the cursor alone, which is the honest answer for a
+        // box with no room for text.
+        let avail = avail.max(1);
         let (start, end) = if buffer_chars.len() <= avail {
             (0, buffer_chars.len())
         } else if cursor < avail {
             (0, avail)
         } else {
-            let s = cursor + 1 - avail;
+            let s = (cursor + 1 - avail).min(buffer_chars.len());
             (s, (s + avail).min(buffer_chars.len()))
         };
 

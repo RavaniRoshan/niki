@@ -1,5 +1,6 @@
 //! Fleet dashboard — mission control for multiple autonomous missions.
 
+use crate::display::theme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -185,12 +186,19 @@ fn render_mission_card(
     };
 
     let elapsed = format_duration(mission.elapsed());
+    // `name_w` is a budget in terminal **columns**; `description` is indexed
+    // in **bytes**. Comparing `len()` against a column count and then slicing
+    // at that offset looks right and is not: any task description with a
+    // multibyte character inside the first few dozen bytes panicked the
+    // render thread. `niki run "Actualizar la documentación"` then `g` was
+    // enough — an ordinary prompt in any language other than English, and one
+    // keypress away.
+    //
+    // `theme::truncate_str_ellipsis` already measures in cells and snaps to a
+    // character boundary. It is used correctly everywhere else in this crate;
+    // these four call sites predate it.
     let name_w = (area.width as usize).saturating_sub(6);
-    let name = if mission.description.len() > name_w {
-        format!("{}…", &mission.description[..name_w.saturating_sub(1)])
-    } else {
-        mission.description.clone()
-    };
+    let name = theme::truncate_str_ellipsis(&mission.description, name_w);
 
     let block = Block::default()
         .borders(Borders::ALL)
