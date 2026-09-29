@@ -106,6 +106,9 @@ pub async fn run_agent(
     // been consumed.
     #[allow(unused_assignments)]
     let mut finish_reason: Option<String> = None;
+    // Set only when a re-prompt could not be delivered. Distinguishes "the
+    // model produced something invalid" from "we never got to ask again".
+    let mut transport_failure: Option<String> = None;
     // The message of the last mid-stream failure, so an unchanged repeat is
     // recognised as the same problem rather than a new one.
     let mut last_mid_stream_error: Option<String> = None;
@@ -442,6 +445,14 @@ pub async fn run_agent(
                         role = ?role,
                         "Re-prompt failed: {}", e
                     );
+                    // Remembered, because the alternative is telling a user
+                    // their model is too small when the model never got the
+                    // chance to try again. The `break` below falls through to
+                    // the same final validation as a genuine schema failure,
+                    // and that path names model capability as the cause — so a
+                    // 429, a dropped connection or an expired key was reported
+                    // as "use a bigger model", with a remedy that cannot help.
+                    transport_failure = Some(e.to_string());
                     break;
                 }
             }
@@ -465,11 +476,19 @@ pub async fn run_agent(
         // it. Without this the message is a schema dump and the run just stops:
         // in practice the cause is almost always a model too small to emit a
         // conformant artifact, which is invisible unless it is named.
-        let hint = "The response was valid JSON but did not satisfy the artifact requirements.\n\
-             Most often the model is too small to emit a conformant artifact — \
-             `qwen2.5-coder:3b` fails here on ordinary tasks.\n\
-             Try: a larger model (7b+), or run ./scripts/dogfood.sh to see where your \
-             model stops.";
+        // The diagnosis has to match the evidence.
+        //
+        // When the re-prompt could not be delivered, the artifact we are
+        // holding is the *first* attempt — the one that was already invalid.
+        // Reporting that as "the model is too small" is often true and
+        // always beside the point: the thing that actually happened is a 429,
+        // a dropped connection, or a key that expired, and the remedy it
+        // suggests cannot fix any of them.
+        //
+        // The other half of the old hint pointed at `./scripts/dogfood.sh`,
+        // which exists in this repository and in nobody's install. A remedy a
+        // user cannot run is not a remedy.
+        let hint = artifact_validation_hint(transport_failure.as_deref());
         display.agent_failed(role, &format!("Validation failed: {}", err_msg));
         return Err(crate::NikiError::ArtifactValidation {
             agent: role,
@@ -490,6 +509,39 @@ pub async fn run_agent(
     });
 
     Ok((json_content, token_usage, retry_count, ttft_ms))
+}
+
+/// What to tell the user when a stage's artifact does not validate.
+///
+/// Split out so the *choice between the two diagnoses* is testable, because
+/// that choice is the defect. One code path produced both messages: a
+/// re-prompt that could not be delivered (`break` on a transport error) fell
+/// through to the same final validation as a genuinely malformed response, and
+/// the user was told their model was too small. Often true — the first
+/// response *was* invalid — and always beside the point, because what actually
+/// happened was a 429, a dropped connection or an expired key, and the remedy
+/// it suggested cannot fix any of them.
+///
+/// The other half of that hint pointed at `./scripts/dogfood.sh`, which lives
+/// in this repository and in nobody's install. A remedy a user cannot run is
+/// not a remedy.
+pub fn artifact_validation_hint(transport_failure: Option<&str>) -> String {
+    match transport_failure {
+        Some(cause) => format!(
+            "The first response did not satisfy the artifact requirements, and the correction \
+             could not be delivered, so the model was never asked again.\n\
+             What went wrong: {cause}\n\
+             That is a connection or credentials problem, not a model-capability one, so \
+             changing models will not help.\n\
+             Try: `niki doctor` to check the provider is reachable and the key works."
+        ),
+        None => "The response was valid JSON but did not satisfy the artifact requirements.\n\
+             Most often the model is too small to emit a conformant artifact — \
+             `qwen2.5-coder:3b` fails here on ordinary tasks.\n\
+             Try: a larger model (7b+), then `niki doctor` to confirm the provider is \
+             healthy."
+            .to_string(),
+    }
 }
 
 /// The Coder prompt, rendered with the same context a real Coder stage gets.
@@ -616,4 +668,64 @@ pub fn is_mid_stream_retryable(e: &anyhow::Error) -> bool {
         return false;
     }
     RETRYABLE.iter().any(|r| msg.contains(r))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::artifact_validation_hint;
+
+    /// A run that failed because the network failed must not be told the model
+    /// was too small.
+    ///
+    /// This is the false-positive shape the whole harness is built to catch,
+    /// and it was sitting in the product: one code path, two unrelated causes,
+    /// and a hint that named model capability for both. A user whose key had
+    /// expired mid-run was told to buy a bigger model.
+    #[test]
+    fn a_transport_failure_is_not_reported_as_a_model_problem() {
+        let hint = artifact_validation_hint(Some("429 Too Many Requests"));
+        assert!(
+            hint.contains("429 Too Many Requests"),
+            "the actual cause must be quoted back: {hint}"
+        );
+        assert!(
+            !hint.contains("too small to emit"),
+            "a request that was never delivered says nothing about the model's \
+             capability, and this hint claims it does: {hint}"
+        );
+        assert!(
+            hint.contains("niki doctor"),
+            "and it must offer a next step that can actually diagnose it: {hint}"
+        );
+    }
+
+    /// The other direction. When the model really did answer and the artifact
+    /// really was wrong, model capability *is* the likeliest cause and saying
+    /// so is the useful thing. A fix that only ever softened the message would
+    /// lose that.
+    #[test]
+    fn a_real_schema_failure_still_blames_the_model() {
+        let hint = artifact_validation_hint(None);
+        assert!(
+            hint.contains("too small to emit"),
+            "a conformant-looking answer that fails the schema is still a model \
+             problem: {hint}"
+        );
+    }
+
+    /// A remedy a user cannot run is not a remedy. `scripts/dogfood.sh` is a
+    /// repository script, referenced from inside a Homebrew, Scoop and winget
+    /// install — three of which do not contain it.
+    #[test]
+    fn no_hint_points_at_a_script_the_user_does_not_have() {
+        for hint in [
+            artifact_validation_hint(None),
+            artifact_validation_hint(Some("connection refused")),
+        ] {
+            assert!(
+                !hint.contains("dogfood.sh") && !hint.contains("./scripts/"),
+                "the hint points at a file that is not shipped: {hint}"
+            );
+        }
+    }
 }

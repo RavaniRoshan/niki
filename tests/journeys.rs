@@ -551,6 +551,59 @@ fn j_an_empty_task_is_refused_before_any_spend(ctx: &JourneyCtx) -> JourneyResul
     JourneyResult::Pass
 }
 
+/// J15 — a directory that is not a repository cannot produce the deliverable.
+///
+/// NIKI hands back a `niki/<id>` branch. That is the entire output. Nothing
+/// said so until the run was over: on the container backend the user got a
+/// spec, a diff, a test report and a review — four paid model calls — and then
+/// a bare git2 string at the moment the branch would have been created.
+///
+/// The assertion is about ordering. A check that runs after the Planner has
+/// been called is a check that has already cost money.
+fn j_a_non_git_project_is_refused_before_the_run(ctx: &JourneyCtx) -> JourneyResult {
+    let outside = std::env::temp_dir().join(format!("niki-journey-nogit-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(&outside).expect("scratch dir");
+
+    let mut cmd = Command::new(&ctx.bin);
+    let out = cmd
+        .args(["run", "add a hello function"])
+        .current_dir(&outside)
+        .env_clear()
+        .env("HOME", &ctx.home)
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("TERM", "xterm-256color")
+        .env("LANG", "C.UTF-8")
+        .env("NIKI_CI", "1")
+        .output()
+        .expect("niki binary runs");
+    let _ = std::fs::remove_dir_all(&outside);
+
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    if combined.contains("panicked at") {
+        return JourneyResult::Fail("`niki run` in a non-git directory panicked".to_string());
+    }
+    if out.status.success() {
+        return JourneyResult::Fail(
+            "`niki run` in a directory that is not a git repository reported \
+             success — it cannot have produced a branch"
+                .to_string(),
+        );
+    }
+    if !combined.to_lowercase().contains("git") {
+        return JourneyResult::Fail(format!(
+            "the refusal does not mention the repository it needs: {combined}"
+        ));
+    }
+    // It must offer the fix, not just name the missing thing.
+    if !combined.contains("git init") {
+        return JourneyResult::Fail(format!(
+            "the refusal names the problem but not the one-line fix: {combined}"
+        ));
+    }
+    JourneyResult::Pass
+}
+
 static JOURNEYS: &[Journey] = &[
     Journey {
         id: "J00",
@@ -621,6 +674,13 @@ static JOURNEYS: &[Journey] = &[
         intent: "pass a project path that does not exist",
         guards: "users typo paths; a panic here is the first thing a new user sees",
         run: j_nonexistent_project_is_a_clean_error,
+    },
+    Journey {
+        id: "J15",
+        intent: "run a task in a directory that is not a git repository",
+        guards: "four paid model calls before a bare git2 string, for a \
+                  deliverable that could never have been produced",
+        run: j_a_non_git_project_is_refused_before_the_run,
     },
     Journey {
         id: "J12",
