@@ -833,6 +833,7 @@ fn the_fallback_notice_says_what_happened() {
         steps: 1,
         tool_calls: vec![],
         usage: TokenUsage::default(),
+        feedback_turns: 0,
         truncated: false,
         artifact: None,
     };
@@ -861,6 +862,7 @@ fn the_fallback_notice_says_what_happened() {
             ("bash".to_string(), false),
         ],
         usage: TokenUsage::default(),
+        feedback_turns: 0,
         truncated: false,
         artifact: None,
     };
@@ -1095,6 +1097,7 @@ fn the_fallback_notice_distinguishes_truncation_from_a_short_answer() {
             steps: 1,
             tool_calls: vec![],
             usage: TokenUsage::default(),
+            feedback_turns: 0,
             truncated,
             artifact: None,
         })

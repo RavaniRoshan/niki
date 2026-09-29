@@ -2584,6 +2584,14 @@ pub struct LoopOutput {
     /// Accumulated provider token usage across all loop iterations (Phase 3.2:
     /// tool loops participate in token accounting instead of discarding it).
     pub usage: crate::llm::provider::TokenUsage,
+    /// How many "try again" turns this loop spent on its own.
+    ///
+    /// Reported rather than kept private so the caller can start its own
+    /// budget where this one stopped. The loop's truncation retry and the
+    /// pipeline's unappliable-patch retry are the same kind of event — "tell
+    /// the model what went wrong and try again" — and two counters meant a run
+    /// could spend four of them without either noticing.
+    pub feedback_turns: u32,
     /// Whether the last response was cut off at the provider's token limit.
     ///
     /// Carried out rather than logged because a truncated answer and a complete
@@ -3030,6 +3038,7 @@ pub async fn run_tool_loop_with(
                 // which meant a caller asking "was this cut off?" was told no
                 // in exactly the case where it was — the one case the question
                 // exists for.
+                feedback_turns: steps_failed_truncated,
                 truncated: was_truncated(response.finish_reason.as_deref()) && recovered.is_none(),
                 artifact: recovered,
             });
@@ -3125,6 +3134,7 @@ pub async fn run_tool_loop_with(
                     steps,
                     tool_calls: call_log,
                     usage,
+                    feedback_turns: 0,
                     truncated: false,
                     artifact: submitted,
                 });
@@ -3270,6 +3280,7 @@ pub async fn run_tool_loop_with(
         tool_calls: call_log,
         usage,
         truncated: was_truncated(last_finish_reason.as_deref()) && submitted.is_none(),
+        feedback_turns: 0,
         artifact: submitted,
     })
 }
