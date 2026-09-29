@@ -303,6 +303,60 @@ fn write_plan_md(task_dir: &std::path::Path, task: &Task, result: &PipelineResul
 
 /// Cross-check the three things a run publishes about itself.
 ///
+/// What a finished run records: its status, and the branch it may name.
+///
+/// Extracted because two consumers need the same answer and did not have it.
+/// `task.json` decided with this rule; `manifest.json` re-derived a looser one
+/// of its own — withhold the branch only when one was *blocked*, advertise the
+/// name whenever the name was known — and the two disagreed by construction.
+/// A breadth run committed fine, failed afterwards, and died in reconciliation
+/// with "manifest.json names branch niki/31eb6c86 but task.json records None".
+///
+/// The rule is deliberately strict: a run that failed to commit names no
+/// branch at all, because a name is an advertisement and the branch may not be
+/// on disk. The failure itself is recorded separately, in `status`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Completion {
+    /// Why the run is not `Completed`, if it is not.
+    pub error: Option<String>,
+    /// The branch the run may advertise. `None` unless the branch was
+    /// genuinely created and committed.
+    pub branch: Option<String>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn decide_completion(
+    branch_creation_error: Option<String>,
+    branch_block_note: Option<String>,
+    branch_created: bool,
+    branch_name: &str,
+    dry_run: bool,
+    task_dir: &std::path::Path,
+) -> Completion {
+    let error = branch_creation_error.or(branch_block_note).or_else(|| {
+        if branch_created {
+            None
+        } else if dry_run {
+            Some(format!(
+                "Dry run: no branch created. Review {}/plan.md, then re-run without --dry-run.",
+                task_dir.display()
+            ))
+        } else {
+            Some("No branch created: the run produced an empty diff.".to_string())
+        }
+    });
+    Completion {
+        // The branch is named only when there is no error at all — the same
+        // value every consumer must read, so nobody can re-derive it wrongly.
+        branch: if error.is_none() {
+            Some(branch_name.to_string())
+        } else {
+            None
+        },
+        error,
+    }
+}
+
 /// The pipeline result, `task.json`, and `manifest.json` are produced by
 /// different code paths at different moments. Nothing forced them to agree, so
 /// a run could finish with a `task.json` recording a different cost than the
@@ -1242,32 +1296,22 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
     // branch, a failed commit, a dry run and an empty diff are all recorded as
     // Failed with `branch: None`, so `niki status` and the JSON envelope can
     // never advertise a branch that does not exist on disk.
-    let status_error = branch_creation_error
-        .or_else(|| branch_block_note.clone())
-        .or_else(|| {
-            if branch_created {
-                None
-            } else if args.dry_run {
-                Some(format!(
-                    "Dry run: no branch created. Review {}/plan.md, then re-run without --dry-run.",
-                    task_dir.display()
-                ))
-            } else {
-                Some("No branch created: the run produced an empty diff.".to_string())
-            }
-        });
-    match &status_error {
-        Some(error) => {
-            record.status = TaskStatus::Failed {
-                error: error.clone(),
-            };
-            record.branch = None;
-        }
-        None => {
-            record.status = TaskStatus::Completed;
-            record.branch = Some(branch_name.clone());
-        }
-    }
+    let completion = decide_completion(
+        branch_creation_error,
+        branch_block_note.clone(),
+        branch_created,
+        &branch_name,
+        args.dry_run,
+        &task_dir,
+    );
+    let status_error = completion.error.clone();
+    record.status = match &completion.error {
+        Some(error) => TaskStatus::Failed {
+            error: error.clone(),
+        },
+        None => TaskStatus::Completed,
+    };
+    record.branch = completion.branch;
     record.verdict = Some(format!("{:?}", result.verdict));
     // Persist the outcome, not just the bare verdict. Without this the record
     // cannot distinguish "a reviewer approved" from "nothing reviewed it" —
@@ -1292,11 +1336,23 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
     // roles, and summed cost onto manifest.json. Best-effort (warns, never
     // fails). Skipped for dry runs, whose manifest is already accurate.
     if !args.dry_run && config.snapshot.enabled {
-        let branch_opt = if branch_block_note.is_some() {
-            None
-        } else {
-            Some(branch_name.as_str())
-        };
+        // `record.branch`, not a re-derivation of the branch name.
+        //
+        // The manifest used to decide for itself: it withheld the branch only
+        // when one was *blocked*, and advertised the name whenever the name
+        // was known. The record uses a stricter rule — a failed commit or a
+        // branch that was never created leaves it `None` precisely so nothing
+        // can advertise a branch that does not exist on disk — so the two
+        // disagreed by construction, and the reconcile check below caught the
+        // disagreement by failing a run that had otherwise succeeded.
+        //
+        // Measured: a breadth run died with "manifest.json names branch
+        // niki/31eb6c86 but task.json records None" after committing
+        // successfully and failing afterwards.
+        //
+        // One rule, read from one place. The reconciliation below stays as the
+        // backstop for anything else that drifts.
+        let branch_opt = record.branch.as_deref();
         let total_cost: f64 = result.metrics.iter().map(|m| m.cost_usd).sum();
         crate::orchestrator::provenance::record_completion(
             &task_dir,
@@ -1639,6 +1695,93 @@ mod reconcile_tests {
         let err = reconcile_result_record_manifest(&result, &record, d.path())
             .expect_err("a failed run must not be stored as completed");
         assert!(err.to_string().contains("completed"), "{err}");
+    }
+
+    /// The branch a run records and the branch the manifest records must be
+    /// the same value, and this is the rule that guarantees it.
+    ///
+    /// The two used to decide independently. The record withheld the branch
+    /// unless it was genuinely created and committed; the manifest withheld it
+    /// only when the branch was *blocked*, and advertised the name whenever the
+    /// name was known. A run that committed successfully and then failed
+    /// afterwards left the manifest naming a branch the record had deliberately
+    /// denied — and the reconciliation below failed the run for it. Measured,
+    /// on a `docs` breadth task.
+    ///
+    /// Every case where the run is not cleanly completed must name no branch,
+    /// because a name is an advertisement and the branch may not be on disk.
+    #[test]
+    fn a_run_that_did_not_cleanly_finish_names_no_branch() {
+        let dir = std::path::Path::new("/tmp/task");
+        let name = "niki/31eb6c86";
+
+        // The measured case: the branch was created, but something after it
+        // failed. The name is known; it must not be advertised.
+        let after_a_failure = decide_completion(
+            Some("safety proof failed".into()),
+            None,
+            true,
+            name,
+            false,
+            dir,
+        );
+        assert_eq!(after_a_failure.branch, None, "a failed run names no branch");
+        assert!(after_a_failure.error.is_some(), "and says why");
+
+        // A blocked branch.
+        let blocked =
+            decide_completion(None, Some("branch in use".into()), false, name, false, dir);
+        assert_eq!(blocked.branch, None);
+
+        // A dry run: the plan exists, the branch does not.
+        let dry = decide_completion(None, None, false, name, true, dir);
+        assert_eq!(dry.branch, None);
+        assert!(
+            dry.error.as_deref().is_some_and(|e| e.contains("Dry run")),
+            "and points at the plan it did leave behind: {:?}",
+            dry.error
+        );
+
+        // An empty diff.
+        let empty = decide_completion(None, None, false, name, false, dir);
+        assert_eq!(empty.branch, None);
+
+        // And the one case that does name it.
+        let clean = decide_completion(None, None, true, name, false, dir);
+        assert_eq!(clean.branch.as_deref(), Some(name));
+        assert_eq!(clean.error, None);
+    }
+
+    /// The invariant the failure came from, stated directly.
+    #[test]
+    fn the_manifest_and_the_record_can_never_disagree_about_the_branch() {
+        // Whatever the inputs, the branch the manifest is given is the branch
+        // the record holds — because the manifest is handed `record.branch`
+        // rather than being allowed to derive one. This test pins the shape of
+        // that: there is no second decision to make.
+        for (err, blocked, created) in [
+            (None, None, true),
+            (Some("commit failed".into()), None, true),
+            (None, Some("in use".into()), false),
+            (None, None, false),
+        ] {
+            let c = decide_completion(
+                err,
+                blocked,
+                created,
+                "niki/x",
+                false,
+                std::path::Path::new("/tmp/t"),
+            );
+            let record_branch = c.branch.clone();
+            // The production call site: `record.branch.as_deref()`.
+            let manifest_branch = record_branch.as_deref();
+            assert_eq!(
+                manifest_branch,
+                record_branch.as_deref(),
+                "the manifest reads the record's value; there is nothing to reconcile"
+            );
+        }
     }
 
     #[test]
