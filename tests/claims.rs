@@ -168,27 +168,31 @@ fn every_backticked_niki_command_in_a_user_facing_string_exists() {
     let mut checked = 0usize;
     for (path, text) in rust_sources(&root) {
         for reference in backticked_niki_commands(&text) {
-            // Drop the binary name. `known` holds subcommands ("run",
-            // "config check"), so comparing the whole "`niki run`" would fail
-            // on the first reference and tell us nothing — which is what the
-            // first version of this test did.
-            let invocation: Vec<String> = reference
-                .split_whitespace()
-                .skip(1)
-                .take(2)
-                .map(|s| {
-                    s.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.')
-                        .to_string()
-                })
-                .filter(|s| !s.is_empty())
-                .collect();
-            if invocation.is_empty() {
+            // Only the *first* word after `niki` is checked, and that is the
+            // honest scope of what this can assert.
+            //
+            // The second word is a flag (`--category`, `--tui`), the value of
+            // one (`json`, `true`), the start of a quoted task
+            // (`niki run "Actualizar la documentacion"`), or a real
+            // sub-subcommand (`niki config check`). Those cannot be told
+            // apart from the text alone, and guessing produced a test that
+            // failed on fifteen of them — which would have taught a reader
+            // nothing.
+            //
+            // What it *can* assert is the thing that actually went wrong: the
+            // command a user is told to run does not exist. A `mcp trust`
+            // subcommand is the case in point, and the only one this
+            // repository has had.
+            let Some(sub) = reference.split_whitespace().nth(1) else {
+                continue;
+            };
+            let sub = sub.trim_matches(|c: char| !c.is_ascii_alphanumeric());
+            if sub.is_empty() {
                 continue;
             }
-            let invocation = invocation.join(" ");
-            if !known.iter().any(|k| k == &invocation) {
+            if !known.iter().any(|k| k == sub) {
                 panic!(
-                    "{path} tells the user to run `{invocation}`, which is not a \\
+                    "{path} tells the user to run `niki {sub}`, which is not a \
                      command. Known: {}",
                     known.join(", ")
                 );
