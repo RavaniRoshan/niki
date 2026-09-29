@@ -634,8 +634,29 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
 }
 
 async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
+    // An empty task is not a task, and the pipeline will not notice: the
+    // Planner is handed "" and asked for a spec, produces one, and the run
+    // continues through four paid model calls to hand back a change nobody
+    // asked for. `niki run ""` is not a hypothetical — it is what a shell
+    // variable that expanded to nothing produces, which is one of the easiest
+    // ways to spend money by accident.
+    //
+    // Checked here, before the project is even resolved, so it costs nothing.
+    if args.description.trim().is_empty() {
+        anyhow::bail!(
+            "No task given. `niki run` needs a description of what to change, e.g.\n  \
+             niki run \"add a --verbose flag to the build command\"\n\
+             (This usually means a shell variable expanded to nothing.)"
+        );
+    }
+
     let project_dir = match &args.project {
-        Some(p) => p.canonicalize()?,
+        Some(p) => p.canonicalize().map_err(|e| {
+            anyhow::anyhow!(
+                "--project {}: {e}\nIf the path is right, it may not exist yet.",
+                p.display()
+            )
+        })?,
         None => env::current_dir()?,
     };
 

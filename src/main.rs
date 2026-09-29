@@ -114,9 +114,37 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     let cli = Cli::parse();
-    let command = cli
-        .command
-        .unwrap_or_else(|| Commands::Chat(niki::cli::chat::ChatArgs::default()));
+    let command: Commands = match cli.command {
+        Some(command) => command,
+        // Bare `niki` is the first thing a new user types, and where it lands
+        // decides what they think this is.
+        //
+        // On a terminal, the chat surface is the right answer — that is what
+        // Codex and Claude Code do, and matching them is the point. Without
+        // one there is nothing to land on: the TUI tries to enter raw mode,
+        // fails, returns immediately, and the process exits **0 having printed
+        // nothing**. In a script that is indistinguishable from success, and
+        // to a person it is a program that hangs for a moment and then hangs
+        // up. So it prints what it can do and exits non-zero, which is the
+        // conventional answer and the only one a script can act on.
+        None => {
+            if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+                Commands::Chat(niki::cli::chat::ChatArgs::default())
+            } else {
+                use clap::CommandFactory as _;
+                let mut cmd = Cli::command();
+                let _ = cmd.print_help();
+                eprintln!(
+                    "\n\n`niki` with no arguments opens the chat interface, which needs a \
+                     terminal.\nTry one of:\n  \
+                     niki run \"<task>\"      run the pipeline on a coding task\n  \
+                     niki doctor             check this install\n  \
+                     niki --help             everything else"
+                );
+                std::process::exit(2);
+            }
+        }
+    };
 
     match &command {
         Commands::Run(args) => niki::cli::run::handle(args).await?,
