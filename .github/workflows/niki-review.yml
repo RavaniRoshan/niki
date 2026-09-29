@@ -119,7 +119,7 @@ jobs:
           echo "This job must not report success without executing anything."
           echo "On a fork, secrets are never exposed — the live-provider job cannot run there."
           exit 1
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
         if: steps.keys.outputs.have == 'true'
         with:
           ref: ${{ needs.guard.outputs.ref || github.sha }}

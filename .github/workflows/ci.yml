@@ -33,7 +33,7 @@ jobs:
     name: Check (fmt + clippy)
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -48,7 +48,7 @@ jobs:
     name: MSRV (1.88)
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.88.0"
@@ -61,7 +61,7 @@ jobs:
     name: Build (--no-default-features)
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Build without default features
         run: cargo build --no-default-features
@@ -71,7 +71,7 @@ jobs:
     name: Audit (supply chain)
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -101,7 +101,7 @@ jobs:
     name: Manifest parity
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - name: Check manifest download URLs resolve
         run: |
           set -euo pipefail
@@ -152,7 +152,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [check, msrv, no-default-features]
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v7
       # nextest gives per-test process isolation (a real flakiness source when
@@ -181,7 +181,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - name: Install the latest release from the published script
         run: |
           set -euo pipefail
@@ -200,7 +200,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Installer / formula / dist-config agreement
         run: cargo test --test dist_install --verbose
@@ -242,7 +242,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Node.js
         uses: actions/setup-node@v7
@@ -353,7 +353,7 @@ jobs:
       # waited on. The Python suite had the same blind spot.
       FORCE_NO_COLOR: ${{ matrix.colour == 'NO_COLOR=1' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
@@ -399,7 +399,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Build release binary
         run: cargo build --release
@@ -418,7 +418,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
@@ -485,7 +485,7 @@ jobs:
     env:
       NIKI_CI: "1"
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Install VHS + fonts + PIL
         run: |
@@ -592,7 +592,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Install dependencies
         run: |
