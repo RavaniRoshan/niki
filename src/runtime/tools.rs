@@ -2917,6 +2917,22 @@ pub struct LoopOptions {
     /// the request. Every test before it checked a hop; that one checks the
     /// destination, and the destination was wrong.
     pub reasoning_effort: Option<String>,
+
+    /// Absolute USD this loop may spend before it stops itself.
+    ///
+    /// A *ceiling*, not a budget object. The run already accounts every stage
+    /// exactly once through its metric, and letting the loop charge as well
+    /// would bill the same requests twice — the same class of bug as pushing
+    /// a metric on both the success and the failure path, in the other
+    /// direction. So the loop does not account; it only **stops**.
+    ///
+    /// What it could not do before was stop. `--max-usd` was checked at stage
+    /// boundaries, so a Coder loop that made twelve requests could spend past
+    /// the ceiling and the run would only find out afterwards. The user set a
+    /// limit and the limit did not hold for the stage that spends the most.
+    ///
+    /// `None` means no ceiling, which is the ordinary case.
+    pub cost_ceiling_usd: Option<f64>,
 }
 
 /// Validates a submitted artifact; `Err` is a message shown to the model.
@@ -2929,6 +2945,7 @@ impl std::fmt::Debug for LoopOptions {
             .field("submit_artifact", &self.submit_artifact)
             .field("validate_artifact", &self.validate_artifact.is_some())
             .field("reasoning_effort", &self.reasoning_effort)
+            .field("cost_ceiling_usd", &self.cost_ceiling_usd)
             .finish()
     }
 }
@@ -3005,6 +3022,31 @@ pub async fn run_tool_loop_with(
         // provider may emit disjoint or cumulative usage chunks for one call.
         usage.accumulate(&response.usage);
         last_content = response.content.clone();
+        // The run's own ceiling, checked here so a loop cannot spend past it
+        // between stage boundaries. Accounting stays with the run's budget
+        // (below and at the stage boundary) — this only decides whether to
+        // keep going, so the two cannot bill the same request twice.
+        if let Some(ceiling) = opts.cost_ceiling_usd
+            && crate::cost::compute_cost(provider.provider_name(), model, &usage) >= ceiling
+        {
+            tracing::warn!(
+                target: "niki::runtime",
+                steps,
+                spent = crate::cost::compute_cost(provider.provider_name(), model, &usage),
+                ceiling,
+                "tool loop stopped at the run's cost ceiling"
+            );
+            return Ok(LoopOutput {
+                content: last_content.clone(),
+                steps,
+                tool_calls: call_log,
+                usage,
+                feedback_turns: steps_failed_truncated,
+                truncated: was_truncated(last_finish_reason.as_deref()),
+                artifact: None,
+            });
+        }
+
         // Phase 5.5: every loop iteration spends the unified run budget.
         // Exhaustion aborts the loop with a typed error — never a silent stop.
         if let Some(b) = budget.as_deref_mut() {
@@ -3482,6 +3524,170 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("budget exhausted"), "{err:?}");
+    }
+
+    /// A provider that reports real token usage, so `compute_cost` is not
+    /// zero. The default in `FakeToolProvider` is `TokenUsage::default()`,
+    /// which prices at 0.0 and would let any ceiling pass.
+    struct CostlyToolProvider {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl LlmProvider for CostlyToolProvider {
+        fn provider_name(&self) -> &str {
+            // A name the price table knows, so the ceiling means something.
+            "anthropic"
+        }
+
+        async fn complete(
+            &self,
+            _request: crate::llm::provider::CompletionRequest,
+        ) -> anyhow::Result<crate::llm::provider::CompletionResponse> {
+            let n = self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(crate::llm::provider::CompletionResponse {
+                content: String::new(),
+                model: "claude-sonnet-4-20250514".into(),
+                usage: crate::llm::provider::TokenUsage {
+                    input_tokens: 1_000,
+                    output_tokens: 1_000,
+                    cached_input_tokens: 0,
+                    reasoning_tokens: 0,
+                },
+                finish_reason: Some("stop".to_string()),
+                // Always a tool call, so the loop would otherwise keep going
+                // for its whole step budget.
+                tool_calls: if n < 100 {
+                    vec![crate::llm::provider::ToolCall {
+                        id: format!("call_{n}"),
+                        name: "bash".into(),
+                        arguments: serde_json::json!({"command": "echo hi"}),
+                    }]
+                } else {
+                    Vec::new()
+                },
+            })
+        }
+
+        async fn stream(
+            &self,
+            _r: crate::llm::provider::CompletionRequest,
+        ) -> anyhow::Result<
+            std::pin::Pin<
+                Box<
+                    dyn futures::Stream<Item = anyhow::Result<crate::llm::provider::StreamChunk>>
+                        + Send,
+                >,
+            >,
+        > {
+            unimplemented!("the tool loop uses complete()")
+        }
+    }
+
+    /// `--max-usd` has to hold for the stage that spends the most, not just at
+    /// the boundaries around it.
+    ///
+    /// The Coder runs a loop that can make a dozen requests. `RunBudget` is
+    /// checked at stage boundaries, so a loop could spend well past the
+    /// ceiling and the run would only find out on the way out — the user set a
+    /// limit and the limit did not hold for the one stage that can breach it.
+    ///
+    /// A ceiling in dollars, as a plain value, rather than the budget object.
+    /// The run already accounts each stage exactly once through its metric;
+    /// letting the loop charge as well would bill the same requests twice. So
+    /// the loop does not account — it only stops.
+    #[tokio::test]
+    async fn the_tool_loop_stops_at_the_runs_cost_ceiling() {
+        let provider = CostlyToolProvider {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let registry = build_baseline_registry();
+        let ctx = ToolContext {
+            agent_id: crate::mission::AgentId("a1".into()),
+            mission_id: crate::mission::MissionId("m1".into()),
+            role: "coder".into(),
+            project_path: std::env::temp_dir(),
+            permissions: HashMap::new(),
+            permission_mode: "auto".into(),
+            task_store: None,
+        };
+
+        // One step of this provider costs about $0.018, so a $0.001 ceiling is
+        // breached by the first response and never by a later one.
+        let out = run_tool_loop_with(
+            LoopOptions {
+                cost_ceiling_usd: Some(0.001),
+                ..Default::default()
+            },
+            &provider,
+            "claude-sonnet-4-20250514",
+            &registry,
+            &ctx,
+            vec![LoopMessage::User("do the thing".into())],
+            None,
+            12,
+            None,
+            None,
+        )
+        .await
+        .expect("hitting the ceiling is a stop, not an error");
+
+        assert!(
+            out.artifact.is_none(),
+            "a loop stopped by the ceiling never submitted, which is the whole \
+             point: the fallback path takes over rather than a half-finished \
+             artifact being accepted"
+        );
+        assert_eq!(
+            provider.calls.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "the ceiling must stop the loop at the first request that breaches \
+             it — a loop that only checked between stages would have made all \
+             twelve"
+        );
+    }
+
+    /// The inverse. With no ceiling the loop runs to its step budget, so the
+    /// check cannot pass by stopping everything.
+    #[tokio::test]
+    async fn no_ceiling_means_no_early_stop() {
+        let provider = CostlyToolProvider {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let registry = build_baseline_registry();
+        let ctx = ToolContext {
+            agent_id: crate::mission::AgentId("a1".into()),
+            mission_id: crate::mission::MissionId("m1".into()),
+            role: "coder".into(),
+            project_path: std::env::temp_dir(),
+            permissions: HashMap::new(),
+            permission_mode: "auto".into(),
+            task_store: None,
+        };
+        run_tool_loop_with(
+            LoopOptions {
+                cost_ceiling_usd: None,
+                ..Default::default()
+            },
+            &provider,
+            "claude-sonnet-4-20250514",
+            &registry,
+            &ctx,
+            vec![LoopMessage::User("do the thing".into())],
+            None,
+            3,
+            None,
+            None,
+        )
+        .await
+        .expect("the loop runs");
+        assert_eq!(
+            provider.calls.load(std::sync::atomic::Ordering::Relaxed),
+            3,
+            "without a ceiling the loop must reach its own step limit"
+        );
     }
 
     #[tokio::test]
