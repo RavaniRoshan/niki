@@ -23,6 +23,19 @@ Measured on this box: the full suite is 64s warm, one command, all binaries.
 `cargo test --tests` is much slower and, run all at once, will not fit in RAM
 here. Install once with `cargo install cargo-nextest --locked`.
 
+**Run the full suite in CI, not locally.** The `Tests` job in `.github/workflows/ci.yml`
+runs the whole thing on a free `ubuntu-latest` runner and gates the PR, alongside
+Integration, TUI Smoke and CodeQL. Locally, run the binaries you touched:
+
+```
+cargo nextest run -j 2 -E 'binary(pipeline_guards) + binary(kb_pipeline)'
+cargo nextest run -j 2 -E 'test(<substring>)'
+```
+
+A full local run links every test binary, which is the largest memory event in
+the build and the thing that starves other sessions on this box. It is there for
+when you need it before pushing, not as the inner loop.
+
 nextest earns its place twice over. It parallelises *across* test binaries
 while `.config/nextest.toml` keeps the heavy and heap binaries serialised by
 mechanism — the same split Codex uses. And it runs process-per-test, so a test
