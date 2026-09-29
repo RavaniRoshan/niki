@@ -1384,7 +1384,19 @@ async fn run_stage(
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<String> {
     let start = Instant::now();
-    let (json, usage, retry_count, ttft_ms) = run_agent(
+    // What the stage spent, recorded whether or not it succeeded.
+    //
+    // `?` used to follow the call directly, so a stage that failed recorded
+    // nothing at all: no cost, no tokens, no metric. `metrics` is the only
+    // source for `task.json`'s `total_cost_usd`, for the Cost page, for the
+    // report and for the JSON envelope — so a run that died at the Reviewer
+    // was recorded as if it had only cost the Planner and the Coder, and the
+    // invoice said otherwise.
+    //
+    // The failure is where the money is. That is the direction every
+    // accounting bug in this repository has gone.
+    let mut spent: Option<crate::llm::provider::TokenUsage> = None;
+    let result = run_agent(
         role,
         llm,
         model,
@@ -1396,8 +1408,38 @@ async fn run_stage(
         temperature,
         reasoning_effort,
         steer_rx,
+        &mut spent,
     )
-    .await?;
+    .await;
+
+    // Bill it on the way out — but only on the failure path.
+    //
+    // The success path below already pushes a metric, and it is the better
+    // one: it carries the retry count and the time-to-first-token that only
+    // the `Ok` value knows. Pushing here unconditionally would charge every
+    // successful stage twice, which is the same class of bug in the opposite
+    // direction and would have been found by whichever test happened to look
+    // at a metric count.
+    if result.is_err()
+        && let Some(u) = spent
+    {
+        let served = llm.served_by();
+        let served_provider: &str = served.as_deref().unwrap_or(provider);
+        metrics.push(StageMetric {
+            role,
+            provider: served_provider.to_string(),
+            model: model.to_string(),
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            cached_input_tokens: u.cached_input_tokens,
+            reasoning_tokens: u.reasoning_tokens,
+            latency_ms: start.elapsed().as_millis() as u64,
+            cost_usd: compute_cost(served_provider, model, &u),
+            retry_count: 0,
+            ttft_ms: 0,
+        });
+    }
+    let (json, usage, retry_count, ttft_ms) = result?;
     let latency_ms = start.elapsed().as_millis() as u64;
     // Price against the provider that actually served. When the request fell
     // through to a fallback, `provider`/`model` are still the primary's, so

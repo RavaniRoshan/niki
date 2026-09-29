@@ -288,6 +288,7 @@ async fn a_repair_retry_is_included_in_the_reported_usage() {
         0.2,
         None,
         None,
+        &mut None,
     )
     .await
     .expect("the second attempt is conformant, so the stage completes");
