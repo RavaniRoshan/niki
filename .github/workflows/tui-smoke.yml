@@ -28,10 +28,10 @@ env:
 jobs:
   tui-smoke:
     name: TUI smoke (tmux PTY)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
