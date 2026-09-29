@@ -705,14 +705,13 @@ impl FeedbackBudget {
         Self::default()
     }
 
-    /// Start from a count another component already spent.
+    /// Fold in recovery turns another component already spent.
     ///
-    /// The Coder's tool loop burns turns of its own on a truncated answer, and
-    /// the pipeline then spends them on an unappliable patch. Those are the same
-    /// kind of event, so the allowance has to start where the loop left off or
-    /// a stage gets twice the budget depending on which of the two it hit.
-    pub fn starting_at(used: u32) -> Self {
-        Self { used }
+    /// Raises the running total, never lowers it, so calling it each round with
+    /// the loop's current count cannot hand the stage fresh turns. Starting a
+    /// *new* budget from that count instead is the bug this exists to prevent.
+    pub fn note_prior(&mut self, spent: u32) {
+        self.used = self.used.max(spent);
     }
 
     /// Record one more attempt and say whether it is allowed.
@@ -1127,7 +1126,7 @@ async fn run_parallel_coders(
             sandbox.ensure_tools(&required_tools(&config)).await?;
 
             let mut local_metrics: Vec<StageMetric> = Vec::new();
-            let (_json, _summary, output) = run_role(
+            let solo = run_role(
                 AgentRole::Coder,
                 &*llm,
                 &model,
@@ -1154,6 +1153,7 @@ async fn run_parallel_coders(
                 None,
             )
             .await?;
+            let output = solo.output;
 
             let diff = match output {
                 RoleOutput::Coder(d) => d,
@@ -1367,7 +1367,7 @@ async fn run_coder_tool_loop(
     _max_tokens: u32,
     display: &mut AgenticDisplay,
     metrics: &mut Vec<StageMetric>,
-) -> Option<String> {
+) -> Option<(String, u32)> {
     let schema_text = crate::load_asset(schema_path).ok()?;
     let schema_json: serde_json::Value = serde_json::from_str(&schema_text).ok()?;
     // `prompts/` matters, and getting it wrong is silent.
@@ -1471,13 +1471,9 @@ async fn run_coder_tool_loop(
     }
 
     let latency_ms = start.elapsed().as_millis() as u64;
-    // The loop reports how many "try again" turns it spent on its own recovery
-    // (`LoopOutput::feedback_turns`). It is deliberately not threaded out of
-    // here: doing so means changing `run_role`'s return type, and a shared
-    // budget wired halfway is a hidden channel rather than a shared one. The
-    // pipeline's budget covers the causes it decides; the loop's stays bounded
-    // inside the loop, and both are named.
-    let _loop_feedback_turns = out.feedback_turns;
+    // How many "try again" turns the loop spent on its own recovery. Handed
+    // back so the pipeline's shared allowance starts where this one left off.
+    let feedback_turns = out.feedback_turns;
     let served = llm.served_by();
     let served_provider: &str = served.as_deref().unwrap_or(provider);
     metrics.push(StageMetric {
@@ -1495,7 +1491,7 @@ async fn run_coder_tool_loop(
         retry_count: 0,
         ttft_ms: 0,
     });
-    Some(json)
+    Some((json, feedback_turns))
 }
 
 /// What to tell the user when the Coder's tool loop produced no artifact.
@@ -1573,6 +1569,24 @@ pub fn role_prompt(role: AgentRole) -> (&'static str, &'static str) {
 /// Run a role-aware stage: build the role-specific prompt context, execute the
 /// agent, parse the artifact, and render a summary for display.
 ///
+/// What one stage produced.
+///
+/// A struct rather than the `(json, summary, output)` tuple this used to
+/// return, so the Coder's tool loop can report how many recovery turns it
+/// spent without becoming a fourth tuple element. It is the link between the
+/// loop's own budget and the pipeline's shared one: both are "tell the model
+/// what went wrong and try again", and two counters meant a stage could get
+/// twice the allowance depending on which of them it hit.
+pub struct RoleRun {
+    pub json: String,
+    pub summary: Vec<String>,
+    pub output: RoleOutput,
+    /// Recovery turns the stage spent on its own reasons, before the pipeline
+    /// sees it. Zero for every role but the Coder, and zero for the Coder when
+    /// it took the one-shot fallback.
+    pub feedback_turns: u32,
+}
+
 /// Only body stages (Coder/Tester/Reviewer) flow through here; the Planner is
 /// handled as the pipeline entry point in `execute_pipeline`.
 #[allow(clippy::too_many_arguments)]
@@ -1604,7 +1618,10 @@ async fn run_role(
     hooks: &crate::audit::HookBus,
     hook_task_id: &Uuid,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
-) -> Result<(String, Vec<String>, RoleOutput)> {
+) -> Result<RoleRun> {
+    // Recovery turns the Coder's tool loop spends on its own reasons, handed on
+    // so the pipeline's shared allowance starts where the loop's left off.
+    let mut feedback_turns: u32 = 0;
     let task_spec_json = serde_json::to_string_pretty(task_spec)?;
     let (template, schema) = role_prompt(role);
 
@@ -1794,7 +1811,10 @@ async fn run_role(
         )
         .await
         {
-            Some(json) => json,
+            Some((json, turns)) => {
+                feedback_turns = turns;
+                json
+            }
             None => {
                 run_stage(
                     role,
@@ -1850,7 +1870,12 @@ async fn run_role(
         crate::audit::HookEvent::PostAgentStop,
         agent_hook_payload(role, hook_task_id, round),
     )?;
-    Ok((json, summary, output))
+    Ok(RoleRun {
+        json,
+        summary,
+        output,
+        feedback_turns,
+    })
 }
 
 pub fn parse_role(role: AgentRole, json: &str) -> Result<RoleOutput> {
@@ -1903,7 +1928,7 @@ async fn run_bookkept_stage(
     security_enabled: bool,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<(String, RoleOutput)> {
-    let (json, summary, output) = run_role(
+    let stage_run = run_role(
         stage.role,
         llm,
         &stage.model,
@@ -1930,6 +1955,12 @@ async fn run_bookkept_stage(
         steer_rx,
     )
     .await?;
+    let RoleRun {
+        json,
+        summary,
+        output: role_output,
+        ..
+    } = stage_run;
     artifacts.push((stage.role, json.clone()));
     isolation.push(IsolationRecord {
         role: stage.role,
@@ -1960,7 +1991,7 @@ async fn run_bookkept_stage(
         project_path,
         round,
     )?;
-    Ok((json, output))
+    Ok((json, role_output))
 }
 
 /// Hard-enforce the per-run spend cap. Returns an error that aborts the pipeline
@@ -2718,12 +2749,15 @@ pub async fn execute_pipeline(
     // every cause the pipeline itself decides, so no single failure mode can
     // spend it twice.
     //
-    // It does NOT include the Coder tool loop's own truncation retry, which
-    // lives in `run_tool_loop_with` and is bounded separately. Uniting them
-    // means carrying a turn count out of the loop and through `run_role`,
-    // which is a real signature change and not something to do half-wired.
-    // Until then the honest state is two budgets, both named, rather than one
-    // that pretends to cover something it does not.
+    // Seeded from the Coder's tool loop, which spends turns of its own on a
+    // truncated answer and reports the count as `RoleRun::feedback_turns`. One
+    // allowance covers both, so a stage cannot get twice the turns depending on
+    // which of the two it happened to hit.
+    //
+    // What is *not* covered is the agent's malformed-JSON repair, which happens
+    // inside a single `run_agent` call and is bounded there. Uniting that means
+    // a budget threaded through the agent's signature, which is a deeper change
+    // than a stage-level one; two named budgets beat one that overstates.
     let mut feedback_budget = FeedbackBudget::new();
     // The signature of the findings the *previous* round was run against, so a
     // repeat of the same critique is recognisable.
@@ -2802,7 +2836,7 @@ pub async fn execute_pipeline(
                     anyhow::anyhow!("Provider '{}' not found in cache", synth_stage.provider)
                 })?;
                 let coder_json_in = serde_json::to_string(&per_coder)?;
-                let (json, summary, role_output) = run_role(
+                let stage_run = run_role(
                     AgentRole::Synthesizer,
                     &**synth_llm,
                     &synth_stage.model,
@@ -2829,6 +2863,8 @@ pub async fn execute_pipeline(
                     steer_rx,
                 )
                 .await?;
+                let (json, summary, role_output) =
+                    (stage_run.json, stage_run.summary, stage_run.output);
                 artifacts.push((AgentRole::Synthesizer, json.clone()));
                 record_isolation(
                     &mut isolation,
@@ -2885,7 +2921,7 @@ pub async fn execute_pipeline(
                     let llm = provider_cache.get(&cache_key).ok_or_else(|| {
                         anyhow::anyhow!("Provider '{}' not found in cache", stage.provider)
                     })?;
-                    let (json, summary, role_output) = run_role(
+                    let stage_run = run_role(
                         stage.role,
                         &**llm,
                         &stage.model,
@@ -2912,6 +2948,8 @@ pub async fn execute_pipeline(
                         steer_rx,
                     )
                     .await?;
+                    let (json, summary, role_output) =
+                        (stage_run.json, stage_run.summary, stage_run.output);
                     artifacts.push((stage.role, json.clone()));
                     isolation.push(IsolationRecord {
                         role: stage.role,
@@ -3002,7 +3040,7 @@ pub async fn execute_pipeline(
                         // land, and `build_current_files` reads from disk.
                         let stage_root: Option<std::path::PathBuf> =
                             sandbox.work_root().map(|p| p.to_path_buf());
-                        let (json, summary, role_output) = run_role(
+                        let stage_run = run_role(
                             stage.role,
                             &**llm,
                             &stage.model,
@@ -3034,6 +3072,20 @@ pub async fn execute_pipeline(
                             steer_rx,
                         )
                         .await?;
+                        if stage.role == AgentRole::Coder {
+                            // Fold the loop's own recovery turns into the
+                            // shared allowance.
+                            //
+                            // `note_prior`, not a re-seed: re-creating the
+                            // budget here restarted it at zero on every round,
+                            // so a stage whose patch never applied looped
+                            // forever printing "attempt 1 of 2". Found by
+                            // running the suite and finding a test binary
+                            // still going after ten minutes.
+                            feedback_budget.note_prior(stage_run.feedback_turns);
+                        }
+                        let (json, summary, role_output) =
+                            (stage_run.json, stage_run.summary, stage_run.output);
                         artifacts.push((stage.role, json.clone()));
                         if let Some(ref mut sess) = runtime_session {
                             let fragment_kind = match stage.role {
@@ -3415,7 +3467,7 @@ pub async fn execute_pipeline(
             )
             .await
             {
-                Some(json) => json,
+                Some((json, _turns)) => json,
                 None => {
                     run_stage(
                         AgentRole::Coder,
@@ -4443,6 +4495,96 @@ mod tests {
             !msg.contains("the patch did not apply"),
             "a truncation must not be reported as an anchoring problem: {msg}"
         );
+    }
+
+    /// The loop's recovery turns come off the same allowance.
+    ///
+    /// The Coder's tool loop spends turns of its own when a response is cut off
+    /// at the token limit. Those and the pipeline's unappliable-patch retries are
+    /// the same kind of event — "tell the model what went wrong and try again" —
+    /// so a stage that hit both must not get the sum of the two budgets. This
+    /// is the wiring that `RoleRun::feedback_turns` exists for.
+    #[test]
+    fn a_loop_that_already_recovered_leaves_less_for_the_pipeline() {
+        // A loop that spent both turns on truncated answers.
+        let mut after = FeedbackBudget::new();
+        after.note_prior(2);
+        assert!(
+            matches!(
+                after.take("x", FeedbackCause::UnappliablePatch),
+                StageFeedback::Stop { .. }
+            ),
+            "with the allowance already spent, the pipeline must not grant another"
+        );
+
+        // A loop that recovered once leaves exactly one.
+        let mut one_left = FeedbackBudget::new();
+        one_left.note_prior(1);
+        assert!(matches!(
+            one_left.take("x", FeedbackCause::UnappliablePatch),
+            StageFeedback::Send { .. }
+        ));
+        assert!(
+            matches!(
+                one_left.take("x", FeedbackCause::UnappliablePatch),
+                StageFeedback::Stop { .. }
+            ),
+            "and then the allowance is gone"
+        );
+
+        // A loop that never recovered changes nothing.
+        let mut untouched = FeedbackBudget::new();
+        assert!(matches!(
+            untouched.take("x", FeedbackCause::UnappliablePatch),
+            StageFeedback::Send { .. }
+        ));
+    }
+
+    /// Folding in another component's spend must never hand out fresh turns.
+    ///
+    /// The bug this guards: the budget was re-created from the loop's turn
+    /// count on *every* patch failure, so it restarted at zero each time, a
+    /// stage whose patch never applied looped for ever, and the suite showed a
+    /// test binary still running after ten minutes printing "attempt 1 of 2".
+    /// `note_prior` raises the total instead, so a repeat cannot reset it.
+    #[test]
+    fn folding_in_another_spend_never_resets_the_allowance() {
+        // `max`, not `+`, and the distinction matters.
+        //
+        // The loop reports a *cumulative* count of the same feedback turns the
+        // pipeline is counting. Adding the two would count every turn twice
+        // and halve the effective allowance; taking the larger is correct
+        // because they are two views of one number. A first version of this
+        // test asserted they should add, and was wrong.
+        let mut b = FeedbackBudget::new();
+        // The pipeline spends one of its own.
+        assert!(matches!(
+            b.take("mine", FeedbackCause::UnappliablePatch),
+            StageFeedback::Send { .. }
+        ));
+        // The loop now reports one as well — the same turn, seen from the other
+        // side. It must not double it, and it must not reset it either.
+        b.note_prior(1);
+        assert_eq!(b.used(), 1, "one turn, counted once");
+
+        // A genuinely larger report does raise the total, and the allowance
+        // shrinks by exactly that much.
+        let mut spent = FeedbackBudget::new();
+        spent.note_prior(MAX_STAGE_FEEDBACK);
+        assert_eq!(spent.used(), MAX_STAGE_FEEDBACK);
+        assert!(
+            matches!(
+                spent.take("x", FeedbackCause::UnappliablePatch),
+                StageFeedback::Stop { .. }
+            ),
+            "a loop that used the whole allowance leaves none"
+        );
+
+        // A lower report cannot give turns back.
+        let mut c = FeedbackBudget::new();
+        c.note_prior(MAX_STAGE_FEEDBACK);
+        c.note_prior(0);
+        assert_eq!(c.used(), MAX_STAGE_FEEDBACK, "the total never goes down");
     }
 
     /// A send is not a stop; conflating them would warn on every retry.
