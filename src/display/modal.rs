@@ -13,10 +13,19 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
     let scrim = Block::default().style(Style::default().bg(theme::surface_dark()));
     frame.render_widget(scrim, area);
 
-    let popup_width = 50.min(area.width - 4);
-    let popup_height = 10.min(area.height - 4);
-    let x = (area.width - popup_width) / 2;
-    let y = (area.height - popup_height) / 2;
+    // `saturating_sub`, like every other overlay in this crate.
+    //
+    // This one subtracted raw `u16`. A terminal narrower than 4 columns
+    // panicked immediately in a debug build — and in a *release* build, which
+    // is what ships, `2u16 - 4` wraps to 65534, `min(50, …)` picks 50, and
+    // `x` becomes 32767. The render then indexes a buffer 32767 columns wide,
+    // which does not exist, and `Buffer::index_of` panics. So this was a
+    // release-mode crash, reachable by resizing a window, and every other
+    // overlay in the crate had already been fixed for exactly this.
+    let popup_width = 50.min(area.width.saturating_sub(4));
+    let popup_height = 10.min(area.height.saturating_sub(4));
+    let x = (area.width.saturating_sub(popup_width)) / 2;
+    let y = (area.height.saturating_sub(popup_height)) / 2;
 
     let popup_area = Rect {
         x,
@@ -103,10 +112,19 @@ pub fn modal_hit_test(
     area: Rect,
     modal: &Modal,
 ) -> Option<ModalAction> {
-    let popup_width = 50.min(area.width - 4);
-    let popup_height = 10.min(area.height - 4);
-    let x = (area.width - popup_width) / 2;
-    let y = (area.height - popup_height) / 2;
+    // `saturating_sub`, like every other overlay in this crate.
+    //
+    // This one subtracted raw `u16`. A terminal narrower than 4 columns
+    // panicked immediately in a debug build — and in a *release* build, which
+    // is what ships, `2u16 - 4` wraps to 65534, `min(50, …)` picks 50, and
+    // `x` becomes 32767. The render then indexes a buffer 32767 columns wide,
+    // which does not exist, and `Buffer::index_of` panics. So this was a
+    // release-mode crash, reachable by resizing a window, and every other
+    // overlay in the crate had already been fixed for exactly this.
+    let popup_width = 50.min(area.width.saturating_sub(4));
+    let popup_height = 10.min(area.height.saturating_sub(4));
+    let x = (area.width.saturating_sub(popup_width)) / 2;
+    let y = (area.height.saturating_sub(popup_height)) / 2;
 
     // Check if click is within the popup area
     if mouse_col < x

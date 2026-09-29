@@ -221,11 +221,11 @@ impl Page for RunPage {
             for card in state.tool_cards.iter().rev().take(3).rev() {
                 let glyph = card.status_glyph();
                 let color = card.status_color();
-                let summary = if card.summary.len() > 50 {
-                    format!("{}...", &card.summary[..47])
-                } else {
-                    card.summary.clone()
-                };
+                // The summary is model- and tool-authored text — a command, a
+                // path, a grep pattern — sliced at a byte offset computed from
+                // a column budget. `echo "café — résumé"` was enough to panic
+                // the Run page.
+                let summary = theme::truncate_str_ellipsis(&card.summary, 50);
                 pipeline_lines.push(Line::from(vec![
                     Span::styled("    ", Style::default()),
                     Span::styled(

@@ -1556,15 +1556,28 @@ pub fn run_chat(
                 }
                 Ok(Event::Mouse(mouse)) => {
                     if state.current_page == PageId::Chat {
+                        // The *content* band, not the whole terminal.
+                        //
+                        // `run_tui` resolved its mouse coordinates against
+                        // `bands(full).content` — the same rect the renderer
+                        // draws the transcript into, which starts below the
+                        // header and stops above the status line. This loop
+                        // passed the entire screen, so every coordinate was
+                        // off by the header height: drag-to-select copied the
+                        // wrong lines, and clicking a collapsed stage header
+                        // toggled whichever stage happened to be that many
+                        // rows higher.
+                        //
+                        // The comment block at the `run_tui` site records
+                        // exactly this class of bug being fixed there — the
+                        // input loop solving its own layout instead of asking
+                        // the layout function. This was the second input loop.
                         let size = terminal.size().unwrap_or(ratatui::layout::Size {
                             width: 80,
                             height: 24,
                         });
-                        chat::ChatPage::handle_mouse(
-                            &mut state,
-                            mouse,
-                            Rect::new(0, 0, size.width, size.height),
-                        );
+                        let full = Rect::new(0, 0, size.width, size.height);
+                        chat::ChatPage::handle_mouse(&mut state, mouse, bands(full).content);
                         needs_render = true;
                     }
                 }

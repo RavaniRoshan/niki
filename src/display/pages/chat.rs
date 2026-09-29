@@ -161,7 +161,24 @@ impl ChatPage {
             (r2, c2, r1, c1)
         };
         let mut out = String::new();
-        for row in start_row..=end_row.min(state.chat_lines.len().saturating_sub(1)) {
+        // Nothing to select when there is nothing shown.
+        //
+        // `saturating_sub(1)` on an empty vector is 0, so the range below was
+        // `0..=0` and the index that followed panicked — on an empty
+        // transcript, which is exactly the state a fresh `niki chat` is in
+        // until the first message is rendered. The click did not need
+        // anything unusual to get there: open a chat, left-click anywhere
+        // before typing, and the render thread unwound. The app vanished
+        // mid-session with no shell prompt explaining where it went.
+        //
+        // Returning early is also the honest answer. An empty transcript has
+        // no selection, so the right result is the empty string the function
+        // already documents, not a panic.
+        if state.chat_lines.is_empty() || start_row >= state.chat_lines.len() {
+            return out;
+        }
+        let last_row = end_row.min(state.chat_lines.len() - 1);
+        for row in start_row..=last_row {
             let line = &state.chat_lines[row];
             if line.is_input {
                 continue;

@@ -225,8 +225,12 @@ impl Page for HistoryPage {
                         format!("  {:<8}  ", entry.id),
                         Style::default().fg(theme::BLUE()),
                     ),
+                    // Columns, not bytes — see `fleet.rs`. A task described
+                    // in any language but English panicked the History page as
+                    // soon as the description was longer than 32 bytes and had
+                    // a multibyte character inside that window.
                     Span::styled(
-                        format!("{:<32}  ", &entry.task[..entry.task.len().min(32)]),
+                        format!("{:<32}  ", theme::truncate_str(&entry.task, 32)),
                         style,
                     ),
                     Span::styled(
@@ -238,7 +242,7 @@ impl Page for HistoryPage {
                         Style::default().fg(theme::fg_dim()),
                     ),
                     Span::styled(
-                        format!("{:<6}", &entry.branch[..entry.branch.len().min(6)]),
+                        format!("{:<6}", theme::truncate_str(&entry.branch, 6)),
                         if is_selected {
                             Style::default()
                                 .fg(theme::fg_color())
