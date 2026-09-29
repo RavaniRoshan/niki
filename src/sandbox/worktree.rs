@@ -752,32 +752,93 @@ fn nearest_lines(
             }
         }
     }
-    best.filter(|(score, _, _)| *score >= 0.5)
+    // 0.6 is aider's floor (`find_similar_lines`). It is lower than it looks,
+    // because character-level ratios over short, similar lines cluster: on the
+    // fixture below, the true near miss scores 0.86 and a line two identifiers
+    // away scores 0.77. That is fine here and would not be fine for choosing
+    // an edit, which is why this is a suggestion shown to the model and never
+    // applied by the harness.
+    const SUGGESTION_FLOOR: f64 = 0.6;
+    best.filter(|(score, _, _)| *score >= SUGGESTION_FLOOR)
 }
 
 /// How alike two equal-length line runs are, in `[0, 1]`.
 ///
-/// A cheap stand-in for difflib's ratio. Weighted toward the exact count and
-/// toward the leading lines: an anchor that is right at the top and drifts is
-/// still recognisably a near miss, and one that is only right at the bottom
-/// much less so.
+/// Character-level, the way difflib's `SequenceMatcher` is, because a
+/// whitespace-only comparison finds nothing useful. An anchor that differs from
+/// a real line by one token is exactly the near miss worth showing, and an
+/// exact/trimmed-line score gives it zero: `fn a() { 1 }` against `fn a() {}`
+/// matches no line exactly and no line after trimming either.
+///
+/// The matching is a greedy longest-common-substring walk, which is O(n + m)
+/// and needs no dependency. It over-estimates a little versus a true LCS — it
+/// cannot go back and re-match an earlier character — and that is acceptable
+/// for a suggestion shown to a model, which is not the same as resolving an
+/// edit. Lines are capped so a minified file cannot make this expensive.
 fn similarity(a: &[&str], b: &[&str]) -> f64 {
     if a.is_empty() || a.len() != b.len() {
         return 0.0;
     }
-    let n = a.len() as f64;
-    let exact = a.iter().zip(b).filter(|(x, y)| x == y).count() as f64;
-    let trimmed = a
-        .iter()
-        .zip(b)
-        .filter(|(x, y)| x.trim() == y.trim())
-        .count() as f64;
-    let prefix = a
-        .iter()
-        .zip(b)
-        .take_while(|(x, y)| x.trim() == y.trim())
-        .count() as f64;
-    exact / n * 0.5 + trimmed / n * 0.2 + prefix / n * 0.3
+    let left: String = a.join("\n");
+    let right: String = b.join("\n");
+    let l: Vec<char> = left.chars().take(4000).collect();
+    let r: Vec<char> = right.chars().take(4000).collect();
+    if l.is_empty() || r.is_empty() {
+        return 0.0;
+    }
+
+    // Greedy match, re-scanning forward from the last matched position, which
+    // is the classic cheap approximation of a diff ratio.
+    // Exact longest common subsequence for the sizes an anchor actually has.
+    // The greedy walk below is O(n + m) but it cannot re-match an earlier
+    // character, and on a two-line anchor that cost it most of the score: a
+    // real near miss scored 0.41, under the 0.5 floor, so the suggestion never
+    // appeared — the feature silently did nothing. An O(n·m) table over a few
+    // hundred characters is nothing, and an edit anchor is rarely more.
+    const EXACT_LIMIT: usize = 512;
+    let matched = if l.len() <= EXACT_LIMIT && r.len() <= EXACT_LIMIT {
+        lcs_len(&l, &r)
+    } else {
+        greedy_match_len(&l, &r)
+    };
+    // difflib's ratio, which handles unequal lengths: the near miss that
+    // matters is usually a line with a token added or removed, so requiring
+    // equal lengths scored exactly the case we care about as zero.
+    2.0 * matched as f64 / (l.len() + r.len()) as f64
+}
+
+/// Length of the longest common subsequence of two character runs.
+fn lcs_len(a: &[char], b: &[char]) -> usize {
+    let mut prev = vec![0usize; b.len() + 1];
+    let mut cur = vec![0usize; b.len() + 1];
+    for &ca in a {
+        for (j, &cb) in b.iter().enumerate() {
+            cur[j + 1] = if ca == cb {
+                prev[j] + 1
+            } else {
+                cur[j].max(prev[j + 1])
+            };
+        }
+        std::mem::swap(&mut prev, &mut cur);
+        cur.iter_mut().for_each(|v| *v = 0);
+    }
+    prev[b.len()]
+}
+
+/// Cheap O(n + m) fallback for runs too long for the table.
+fn greedy_match_len(a: &[char], b: &[char]) -> usize {
+    let mut matched = 0usize;
+    let mut j = 0usize;
+    for c in a {
+        while j < b.len() && b[j] != *c {
+            j += 1;
+        }
+        if j < b.len() {
+            matched += 1;
+            j += 1;
+        }
+    }
+    matched
 }
 
 /// Keep both ends of a long string — the difference is usually at one of them.
