@@ -28,30 +28,34 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # ── Runner ─────────────────────────────────────────────────────────
+  # ── Runner: GitHub-hosted ──────────────────────────────────────────
   #
-  # `CI_RUNNER` is a repository variable, so the runner moves without a code
-  # change: set it to `blacksmith-4vcpu-ubuntu-2404` in
-  # Settings → Secrets and variables → Actions → Variables and every job here
-  # moves to Blacksmith bare metal.
+  # Blacksmith was tried here and rejected on evidence, not taste:
   #
-  # It is a variable rather than a hard-coded label because Blacksmith's GitHub
-  # app is **not installed on this organisation yet**. With the label written
-  # in, every job in this workflow sat queued indefinitely — this repo's
-  # `blacksmith-migration-4c53a26` branch has been queued the same way for
-  # 23 minutes — because a workflow cannot be scheduled at all when no runner
-  # carries the label. That blocks the entire pipeline, including the checks
-  # that are not about speed.
+  # * The app is installed on `Roshan-s-labs` with full `actions: write`, not
+  #   suspended — so the labels resolved correctly and the workflow was
+  #   scheduled. But after ~6 minutes only ONE of twelve Linux jobs had picked
+  #   up a runner and the other eleven sat queued. Blacksmith provisions
+  #   runners per job, and at that concurrency this workflow would take longer
+  #   than the 13m21s it takes on GitHub-hosted runners. Faster hardware
+  #   behind a serialisation point is slower.
+  # * With the runner label written in *before* the app existed, nothing ran
+  #   at all: a workflow whose labels match no runner is not scheduled, so the
+  #   audit, the install-path gate and the fast checks all went silent.
   #
-  # So the default resolves to `ubuntu-latest` and works today, and one
-  # setting turns on the faster runners. The cache steps are kept either way:
-  # a cold `cargo build --tests` compiles vendored libgit2 on every job, and
-  # faster hardware with no cache is a slower pipeline.
+  # Revisit if Blacksmith's concurrency on this account changes. The change
+  # is one line per job plus a `CI_RUNNER` repository variable; the reasoning
+  # is recorded here so the next person does not re-run the experiment.
+  #
+  # The `Swatinem/rust-cache@v2` and `actions/setup-node@v7` steps are load
+  # bearing and must not be dropped: a cold `cargo build --tests` compiles
+  # vendored libgit2 on every job, so removing the cache makes every run a cold
+  # build regardless of how fast the runner is.
 
   # ── Phase 1: Fast checks (fail fast) ──────────────────────────────
   check:
     name: Check (fmt + clippy)
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -74,7 +78,7 @@ jobs:
   # ── Phase 1-msrv: Minimum Supported Rust Version (1.88) ─────────────
   msrv:
     name: MSRV (1.88)
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -95,7 +99,7 @@ jobs:
   # ── Phase 1-features: Build without default features ────────────────
   no-default-features:
     name: Build (--no-default-features)
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -114,7 +118,7 @@ jobs:
   # ── Phase 1b: Supply-chain audit (cargo-audit + cargo-deny) ────────
   audit:
     name: Audit (supply chain)
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -152,7 +156,7 @@ jobs:
   # invariant: every download URL referenced by a manifest must exist.
   manifest-parity:
     name: Manifest parity
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - name: Check manifest download URLs resolve
@@ -202,7 +206,7 @@ jobs:
   # ── Phase 2: Unit + integration tests ─────────────────────────────
   test:
     name: Tests
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     needs: [check, msrv, no-default-features]
     steps:
       - uses: actions/checkout@v7
@@ -240,7 +244,7 @@ jobs:
   # niki at all. This job is the gate that keeps it working.
   install:
     name: Install path
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -280,7 +284,7 @@ jobs:
   # ── Phase 2c: release-packaging contract ──────────────────────────
   dist-contract:
     name: Release packaging contract
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -356,7 +360,7 @@ jobs:
     # `product-verify`: this job builds its own release binary and runs its own
     # mock LLM, so nothing from the `test` job reaches it.
     needs: [check]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -455,7 +459,7 @@ jobs:
   # and was never wired to anything — 11 passing tests nobody ran.
   tui-headless:
     name: Headless PTY TUI (${{ matrix.colour }})
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     # Both colour states, as separate jobs on separate runners — not as two
     # invocations in one job. The suite is timing-sensitive by construction:
@@ -539,7 +543,7 @@ jobs:
   # already shipped CI jobs that went green while executing nothing.
   journeys:
     name: Consumer journeys
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -567,7 +571,7 @@ jobs:
   # advertised in the footer and did nothing. Every other suite passed.
   tui-pty:
     name: Real PTY TUI
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -626,7 +630,7 @@ jobs:
   demo:
     name: Demo (no key, no container)
     needs: [check]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -721,7 +725,7 @@ jobs:
     # capture job into a 15-minute one and put the most expensive TUI gate at
     # the very end of the run. `check` still gates it.
     needs: [check]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       NIKI_CI: "1"
@@ -853,7 +857,7 @@ jobs:
     # behind a 7-minute test job. `check` still gates it, so an obviously broken
     # tree does not spend the minutes.
     needs: [check]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
