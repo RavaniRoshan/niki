@@ -174,10 +174,26 @@ fn check_install() -> Vec<Check> {
                         let version = String::from_utf8_lossy(&output.stdout);
                         CheckResult::Pass(version.trim().to_string())
                     } else {
-                        CheckResult::Fail("rustc not working".to_string())
+                        // A warning, not a failure, and the reason matters.
+                        //
+                        // `rustc` is only ever stamped into the provenance
+                        // record, and that field is an `Option` precisely
+                        // because the toolchain is not required. A released
+                        // binary asks nothing of the user at runtime, so a
+                        // first-time user with no Rust installed — who has no
+                        // intention of installing it — was shown a red ✗ and a
+                        // "some checks failed" summary for a tool this program
+                        // never calls.
+                        CheckResult::Warn(
+                            "rustc not working (only used to stamp provenance)".to_string(),
+                        )
                     }
                 }
-                Err(_) => CheckResult::Fail("rustc not found".to_string()),
+                // See above: absent rustc is a fact about the machine, not a
+                // fault in the install.
+                Err(_) => CheckResult::Warn(
+                    "rustc not found (only used to stamp the provenance record)".to_string(),
+                ),
             },
         },
     ]
@@ -378,8 +394,13 @@ fn check_sandbox_image(base_image: &str) -> Check {
     } else if present("docker", base_image) || present("podman", base_image) {
         CheckResult::Pass(format!("{} present locally", base_image))
     } else {
-        CheckResult::Fail(format!(
-            "{} not found locally — build it: `podman build -t {} -f docker/Dockerfile .` (or `docker build ...`)",
+        // A warning, and it says who it affects. The worktree backend runs
+        // agent commands as local processes and needs no image at all, so a
+        // user who never touches the container backend should not be told a
+        // check failed.
+        CheckResult::Warn(format!(
+            "{} not found locally — needed only for the container backend. Build it with \
+             `podman build -t {} -f docker/Dockerfile .` (or `docker build ...`)",
             base_image, base_image
         ))
     };

@@ -396,7 +396,50 @@ fn j_unknown_report_id_is_a_clean_error(ctx: &JourneyCtx) -> JourneyResult {
     JourneyResult::Pass
 }
 
+/// A brand-new machine must not be told it is broken.
+///
+/// `doctor` reported two hard failures on a fresh install: a missing `rustc`
+/// and a missing container image. The first is a fact about a machine that
+/// never needs the toolchain — `rustc` is only stamped into the provenance
+/// record, and that field is an `Option` precisely because it is optional. The
+/// second only affects the container backend; a user on the worktree backend
+/// never touches it.
+///
+/// Both were `Fail`, so the summary read "some checks failed" and a first-time
+/// user with a released binary was told, in red, that their install was broken.
+/// The whole point of the zero-setup path is that someone can install this and
+/// run it; a doctor that opens with two failures says otherwise.
+fn j_doctor_does_not_fail_a_first_run(ctx: &JourneyCtx) -> JourneyResult {
+    let out = ctx.run(&["doctor"]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    if combined.contains("panicked at") {
+        return JourneyResult::Fail("`doctor` panicked on a fresh machine".to_string());
+    }
+    if let Some(line) = combined
+        .lines()
+        .find(|l| l.contains("checks failed") || l.contains("Some checks failed"))
+    {
+        return JourneyResult::Fail(format!(
+            "a first-time user is shown a failing report: {line}"
+        ));
+    }
+    // And the report must still be *useful* — "no failures" is only good if it
+    // also says something.
+    if !combined.contains("checks") {
+        return JourneyResult::Fail(
+            "`doctor` said nothing about its checks; silence is not a passing report".to_string(),
+        );
+    }
+    JourneyResult::Pass
+}
+
 static JOURNEYS: &[Journey] = &[
+    Journey {
+        id: "J00",
+        intent: "run `niki doctor` on a machine that has never configured it",
+        guards: "the first thing a new user runs; a red report here is the                   difference between 'install and go' and 'something is wrong                   with my machine'",
+        run: j_doctor_does_not_fail_a_first_run,
+    },
     Journey {
         id: "J01",
         intent: "run `niki --version` on a machine with no config",
