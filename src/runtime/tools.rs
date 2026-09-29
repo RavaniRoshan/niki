@@ -1109,11 +1109,24 @@ impl Tool for GlobTool {
             Ok(p) => p,
             Err(e) => return make_error_result(&e),
         };
-        let full_pattern = if pattern.starts_with('/') {
-            pattern.to_string()
-        } else {
-            format!("{}/{}", ctx.project_path.display(), pattern)
-        };
+        // Confined, like every other path-taking tool here.
+        //
+        // An absolute pattern used to be passed straight to `glob`, so
+        // `glob {"pattern": "/home/user/.ssh/*"}` listed any directory on the
+        // host. `read`, `list`, `write`, `edit`, `patch` and `grep` all resolve
+        // through `resolve_tool_path`, which rejects `..` and canonicalises;
+        // `glob` was the one hole in a write path the rest of the file
+        // documents as hardened.
+        //
+        // `..` is rejected too: a relative pattern containing it escapes the
+        // project just as effectively as an absolute one.
+        if pattern.starts_with('/') || pattern.split(['/', '\\']).any(|c| c == "..") {
+            return make_error_result(&format!(
+                "glob pattern must be inside the project: `{pattern}` is an absolute \
+                 path or escapes it with `..`. Use a path relative to the project root."
+            ));
+        }
+        let full_pattern = format!("{}/{}", ctx.project_path.display(), pattern);
         match glob::glob(&full_pattern) {
             Ok(paths) => {
                 let matches: Vec<String> = paths
@@ -2268,7 +2281,33 @@ impl Tool for TaskListTool {
     }
 }
 
+/// Whether the TUI currently owns stdin in raw mode.
+///
+/// Set when a TUI enters raw mode and cleared when it leaves. `is_terminal()`
+/// cannot answer this: stdin *is* a terminal while the TUI holds it, and the
+/// TUI is running its own `event::read()` on it.
+static TUI_OWNS_STDIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Claim or release stdin for the TUI. Called by `display::tui` on entering
+/// and leaving raw mode.
+pub fn set_stdin_owned_by_tui(owned: bool) {
+    TUI_OWNS_STDIN.store(owned, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn stdin_owned_by_tui() -> bool {
+    TUI_OWNS_STDIN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn is_interactive_stdin() -> bool {
+    if stdin_owned_by_tui() {
+        // Someone else is reading this. `read_line` here would race the TUI's
+        // event loop for the next keypress, and in raw mode it returns after
+        // one keystroke with no newline — so `approval` would take a stray `y`
+        // the user typed at the *interface* as consent to a command it never
+        // showed them. Fail closed instead: `approval` denies, `ask_user` says
+        // it cannot ask.
+        return false;
+    }
     if std::env::var_os("NIKI_NON_INTERACTIVE").is_some() {
         return false;
     }
@@ -4039,6 +4078,99 @@ mod tests {
             fail_closed_headless: false,
             task_store: None,
         }
+    }
+
+    /// `glob` must not list the host.
+    ///
+    /// An absolute pattern was passed straight to `glob::glob`, so
+    /// `glob {"pattern": "/home/user/.ssh/*"}` enumerated any directory on the
+    /// machine. Filenames only — `read` is still confined — but it is a
+    /// model-reachable read of the host's filesystem, and `glob` was the one
+    /// tool in the file that skipped `resolve_tool_path` while every other
+    /// path-taking tool used it.
+    #[tokio::test]
+    async fn glob_cannot_escape_the_project() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let ctx = ToolContext {
+            project_path: dir.path().to_path_buf(),
+            ..manual_ctx()
+        };
+        for pattern in ["/etc/*", "/home/user/.ssh/*", "../outside/*", "a/../../b"] {
+            let out = crate::runtime::tools::GlobTool
+                .execute(
+                    ToolInput::new(serde_json::json!({"pattern": pattern})),
+                    &ctx,
+                )
+                .await;
+            assert_ne!(
+                out.status,
+                ToolStatus::Success,
+                "`{pattern}` must not be globbed: it reaches outside the project"
+            );
+        }
+    }
+
+    /// And the ordinary case still works, or the guard above is just a wall.
+    #[tokio::test]
+    async fn glob_still_matches_inside_the_project() {
+        let dir = tempfile::tempdir().expect("tmp");
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}").expect("write");
+        let ctx = ToolContext {
+            project_path: dir.path().to_path_buf(),
+            ..manual_ctx()
+        };
+        let out = crate::runtime::tools::GlobTool
+            .execute(ToolInput::new(serde_json::json!({"pattern": "*.rs"})), &ctx)
+            .await;
+        assert_eq!(out.status, ToolStatus::Success, "{:?}", out.summary);
+    }
+
+    /// The TUI owns stdin, so nothing else may read it.
+    ///
+    /// `is_terminal()` cannot answer this: stdin *is* a terminal while the TUI
+    /// holds it. And in raw mode `read_line` returns after a single keystroke
+    /// with no newline — so `approval` would have taken a stray `y` the user
+    /// typed at the *interface* as consent to a command it never showed them,
+    /// and `ask_user` would have answered with whatever key came next while
+    /// printing its question into the alternate screen.
+    ///
+    /// `approval` is the one that matters: a false approval is worse than a
+    /// missing one, so the answer here must be "cannot ask", which the tool
+    /// turns into a denial.
+    #[tokio::test]
+    async fn a_tui_holding_stdin_makes_approval_deny_rather_than_guess() {
+        set_stdin_owned_by_tui(true);
+        let ctx = manual_ctx();
+        let out = crate::runtime::tools::ApprovalTool
+            .execute(
+                ToolInput::new(serde_json::json!({"command": "rm -rf /"})),
+                &ctx,
+            )
+            .await;
+        set_stdin_owned_by_tui(false);
+        assert_eq!(
+            out.status,
+            ToolStatus::PermissionDenied,
+            "with the interface holding stdin there is nobody to ask, and \
+             guessing is the one answer that must never be given"
+        );
+    }
+
+    /// The inverse, and the reason the test above is not "always deny".
+    ///
+    /// Headless `niki run` is the normal case and has no TUI; denying there
+    /// would make every approval-gated tool unusable for everyone.
+    #[test]
+    fn releasing_stdin_makes_asking_possible_again() {
+        set_stdin_owned_by_tui(true);
+        set_stdin_owned_by_tui(false);
+        // `NIKI_NON_INTERACTIVE` or a test binary keeps this false either
+        // way; the assertion is only that the flag is not stuck on.
+        assert!(
+            !stdin_owned_by_tui(),
+            "the flag must be clear once the TUI is done with it, or every \
+             later question in the same process is unanswerable"
+        );
     }
 
     /// `manual` with no approval UI must allow, because that is what it is

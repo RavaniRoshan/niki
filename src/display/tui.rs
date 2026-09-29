@@ -145,6 +145,11 @@ struct RestoreGuard;
 
 impl Drop for RestoreGuard {
     fn drop(&mut self) {
+        // Release stdin before raw mode goes, so a tool asking a question in
+        // the same instant the TUI exits is not told the interface still owns
+        // it — and, more importantly, so a *second* TUI in the same process
+        // can claim it.
+        crate::runtime::tools::set_stdin_owned_by_tui(false);
         let _ = disable_raw_mode();
         let _ = crate::display::kitty::disable_kitty_keyboard();
         let _ = crate::display::mouse::disable_tracking();
@@ -769,7 +774,12 @@ fn run_tui(
     if enable_raw_mode().is_err() {
         return;
     }
+    // From here until `RestoreGuard` drops, this thread reads stdin. Tell the
+    // tool layer, so `approval` cannot answer a question nobody was asked and
+    // `ask_user` does not steal a keystroke from the interface.
+    crate::runtime::tools::set_stdin_owned_by_tui(true);
     if execute!(io::stdout(), EnterAlternateScreen).is_err() {
+        crate::runtime::tools::set_stdin_owned_by_tui(false);
         return;
     }
     // Enable mouse capture and bracketed paste mode
@@ -1284,6 +1294,10 @@ pub fn run_chat(
     if enable_raw_mode().is_err() {
         return;
     }
+    // Same claim as `run_tui` — see there. `niki chat` is the surface a person
+    // is most likely to be typing into when an agent asks a question, so this
+    // is the path where a stray keystroke is most likely.
+    crate::runtime::tools::set_stdin_owned_by_tui(true);
     let mut stdout = io::stdout();
     let _ = execute!(
         stdout,
@@ -1608,6 +1622,7 @@ pub fn run_chat(
     // Phase 8 — persist the final chat session on exit (resume next time).
     persistence::save_chat_session(&project_path, &persistence::snapshot(&state));
 
+    crate::runtime::tools::set_stdin_owned_by_tui(false);
     let _ = disable_raw_mode();
     let _ = crate::display::mouse::disable_tracking();
     let _ = execute!(
