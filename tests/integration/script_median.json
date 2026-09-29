@@ -1,0 +1,62 @@
+{
+  "_comment": [
+    "A scripted run for `scripts/mega-e2e.sh`: a Python fixture whose tests are",
+    "red before the change and green after it. This is the second story the mock",
+    "server can tell, and it exists because the only one it could tell was the",
+    "demo — so every other end-to-end path that needed different code to be",
+    "written had no server to run against, and therefore did not exist.",
+    "",
+    "Only the roles that differ from the built-in story are named. The tester and",
+    "reviewer fall through to the built-in artifacts, which is the point: a",
+    "script states the part it is about.",
+    "",
+    "The Coder's edit is anchored on a line that occurs exactly once in the",
+    "fixture, and it appends. That combination is the whole reason the mega",
+    "leg is worth running at all: an ambiguous anchor or a blank one would",
+    "silently put the function somewhere else, every artifact would still",
+    "validate, and the run would still be green."
+  ],
+  "responses": {
+    "planner": {
+      "summary": "Add a median() function alongside mean() in src/stats.py",
+      "approach": "Extend the existing statistics module with a median() that sorts a copy of the input, returns the middle element for an odd length and the mean of the two middle elements for an even length, and raises ValueError on an empty sequence.",
+      "files_to_modify": [
+        {
+          "path": "src/stats.py",
+          "action": "modify",
+          "description": "Add median() next to the existing mean()"
+        }
+      ],
+      "acceptance_criteria": [
+        "median([3, 1, 2]) returns 2",
+        "median([1, 2, 3, 4]) returns 2.5",
+        "median([]) raises ValueError",
+        "The existing mean() is unchanged",
+        "The test suite in tests/ passes"
+      ],
+      "constraints": [
+        "Do not sort the caller's list in place",
+        "Python standard library only"
+      ],
+      "estimated_complexity": "low"
+    },
+    "coder": {
+      "edits": [
+        {
+          "search": "    return sum(values) / len(values)\n",
+          "replace": "    return sum(values) / len(values)\n\n\ndef median(values):\n    \"\"\"Middle value of a sequence, or the mean of the two middle values.\n\n    Raises ValueError on an empty sequence. The input is not sorted in\n    place; a copy is taken first.\n    \"\"\"\n    ordered = sorted(values)\n    n = len(ordered)\n    if n == 0:\n        raise ValueError(\"median() of an empty sequence is undefined\")\n    mid = n // 2\n    if n % 2 == 1:\n        return ordered[mid]\n    return (ordered[mid - 1] + ordered[mid]) / 2\n"
+        }
+      ],
+      "files_changed": [
+        {
+          "path": "src/stats.py",
+          "action": "modify",
+          "language": "python"
+        }
+      ],
+      "implementation_notes": "Added median() next to mean(). Sorts a copy so the caller's list is untouched; odd lengths return the middle element, even lengths average the two middle ones, and an empty sequence raises ValueError.",
+      "spec_adherence": "All five acceptance criteria are met by the new function; mean() is untouched."
+    }
+  },
+  "tool_loop": true
+}

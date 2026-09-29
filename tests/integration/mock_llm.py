@@ -158,6 +158,46 @@ ROLE_RESPONSES = {
 }
 
 
+# ── Scripted runs ─────────────────────────────────────────────────────────
+# Everything above is one fixed story: a JS health endpoint. That is the demo,
+# and a demo can only ever prove the demo.
+#
+# Every other end-to-end path in this repository wants the same machinery over
+# a *different* task — a Python fixture whose tests start red, a bug class, a
+# refusal to emit a patch. Before this, each of those wanted its own server, so
+# each of them did not exist, so the one server that exists is the only story
+# anyone can tell end to end. That is how a codebase ends up unable to test
+# its own second scenario.
+#
+# `MOCK_LLM_SCRIPT=<file.json>` overrides the per-role artifacts and,
+# optionally, the model catalogue:
+#
+#   {"responses": {"coder": {...}}, "models": [{"id": "x"}]}
+#
+# Roles not named fall back to the built-in story, so a script only has to
+# say the part it cares about.
+SCRIPT_PATH = os.environ.get("MOCK_LLM_SCRIPT", "")
+SCRIPTED_MODELS = None
+SCRIPTED_TOOL_LOOP = False
+if SCRIPT_PATH:
+    try:
+        with open(SCRIPT_PATH, encoding="utf-8") as fh:
+            _script = json.load(fh)
+    except (OSError, ValueError) as exc:  # pragma: no cover - test-infra guard
+        sys.stderr.write(f"[mock_llm] MOCK_LLM_SCRIPT={SCRIPT_PATH} unreadable: {exc}\n")
+        raise SystemExit(2)
+    for _role, _body in (_script.get("responses") or {}).items():
+        ROLE_RESPONSES[_role] = _body
+    if _script.get("models") is not None:
+        SCRIPTED_MODELS = _script["models"]
+    SCRIPTED_TOOL_LOOP = bool(_script.get("tool_loop"))
+    sys.stderr.write(
+        f"[mock_llm] scripted: roles={sorted(_script.get('responses') or {})} "
+        f"tool_loop={SCRIPTED_TOOL_LOOP} "
+        f"models={'yes' if SCRIPTED_MODELS is not None else 'built-in'}\n"
+    )
+
+
 # Substring of the system prompt -> role. Order matters: the more specific
 # persona lines are checked first.
 ROLE_MARKERS = [
@@ -203,6 +243,43 @@ def chunk_text(text, size=20):
     return [text[i:i+size] for i in range(0, len(text), size)]
 
 
+def _tool_result_seen(body):
+    """True once the conversation carries an answer back from a tool.
+
+    OpenAI spells it `{"role": "tool"}`; Anthropic spells it a `tool_result`
+    content block. Checking for the string "tool_result" alone — which is what
+    this used to do — matches neither, so the mock never noticed it had been
+    called back and answered identically forever.
+    """
+    for message in body.get("messages") or []:
+        if message.get("role") == "tool":
+            return True
+        content = message.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    return True
+    return False
+
+
+def _openai_tool_call(name, arguments, call_id):
+    return {
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(arguments)},
+                }],
+            },
+            "finish_reason": "tool_calls",
+        }],
+        "usage": {"prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 150},
+    }
+
+
 def openai_json_response(role, body):
     """Non-streaming OpenAI response. Tool-loop path (Phase 3.3): a request
     carrying `tools` gets one `tool_calls` turn until a `tool_result` shows up
@@ -210,25 +287,35 @@ def openai_json_response(role, body):
     text = json.dumps(body)
     tools = body.get("tools") or []
     usage = {"prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 150}
+
+    if SCRIPTED_TOOL_LOOP and tools:
+        # Drive the loop the way a real model drives it: look at the file
+        # first, then submit.
+        #
+        # Without this, every Coder tool loop against this server burned its
+        # entire 12-step budget calling a `bash` probe and never called
+        # `submit_artifact` — so the path a modern model actually takes was
+        # never exercised by anything in CI, and every run silently fell back
+        # to the one-shot call. The fallback is the old behaviour and works,
+        # which is precisely why the gap was invisible: the run still
+        # produced a correct diff.
+        if not _tool_result_seen(body):
+            return _openai_tool_call("read_file", {"path": "src/stats.py"}, "call_read1")
+        return _openai_tool_call(
+            "submit_artifact", ROLE_RESPONSES[role], "call_submit1"
+        )
+
     if tools and "tool_result" not in text:
-        return {
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "call_probe1",
-                        "type": "function",
-                        "function": {
-                            "name": "bash",
-                            "arguments": json.dumps({"command": "echo tool-loop-probe"}),
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
-            "usage": usage,
-        }
+        # Left exactly as it was, deliberately. The check above cannot match
+        # OpenAI's `{"role": "tool"}`, so this branch always wins and the
+        # server keeps answering with a probe call — which is what every
+        # existing consumer was built and measured against. "Fix" it and the
+        # demo, the e2e job and the TUI smokes all change behaviour at once,
+        # on a change whose subject is a new opt-in path. The scripted path
+        # above is the corrected version; this one is frozen.
+        return _openai_tool_call(
+            "bash", {"command": "echo tool-loop-probe"}, "call_probe1"
+        )
     if tools:
         content = "Tool research complete: the probe command returned as observed."
     else:
@@ -246,6 +333,37 @@ def anthropic_json_response(role, body):
     """Non-streaming Anthropic response with the same tool-loop behavior."""
     text = json.dumps(body)
     tools = body.get("tools") or []
+    if SCRIPTED_TOOL_LOOP and tools:
+        # The Anthropic half of the scripted tool loop. Same two turns as the
+        # OpenAI half, so a script behaves identically whichever provider the
+        # end-to-end leg is pointed at — otherwise a scenario that passes on
+        # one provider fails on the other for a reason that has nothing to do
+        # with the scenario.
+        if not _tool_result_seen(body):
+            content = [{
+                "type": "tool_use",
+                "id": "toolu_read1",
+                "name": "read_file",
+                "input": {"path": "src/stats.py"},
+            }]
+            stop = "tool_use"
+        else:
+            content = [{
+                "type": "tool_use",
+                "id": "toolu_submit1",
+                "name": "submit_artifact",
+                "input": ROLE_RESPONSES[role],
+            }]
+            stop = "tool_use"
+        return {
+            "id": "msg_" + uuid.uuid4().hex[:24],
+            "type": "message",
+            "role": "assistant",
+            "model": "mock-model",
+            "content": content,
+            "stop_reason": stop,
+            "usage": {"input_tokens": 50, "output_tokens": 100},
+        }
     if tools and "tool_result" not in text:
         content = [{
             "type": "tool_use",
@@ -407,6 +525,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             self._send_json({"status": "mock-llm-ready"})
+        elif self.path.rstrip("/").endswith("/models"):
+            # The model catalogue, in OpenAI's `{"data": [...]}` shape.
+            #
+            # This was missing, and it made a shipped feature untestable: the
+            # endpoint every other handler fell through to answered a
+            # 200 with `{"message": "Mock LLM server running"}`, which is not
+            # a model list. So `niki providers models`, `niki recommend`'s
+            # availability check, and the doctor all read as "no catalogue
+            # here" against this server and were reported as `Unknown` —
+            # indistinguishable from a provider with no `/models` endpoint.
+            # Every assertion about the catalogue therefore had to be made
+            # against a hand-built struct in a unit test, and the HTTP path
+            # that a real user exercises was never run at all.
+            #
+            # The contents are chosen, not arbitrary. `claude-opus-4` is
+            # absent on purpose: it is what the recommendation table reaches
+            # for most roles, so this is the one that proves the "not offered,
+            # here is what this account *can* run" path fires over a real
+            # socket. The vendor-qualified `anthropic/...` spelling is what
+            # OpenRouter uses, and the bare-id match has to survive it.
+            self._send_json({"object": "list", "data": SCRIPTED_MODELS
+                             if SCRIPTED_MODELS is not None else [
+                {"id": "anthropic/claude-sonnet-4", "object": "model",
+                 "pricing": {"prompt": "0.000003", "completion": "0.000015"}},
+                {"id": "anthropic/claude-haiku-4-5", "object": "model",
+                 "pricing": {"prompt": "0.000001", "completion": "0.000005"}},
+                {"id": "openai/gpt-4o-mini", "object": "model",
+                 "pricing": {"prompt": "0.00000015", "completion": "0.0000006"}},
+                {"id": "openai/o3-mini", "object": "model",
+                 "pricing": {"prompt": "0.0000011", "completion": "0.0000044"}},
+                {"id": "mock-model", "object": "model",
+                 "pricing": {"prompt": "0", "completion": "0"}},
+            ]})
         else:
             self._send_json({"message": "Mock LLM server running"})
 

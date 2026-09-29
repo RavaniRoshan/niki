@@ -847,3 +847,181 @@ fn the_breadth_sweep_covers_more_than_one_shape_of_task() {
          decoration"
     );
 }
+
+// ── The mega end-to-end leg ──────────────────────────────────────────────
+
+fn mega_script() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/mega-e2e.sh");
+    std::fs::read_to_string(&path).expect("scripts/mega-e2e.sh must exist")
+}
+
+fn mega_script_without_comments() -> String {
+    mega_script()
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The assertion that separates this from every other end-to-end path in the
+/// repository.
+///
+/// All of them check that NIKI produced artifacts of the right shape: a
+/// branch, a diff, a `report.md`, a schema-valid `code_diff`. None of them
+/// check that the *code* works. A harness that emits a perfectly-formed patch
+/// which does not compile passes every one of those gates, and the person who
+/// finds out is the person who was trying to use the product.
+///
+/// So the leg has to check the branch out and run the fixture's own tests
+/// against what was written. Without this the script is an elaborate shape
+/// check with a real network in it.
+#[test]
+fn the_mega_leg_runs_the_written_code_and_not_just_the_harness() {
+    let s = mega_script_without_comments();
+    assert!(
+        s.contains("git worktree add"),
+        "the branch must be checked out somewhere; asserting on a diff is not \
+         asserting on code"
+    );
+    assert!(
+        s.contains("python3 -m pytest") && s.contains("the fixture's tests pass on the branch"),
+        "and the fixture's own suite must be run against it"
+    );
+    // Both directions matter. A suite that is green before the change makes
+    // the whole run uninterpretable — the agent can pass by doing nothing —
+    // and the script has to say so out loud rather than trusting the caller
+    // to have set up a task worth measuring.
+    assert!(
+        s.contains("the fixture's tests pass before any change"),
+        "the pre-condition must be checked: a suite that already passes cannot \
+         measure whether the change did anything"
+    );
+}
+
+/// A test that cannot fail is not a test. `set -e` is absent from the
+/// script's shebang options on purpose — the run's exit code has to be
+/// *collected*, not abort the script, so the report can name every check that
+/// failed instead of the first one. What must not happen is the opposite
+/// mistake: every check passing and the script still exiting 0 when the
+/// binary produced no branch at all.
+#[test]
+fn the_mega_leg_fails_loudly_when_there_is_no_branch() {
+    let s = mega_script_without_comments();
+    assert!(
+        s.contains("no niki/* branch"),
+        "an empty result must be a hard failure, not a run that reports nothing and exits 0"
+    );
+    assert!(
+        s.contains("FAILURES") && s.contains("exit 1"),
+        "and the collected failures must reach the exit code"
+    );
+}
+
+/// The `recommend` check is the one that guards against the product lying.
+///
+/// Every other command's output is data. `recommend` prints *advice*, and
+/// this repository has already shipped a version that printed a model the
+/// user's account could not run, in the same voice as one it could, because
+/// the catalogue could not be read and reading-nothing rendered exactly like
+/// reading-everything. The mega leg asserts the inverse of that bug, so the
+/// bug cannot come back through the front door.
+#[test]
+fn the_mega_leg_asserts_the_product_does_not_lie_about_its_own_advice() {
+    let s = mega_script_without_comments();
+    assert!(
+        s.contains("recommend does not present unchecked advice as checked"),
+        "the leg must check `recommend` does not present unverified advice as verified"
+    );
+}
+
+/// The mock server could only ever tell one story — a JavaScript health
+/// endpoint — and every end-to-end path that needed different code written had
+/// no server to run against, so none of them existed. The scripted entry
+/// point is what makes a second scenario possible, and if it is removed the
+/// CI job silently starts running the demo's story against a Python fixture:
+/// the edit does not apply, the tests stay red, and the job goes red for a
+/// reason that has nothing to do with the product.
+#[test]
+fn the_scripted_server_entry_point_stays_wired_to_ci() {
+    let py = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/integration/mock_llm.py"),
+    )
+    .expect("mock_llm.py");
+    assert!(
+        py.contains("MOCK_LLM_SCRIPT"),
+        "the mock server must accept a script, or there is exactly one story \
+         it can tell end to end"
+    );
+
+    let ci = ci_yml();
+    let body = job_body_without_comments(&ci, "mega-e2e");
+    assert!(
+        body.contains("MOCK_LLM_SCRIPT"),
+        "the CI job must actually pass the script, or it runs the built-in story"
+    );
+    // And it must prove the script loaded rather than trusting the env var:
+    // an unreadable path in a server that starts anyway is the exact
+    // "looks configured, is not" failure this repository keeps meeting.
+    assert!(
+        body.contains("scripted:"),
+        "the job must assert the server reported the script loaded"
+    );
+}
+
+/// The model catalogue is fetched over HTTP by four commands. Until the
+/// scripted server grew a `/models` route, every one of those endpoints fell
+/// through to a 200 with a JSON object that is not a model list, so the
+/// catalogue was untestable over a socket and every assertion about it had to
+/// be made against a hand-built struct. That is how a shipped feature ends up
+/// with no test of the code a user runs.
+#[test]
+fn the_mock_server_answers_a_model_catalogue() {
+    let py = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/integration/mock_llm.py"),
+    )
+    .expect("mock_llm.py");
+    assert!(
+        py.contains("endswith(\"/models\")"),
+        "GET .../models must be routed, not fall through to the catch-all"
+    );
+    assert!(
+        py.contains("claude-sonnet-4") && py.contains("gpt-4o-mini"),
+        "and it must answer with plausible ids, in OpenAI's shape, or the \
+         parser is not being tested"
+    );
+    assert!(
+        !py.contains("claude-opus-4\""),
+        "claude-opus-4 must be absent from the built-in catalogue: it is what \
+         the recommendation table reaches for most, so its absence is what \
+         proves the 'not offered, here is what you can run' path fires over a \
+         real socket rather than only in a unit test"
+    );
+}
+
+/// The real-model leg cannot gate a pull request — a small model fails a real
+/// coding task often enough that the gate would be noise, and noise is how
+/// gates stop being gates. But "not a gate" must not decay into "not run":
+/// the workflow has to exist, be dispatchable, and say out loud when it had
+/// no key instead of exiting green.
+#[test]
+fn the_real_provider_leg_is_dispatchable_and_does_not_fake_a_pass() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/mega-e2e.yml");
+    let wf = std::fs::read_to_string(&path).expect("mega-e2e.yml must exist");
+    // String matching, not a YAML parse, for the same reason every other
+    // assertion in this file does it: the question is never "is this valid
+    // YAML", which the Actions runner answers, it is "does this workflow still
+    // do the thing its name claims".
+    assert!(
+        wf.contains("workflow_dispatch:"),
+        "the real-provider leg must be dispatchable, or it is a file nobody runs"
+    );
+    assert!(
+        wf.contains("This is a skip, not a pass") || wf.contains("not run"),
+        "and a run with no key must say so; a skip reported as a pass is how a \
+         product ends up believed to be verified when nothing verified it"
+    );
+    assert!(
+        wf.contains("OPENROUTER_API_KEY"),
+        "the key must be named, so whoever adds it knows where"
+    );
+}

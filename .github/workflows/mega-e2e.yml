@@ -1,0 +1,116 @@
+name: Mega E2E (real provider)
+
+# The leg CI cannot decide.
+#
+# `ci.yml`'s `mega-e2e` job proves the *plumbing* — the whole user path, over
+# a real socket, with a fixture whose tests go from red to green. What it
+# cannot prove is whether the model NIKI is pointed at can do the work. That
+# depends on the model, the account, the network and the hour, so it does not
+# gate a pull request: a red gate that fires 40% of the time on a small model
+# is a gate everyone learns to ignore, and an ignored gate is worse than no
+# gate because it still looks like one.
+#
+# So it runs on demand, against a real hosted provider:
+#
+#   gh workflow run mega-e2e.yml
+#   gh workflow run mega-e2e.yml -f model=anthropic/claude-opus-4 -f runs=3
+#
+# Requires `OPENROUTER_API_KEY` in the repository secrets. Without it the job
+# says plainly that it did not run and exits 0 — a skip is never reported as
+# a pass, and "we had no key" is not "the product works".
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "OpenRouter model id"
+        default: "anthropic/claude-sonnet-4"
+      runs:
+        description: "How many times to run it (pass rate, not one sample)"
+        default: "1"
+      timeout:
+        description: "Seconds to allow one run"
+        default: "900"
+      effort:
+        description: "reasoning_effort to configure for the coder, or empty for none"
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  real:
+    name: Real provider (${{ inputs.model }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Deliberately NOT the whole org: a fork's pull_request cannot read
+      # this repository's secrets, and a workflow that tries is a workflow
+      # that fails on an unrelated change.
+      NIKI_BASE_URL: https://openrouter.ai/api/v1
+      NIKI_PROVIDER: openrouter
+      NIKI_MODEL: ${{ inputs.model }}
+      NIKI_KEY_ENV: OPENROUTER_API_KEY
+      NIKI_MEGA_TIMEOUT: ${{ inputs.timeout }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - name: Install test dependencies
+        run: python3 -m pip install --quiet pytest
+      - name: Check for a key
+        id: key
+        env:
+          KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEY" ]; then
+            echo "::notice title=not run::OPENROUTER_API_KEY is not set on this repository, so there is nothing to test against. Add it under Settings -> Secrets and variables -> Actions. This is a skip, not a pass."
+            echo "present=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "present=true" >>"$GITHUB_OUTPUT"
+          fi
+      - name: Build release binary
+        if: steps.key.outputs.present == 'true'
+        run: cargo build --release
+      - name: Confirm the account can actually see the model
+        # Run before the pipeline, so a wrong model id or a dead key is
+        # reported as what it is — an account problem — rather than as a
+        # mysterious harness failure three minutes later.
+        if: steps.key.outputs.present == 'true'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          npx --yes @openrouter/cli models >/dev/null 2>&1 || true
+          if ! curl -fsS -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+               https://openrouter.ai/api/v1/models \
+               | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("data",[])))' ; then
+            echo "FAIL: the catalogue could not be read — the key is wrong or the account is not enabled"
+            exit 1
+          fi
+      - name: Run it
+        if: steps.key.outputs.present == 'true'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          NIKI_BIN: ${{ github.workspace }}/target/release/niki
+        run: |
+          set -euo pipefail
+          pass=0; fail=0
+          for i in $(seq 1 ${{ inputs.runs }}); do
+            echo "::group::run $i/${{ inputs.runs }}"
+            if ./scripts/mega-e2e.sh; then pass=$((pass+1)); else fail=$((fail+1)); fi
+            echo "::endgroup::"
+          done
+          echo "### ${{ inputs.model }}: $pass/$((pass+fail)) completed"
+          # One sample of a stochastic system is not a pass rate, and
+          # reporting it as one is how a 60% harness gets called reliable.
+          # Zero out of one is reported as inconclusive, not as a failure of
+          # the product — but a repeated run that never succeeds is a real
+          # signal, so the count is always printed and always visible.
+          echo "$pass/$((pass+fail)) completed on ${{ inputs.model }}"
