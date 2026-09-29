@@ -1507,10 +1507,19 @@ async fn run_coder_tool_loop(
     // the run quietly became the one-shot path. From the outside that is
     // indistinguishable from the loop not existing, which is how the tool
     // loop shipped with a prompt that contradicted it and nobody noticed.
-    let Some(artifact) = out.artifact else {
+    let Some(artifact) = out.artifact.clone() else {
         let msg = coder_loop_fallback_notice(&out);
         tracing::warn!(target: "niki::pipeline", role = "coder", steps = out.steps, "{}", msg);
         eprintln!("niki: {msg}");
+        record_loop_cost(
+            role,
+            llm,
+            provider,
+            model,
+            &out,
+            start.elapsed().as_millis() as u64,
+            metrics,
+        );
         return None;
     };
     let json = serde_json::to_string_pretty(&artifact).ok()?;
@@ -1534,13 +1543,57 @@ async fn run_coder_tool_loop(
         );
         tracing::warn!(target: "niki::pipeline", role = "coder", error = %e, "{}", msg);
         eprintln!("niki: {msg}");
+        record_loop_cost(
+            role,
+            llm,
+            provider,
+            model,
+            &out,
+            start.elapsed().as_millis() as u64,
+            metrics,
+        );
         return None;
     }
 
-    let latency_ms = start.elapsed().as_millis() as u64;
     // How many "try again" turns the loop spent on its own recovery. Handed
     // back so the pipeline's shared allowance starts where this one left off.
     let feedback_turns = out.feedback_turns;
+    record_loop_cost(
+        role,
+        llm,
+        provider,
+        model,
+        &out,
+        start.elapsed().as_millis() as u64,
+        metrics,
+    );
+    Some((json, feedback_turns))
+}
+
+/// Bill a Coder tool loop, on **every** path out of it.
+///
+/// The cost used to be recorded only when the loop succeeded, which is exactly
+/// backwards: the failure is the expensive case. A loop that explored for
+/// twelve steps and never called `submit_artifact` had already spent twelve
+/// requests, and the pipeline then ran a *second*, full one-shot call as the
+/// fallback — so the user paid twice and `task.json` recorded one of the two.
+///
+/// The two places this matters most are exactly the ones a small local model
+/// reaches: no artifact, or an artifact that does not validate.
+///
+/// `retry_count` stays 0 on purpose. The loop is not retrying a failed request,
+/// it is the mechanism, and `RunBudget::accrue` adds `1 + retry_count` — so
+/// charging the step count here would double-count against `--max-steps` in a
+/// way that has nothing to do with what that flag means.
+pub fn record_loop_cost(
+    role: AgentRole,
+    llm: &dyn crate::llm::provider::LlmProvider,
+    provider: &str,
+    model: &str,
+    out: &crate::runtime::tools::LoopOutput,
+    latency_ms: u64,
+    metrics: &mut Vec<StageMetric>,
+) {
     let served = llm.served_by();
     let served_provider: &str = served.as_deref().unwrap_or(provider);
     metrics.push(StageMetric {
@@ -1553,12 +1606,9 @@ async fn run_coder_tool_loop(
         reasoning_tokens: out.usage.reasoning_tokens,
         latency_ms,
         cost_usd: compute_cost(served_provider, model, &out.usage),
-        // The loop is the retry mechanism now: the model was allowed to correct
-        // itself before it had to produce something final.
         retry_count: 0,
         ttft_ms: 0,
     });
-    Some((json, feedback_turns))
 }
 
 /// What to tell the user when the Coder's tool loop produced no artifact.

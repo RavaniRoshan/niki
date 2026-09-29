@@ -20,6 +20,9 @@ pub mod invariants;
 #[path = "reverse/llm_faults/mod.rs"]
 pub mod llm_faults;
 
+#[path = "reverse/money.rs"]
+pub mod money;
+
 mod common;
 
 #[path = "reverse/invariants_ratchet.rs"]
