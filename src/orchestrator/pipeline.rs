@@ -5357,11 +5357,19 @@ mod tests {
     /// which is what makes this a bug and not a decision.
     #[test]
     fn the_coder_loop_is_given_the_configured_permission_mode() {
+        // Scoped to the code, not the whole file: this test lives in the same
+        // file and its own source contains the literal it is looking for, so
+        // searching everything matches itself and fails forever. The first
+        // version did exactly that and went red on a tree that was correct.
         let src = include_str!("pipeline.rs");
+        let code = match src.find("#[cfg(test)]") {
+            Some(i) => &src[..i],
+            None => src,
+        };
 
         // The literal that started all of it.
         assert!(
-            !src.contains(r#"parse_permission_mode("manual")"#),
+            !code.contains(r#"parse_permission_mode("manual")"#),
             "the Coder loop must not hardcode a permission mode: `[permissions] \
              mode` and `--permission-mode` are documented to apply, and the \
              sibling research loop already threads them"
