@@ -226,8 +226,16 @@ fn truncation_measures_columns_not_bytes() {
 /// exactly like the correct code and panics on the first accent.
 #[test]
 fn a_column_budget_is_not_a_byte_offset() {
-    let s = "Actualizar la documentación del proyecto";
+    // Built rather than typed, so the assertion below cannot be defeated by
+    // where the accents happen to fall. An earlier version used a real
+    // Spanish sentence and this test failed — correctly — because byte 32 of
+    // that sentence *was* a character boundary, so it was asserting that
+    // slicing is safe rather than that the old code was not.
+    //
+    // A guard that refuses to prove a thing it cannot prove is worth more
+    // than a test that passes for the wrong reason.
     let budget = 32usize;
+    let s: String = "a".repeat(budget) + "日本語";
     // What the old code did, and why it is not a safe thing to do.
     assert!(
         s.len() > budget,
@@ -240,7 +248,7 @@ fn a_column_budget_is_not_a_byte_offset() {
          asserting that slicing is safe rather than that the old code was not"
     );
     // And what it does now.
-    let out = theme::truncate_str(s, budget);
+    let out = theme::truncate_str(&s, budget);
     assert!(out.chars().count() <= budget);
     assert!(s.starts_with(&out));
 }
