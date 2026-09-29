@@ -235,7 +235,12 @@ fn a_column_budget_is_not_a_byte_offset() {
     // A guard that refuses to prove a thing it cannot prove is worth more
     // than a test that passes for the wrong reason.
     let budget = 32usize;
-    let s: String = "a".repeat(budget) + "日本語";
+    // `budget - 1` ASCII characters, then a 3-byte CJK character, so byte
+    // `budget` lands *inside* it. Appending the CJK after `budget` ASCII
+    // characters put the boundary exactly at `budget` and the guard below
+    // refused — which is the second time this fixture has been wrong and the
+    // second time the guard was right.
+    let s: String = "a".repeat(budget - 1) + "日本語";
     // What the old code did, and why it is not a safe thing to do.
     assert!(
         s.len() > budget,
