@@ -650,10 +650,20 @@ async fn an_unappliable_patch_asks_the_coder_again_instead_of_ending_the_run() {
     );
 }
 
-/// With no rounds left, the same situation is a hard error rather than a
-/// silent empty branch.
+/// An unappliable patch has its own allowance and does not spend the
+/// Reviewer's.
+///
+/// It is a mechanical error — a `search` that is not in the file — not a
+/// judgment about quality, so charging it to the revision budget spends a
+/// round the Reviewer asked for on something it never asked about.
+///
+/// The scenario is the one that separates them. `max_revision_rounds = 1`
+/// means the Reviewer gets exactly one round of quality feedback. A Coder
+/// patch that would not apply comes first and is sent back; if that had
+/// charged the budget, the loop would be over before the Reviewer ever ran.
+/// It does not, so the Reviewer's round happens and the run closes.
 #[tokio::test]
-async fn an_unappliable_patch_with_no_rounds_left_fails_loudly() {
+async fn a_patch_that_will_not_apply_does_not_spend_the_reviewers_budget() {
     let mut spec: serde_json::Value = serde_json::from_str(&medium_spec_json()).unwrap();
     spec["estimated_complexity"] = serde_json::json!("high");
 
@@ -663,30 +673,56 @@ async fn an_unappliable_patch_with_no_rounds_left_fails_loudly() {
         "src/list.rs",
     ))
     .expect("diff json");
+    let appliable: serde_json::Value = serde_json::from_str(&mock_llm::code_diff_json(
+        "let end = start + size - 1;",
+        "let end = start + size;",
+        "src/list.rs",
+    ))
+    .expect("diff json");
 
     let builder = MockScriptBuilder::new()
         .add_response("mock-planner", &wrap_json(&spec.to_string()), 80, 120)
-        .add_tool_call("mock-coder", "submit_artifact", unappliable);
+        .add_tool_call("mock-coder", "submit_artifact", unappliable)
+        .add_tool_call("mock-coder", "submit_artifact", appliable)
+        .add_response(
+            "mock-tester",
+            &wrap_json(&mock_llm::test_report_json()),
+            100,
+            60,
+        )
+        .add_response(
+            "mock-reviewer",
+            &wrap_json(&mock_llm::review_verdict_approved_json()),
+            150,
+            60,
+        );
 
     let mut harness = TestHarness::new()
         .with_mock_builder(|_| builder)
         .with_worktree_backend()
         .with_mock_provider();
     harness.config.docker.extra_packages.clear();
+    // One quality round. A mechanical failure must not use it up.
     harness.config.general.max_revision_rounds = 1;
 
-    let err = harness
+    let res = harness
         .run_pipeline_result()
         .await
-        .expect_err("with no rounds left there is nothing to retry, and silence would be a lie");
-    let msg = format!("{err:?}");
-    assert!(
-        msg.contains("did not apply"),
-        "the error must say what happened: {msg}"
+        .expect("a patch that would not apply must not end the run");
+
+    assert_eq!(
+        res.verdict,
+        Verdict::Approved,
+        "the Reviewer's own round still had to happen, and its verdict still counts"
     );
-    assert!(
-        msg.contains("no revision rounds left"),
-        "and that there was no second chance: {msg}"
+    let reviewer_calls = res
+        .metrics
+        .iter()
+        .filter(|m| m.role == niki::artifacts::types::AgentRole::Reviewer)
+        .count();
+    assert_eq!(
+        reviewer_calls, 1,
+        "the Reviewer must have run: its budget was not spent on the Coder's typo"
     );
 }
 
