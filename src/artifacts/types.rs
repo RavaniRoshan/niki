@@ -14,9 +14,17 @@ pub struct ArtifactEnvelope<T: Serialize> {
     pub payload: T,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentRole {
+    /// The default, so a `[pipeline] stages` entry that names a role can omit
+    /// one and still deserialise — every other field in that table is
+    /// optional, and a struct-level `#[serde(default)]` fills them from
+    /// `Default`, which needs this to exist.
+    ///
+    /// Planner is first in the pipeline, so it is the least surprising thing
+    /// for an entry that forgot to say.
+    #[default]
     Planner,
     Coder,
     Tester,
