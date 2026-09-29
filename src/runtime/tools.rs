@@ -2971,6 +2971,7 @@ pub async fn run_tool_loop_with(
             temperature: 0.7,
             json_schema: None,
             tools: tools.clone(),
+            ..Default::default()
         };
 
         let response = provider.complete(request).await?;

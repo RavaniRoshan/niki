@@ -167,6 +167,7 @@ fn a_fallback_served_call_is_priced_by_the_fallback() {
                 temperature: 0.0,
                 json_schema: None,
                 tools: None,
+                reasoning_effort: None,
             })
             .await
             .expect("fallback serves");

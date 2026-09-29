@@ -1156,6 +1156,7 @@ pub struct PipelineStageConfig {
     /// Temperature for this stage. 0.0 = use agent default (0.2).
     #[serde(default)]
     pub temperature: f32,
+
     /// Fallback providers to try if the primary fails on transient errors.
     #[serde(default)]
     pub fallbacks: Vec<String>,
@@ -1334,6 +1335,10 @@ pub struct AgentConfig {
     /// Temperature for this agent's completions. 0.0 = use default (0.2).
     #[serde(default)]
     pub temperature: f32,
+    /// The provider's own reasoning-effort control: `low`, `medium`, `high`, or
+    /// whatever else a given model accepts (`minimal`, `xhigh`).
+    ///
+
     /// Ordered list of fallback providers if the primary fails on transient errors.
     /// The primary provider is always tried first; fallbacks are attempted in order.
     #[serde(default)]

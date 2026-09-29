@@ -546,6 +546,7 @@ async fn check_single_provider(name: &str, cfg: &ProviderConfig) -> Result<(Toke
         temperature: 0.0,
         json_schema: None,
         tools: None,
+        ..Default::default()
     };
 
     let response = provider.complete(request).await?;

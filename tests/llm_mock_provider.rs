@@ -55,6 +55,7 @@ fn make_request() -> CompletionRequest {
         temperature: 0.2,
         json_schema: None,
         tools: None,
+        reasoning_effort: None,
     }
 }
 
@@ -159,6 +160,7 @@ async fn mock_provider_returns_error_on_unknown_model() {
         temperature: 0.2,
         json_schema: None,
         tools: None,
+        reasoning_effort: None,
     };
     let result = provider.complete(req).await;
     assert!(result.is_err());
@@ -242,6 +244,7 @@ async fn nvidia_nim_live_chat() {
         temperature: 0.7,
         json_schema: None,
         tools: None,
+        reasoning_effort: None,
     };
     let resp = provider.complete(req).await.expect("LLM call");
     assert!(resp.usage.output_tokens > 0, "should produce output tokens");
