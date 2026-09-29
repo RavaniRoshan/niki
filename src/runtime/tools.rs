@@ -1107,6 +1107,27 @@ impl Tool for GlobTool {
     }
 }
 
+/// The argument vector [`GrepTool`] hands to ripgrep.
+///
+/// Extracted so the argument *shape* is testable without ripgrep installed
+/// and without a file on disk. The defect this guards is entirely about
+/// position — a model-authored string landing where a flag is expected — and
+/// position is the one thing an end-to-end test can only observe by watching
+/// a subprocess do something it should not.
+pub fn grep_argv(query: &str, include: Option<&str>, search_path: &str) -> Vec<String> {
+    let mut argv: Vec<String> = vec!["--no-heading".into(), "--line-number".into()];
+    if let Some(inc) = include {
+        argv.push("-g".into());
+        argv.push(inc.to_string());
+    }
+    // The separator, then the positionals. See the call site for why this is
+    // the difference between a search and arbitrary command execution.
+    argv.push("--".into());
+    argv.push(query.to_string());
+    argv.push(search_path.to_string());
+    argv
+}
+
 /// Grep tool — search file contents.
 pub struct GrepTool;
 
@@ -1133,7 +1154,7 @@ impl Tool for GrepTool {
         let include = input.str("include").map(|s| s.to_string());
         let path = input.str("path").map(|s| s.to_string());
 
-        // Use ripgrep via command if available, fall back to grep -r
+        // Use ripgrep.
         let mut cmd = tokio::process::Command::new("rg");
         cmd.arg("--no-heading").arg("--line-number");
         if let Some(inc) = &include {
@@ -1153,7 +1174,31 @@ impl Tool for GrepTool {
                 .display()
                 .to_string(),
         };
-        cmd.arg(query).arg(&search_path);
+        // `--` before the first positional, and it is load-bearing.
+        //
+        // `query` is model-authored text. Without the separator it is parsed
+        // as an option, and ripgrep has `--pre=COMMAND`, which runs COMMAND
+        // once per candidate file. So a single tool call —
+        //
+        //     grep {"query": "--pre=/tmp/x.sh"}
+        //
+        // executed /tmp/x.sh in the process's working directory. `grep` is
+        // `PermissionRequirement::Allow`, so this never consulted the `bash`
+        // deny-list (`curl | sh`, `rm -rf /`, …) and never asked the user.
+        //
+        // The trigger is a model that emits a flag-shaped pattern, which a
+        // prompt injection in a file the Coder reads can do. A coding agent
+        // that reads untrusted files has no control over what its model
+        // writes into a tool call, so the control has to be here.
+        //
+        // `-g <glob>` is safe on its own: `-g` consumes the next argument
+        // whatever it looks like, so `include` is not affected.
+        for arg in grep_argv(query, include.as_deref(), &search_path) {
+            cmd.arg(arg);
+        }
+        // The working directory, so the search root is the project rather than
+        // wherever the user happened to launch `niki` from.
+        cmd.current_dir(&ctx.project_path);
 
         match cmd.output().await {
             Ok(output) => {
@@ -1620,16 +1665,51 @@ impl Tool for TestTool {
         } else {
             ("cargo", vec!["test".to_string()])
         };
-        let result = tokio::process::Command::new(cmd)
-            .args(&args)
-            .current_dir(&ctx.project_path)
-            .output()
-            .await;
+        // Through `exec_with_timeout`, like `bash`.
+        //
+        // `Command::output()` blocks until the child exits, with no deadline.
+        // The tool loop is parked on that await, so a suite that waits on
+        // input, a `watch` mode, or a hung server hangs the entire run — and
+        // `max_steps` cannot help, because the loop is not iterating. Nothing
+        // else in the registry had this problem: `BashTool` has used
+        // `exec_with_timeout` since it was written, precisely because
+        // wrapping the future instead signals the process group and the
+        // background processes a command leaves behind outlive the run.
+        //
+        // The deadline is a constant rather than model-supplied, on purpose.
+        // `bash` lets the model pick `timeout_ms` and converts it unchecked,
+        // so `-1` becomes a kill deadline of 584 million years; here the model
+        // has no knob to turn.
+        const TEST_TOOL_TIMEOUT: Duration = Duration::from_secs(600);
+        let argv = {
+            let mut v = vec![cmd.to_string()];
+            v.extend(args.iter().cloned());
+            v
+        };
+        let result = crate::sandbox::exec::exec_with_timeout(
+            &argv,
+            &ctx.project_path,
+            TEST_TOOL_TIMEOUT,
+            TEST_TOOL_TIMEOUT.as_secs(),
+            crate::sandbox::truncate_head_tail,
+        )
+        .await;
         match result {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let _stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let exit_code = output.status.code().unwrap_or(-1);
+            // A deadline here is not a test failure; it is "we stopped
+            // waiting", and the model needs to hear that rather than see a
+            // tool that never returned.
+            Ok(Err(_timeout)) => {
+                return make_error_result(&format!(
+                    "the test command did not finish within {}s and was killed. \
+                     A suite that waits for input, or a watcher, will do this; \
+                     run the command directly to see where it stops.",
+                    TEST_TOOL_TIMEOUT.as_secs()
+                ));
+            }
+            Err(e) => return make_error_result(&format!("could not run the tests: {e}")),
+            Ok(Ok(output)) => {
+                let stdout = output.stdout;
+                let exit_code = output.exit_code;
                 let passed = stdout.matches("test result: ok").count();
                 let failed = stdout.matches("test result: FAILED").count();
                 let status = if exit_code == 0 {
@@ -1655,7 +1735,6 @@ impl Tool for TestTool {
                     metadata: HashMap::new(),
                 }
             }
-            Err(e) => make_error_result(&format!("test error: {}", e)),
         }
     }
 }
@@ -4521,6 +4600,85 @@ mod network_egress_permission_tests {
         assert!(
             !victim.exists(),
             "the file outside the project must not exist — the tool wrote it anyway"
+        );
+    }
+
+    /// A model-authored search string must not be able to become a flag.
+    ///
+    /// `rg --pre=COMMAND` runs COMMAND once per candidate file, and `grep` is
+    /// `PermissionRequirement::Allow` — so a flag-shaped `query` reached
+    /// arbitrary command execution without ever consulting the `bash`
+    /// deny-list or asking the user. One tool call was enough:
+    ///
+    ///     grep {"query": "--pre=/tmp/anything.sh"}
+    ///
+    /// The trigger is a model that emits a flag-shaped pattern, which a
+    /// prompt injection in a file the Coder reads can arrange. A coding agent
+    /// that opens untrusted files has no control over what its model writes
+    /// into a tool call, so the control belongs here and not in the prompt.
+    ///
+    /// The assertion is positional, which is the whole defect: everything the
+    /// model controls has to land after the `--`.
+    #[test]
+    fn a_flag_shaped_grep_query_cannot_reach_rg_as_a_flag() {
+        let argv = grep_argv("--pre=/tmp/x.sh", None, "/project");
+        let sep = argv
+            .iter()
+            .position(|a| a == "--")
+            .expect("argv must end options");
+        assert_eq!(
+            sep,
+            argv.len() - 3,
+            "exactly the two options precede the separator: {argv:?}"
+        );
+        for a in &argv[..sep] {
+            assert!(
+                !a.contains("pre"),
+                "a model-controlled string reached the option section: {argv:?}"
+            );
+        }
+        assert_eq!(
+            argv[sep + 1],
+            "--pre=/tmp/x.sh",
+            "it is a pattern, verbatim"
+        );
+    }
+
+    /// The separator is unconditional, not only for suspicious-looking input.
+    ///
+    /// A denylist is the wrong shape here: the set of options that do
+    /// something is open-ended, and ripgrep gains more over time. `--` closes
+    /// the whole category, which is why it is unconditional.
+    #[test]
+    fn the_separator_is_present_for_ordinary_queries_too() {
+        for query in ["fn main", "-i", "--help", "a|b", "^pub fn", ""] {
+            let argv = grep_argv(query, Some("*.rs"), "/project");
+            let sep = argv.iter().position(|a| a == "--").expect("always");
+            assert_eq!(argv[sep + 1], query, "{argv:?}");
+            assert_eq!(argv[sep + 2], "/project", "{argv:?}");
+            assert!(
+                argv[..sep].iter().all(|a| a == "--no-heading"
+                    || a == "--line-number"
+                    || a == "-g"
+                    || *a == "*.rs"),
+                "only known options may precede the separator: {argv:?}"
+            );
+        }
+    }
+
+    /// `include` is safe, and for a reason worth pinning.
+    ///
+    /// It is passed as `-g <value>`, and `-g` consumes the next argument
+    /// whatever it looks like — so a glob beginning with `-` cannot become an
+    /// option. If someone "simplifies" this to `arg(format!("-g{inc}"))`
+    /// later, the argument fuses into one token and that stops being true.
+    #[test]
+    fn the_include_glob_cannot_fuse_into_an_option() {
+        let argv = grep_argv("x", Some("--help"), "/project");
+        let sep = argv.iter().position(|a| a == "--").expect("sep");
+        assert_eq!(
+            &argv[sep - 2..sep],
+            &["-g".to_string(), "--help".to_string()]
         );
     }
 }
