@@ -277,6 +277,25 @@ impl LlmProvider for AnthropicProvider {
                                             return;
                                         }
                                     } else if json["type"] == "message_delta" {
+                                        // The stop reason, before the usage.
+                                        //
+                                        // `max_tokens` is Anthropic's name for
+                                        // being cut off, and without this a
+                                        // truncated response is
+                                        // indistinguishable from a malformed
+                                        // one — the same gap Ollama had, found
+                                        // by measurement there and fixed here by
+                                        // reading the protocol rather than
+                                        // waiting for the same bug to show up.
+                                        if let Some(reason) = json["delta"]["stop_reason"].as_str()
+                                            && tx
+                                                .send(Ok(StreamChunk::Finish {
+                                                    reason: reason.to_string(),
+                                                }))
+                                                .is_err()
+                                        {
+                                            return;
+                                        }
                                         // output_tokens (and possibly the final input_tokens) arrive here
                                         if let Some(output) =
                                             json["usage"]["output_tokens"].as_u64()
