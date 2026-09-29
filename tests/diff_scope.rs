@@ -713,3 +713,90 @@ fn a_unique_anchor_still_applies() {
     .expect("and produces content");
     assert_eq!(out, "fn a() { 9 }\nfn b() { 2 }\nfn a() { 3 }\n");
 }
+
+/// An unappliable edit has to say what went wrong, not just that it did.
+///
+/// The old message was "No edit block matched its target file in the worktree
+/// (N unmatched); nothing was written" — true, and useless. A model reading it
+/// has no idea which of its anchors was wrong, what it sent, or what the file
+/// actually contains, and it is about to guess. Measured: `refactor` failed
+/// twice in a row on an unappliable patch.
+///
+/// Aider builds this report deliberately, and it is the difference between a
+/// retry that converges and one that repeats: the failed SEARCH verbatim, a
+/// "Did you mean to match some of these actual lines?" suggestion taken from
+/// the real file. We are all-or-nothing per patch, so nothing partially
+/// applied and aider's "don't re-send the others" note would be false here;
+/// the first two carry the weight.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unmatched_edit_says_what_it_searched_for_and_what_is_actually_there() {
+    let dir = fixture_repo();
+    let repo = dir.path();
+    let sb = worktree_sandbox(repo).await;
+    let actual = std::fs::read_to_string(sb.worktree_path.join("tracked.rs")).unwrap();
+
+    // Nearly right: the indentation is wrong, so it does not match.
+    let wrong = actual.replace("fn a() { 42 }", "  fn a() { 42 }");
+    let patch = format!(
+        "FILE: tracked.rs\n<<<<<<< SEARCH\n{wrong}\n=======\nfn a() {{ 99 }}\n>>>>>>> REPLACE\n\n"
+    );
+
+    let err = sb
+        .apply_patch(&patch, repo)
+        .await
+        .expect_err("a mis-indented anchor does not match");
+    let msg = err.to_string();
+
+    assert!(
+        msg.contains("did not match anything in the worktree"),
+        "{msg}"
+    );
+    // It must echo what the model sent...
+    assert!(
+        msg.contains("you searched for"),
+        "the model has to see its own anchor, not a verdict on it: {msg}"
+    );
+    assert!(
+        msg.contains("fn a() { 42 }") || msg.contains("a() { 42 }"),
+        "including the text it sent: {msg}"
+    );
+    // ...and what the file actually says.
+    assert!(
+        msg.contains("closest lines in the file"),
+        "a near miss is worth more than a verdict, because the model can act on it: {msg}"
+    );
+    assert!(
+        msg.contains("fn a() {"),
+        "and it must be a line from the file, not the model's text echoed back: {msg}"
+    );
+    assert!(
+        msg.contains("Re-read each file"),
+        "and say what to do about it: {msg}"
+    );
+
+    sb.destroy().await.unwrap();
+}
+
+/// A hint is a hint. The report must never resolve the anchor itself — that is
+/// how a change lands somewhere the model did not name.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_near_miss_is_suggested_but_never_applied() {
+    let dir = fixture_repo();
+    let repo = dir.path();
+    let sb = worktree_sandbox(repo).await;
+    let before = std::fs::read_to_string(sb.worktree_path.join("tracked.rs")).unwrap();
+
+    let patch = "FILE: tracked.rs\n<<<<<<< SEARCH\n  fn a() { 42 }   // mis-indented\n=======\nfn a() { 99 }\n>>>>>>> REPLACE\n\n";
+    let _ = sb
+        .apply_patch(patch, repo)
+        .await
+        .expect_err("it does not match, and must not be made to");
+
+    assert_eq!(
+        std::fs::read_to_string(sb.worktree_path.join("tracked.rs")).unwrap(),
+        before,
+        "the near-miss line was shown to the model, not applied by the harness — a resolver \
+         here is a wrong-place edit with extra steps"
+    );
+    sb.destroy().await.unwrap();
+}

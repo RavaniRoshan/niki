@@ -72,8 +72,13 @@ for t in "${targets[@]}"; do
 done
 
 echo
+# A skip is a failure. The floor exists so a link does not take the box down,
+# but a suite that skipped everything and printed "all passed" is worse than
+# one that crashed: it is a green result for work that never ran.
 if [ "${#skipped[@]}" -gt 0 ]; then
-    echo "skipped for memory: ${skipped[*]}"
+    echo "SKIPPED for low memory: ${skipped[*]}"
+    echo "free memory was below ${MIN_FREE_MB} MiB. Free some and re-run; this is NOT a pass."
+    exit 2
 fi
 if [ "${#failures[@]}" -gt 0 ]; then
     echo "FAILED: ${failures[*]}"
