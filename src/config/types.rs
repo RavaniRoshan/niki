@@ -1169,6 +1169,28 @@ pub struct PipelineStageConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
+    /// How many times the pipeline may send a rejected change back.
+    ///
+    /// The only field in `[general]` without a `#[serde(default)]`, and that
+    /// made the whole section unusable in practice: writing
+    ///
+    ///     [general]
+    ///     output_dir = ".niki"
+    ///
+    /// is a hard parse failure — `missing field max_revision_rounds` — so a
+    /// user could not set *any* other option in this section without first
+    /// inventing a value for one they had not read about.
+    ///
+    /// And the failure mode was the worst available. `NikiConfig::load`
+    /// returns `Err`, and thirteen call sites answered with
+    /// `.unwrap_or_default()` — so the user's entire file was ignored, with no
+    /// message anywhere, and the run proceeded on the built-in defaults. The
+    /// only visible symptom was behaviour that did not match their config.
+    ///
+    /// Every other field in this struct already has a default. The value here
+    /// is the same one `Default::default` uses, so a file that omits it gets
+    /// exactly what a file with no `[general]` section gets.
+    #[serde(default = "default_max_revision_rounds")]
     pub max_revision_rounds: u32,
     /// ISO-639-1 language hint for speech-to-text (e.g. `"en"`). `None` lets
     /// the STT engine auto-detect. Used by `niki voice` / push-to-talk.
@@ -1193,6 +1215,10 @@ pub struct GeneralConfig {
     /// order and the remainder is cut with a marker, never silently.
     #[serde(default = "default_max_context_chars")]
     pub max_context_chars: usize,
+}
+
+fn default_max_revision_rounds() -> u32 {
+    3
 }
 
 fn default_max_context_chars() -> usize {
@@ -2647,6 +2673,63 @@ mod topology_spellings {
         assert_eq!(configured, vec!["openai"]);
     }
 
+    /// Every field in `[general]` must be settable on its own.
+    ///
+    /// `max_revision_rounds` was the only one without a default, which made
+    /// the section unusable: `[general] output_dir = ".niki"` was a hard parse
+    /// failure. And because `NikiConfig::load` returns `Err` and a dozen
+    /// callers answer `.unwrap_or_default()`, the visible result was a run on
+    /// the built-in defaults with no message — the user's whole file ignored
+    /// because of one field they had never heard of.
+    ///
+    /// The test is per-field rather than one fixture, so the next field that
+    /// loses its `#[serde(default)]` is caught here rather than by a user.
+    #[test]
+    fn every_general_option_can_be_set_on_its_own() {
+        let cases = [
+            ("output_dir", "custom-out"),
+            ("spend_cap_usd", "1.5"),
+            ("max_diff_lines", "200"),
+            ("max_context_chars", "12000"),
+            ("language", "\"en\""),
+            ("max_revision_rounds", "2"),
+        ];
+        for (key, value) in cases {
+            let dir = tempfile::tempdir().expect("tmp");
+            let path = dir.path().join("niki.toml");
+            std::fs::write(&path, format!("[general]\n{key} = {value}\n")).expect("write");
+            NikiConfig::load_file_only(&path).unwrap_or_else(|e| {
+                panic!("`[general] {key} = {value}` on its own must be valid: {e}")
+            });
+            let cfg = NikiConfig::load(dir.path()).expect("loads");
+            match key {
+                "output_dir" => assert_eq!(cfg.general.output_dir, "custom-out"),
+                "spend_cap_usd" => assert!((cfg.general.spend_cap_usd - 1.5).abs() < 1e-9),
+                "max_diff_lines" => assert_eq!(cfg.general.max_diff_lines, 200),
+                "max_context_chars" => assert_eq!(cfg.general.max_context_chars, 12000),
+                "language" => assert_eq!(cfg.general.language.as_deref(), Some("en")),
+                "max_revision_rounds" => assert_eq!(cfg.general.max_revision_rounds, 2),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    /// And omitting it must give the same answer as having no `[general]`
+    /// section at all — otherwise the default is a fiction and the two paths
+    /// disagree, which is the same class of bug from the other side.
+    #[test]
+    fn an_omitted_option_matches_having_no_section_at_all() {
+        let bare = NikiConfig::default();
+        let dir = tempfile::tempdir().expect("tmp");
+        std::fs::write(dir.path().join("niki.toml"), "[general]\n").expect("write");
+        let loaded = NikiConfig::load(dir.path()).expect("loads");
+        assert_eq!(
+            loaded.general.max_revision_rounds, bare.general.max_revision_rounds,
+            "an empty [general] must not silently change the revision budget"
+        );
+        assert_eq!(loaded.general.output_dir, bare.general.output_dir);
+    }
+
     /// A misspelled section is the failure nobody sees.
     ///
     /// It parses. It is accepted. It is then ignored, because nothing reads
@@ -2663,8 +2746,10 @@ mod topology_spellings {
         let path = dir.path().join("niki.toml");
         std::fs::write(&path, "[agentz.coder]\nmodel = \"x\"\n").expect("write");
         let err = NikiConfig::load_file_only(&path).expect_err("must be an error");
+        // TOML collapses `[agentz.coder]` into a top-level `agentz` table,
+        // so `agentz` is the name the user has to go and fix.
         assert!(
-            err.contains("[agentz.coder]"),
+            err.contains("[agentz]"),
             "the message must name the section the user typed: {err}"
         );
         assert!(
