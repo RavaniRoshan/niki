@@ -5,13 +5,17 @@
 # Why this exists: `cargo test` on the full suite links every test binary at
 # once, and linking is the largest single memory event in the build. On this
 # machine — ~7.5 GiB shared with another agent session — that is what produces
-# the OOM kills and freezes. The full suite is not gone; it runs in CI on a
-# runner with the whole machine to itself. This is for the inner loop.
+# the OOM kills and freezes.
+#
+# The full suite is not gone and should not be run here: it runs in
+# `.github/workflows/ci.yml` and gates the PR. This is for the inner loop, and
+# `--all` is a last resort before pushing rather than a default.
 #
 #   scripts/test-fast.sh                  # unit tests only — the inner loop
 #   scripts/test-fast.sh --filter review  # tests whose name contains "review"
 #   scripts/test-fast.sh --lib <name>     # one library test, exactly
-#   scripts/test-fast.sh --all            # everything, capped and fail-fast
+#   scripts/test-fast.sh --all            # LAST RESORT before pushing; CI is where
+#                                        # the full suite belongs
 #   scripts/test-fast.sh --mem            # how much room is actually left
 set -uo pipefail
 

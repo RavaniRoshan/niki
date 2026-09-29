@@ -12,40 +12,32 @@ Rust CLI (edition 2024, MSRV 1.88). Multi-agent coding pipeline: Planner → Cod
 - Single test: `cargo test <test_name>`.
 - `git2` uses `vendored-libgit2`, so no system libgit2 is required to build.
 
-## Tests — use nextest
+## Tests — CI runs the suite, you run the slice
 
-```
-cargo nextest run -j 2      # the whole suite: 1503 tests in ~60s
-./scripts/verify-suite.sh   # same thing, with a memory guard
-```
+**Do not run the full test suite on this machine.** It shares ~7.5 GiB with
+another agent session, and linking every test binary is the largest memory
+event in the build. That is what produced the OOM kills and the freezes.
 
-Measured on this box: the full suite is 64s warm, one command, all binaries.
-`cargo test --tests` is much slower and, run all at once, will not fit in RAM
-here. Install once with `cargo install cargo-nextest --locked`.
+The full suite runs in `.github/workflows/ci.yml` on GitHub-hosted runners and
+gates the PR. Push and read the result:
 
-**Run the full suite in CI, not locally.** The `Tests` job in `.github/workflows/ci.yml`
-runs the whole thing on a free `ubuntu-latest` runner and gates the PR, alongside
-Integration, TUI Smoke and CodeQL. Locally, run the binaries you touched:
-
-```
-cargo nextest run -j 2 -E 'binary(pipeline_guards) + binary(kb_pipeline)'
-cargo nextest run -j 2 -E 'test(<substring>)'
+```bash
+gh run list --workflow=CI --limit 1
+gh run view <id> --json jobs -q '.jobs[] | "\(.name): \(.status) \(.conclusion)"'
 ```
 
-A full local run links every test binary, which is the largest memory event in
-the build and the thing that starves other sessions on this box. It is there for
-when you need it before pushing, not as the inner loop.
+Locally, run the tests you changed:
 
-nextest earns its place twice over. It parallelises *across* test binaries
-while `.config/nextest.toml` keeps the heavy and heap binaries serialised by
-mechanism — the same split Codex uses. And it runs process-per-test, so a test
-that wedges is killed at its configured timeout instead of hanging the run:
-that is how a real infinite loop was caught here, as a binary that had been
-running ten minutes and should take 1.4 seconds.
+```bash
+scripts/test-fast.sh                          # 890 unit tests, ~14s
+scripts/test-fast.sh --filter <name>          # tests matching a name
+scripts/test-fast.sh --lib <name>             # one library test
+scripts/test-fast.sh --mem                    # how much room is left
+```
 
-Without nextest, `scripts/verify-suite.sh` falls back to one binary at a time
-and refuses to start a link when free memory is low — a skip is reported as a
-failure, never as a pass.
+`--all` exists and is capped, but it is a last resort before pushing, not the
+inner loop. A focused test that fails is worth more than a full run that does
+not finish.
 
 ## Low-RAM / constrained machines
 
