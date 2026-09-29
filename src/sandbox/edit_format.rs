@@ -228,13 +228,51 @@ fn apply_single_edit(content: &str, edit: &EditBlock) -> Result<Option<String>> 
         return Ok(Some(result));
     }
 
-    // Strategy 1: Exact match
-    if let Some(pos) = content.find(&edit.search) {
-        let mut result = String::with_capacity(content.len() + edit.replace.len());
-        result.push_str(&content[..pos]);
-        result.push_str(&edit.replace);
-        result.push_str(&content[pos + edit.search.len()..]);
-        return Ok(Some(result));
+    // Strategy 1: Exact match, and it has to be *the* match.
+    //
+    // `find` takes the first occurrence, so a `search` that appears twice
+    // silently edited the first one. That is the worst failure class there
+    // is: the edit applies, the run reports success, and the change lands
+    // somewhere the model did not mean. Every reference harness refuses it —
+    // opencode ("Provide more surrounding context or set replaceAll"),
+    // Cline ("multiple occurrences"), OpenHands (lists the line numbers),
+    // pi (uniqueness counted in normalized space), Aider (matches only a
+    // chunk long enough to be unique), Codex (a monotonic line index across
+    // hunks so an early miss cannot silently retarget a later one).
+    //
+    // We report both cases distinctly, because the fix differs: zero means the
+    // anchor is wrong, many means it is too short. Neither is fixed by
+    // guessing which occurrence was meant.
+    let mut occurrences = content.match_indices(&edit.search).map(|(i, _)| i);
+    let first = occurrences.next();
+    let second = occurrences.next();
+    // The count is reported rather than inferred from a second offset: the
+    // first version printed the offset as if it were a count, and said "matches
+    // 26 times" for a file where it matched twice.
+    let matches = first.is_some() as usize
+        + second.is_some() as usize
+        + content.matches(&edit.search).count().saturating_sub(2);
+    match (first, second) {
+        (Some(pos), None) => {
+            let mut result = String::with_capacity(content.len() + edit.replace.len());
+            result.push_str(&content[..pos]);
+            result.push_str(&edit.replace);
+            result.push_str(&content[pos + edit.search.len()..]);
+            return Ok(Some(result));
+        }
+        (Some(_), Some(_)) => {
+            let first_at = content.find(&edit.search).unwrap_or(0);
+            let first_line = content[..first_at].lines().count().max(1);
+            return Err(anyhow::anyhow!(
+                "the anchor for this edit matches {matches} times in the file (first at line \
+                 {first_line}). Add more surrounding context so it is unique, or split the \
+                 edit. Applying it to an arbitrary one of them would change code the model \
+                 did not name."
+            ));
+        }
+        (None, _) => {
+            // Fall through to the looser strategies below.
+        }
     }
 
     // Strategy 2: Line-trimmed match
