@@ -1275,6 +1275,22 @@ impl AgentsConfig {
             _ => return None,
         })
     }
+
+    /// The mutable twin of [`Self::agent_named`], for the same reason: routing
+    /// is set per role and a caller that has to spell out seven field paths to
+    /// change one role's provider will eventually miss a role.
+    pub fn agent_named_mut(&mut self, name: &str) -> Option<&mut AgentConfig> {
+        Some(match name {
+            "planner" => &mut self.planner,
+            "coder" => &mut self.coder,
+            "tester" => &mut self.tester,
+            "reviewer" => &mut self.reviewer,
+            "synthesizer" => &mut self.synthesizer,
+            "security_auditor" => &mut self.security_auditor,
+            "red" => &mut self.red,
+            _ => return None,
+        })
+    }
 }
 
 impl Default for AgentsConfig {
