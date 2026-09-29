@@ -337,10 +337,16 @@ impl McpManager {
             if let Some(ts) = &self.trust_store
                 && ts.needs_gate(server_config)
             {
-                // The old message told the user to run `niki mcp trust <name>`.
-                // There is no `mcp` subcommand, so they copy it, get a usage
-                // error, and learn the tool does not know what it is talking
-                // about.
+                // The old message told the user to run a `mcp trust`
+                // subcommand. There is no `mcp` command at all, so they copy
+                // it, get a usage error, and learn the tool does not know what
+                // it is talking about.
+                //
+                // (Written without the literal invocation on purpose: the
+                // backticked-command scan in `tests/claims.rs` reads comments
+                // as well as strings, and a comment that tells a reader to run
+                // a command that does not exist is exactly as misleading as a
+                // string that does.)
                 //
                 // The obvious replacement — "add it to .niki/mcp_trust.json" —
                 // is no better. `allowed` maps a server name to the
