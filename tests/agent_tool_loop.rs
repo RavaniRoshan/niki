@@ -1654,3 +1654,64 @@ async fn the_stage_value_is_what_the_provider_receives() {
          between run_role and the request would show up here"
     );
 }
+
+/// A recommendation the provider cannot serve must say so, in words.
+///
+/// `niki recommend` is a hardcoded table about models that existed when it was
+/// written. On a provider that fronts hundreds under its own names it is wrong
+/// more often than right, and a recommendation a user cannot run reads as
+/// authoritative — worse than no advice, because it looks checked.
+///
+/// The wording is the part that rots, so it is tested separately from the
+/// printing, and it has to do two jobs: say the model is not there, and offer
+/// something from the catalogue that is.
+#[test]
+fn a_recommendation_the_provider_cannot_serve_says_so_and_offers_a_real_one() {
+    use niki::cli::catalogue::CatalogueEntry;
+    use niki::cli::recommend::not_offered_lines;
+
+    let catalogue = vec![
+        CatalogueEntry {
+            id: "anthropic/claude-sonnet-4".into(),
+            price_per_mtok: Some((Some(3.0), Some(15.0))),
+            traits: vec![],
+        },
+        CatalogueEntry {
+            id: "openai/o3-mini".into(),
+            price_per_mtok: None,
+            traits: vec![],
+        },
+    ];
+
+    let lines = not_offered_lines("openrouter", "claude-opus-4", Some(&catalogue));
+    assert_eq!(lines.len(), 1);
+    assert!(
+        lines[0].contains("Not offered"),
+        "the user must be told outright: {}",
+        lines[0]
+    );
+    assert!(
+        lines[0].contains("claude-sonnet-4"),
+        "and given something they can actually run: {}",
+        lines[0]
+    );
+
+    // An empty catalogue cannot suggest, and must not pretend to.
+    let bare = not_offered_lines("someprovider", "mystery-model", Some(&[]));
+    assert!(
+        bare[0].contains("does not list"),
+        "with nothing to offer, say that and stop: {}",
+        bare[0]
+    );
+
+    // No catalogue at all is silence, not a claim — several providers have no
+    // `/models` endpoint and that says nothing about what exists.
+    assert!(
+        not_offered_lines("p", "m", None).len() == 1,
+        "sanity: the helper always has something to say when called"
+    );
+    assert_eq!(
+        niki::recommend::availability(None, "m"),
+        niki::recommend::Availability::Unknown
+    );
+}

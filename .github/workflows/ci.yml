@@ -28,10 +28,23 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # ── Runner: Blacksmith, not GitHub-hosted ──────────────────────────
+  #
+  # `blacksmith-4vcpu-ubuntu-2404` is a bare-metal runner. The reason is not
+  # price or raw speed alone: a GitHub-hosted `ubuntu-latest` is a shared VM
+  # whose disk and CPU are throttled under a cold `cargo build --tests`, and
+  # this suite's cold build compiles vendored libgit2 (a full C compile) on
+  # every job, every run.
+  #
+  # The `Swatinem/rust-cache@v2` steps are kept deliberately. A branch in this
+  # repo switched the runners *and* deleted the caches, which turns every run
+  # into a cold build — the exact cost the cache comment in each job explains.
+  # Faster hardware with no cache is a slower pipeline.
+
   # ── Phase 1: Fast checks (fail fast) ──────────────────────────────
   check:
     name: Check (fmt + clippy)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -54,7 +67,7 @@ jobs:
   # ── Phase 1-msrv: Minimum Supported Rust Version (1.88) ─────────────
   msrv:
     name: MSRV (1.88)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -75,7 +88,7 @@ jobs:
   # ── Phase 1-features: Build without default features ────────────────
   no-default-features:
     name: Build (--no-default-features)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -94,7 +107,7 @@ jobs:
   # ── Phase 1b: Supply-chain audit (cargo-audit + cargo-deny) ────────
   audit:
     name: Audit (supply chain)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -132,7 +145,7 @@ jobs:
   # invariant: every download URL referenced by a manifest must exist.
   manifest-parity:
     name: Manifest parity
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
       - name: Check manifest download URLs resolve
@@ -182,7 +195,7 @@ jobs:
   # ── Phase 2: Unit + integration tests ─────────────────────────────
   test:
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [check, msrv, no-default-features]
     steps:
       - uses: actions/checkout@v7
@@ -203,7 +216,7 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       - name: Run unit + integration tests
-        run: cargo nextest run --profile default
+        run: cargo nextest run --profile ci
       - name: Build release binary
         run: cargo build --release
       - name: Verify binary runs
@@ -220,7 +233,7 @@ jobs:
   # niki at all. This job is the gate that keeps it working.
   install:
     name: Install path
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -260,7 +273,7 @@ jobs:
   # ── Phase 2c: release-packaging contract ──────────────────────────
   dist-contract:
     name: Release packaging contract
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -336,7 +349,7 @@ jobs:
     # `product-verify`: this job builds its own release binary and runs its own
     # mock LLM, so nothing from the `test` job reaches it.
     needs: [check]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -435,7 +448,7 @@ jobs:
   # and was never wired to anything — 11 passing tests nobody ran.
   tui-headless:
     name: Headless PTY TUI (${{ matrix.colour }})
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     # Both colour states, as separate jobs on separate runners — not as two
     # invocations in one job. The suite is timing-sensitive by construction:
@@ -519,7 +532,7 @@ jobs:
   # already shipped CI jobs that went green while executing nothing.
   journeys:
     name: Consumer journeys
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -547,7 +560,7 @@ jobs:
   # advertised in the footer and did nothing. Every other suite passed.
   tui-pty:
     name: Real PTY TUI
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -606,7 +619,7 @@ jobs:
   demo:
     name: Demo (no key, no container)
     needs: [check]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -701,7 +714,7 @@ jobs:
     # capture job into a 15-minute one and put the most expensive TUI gate at
     # the very end of the run. `check` still gates it.
     needs: [check]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     env:
       NIKI_CI: "1"
@@ -833,7 +846,7 @@ jobs:
     # behind a 7-minute test job. `check` still gates it, so an obviously broken
     # tree does not spend the minutes.
     needs: [check]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
