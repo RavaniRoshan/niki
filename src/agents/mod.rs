@@ -95,6 +95,11 @@ pub async fn run_agent(
     let mut estimated_output_tokens: u32 = 0;
     let mut first_text_time: Option<Instant> = None;
     let mut mid_stream_retries: u32 = 0;
+    // The provider's stop reason for the response currently being read.
+    // Re-armed per attempt below; the value is only read once a stream has
+    // been consumed.
+    #[allow(unused_assignments)]
+    let mut finish_reason: Option<String> = None;
     // The message of the last mid-stream failure, so an unchanged repeat is
     // recognised as the same problem rather than a new one.
     let mut last_mid_stream_error: Option<String> = None;
@@ -150,6 +155,10 @@ pub async fn run_agent(
         // request, so TTFT is measured from this attempt, not the first one.
         stream_start = Instant::now();
 
+        // Re-armed per attempt: a stop reason describes one response, and a
+        // retry produces another.
+        finish_reason = None;
+
         while let Some(chunk_res) = stream.next().await {
             match chunk_res {
                 Ok(StreamChunk::Text(token)) => {
@@ -159,6 +168,13 @@ pub async fn run_agent(
                     full_content.push_str(&token);
                     estimated_output_tokens += (token.len() / 4).max(1) as u32;
                     display.stream_token(&token);
+                }
+                Ok(StreamChunk::Finish { reason }) => {
+                    // The provider says why it stopped. Nothing could read this
+                    // before, so a response cut off at the token limit was
+                    // indistinguishable from a malformed one and was reported
+                    // as the latter.
+                    finish_reason = Some(reason);
                 }
                 Ok(StreamChunk::Usage(u)) => {
                     // `.max()` is correct *within a single stream*: every usage
@@ -249,6 +265,39 @@ pub async fn run_agent(
     // The repair was therefore billed to nobody: `token_usage` carried only
     // the first attempt, so a stage that needed two rounds to produce a valid
     // artifact under-reported its own cost to the user and to the spend cap.
+
+    // A response the provider cut off is not a response.
+    //
+    // It used to arrive here as a half-written JSON object, go to the repairer,
+    // and be reported as "did not satisfy the artifact requirements" — which
+    // blames the model for something the token limit did, and whose real fix
+    // (raise the limit) is nowhere in the message. The stop reason has been
+    // available from the provider the whole time and was thrown away, because
+    // `StreamChunk` had nowhere to put it.
+    //
+    // Caught on `qwen2.5-coder:3b`, which reports `done_reason: "length"`
+    // correctly: a breadth run emitted a correct, well-formed artifact and
+    // stopped mid-string, and the run failed with a message that named neither.
+    if crate::runtime::tools::was_truncated(finish_reason.as_deref()) {
+        let reason = finish_reason.as_deref().unwrap_or("length");
+        display.agent_failed(
+            role,
+            &format!(
+                "the response was cut off at the {reason} limit after {} characters, so the \
+                 artifact is incomplete",
+                full_content.len()
+            ),
+        );
+        return Err(crate::NikiError::AgentFailure {
+            agent: role,
+            retries: retry_count,
+            message: format!(
+                "the response was truncated at the {reason} limit; the artifact was never \
+                 finished. Raise the stage's max_tokens, or ask for a smaller change."
+            ),
+        }
+        .into());
+    }
 
     // ===== Phase 2: Resilient parsing + repair + re-prompt =====
     const MAX_REPAIR_RETRIES: u32 = 2;

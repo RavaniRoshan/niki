@@ -214,6 +214,19 @@ impl LlmProvider for OllamaProvider {
 
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
                                 if json["done"].as_bool().unwrap_or(false) {
+                                    // The stop reason, before the stream ends.
+                                    // `done_reason` is "length" when the token
+                                    // limit cut the response off, and nothing
+                                    // downstream could see it without this.
+                                    if let Some(reason) = json["done_reason"].as_str()
+                                        && tx
+                                            .send(Ok(StreamChunk::Finish {
+                                                reason: reason.to_string(),
+                                            }))
+                                            .is_err()
+                                    {
+                                        return;
+                                    }
                                     // Final chunk carries real token counts.
                                     if tx
                                         .send(Ok(StreamChunk::Usage(TokenUsage {

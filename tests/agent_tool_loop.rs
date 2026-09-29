@@ -1113,3 +1113,83 @@ fn the_fallback_notice_distinguishes_truncation_from_a_short_answer() {
         notice(false)
     );
 }
+
+/// A response the provider cut off must not be treated as a complete one.
+///
+/// `StreamChunk` carried only text and usage, so a streaming caller could not
+/// tell a finished response from one that stopped at the token limit. The
+/// one-shot agent path streams, so it had no truncation guard at all: a
+/// half-written artifact went to the JSON repairer and came back as "did not
+/// satisfy the artifact requirements", which blames the model for something
+/// the token limit did and names none of the real fix.
+///
+/// Ollama reports `done_reason: "length"` correctly — probed directly against
+/// the running server — and the value was being dropped on the floor.
+#[tokio::test]
+async fn a_truncated_one_shot_response_is_reported_as_truncated() {
+    use niki::llm::provider::{
+        CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage,
+    };
+
+    /// Streams a half-written artifact, then says it was cut off.
+    struct Truncated;
+
+    #[async_trait::async_trait]
+    impl LlmProvider for Truncated {
+        fn provider_name(&self) -> &str {
+            "truncated"
+        }
+        async fn complete(&self, _r: CompletionRequest) -> Result<CompletionResponse> {
+            unreachable!("this test drives the streaming path")
+        }
+        async fn stream(
+            &self,
+            _r: CompletionRequest,
+        ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = Result<StreamChunk>> + Send>>>
+        {
+            Ok(Box::pin(futures::stream::iter(vec![
+                Ok(StreamChunk::Text(
+                    r#"{"edits": [{"search": "old", "replace": "ne"#.to_string(),
+                )),
+                Ok(StreamChunk::Finish {
+                    reason: "length".to_string(),
+                }),
+                Ok(StreamChunk::Usage(TokenUsage::default())),
+            ])))
+        }
+    }
+
+    let mut display = niki::display::agent_stream::AgenticDisplay::new();
+    let err = niki::agents::run_agent(
+        niki::artifacts::types::AgentRole::Coder,
+        &Truncated,
+        "m",
+        "coder.md",
+        minijinja::context! {
+            input_artifacts => vec![r#"{"summary":"x"}"#.to_string()],
+            revision_round => 0,
+            project_knowledge => "",
+            project_memory => "",
+            current_files => "",
+            mcp_tools => "",
+            tool_loop => false,
+        },
+        "schemas/code_diff.schema.json",
+        &mut display,
+        4096,
+        0.0,
+        None,
+    )
+    .await
+    .expect_err("a response cut off mid-artifact is not an answer");
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("truncated"),
+        "the failure must say the response was cut off, not that the model was wrong: {msg}"
+    );
+    assert!(
+        !msg.contains("too small"),
+        "and must not blame the model for the token limit: {msg}"
+    );
+}
