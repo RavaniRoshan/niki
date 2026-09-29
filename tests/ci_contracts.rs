@@ -1096,3 +1096,97 @@ fn the_real_provider_leg_is_dispatchable_and_does_not_fake_a_pass() {
         "the key must be named, so whoever adds it knows where"
     );
 }
+
+/// Branch protection must name checks this workflow still produces.
+///
+/// The required-checks list is a set of **strings**, and GitHub blocks a merge
+/// when a required check has not reported. It does not care whether that check
+/// still exists. So renaming or deleting a job leaves a required name behind
+/// that can never report, and every pull request in the repository is blocked
+/// from then on — with a merge box that says "Expected — waiting for status
+/// check" and no indication of why.
+///
+/// Nothing in the workflow file shows that, because the list lives in the
+/// repository's settings. That is why there is a committed copy and a test, and
+/// why `scripts/check-required-contexts.py` is a CI step.
+#[test]
+fn every_required_status_check_is_one_this_workflow_produces() {
+    let script = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/check-required-contexts.py"),
+    )
+    .expect("scripts/check-required-contexts.py must exist");
+    let ci = ci_yml();
+
+    // The committed list, read out of the script so there is one source of
+    // truth rather than a second copy to keep in step.
+    let start = script
+        .find("REQUIRED_CONTEXTS: list[str] = [")
+        .expect("REQUIRED_CONTEXTS is declared");
+    // Search for the closing bracket *on its own line*. The obvious
+    // `find("]")` finds the one inside `list[str]` — four characters into the
+    // anchor — and returns an empty body, so the test would parse zero names
+    // and then fail its own length check for a reason that has nothing to do
+    // with branch protection. Found by dry-running the parse before pushing,
+    // which is the only reason it did not cost a CI cycle.
+    let body = &script[start..];
+    let body = &body[..body.find("\n]").expect("the list is closed")];
+
+    let mut required: Vec<&str> = body.lines().filter_map(|l| l.split('"').nth(1)).collect();
+    required.sort_unstable();
+
+    assert!(
+        required.len() >= 20,
+        "the list has {} entries, which is too few to be guarding anything — \
+         a check that is not required is not a gate",
+        required.len()
+    );
+
+    for name in &required {
+        // A matrix job's name is a template; its expansions are listed in the
+        // script and checked by the same test through `--live`. Here the
+        // requirement is the weaker one, and still the dangerous direction:
+        // the name must appear somewhere in the workflow, or it can never
+        // report.
+        let in_matrix = [
+            "Build x86_64-unknown-linux-gnu",
+            "Build x86_64-apple-darwin",
+            "Build aarch64-apple-darwin",
+            "Headless PTY TUI (NO_COLOR=1)",
+            "Headless PTY TUI (colour)",
+        ];
+        let found = ci.contains(name)
+            || in_matrix.contains(name)
+            || ci.contains("Build ${{ matrix.target }}")
+            || ci.contains("Headless PTY TUI (${{ matrix.colour }})");
+        assert!(
+            found,
+            "`{name}` is required by branch protection but no job in ci.yml \
+             produces it. GitHub will wait for it on every pull request, \
+             forever. Rename the job, or drop the requirement."
+        );
+    }
+
+    // And the gate that checks the *code* has to be one of them. Everything
+    // else in this repository asserts that artifacts have the right shape;
+    // this is the one that asserts the code works, and a gate nobody requires
+    // is not a gate.
+    assert!(
+        required.contains(&"Mega E2E (code must work)"),
+        "the end-to-end leg that checks the written code must be required, or \
+         it can fail forever without blocking a merge"
+    );
+}
+
+/// The CI step that runs the check has to still be wired, or the script is a
+/// file nobody runs — which is how the drift this file guards against would
+/// start again.
+#[test]
+fn the_required_context_check_runs_in_ci() {
+    let ci = ci_yml();
+    let check = job_body_without_comments(&ci, "check");
+    assert!(
+        check.contains("check-required-contexts.py"),
+        "the fast `check` job must run scripts/check-required-contexts.py, or \
+         nothing notices branch protection drifting from the workflow"
+    );
+}

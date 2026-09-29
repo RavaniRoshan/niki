@@ -58,6 +58,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Runs before anything expensive, because it is the check that decides
+      # whether the rest of the gates are real.
+      #
+      # Branch protection is a list of *strings*. GitHub blocks a merge when a
+      # required check has not reported, and it does not care whether that
+      # check still exists — so a job renamed here leaves a required name
+      # behind that can never report, and every pull request in the repository
+      # is blocked from then on with "waiting for status check" and no reason.
+      # Nothing in the workflow file shows that, because the list lives in the
+      # repository's settings.
+      - name: Required status checks still exist
+        run: python3 scripts/check-required-contexts.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
