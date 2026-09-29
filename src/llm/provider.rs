@@ -14,6 +14,23 @@ use std::pin::Pin;
 pub enum StreamChunk {
     Text(String),
     Usage(TokenUsage),
+    /// The provider's stop reason, once it knows one.
+    ///
+    /// This is the only way a streaming caller can tell a *complete* response
+    /// from one cut off at the token limit, and without it the two are
+    /// indistinguishable: a half-written artifact looks exactly like a
+    /// malformed one, gets fed to the JSON repairer, and is reported as "did
+    /// not satisfy the artifact requirements" — which sends a user to blame
+    /// the model for something the token limit did.
+    ///
+    /// The tool loop never needed this because it calls `complete()` and reads
+    /// `CompletionResponse::finish_reason`. The one-shot agent path streams,
+    /// and so had no way to know at all. Measured: `qwen2.5-coder:3b` reports
+    /// `done_reason: "length"` correctly (probed directly), and the value was
+    /// being dropped on the floor.
+    Finish {
+        reason: String,
+    },
 }
 
 #[async_trait]

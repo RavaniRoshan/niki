@@ -104,6 +104,9 @@ async fn mock_provider_stream_yields_text_and_usage_chunks() {
     while let Some(chunk) = stream.next().await {
         match chunk.unwrap() {
             StreamChunk::Text(t) => full_text.push_str(&t),
+            // The stop reason rides the stream now; a mock that never sends
+            // one is saying "I did not stop early", which is not truncation.
+            StreamChunk::Finish { .. } => {}
             StreamChunk::Usage(u) => {
                 usage_seen = true;
                 assert_eq!(u.input_tokens, 10);
