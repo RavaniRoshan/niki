@@ -677,6 +677,79 @@ jobs:
             *) echo "FAIL: the demo's branch contains no insertions — the agent changed nothing"; exit 1 ;;
           esac
 
+  # ── Does the code the agent writes actually work? ──────────────────────
+  # Every other gate in this file checks that NIKI produced *artifacts of the
+  # right shape*. None of them check that the code does anything. A harness
+  # that emits a perfectly-formed patch which does not compile is
+  # indistinguishable from one that works, right up until a person tries it —
+  # and a person trying it is the thing this product exists for.
+  #
+  # So this job runs the whole user path against a real HTTP server on a real
+  # socket, against a fixture whose test suite is red before the run and must
+  # be green after, and then checks the branch out and runs those tests
+  # against the code NIKI wrote.
+  #
+  # Against the *scripted* server, not a real model. The plumbing is what CI
+  # can decide; the model's judgement is not, and a gate that goes red 40% of
+  # the time on a small model is a gate everyone learns to ignore. The
+  # real-model leg is `.github/workflows/mega-e2e.yml`, on demand.
+  mega-e2e:
+    name: Mega E2E (code must work)
+    needs: [check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The pipeline's sandbox preflight requires git, node, npm and python3
+      # on the host, and the fixture's own tests need pytest. Without these
+      # the run fails in a way that has nothing to do with the thing under
+      # test — which is how a product gate becomes a mystery gate.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - name: Install test dependencies
+        run: python3 -m pip install --quiet pytest
+      - name: Build release binary
+        run: cargo build --release
+      - name: Start the scripted model server
+        env:
+          MOCK_LLM_PORT: "8091"
+          MOCK_LLM_SCRIPT: ${{ github.workspace }}/tests/integration/script_median.json
+        run: |
+          set -euo pipefail
+          python3 tests/integration/mock_llm.py >/tmp/mock.log 2>&1 &
+          echo $! >/tmp/mock.pid
+          ready=0
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8091/health >/dev/null 2>&1; then ready=1; break; fi
+            sleep 0.5
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "FAIL: the scripted server never became ready"
+            cat /tmp/mock.log
+            exit 1
+          fi
+          # The script must exist and have loaded, or the run silently
+          # answers with the built-in JavaScript story and every check below
+          # fails for a reason that has nothing to do with the product.
+          grep -q 'scripted:' /tmp/mock.log || { echo "FAIL: MOCK_LLM_SCRIPT was not loaded"; cat /tmp/mock.log; exit 1; }
+      - name: Run the whole product end to end
+        env:
+          NIKI_BIN: ${{ github.workspace }}/target/release/niki
+          NIKI_BASE_URL: http://127.0.0.1:8091
+          NIKI_MODEL: mock-model
+          NIKI_PROVIDER: openai
+          NIKI_MEGA_TIMEOUT: "600"
+        run: ./scripts/mega-e2e.sh
+      - name: Cleanup
+        if: always()
+        run: kill $(cat /tmp/mock.pid 2>/dev/null) 2>/dev/null || true
+
   # ── Windows ──────────────────────────────────────────────────────────
   # niki ships a winget manifest and a cargo-dist `x86_64-pc-windows-msvc`
   # target, but no workflow ever built or ran anything on Windows. A manifest
