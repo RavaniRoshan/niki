@@ -1196,6 +1196,7 @@ async fn a_truncated_one_shot_response_is_reported_as_truncated() {
         0.0,
         None,
         None,
+        &mut None,
     )
     .await
     .expect_err("a response cut off mid-artifact is not an answer");
@@ -1657,6 +1658,7 @@ async fn the_stage_value_is_what_the_provider_receives() {
             0.0,
             effort,
             None,
+            &mut None,
         )
         .await
         .expect("the run completes");

@@ -35,6 +35,15 @@ pub async fn run_agent(
     // working run into a 400.
     reasoning_effort: Option<&str>,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+    // Filled in with what was actually spent, **including on the error path**.
+    //
+    // A stage that fails has usually already paid for the request that failed
+    // it. The caller needs that number to record a cost, and a `Result` that
+    // carries only the error cannot give it — which is why every failed stage
+    // used to be recorded as free, in `task.json`, in the cost page, and in
+    // the JSON envelope. The failure is the expensive case and it was the one
+    // that showed nothing.
+    spent_out: &mut Option<TokenUsage>,
 ) -> Result<(String, TokenUsage, u32, u32)> {
     let mut env = Environment::new();
     let template_content = crate::load_asset(&format!("prompts/{}", template_name))?;
@@ -469,6 +478,16 @@ pub async fn run_agent(
         "agent response captured"
     );
 
+    // Work out what this stage cost *before* deciding whether it succeeded.
+    // Everything after this point can return early, and everything after this
+    // point is a path the user was still billed for.
+    let token_usage = usage.unwrap_or(TokenUsage {
+        input_tokens: 0,
+        output_tokens: estimated_output_tokens,
+        ..Default::default()
+    });
+    *spent_out = Some(token_usage);
+
     // Final validation — fail-loud: invalid artifacts never degrade silently.
     if let Err(e) = validate_artifact(&json_content, schema_path) {
         let err_msg = e.to_string();
@@ -501,12 +520,6 @@ pub async fn run_agent(
     let ttft_ms = first_text_time
         .map(|t| t.duration_since(stream_start).as_millis() as u32)
         .unwrap_or(0);
-
-    let token_usage = usage.unwrap_or(TokenUsage {
-        input_tokens: 0,
-        output_tokens: estimated_output_tokens,
-        ..Default::default()
-    });
 
     Ok((json_content, token_usage, retry_count, ttft_ms))
 }
