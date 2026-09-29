@@ -1095,6 +1095,11 @@ async fn run_parallel_coders(
     // Lifecycle hooks bus (cloned per spawned coder: shell-outs are brief).
     hook_bus: crate::audit::HookBus,
     hook_task_id: Uuid,
+    // The run's remaining step allowance, already divided by the coder count.
+    // N coders each running the full 12 is how `--max-steps 5` could produce
+    // 36 requests, and it is the same mistake in a different costume: the cap
+    // is real for every stage except the ones that loop.
+    parallel_step_cap: Option<usize>,
 ) -> Result<Vec<CodeDiff>> {
     let event_tx = base_display
         .tui_tx()
@@ -1159,6 +1164,12 @@ async fn run_parallel_coders(
                 &hook_bus,
                 &hook_task_id,
                 None,
+                // Parallel coders are N loops, so the run's remaining steps are
+                // divided between them rather than handed to each in full. A
+                // cap of 5 with three coders is 1 step each, which is enough
+                // to submit and nothing more — which is the honest reading of
+                // what the user asked for.
+                parallel_step_cap,
             )
             .await?;
             let output = solo.output;
@@ -1300,6 +1311,14 @@ async fn run_experimental_research(
     Ok(Some((appendix, metric)))
 }
 
+/// How many round-trips the Coder's tool loop may make.
+///
+/// Twelve is what the loop was given when it was written, and it is enough to
+/// read a file, grep, try an edit and submit. It is a *ceiling*, not a plan:
+/// the loop exits as soon as the model calls `submit_artifact`, so a model
+/// that needs four steps spends four.
+const CODER_LOOP_MAX_STEPS: usize = 12;
+
 /// Name the stage a topology needs and cannot find.
 ///
 /// These three lookups were `expect()`, which means a hand-edited
@@ -1422,6 +1441,15 @@ async fn run_coder_tool_loop(
     // The loop's own step budget bounds the spend, so the stage's
     // per-response  does not apply to it.
     _max_tokens: u32,
+    // The run's remaining step allowance, when `--max-steps` is set.
+    //
+    // The loop used to take a hardcoded 12 and nothing else, so a user who
+    // wrote `--max-steps 5` got a Coder that spent 12 requests — and was then
+    // accounted as **one** step, because the loop's metric carries
+    // `retry_count: 0` and `RunBudget::accrue` adds `1 + retry_count`. The cap
+    // they set was honoured by every other stage and by the run as a whole,
+    // and ignored by the one stage that can spend the most.
+    step_cap: Option<usize>,
     // Sent to the provider on every request the loop makes. See
     // `LoopOptions::reasoning_effort` for why this is a parameter at all.
     reasoning_effort: Option<&str>,
@@ -1490,8 +1518,12 @@ async fn run_coder_tool_loop(
         vec![crate::runtime::LoopMessage::System(system_prompt)],
         None,
         // Enough to explore and then submit, and no more: a loop with no exit
-        // is a spend cap with extra steps.
-        12,
+        // is a spend cap with extra steps. And never more than the run has
+        // left, when the run has a ceiling at all.
+        match step_cap {
+            Some(remaining) => remaining.clamp(1, CODER_LOOP_MAX_STEPS),
+            None => CODER_LOOP_MAX_STEPS,
+        },
         display.tui_tx(),
         None,
     )
@@ -1737,6 +1769,11 @@ async fn run_role(
     hooks: &crate::audit::HookBus,
     hook_task_id: &Uuid,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+    // The run's remaining step allowance, forwarded to the Coder's tool loop.
+    // A plain value rather than `&mut RunBudget`: the loop is the thing that
+    // spends, and lending it the budget it must also charge is how the two
+    // ended up fighting over one borrow.
+    step_cap: Option<usize>,
 ) -> Result<RoleRun> {
     // Recovery turns the Coder's tool loop spends on its own reasons, handed on
     // so the pipeline's shared allowance starts where the loop's left off.
@@ -1925,6 +1962,7 @@ async fn run_role(
             schema,
             project_path,
             max_tokens,
+            step_cap,
             reasoning_effort,
             display,
             metrics,
@@ -2076,6 +2114,7 @@ async fn run_bookkept_stage(
         hook_bus,
         hook_task_id,
         steer_rx,
+        state.run_budget.remaining_steps(),
     )
     .await?;
     let RoleRun {
@@ -2931,6 +2970,12 @@ run_stage(
                     bare,
                     hook_bus.clone(),
                     task.id,
+                    // Split, not duplicated: N coders each allowed the whole
+                    // remaining budget is how one cap becomes N caps.
+                    state
+                        .run_budget
+                        .remaining_steps()
+                        .map(|r| r / config.parallel.coder_count.max(1) as usize),
                 )
                 .await?;
                 // Phase 5.5: close the parallel-coder spend hole — N coders
@@ -2992,6 +3037,7 @@ run_stage(
                     &hook_bus,
                     &task.id,
                     steer_rx,
+                    state.run_budget.remaining_steps(),
                 )
                 .await?;
                 let (json, summary, role_output) =
@@ -3078,6 +3124,7 @@ run_stage(
                         &hook_bus,
                         &task.id,
                         steer_rx,
+                        state.run_budget.remaining_steps(),
                     )
                     .await?;
                     let (json, summary, role_output) =
@@ -3203,6 +3250,7 @@ run_stage(
                             &hook_bus,
                             &task.id,
                             steer_rx,
+                            state.run_budget.remaining_steps(),
                         )
                         .await?;
                         if stage.role == AgentRole::Coder {
@@ -3597,6 +3645,7 @@ run_stage(
                 "schemas/code_diff.schema.json",
                 &task.project_path,
                 coder_stage.max_tokens,
+                state.run_budget.remaining_steps(),
                 coder_stage.reasoning_effort.as_deref(),
                 display,
                 &mut metrics,

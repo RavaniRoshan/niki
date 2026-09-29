@@ -111,6 +111,18 @@ impl RunBudget {
         self.accounted_metrics = self.accounted_metrics.max(n);
     }
 
+    /// How many steps are left, or `None` when steps are not capped.
+    ///
+    /// Read as a plain value rather than lent as `&mut`, so a caller deep in
+    /// the pipeline can bound a loop it does not own without taking a mutable
+    /// borrow of the budget the loop is supposed to be charging.
+    pub fn remaining_steps(&self) -> Option<usize> {
+        if self.max_steps == 0 {
+            return None;
+        }
+        Some(self.max_steps.saturating_sub(self.steps_used) as usize)
+    }
+
     /// Check all three dimensions. First exhausted dimension wins, named in
     /// the typed error.
     pub fn check(&self) -> anyhow::Result<()> {
@@ -228,5 +240,47 @@ mod tests {
         b.accrue_new_stages(&[m(), m()]);
         assert_eq!(b.steps_used, 6, "only the new metric accrues");
         assert!((b.cost_used - 0.5).abs() < 1e-9);
+    }
+
+    /// `--max-steps` has to mean what it says, and the Coder's tool loop is
+    /// the stage that can spend the most inside a single "step".
+    ///
+    /// The loop was written with a hardcoded ceiling of twelve round-trips and
+    /// nothing else — the run's budget was not visible to it, because
+    /// `run_role` never received one. A user who wrote `--max-steps 5` got a
+    /// Coder that made twelve requests, and the run then accounted for the
+    /// loop as *one* step, because its metric carries `retry_count: 0` and
+    /// `accrue` adds `1 + retry_count`. So the cap was honoured by every stage
+    /// that did not loop, ignored by the one that spends the most, and the
+    /// recorded number said the loop had cost a single step.
+    ///
+    /// `remaining_steps` is read as a plain value for this: the loop is the
+    /// thing that spends, and lending it the budget it also has to charge is
+    /// how the two ended up fighting over one borrow in the first place.
+    #[test]
+    fn remaining_steps_reads_the_allowance_the_user_set() {
+        let mut b = RunBudget::new(5, 0.0, 0);
+        assert_eq!(
+            b.remaining_steps(),
+            Some(5),
+            "a fresh capped budget has its whole allowance left"
+        );
+        b.accrue(3, 0.0);
+        assert_eq!(b.remaining_steps(), Some(2));
+        b.accrue(9, 0.0);
+        assert_eq!(
+            b.remaining_steps(),
+            Some(0),
+            "overshooting must floor at zero, not wrap — a wrapped value would \
+             hand the loop a huge ceiling precisely when the budget is gone"
+        );
+    }
+
+    /// No cap means no cap, and reporting `Some(u32::MAX)` here would make
+    /// every uncapped run look like it had an allowance to divide.
+    #[test]
+    fn an_uncapped_budget_has_no_allowance_to_report() {
+        assert_eq!(RunBudget::new(0, 0.0, 0).remaining_steps(), None);
+        assert_eq!(RunBudget::default().remaining_steps(), None);
     }
 }
