@@ -545,11 +545,23 @@ fn result_envelope(
 /// Same shape as the success envelope, every key present, `status` telling the
 /// two apart. `task_dir`/`report` are null because no run directory was produced
 /// for these paths; the envelope is a fact about the failure, not a stub.
-fn error_envelope(
+/// `spent` is what the run actually cost, which for a failure is rarely zero.
+///
+/// The success envelope reads `record.total_cost_usd`. This one hardcoded
+/// `0.0`, on the failure path — the one path where the money has already been
+/// spent and the user most needs to know how much of it there was. The record
+/// it was built from is right there, two lines above the call, carrying the
+/// real total that the same function goes out of its way to restore.
+///
+/// So `niki run --output-format json` reported every failed run as free. A CI
+/// script summing `cost_usd` to watch a budget gets a clean number for the
+/// runs that went wrong, which are precisely the ones worth watching.
+pub fn error_envelope(
     task: Option<&Task>,
     status: &str,
     error: &str,
     task_dir: Option<&std::path::Path>,
+    spent: Option<(f64, u32, u32)>,
 ) -> serde_json::Value {
     let dir = task_dir.map(|p| p.display().to_string());
     serde_json::json!({
@@ -567,9 +579,9 @@ fn error_envelope(
         "revision_rounds": 0,
         "tests_passed": serde_json::Value::Null,
         "mutation_passed": serde_json::Value::Null,
-        "cost_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
+        "cost_usd": spent.map(|s| s.0).unwrap_or(0.0),
+        "input_tokens": spent.map(|s| s.1).unwrap_or(0),
+        "output_tokens": spent.map(|s| s.2).unwrap_or(0),
         "report": dir.as_ref().map(|d| format!("{d}/report.md")),
         "task_dir": dir,
     })
@@ -626,7 +638,12 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
             // value that is wrong the first time the message is reworded.
             eprintln!("Error: {e}");
             if !emitted {
-                println!("{}", error_envelope(None, "error", &e.to_string(), None));
+                // No task exists yet, so there is no spend to report. The
+                // failure is upstream of any model call.
+                println!(
+                    "{}",
+                    error_envelope(None, "error", &e.to_string(), None, None)
+                );
             }
             Err(e)
         }
@@ -1020,6 +1037,11 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
                         if is_cancelled { "cancelled" } else { "error" },
                         &e.to_string(),
                         Some(&task_dir),
+                        Some((
+                            rec.total_cost_usd,
+                            rec.total_input_tokens,
+                            rec.total_output_tokens,
+                        )),
                     )
                 );
             }
