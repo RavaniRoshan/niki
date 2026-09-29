@@ -39,6 +39,40 @@ scripts/test-fast.sh --mem                    # how much room is left
 inner loop. A focused test that fails is worth more than a full run that does
 not finish.
 
+## The end-to-end legs — what actually runs the product
+
+The suites above test modules. Three scripts drive the *product*, and one of
+them is a test of the others.
+
+| Script | What it proves | Where it runs |
+| --- | --- | --- |
+| `scripts/mega-e2e.sh` | the whole user path over a real HTTP socket, and **the code NIKI wrote actually works** | CI (`Mega E2E`) against the scripted server; against a real model on demand |
+| `scripts/mega-e2e-selftest.sh` | that the leg above **can fail** — a plausible patch that does not work, a run that hands back nothing, a report that admits it is unverified | CI, immediately before the leg |
+| `scripts/demo.sh` | the first-run story, with no key and no container | CI (`Demo`) and by hand |
+
+`mega-e2e.sh` needs a model:
+
+```bash
+NIKI_BASE_URL=http://127.0.0.1:11434/v1 NIKI_MODEL=qwen2.5-coder:3b ./scripts/mega-e2e.sh
+OPENROUTER_API_KEY=sk-… NIKI_BASE_URL=https://openrouter.ai/api/v1 \
+  NIKI_MODEL=anthropic/claude-sonnet-4 ./scripts/mega-e2e.sh
+```
+
+`.github/workflows/mega-e2e.yml` is the real-provider leg, on demand
+(`gh workflow run mega-e2e.yml`). It cannot gate a PR — a small model fails a
+real coding task often enough that the gate would be noise, and noise is how
+gates stop being gates.
+
+**When you change a gate, prove it can fail.** `mega-e2e-selftest.sh` is the
+pattern: run the check against a stand-in that misbehaves and assert the
+verdict. A check that has only ever been green is not known to be a check.
+
+`tests/integration/mock_llm.py` can tell more than one story. `MOCK_LLM_SCRIPT`
+points it at a JSON file that overrides the per-role artifacts, the model
+catalogue, and the tool-loop behaviour; roles you do not name fall through to
+the built-in JavaScript story. A run that only ever tells one story cannot test
+its own second scenario.
+
 ## Low-RAM / constrained machines
 
 This box can have only a few GiB free, and another session shares it. Never run
