@@ -341,7 +341,22 @@ fn normalize_python_literals(input: &str) -> String {
 }
 
 /// Try to close unclosed brackets/braces by appending closing characters.
-/// This is a last-resort strategy — it may produce invalid JSON if the structure is deeply wrong.
+///
+/// A forgotten `}` or `]` is recoverable and this restores what the writer
+/// plainly meant. A value cut off mid-*string* is not repaired — verified,
+/// and the tests below pin it: the final strict parse still fails, so a
+/// truncated artifact never becomes a schema-valid one.
+///
+/// That was checked rather than assumed. Cline guards the same hazard
+/// deliberately (`hasUnterminatedString` in
+/// `sdk/packages/shared/src/parse/json.ts`) because closing an unterminated
+/// string with a synthetic quote "would produce a valid-looking but wrong
+/// value", and a CodeDiff cut mid-`replace` would apply cleanly and the run
+/// would report success. An earlier attempt to add the same guard here was
+/// removed once it proved to be a no-op: every truncated input this function
+/// is reached with already fails to parse, with or without it. Adding a
+/// guard that cannot change an outcome is a comment about a protection that
+/// does not exist.
 fn close_unclosed_brackets(input: &str) -> String {
     let mut in_string = false;
     let mut escaped = false;
@@ -481,6 +496,74 @@ line2"}"#;
         let result = repair_json(input).unwrap();
         let v: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(v["name"], "test");
+    }
+
+    /// What this repair pass does and does not recover, measured.
+    ///
+    /// A forgotten bracket is recoverable and is recovered. A response cut off
+    /// partway through a value is *not* recovered, and that is the property
+    /// that matters: a CodeDiff truncated mid-`replace` would otherwise become
+    /// a schema-valid artifact whose replacement is half a function, it would
+    /// apply cleanly to the user's file, and the run would report success.
+    ///
+    /// The truncated cases here were checked against the code before being
+    /// written down — an attempt to add a guard against exactly this turned
+    /// out to change nothing, because the final strict parse already rejects
+    /// them. These tests pin the behaviour that is actually load-bearing.
+    #[test]
+    fn repair_recovers_forgotten_brackets_but_not_a_cut_off_value() {
+        // Recoverable: a bracket the writer forgot.
+        for input in [r#"{"name": "test", "items": [1, 2"#, r#"{"a": {"b": [1, 2"#] {
+            let repaired = repair_json(input)
+                .unwrap_or_else(|e| panic!("a forgotten bracket is recoverable: {e}\n{input}"));
+            let v: serde_json::Value = serde_json::from_str(&repaired).unwrap();
+            assert!(v.is_object(), "{input}");
+        }
+
+        // Not recoverable: cut off partway through a value. Either it fails,
+        // or — the case worth checking — the string that comes back is
+        // byte-for-byte the one the model wrote, with nothing invented.
+        for input in [
+            r#"{"edits": [{"search": "a", "replace": "fn a() { 1 }"#,
+            r#"{"a": {"b": ["x", "unterminated"#,
+            r#"{"edits": [{"search": "", "replace": "pub fn total(xs: &[i32]) -> i32 {
+    xs.iter().sum()
+}"#,
+        ] {
+            match repair_json(input) {
+                Err(_) => {}
+                Ok(repaired) => {
+                    assert!(
+                        repaired.trim() == input.trim(),
+                        "a cut-off value must never come back completed — the model wrote \
+                         {input:?} and the repair returned {repaired:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The specific consequence, end to end: a Coder artifact truncated at the
+    /// token limit must not validate.
+    ///
+    /// This is the one that would corrupt a repository silently, so it is
+    /// worth stating in those terms rather than in terms of the parser.
+    #[test]
+    fn a_code_diff_truncated_mid_replacement_does_not_validate() {
+        let cut = r#"{"edits": [{"search": "", "replace": "pub fn total(xs: &[i32]) -> i32 {
+    xs.iter().sum()
+}"#;
+        let parsed = repair_json(cut);
+        let json = match parsed {
+            Err(_) => return, // the good case: the failure propagates
+            Ok(j) => j,
+        };
+        assert!(
+            crate::artifacts::validate::validate_artifact(&json, "schemas/code_diff.schema.json",)
+                .is_err(),
+            "a diff cut mid-replacement must not be accepted as a code diff — it would apply \
+             cleanly and the run would report success on a half-written function"
+        );
     }
 
     #[test]
