@@ -116,3 +116,46 @@ fn tool_spec_caps_bound_serialization() {
     assert!(capped[0].description.len() <= 2000);
     assert_eq!(capped[0].parameters, serde_json::json!({"type": "object"}));
 }
+
+/// Every provider's word for "I was cut off" must be recognised.
+///
+/// Three providers name the same condition three different ways, and the
+/// symptom of missing one is always the same and never mentions truncation: a
+/// half-written artifact is reported as a malformed one, and a user is sent to
+/// blame a model for a token limit. Ollama's `length` was found by measurement
+/// (probed against the running server); the other two are read off the
+/// protocols, so they are pinned here rather than trusted.
+#[test]
+fn every_providers_word_for_truncation_is_recognised() {
+    for (provider, reason) in [
+        ("ollama", "length"),
+        ("anthropic", "max_tokens"),
+        ("openai", "length"),
+        ("google", "MAX_TOKENS"),
+        ("google", "max_tokens"),
+    ] {
+        assert!(
+            niki::runtime::tools::was_truncated(Some(reason)),
+            "{provider} reports truncation as {reason:?} and we do not recognise it"
+        );
+    }
+
+    // And the reasons that are *not* truncation, so the guard cannot fire on
+    // a normal finish or on a refusal.
+    for reason in [
+        "stop",
+        "end_turn",
+        "tool_use",
+        "STOP",
+        "content_filter",
+        "error",
+    ] {
+        assert!(
+            !niki::runtime::tools::was_truncated(Some(reason)),
+            "{reason:?} is not truncation and must not be treated as one"
+        );
+    }
+
+    // No reason at all is not evidence of anything.
+    assert!(!niki::runtime::tools::was_truncated(None));
+}

@@ -291,6 +291,23 @@ impl LlmProvider for OpenAiProvider {
                                     continue;
                                 }
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                                    // The stop reason, when the chunk carries
+                                    // one. `length` here is the same signal
+                                    // Ollama sends as `done_reason` and
+                                    // Anthropic as `stop_reason`, and without
+                                    // it a truncated response is
+                                    // indistinguishable from a malformed one.
+                                    if let Some(reason) =
+                                        json["choices"][0]["finish_reason"].as_str()
+                                        && !reason.is_empty()
+                                        && tx
+                                            .send(Ok(StreamChunk::Finish {
+                                                reason: reason.to_string(),
+                                            }))
+                                            .is_err()
+                                    {
+                                        return;
+                                    }
                                     if json.get("usage").map(|u| u.is_object()).unwrap_or(false) {
                                         // Final usage chunk (choices is empty / absent).
                                         // `json["usage"]` here is safe — it is

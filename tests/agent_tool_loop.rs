@@ -1193,3 +1193,82 @@ async fn a_truncated_one_shot_response_is_reported_as_truncated() {
         "and must not blame the model for the token limit: {msg}"
     );
 }
+
+/// A provider must actually *emit* the stop reason, not merely have somewhere
+/// to put it.
+///
+/// The recogniser (`was_truncated`) is a pure function and a test on it alone
+/// passes whether or not any provider ever calls it — a mutation that stops
+/// all three streaming providers reporting their stop reason left the suite
+/// green. This drives Ollama's real stream over HTTP and asserts a `Finish`
+/// chunk comes out, which is the wiring a pure-function test cannot see.
+#[tokio::test]
+async fn ollama_emits_the_stop_reason_on_its_stream() {
+    use niki::config::ProviderConfig;
+    use niki::llm::provider::{CompletionRequest, LlmProvider, StreamChunk, ToolCall, ToolSpec};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    // Two SSE chunks: some text, then the terminating one carrying
+    // `done_reason: "length"` — which the live server really sends, probed
+    // against `qwen2.5-coder:3b` rather than assumed.
+    let sse = concat!(
+        "{\"model\":\"qwen2.5-coder:3b\",\"message\":{\"role\":\"assistant\",\"content\":\"partial\"},\"done\":false}\n",
+        "{\"model\":\"qwen2.5-coder:3b\",\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"done_reason\":\"length\",\"eval_count\":7}\n"
+    );
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(sse, "text/event-stream"))
+        .mount(&server)
+        .await;
+
+    let provider = niki::llm::ollama::OllamaProvider::new(&ProviderConfig {
+        api_key: Some("ollama".into()),
+        base_url: Some(server.uri()),
+        default_model: "qwen2.5-coder:3b".into(),
+    })
+    .expect("provider");
+
+    let mut stream = provider
+        .stream(CompletionRequest {
+            model: "qwen2.5-coder:3b".into(),
+            user_message: "hi".into(),
+            tools: Some(vec![ToolSpec {
+                name: "read".into(),
+                description: "read".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            }]),
+            ..Default::default()
+        })
+        .await
+        .expect("stream");
+
+    use futures::StreamExt;
+    let mut finish: Option<String> = None;
+    let mut text = String::new();
+    let _ = ToolCall {
+        id: String::new(),
+        name: String::new(),
+        arguments: serde_json::Value::Null,
+    };
+    while let Some(chunk) = stream.next().await {
+        match chunk.expect("chunk") {
+            StreamChunk::Text(t) => text.push_str(&t),
+            StreamChunk::Finish { reason } => finish = Some(reason),
+            StreamChunk::Usage(_) => {}
+        }
+    }
+
+    assert_eq!(text, "partial", "the text still arrives");
+    assert_eq!(
+        finish.as_deref(),
+        Some("length"),
+        "the stream must carry the provider's stop reason — without it the guard \
+         above is unreachable on this path"
+    );
+    assert!(
+        niki::runtime::tools::was_truncated(finish.as_deref()),
+        "and the guard must read it"
+    );
+}
