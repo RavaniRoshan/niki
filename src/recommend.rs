@@ -75,6 +75,92 @@ pub fn recommendations() -> Vec<RoleRec> {
     ]
 }
 
+/// Whether a provider actually offers the model we are about to recommend.
+///
+/// The table above is a hardcoded opinion about models that existed when it was
+/// written. On a provider that fronts hundreds of models under their own names
+/// — OpenRouter — it is confidently wrong more often than right, and a
+/// recommendation a user cannot run is worse than none, because it reads as
+/// authoritative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Availability {
+    /// The catalogue contains it.
+    Offered,
+    /// The catalogue was read and does not contain it.
+    NotOffered,
+    /// No catalogue: the provider has no endpoint, the key could not read one,
+    /// or the user has not configured one. Not a claim either way.
+    Unknown,
+}
+
+/// Match a recommended model against a provider's catalogue.
+///
+/// `None` for the catalogue means `Unknown` — the distinction that matters. A
+/// provider without a `/models` endpoint is normal and says nothing about
+/// whether the model exists.
+pub fn availability(
+    catalogue: Option<&[crate::cli::catalogue::CatalogueEntry]>,
+    model: &str,
+) -> Availability {
+    let Some(entries) = catalogue else {
+        return Availability::Unknown;
+    };
+    // Exact id, or a bare id matching a vendor-qualified one. OpenRouter calls
+    // the same model `anthropic/claude-sonnet-4` where our table says
+    // `claude-sonnet-4`, and neither spelling is a different model.
+    let offered = entries.iter().any(|e| {
+        e.id == model
+            || e.id.rsplit('/').next() == Some(model)
+            || model.rsplit('/').next() == Some(e.id.as_str())
+    });
+    if offered {
+        Availability::Offered
+    } else {
+        Availability::NotOffered
+    }
+}
+
+/// The closest things a provider *does* offer, for a model we cannot find.
+///
+/// Families first, then anything sharing a word, capped small. This is a
+/// suggestion shown to a person, so being wrong costs a glance; it is never
+/// used to pick a model on their behalf.
+pub fn suggestions(
+    catalogue: Option<&[crate::cli::catalogue::CatalogueEntry]>,
+    model: &str,
+    limit: usize,
+) -> Vec<String> {
+    let Some(entries) = catalogue else {
+        return Vec::new();
+    };
+    let needle = model.to_ascii_lowercase();
+    let family = needle
+        .split(|c: char| c == '-' || c == '_' || c.is_ascii_digit())
+        .find(|w| w.len() > 3)
+        .unwrap_or("");
+    let mut scored: Vec<(usize, &str)> = entries
+        .iter()
+        .map(|e| {
+            let id = e.id.to_ascii_lowercase();
+            let score = if id == needle {
+                0
+            } else if !family.is_empty() && id.contains(family) {
+                1
+            } else {
+                2
+            };
+            (score, e.id.as_str())
+        })
+        .filter(|(s, _)| *s < 2)
+        .collect();
+    scored.sort_by_key(|(s, id)| (*s, id.len()));
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, id)| id.to_string())
+        .collect()
+}
+
 /// Whether a role defaults to the *strong* model under a `balanced` preference.
 /// Quality-critical gates (Reviewer, SecurityAuditor) lean strong; mechanical
 /// roles (Tester, Synthesizer) lean cheap.
@@ -223,6 +309,65 @@ mod tests {
                 role
             );
         }
+    }
+
+    use crate::cli::catalogue::CatalogueEntry;
+
+    fn entry(id: &str) -> CatalogueEntry {
+        CatalogueEntry {
+            id: id.to_string(),
+            price_per_mtok: None,
+            traits: Vec::new(),
+        }
+    }
+
+    /// The table is an opinion about models that existed when it was written.
+    /// On a provider that fronts hundreds under its own names it is wrong more
+    /// often than right, and a recommendation a user cannot run reads as
+    /// authoritative.
+    #[test]
+    fn a_recommendation_the_provider_does_not_offer_is_said_so() {
+        let catalogue = vec![entry("anthropic/claude-sonnet-4"), entry("openai/o3-mini")];
+        assert_eq!(
+            availability(Some(&catalogue), "claude-sonnet-4"),
+            Availability::Offered,
+            "a vendor-qualified id is the same model as the bare name our table uses"
+        );
+        assert_eq!(
+            availability(Some(&catalogue), "claude-opus-4"),
+            Availability::NotOffered,
+            "naming a model this account cannot run must be visible"
+        );
+    }
+
+    /// No catalogue is not a claim that the model is missing. Several
+    /// providers have no `/models` endpoint, and a key that cannot read one
+    /// says nothing about what exists.
+    #[test]
+    fn no_catalogue_means_unknown_not_missing() {
+        assert_eq!(availability(None, "claude-opus-4"), Availability::Unknown);
+    }
+
+    /// The suggestion is for a person to read, so it errs toward the family
+    /// and is capped — it is never used to pick on the user's behalf.
+    #[test]
+    fn a_missing_model_offers_real_alternatives() {
+        let catalogue = vec![
+            entry("anthropic/claude-sonnet-4"),
+            entry("anthropic/claude-haiku-4-5"),
+            entry("openai/o3-mini"),
+            entry("meta-llama/llama-3.3-70b-instruct"),
+        ];
+        let s = suggestions(Some(&catalogue), "claude-opus-4", 3);
+        assert!(
+            s.iter().any(|x| x.contains("claude")),
+            "the same family should surface first: {s:?}"
+        );
+        assert!(
+            !s.iter().any(|x| x.contains("llama")),
+            "and unrelated models should not be dressed up as substitutes: {s:?}"
+        );
+        assert_eq!(suggestions(None, "claude-opus-4", 3).len(), 0);
     }
 
     #[test]

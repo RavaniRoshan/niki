@@ -132,7 +132,7 @@ async fn main() -> Result<()> {
             })
             .await?
         }
-        Commands::Recommend(args) => niki::cli::recommend::handle(args)?,
+        Commands::Recommend(args) => niki::cli::recommend::handle(args).await?,
         Commands::Dashboard(args) => niki::cli::dashboard::handle(args)?,
         Commands::Eval(args) => niki::cli::eval::handle(args).await?,
         Commands::Memory(args) => niki::cli::memory::handle(args)?,
