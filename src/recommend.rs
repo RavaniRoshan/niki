@@ -10,6 +10,7 @@ use crate::cost::lookup_price;
 use serde::Deserialize;
 
 /// A curated recommendation for one pipeline role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RoleRec {
     pub role: AgentRole,
     /// A high-capability (but pricier) model for when quality matters most.
