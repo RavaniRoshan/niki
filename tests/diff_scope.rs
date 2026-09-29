@@ -163,7 +163,16 @@ async fn edit_apply_is_all_or_nothing() {
 
     let patch = "FILE: tracked.rs\n<<<<<<< SEARCH\nfn a() {}\n=======\nfn a() { 42 }\n>>>>>>> REPLACE\n\nFILE: ghost.rs\n<<<<<<< SEARCH\nnothing here\n=======\nsomething\n>>>>>>> REPLACE\n";
     let err = sb.apply_patch(patch, repo).await.unwrap_err();
-    assert!(err.to_string().contains("unmatched"));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("did not match anything in the worktree"),
+        "the failure must say what happened: {msg}"
+    );
+    assert!(
+        msg.contains("nothing here"),
+        "and name the anchor that failed, so the model can see which of its own edits it was: \
+         {msg}"
+    );
     assert_eq!(
         std::fs::read_to_string(&target).unwrap(),
         before,
@@ -733,41 +742,48 @@ async fn an_unmatched_edit_says_what_it_searched_for_and_what_is_actually_there(
     let dir = fixture_repo();
     let repo = dir.path();
     let sb = worktree_sandbox(repo).await;
-    let actual = std::fs::read_to_string(sb.worktree_path.join("tracked.rs")).unwrap();
+    // A file with enough lines for a near-miss to exist. The suggestion is an
+    // equal-length window over some file in the tree, so a one-line fixture
+    // cannot produce one — and the first version of this test failed for
+    // exactly that reason, which reads like the feature being absent.
+    std::fs::write(
+        sb.worktree_path.join("tracked.rs"),
+        "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}\n",
+    )
+    .unwrap();
 
-    // Nearly right: the indentation is wrong, so it does not match.
-    let wrong = actual.replace("fn a() { 42 }", "  fn a() { 42 }");
-    let patch = format!(
-        "FILE: tracked.rs\n<<<<<<< SEARCH\n{wrong}\n=======\nfn a() {{ 99 }}\n>>>>>>> REPLACE\n\n"
-    );
-
+    // An anchor that differs by one token from a real line, and so is absent
+    // from the file while being close enough to be worth pointing at.
+    //
+    // Deliberately not a mis-indented anchor: line-trimmed and fuzzy matching
+    // recover that, which is the right behaviour, so it does not exercise this
+    // path and would have made this test pass for the wrong reason.
+    let patch = "FILE: tracked.rs\n<<<<<<< SEARCH\nfn a() { 1 }\nfn b() { 2 }\n=======\nfn a() { 9 }\n>>>>>>> REPLACE\n\n";
     let err = sb
-        .apply_patch(&patch, repo)
+        .apply_patch(patch, repo)
         .await
-        .expect_err("a mis-indented anchor does not match");
+        .expect_err("an anchor that is not in the file does not match");
     let msg = err.to_string();
 
     assert!(
         msg.contains("did not match anything in the worktree"),
         "{msg}"
     );
-    // It must echo what the model sent...
     assert!(
         msg.contains("you searched for"),
         "the model has to see its own anchor, not a verdict on it: {msg}"
     );
     assert!(
-        msg.contains("fn a() { 42 }") || msg.contains("a() { 42 }"),
+        msg.contains("fn a() { 1 }"),
         "including the text it sent: {msg}"
     );
-    // ...and what the file actually says.
     assert!(
         msg.contains("closest lines in the file"),
         "a near miss is worth more than a verdict, because the model can act on it: {msg}"
     );
     assert!(
-        msg.contains("fn a() {"),
-        "and it must be a line from the file, not the model's text echoed back: {msg}"
+        msg.contains("fn a() {}") || msg.contains("fn b() {}"),
+        "and it must be a line from the file, not the model's own text echoed back: {msg}"
     );
     assert!(
         msg.contains("Re-read each file"),
