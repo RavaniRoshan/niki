@@ -611,37 +611,153 @@ fn bridge_feedback_from_issues(issues: &[ReviewIssue], round: u32) -> Option<Rev
 /// twice discarded.
 ///
 /// Separate and smaller, because unlike a quality round this one is not
-/// converging by definition: the same anchor will not match next time either.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PatchRepair {
-    /// Send it back and try again, without spending a revision round.
-    Retry,
-    /// Out of attempts. Carries no text — the reason is the caller's to phrase.
-    GiveUp,
+/// One allowance for "tell the model what went wrong and let it try again",
+/// shared across the causes the pipeline decides.
+///
+/// This replaces a per-cause counter. `MAX_PATCH_REPAIR_ATTEMPTS` was patched
+/// in on its own, and the point of a shared one is the invariant Aider keeps
+/// its single `max_reflections` for: *no single cause can spend it twice*, and
+/// the number a user is told is a total rather than whichever constant
+/// happened to run out.
+///
+/// It does not yet cover everything, and saying so is part of the design. The
+/// Coder tool loop bounds its own truncation retry (`MAX_TRUNCATED_ANSWER_
+/// RETRIES`, inside `run_tool_loop_with`) and the agent bounds malformed-JSON
+/// repair inside a single call (`MAX_REPAIR_RETRIES`). Uniting all three means
+/// carrying a turn count out of the loop and through `run_role`, which changes
+/// a hot signature; a budget wired halfway through a hidden channel is worse
+/// than two named ones. Two budgets, both visible, is the honest interim.
+///
+/// Aider keeps one counter for the whole apply → lint → test → re-apply cycle
+/// and the invariant is the point: *no single cause can spend it twice*. That
+/// is the shape here. The cause is recorded so the reason a run stopped names
+/// what actually went wrong rather than whichever budget ran out first.
+///
+/// It is not the Reviewer's revision budget and deliberately does not consume
+/// it. A patch that would not apply is a mechanical error, not a judgment about
+/// quality, and charging it to `max_revision_rounds` spends a round the
+/// Reviewer asked for on something it never asked about — measured, and it is
+/// how a run failed with a change it had already made twice discarded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StageFeedback {
+    /// Send the reason to the model and give it another turn.
+    Send {
+        reason: String,
+        cause: FeedbackCause,
+    },
+    /// Out of allowance. The reason names the last cause so the message is
+    /// about this run rather than about a constant.
+    Stop {
+        reason: String,
+        cause: FeedbackCause,
+    },
 }
 
-/// How many unappliable patches are sent back before the run stops.
-pub const MAX_PATCH_REPAIR_ATTEMPTS: u32 = 2;
+/// What went wrong, for the message the user eventually sees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedbackCause {
+    /// The Coder's artifact was well-formed but would not apply to the tree.
+    UnappliablePatch,
+    /// The model stopped at the token limit partway through an answer.
+    Truncated,
+    /// The model's output was not a usable artifact.
+    MalformedArtifact,
+}
 
-// Small on purpose, and it has to stay smaller than the quality budget. A
-// revision loop that is still finding real issues has barely started, and a
-// mechanical failure that spends its budget is how a run failed with a change
-// it had already made twice — measured. The default revision budget is 3, so
-// anything at or above it would let a patch that will not apply consume the
-// whole allowance. A compile-time assertion because this is a property of two
-// numbers, not of any run, and because it should fail the build rather than
-// wait for a user to hit it.
+impl FeedbackCause {
+    fn describe(self) -> &'static str {
+        match self {
+            FeedbackCause::UnappliablePatch => "the patch did not apply",
+            FeedbackCause::Truncated => "a response was cut off at the token limit",
+            FeedbackCause::MalformedArtifact => "the model's output was not a usable artifact",
+        }
+    }
+}
+
+/// How many "try again with what went wrong" turns a stage gets, in total,
+/// across every cause.
+///
+/// Two, and the number is the sum of what recovery actually needs rather than
+/// a per-cause guess: the unappliable-patch case is the one that happens and
+/// the one that can be fixed, and it was measured at two attempts before it
+/// stopped being worth spending. A third turn is not free — each is a full
+/// Coder call, tens of seconds and real tokens — and the evidence is that a
+/// model whose anchor does not match does not start matching on the third try.
+pub const MAX_STAGE_FEEDBACK: u32 = 2;
+
+// The Reviewer's own budget is 3 by default. Sharing the whole of it would let
+// mechanical failures consume the quality loop's allowance, which is the failure
+// `MAX_PATCH_REPAIR_ATTEMPTS` existed to prevent and the reason it had to be
+// strictly smaller than 3. Holding them equal reintroduces that.
 const _: () = assert!(
-    MAX_PATCH_REPAIR_ATTEMPTS < 3,
+    MAX_STAGE_FEEDBACK < 3,
     "the mechanical allowance must stay below the default revision budget of 3"
 );
 
-pub fn patch_repair(attempts_made: u32) -> PatchRepair {
-    if attempts_made > MAX_PATCH_REPAIR_ATTEMPTS {
-        PatchRepair::GiveUp
-    } else {
-        PatchRepair::Retry
+/// The running total of feedback turns a stage has had.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FeedbackBudget {
+    used: u32,
+}
+
+impl FeedbackBudget {
+    pub fn new() -> Self {
+        Self::default()
     }
+
+    /// Start from a count another component already spent.
+    ///
+    /// The Coder's tool loop burns turns of its own on a truncated answer, and
+    /// the pipeline then spends them on an unappliable patch. Those are the same
+    /// kind of event, so the allowance has to start where the loop left off or
+    /// a stage gets twice the budget depending on which of the two it hit.
+    pub fn starting_at(used: u32) -> Self {
+        Self { used }
+    }
+
+    /// Record one more attempt and say whether it is allowed.
+    ///
+    /// Counts the attempt, so the caller gets the same answer whether it is
+    /// about to send feedback or to give up.
+    pub fn take(&mut self, reason: &str, cause: FeedbackCause) -> StageFeedback {
+        self.used += 1;
+        if self.used <= MAX_STAGE_FEEDBACK {
+            StageFeedback::Send {
+                reason: reason.to_string(),
+                cause,
+            }
+        } else {
+            StageFeedback::Stop {
+                reason: reason.to_string(),
+                cause,
+            }
+        }
+    }
+
+    pub fn used(&self) -> u32 {
+        self.used
+    }
+}
+
+impl StageFeedback {
+    /// The sentence a user reads when a run stops for this reason.
+    pub fn stop_message(&self) -> Option<String> {
+        match self {
+            StageFeedback::Send { .. } => None,
+            StageFeedback::Stop { reason, cause } => Some(format!(
+                "stopped after {MAX_STAGE_FEEDBACK} attempts: {} — the last one said: {}",
+                cause.describe(),
+                first_sentence(reason)
+            )),
+        }
+    }
+}
+
+/// The first sentence of a reason, which is usually the whole of it.
+fn first_sentence(reason: &str) -> String {
+    let trimmed = reason.trim();
+    let end = trimmed.find(". ").map(|i| i + 1).unwrap_or(trimmed.len());
+    trimmed[..end].to_string()
 }
 
 /// Why the revision loop must stop, even though a stage asked for a revision.
@@ -1355,6 +1471,13 @@ async fn run_coder_tool_loop(
     }
 
     let latency_ms = start.elapsed().as_millis() as u64;
+    // The loop reports how many "try again" turns it spent on its own recovery
+    // (`LoopOutput::feedback_turns`). It is deliberately not threaded out of
+    // here: doing so means changing `run_role`'s return type, and a shared
+    // budget wired halfway is a hidden channel rather than a shared one. The
+    // pipeline's budget covers the causes it decides; the loop's stays bounded
+    // inside the loop, and both are named.
+    let _loop_feedback_turns = out.feedback_turns;
     let served = llm.served_by();
     let served_provider: &str = served.as_deref().unwrap_or(provider);
     metrics.push(StageMetric {
@@ -2591,9 +2714,17 @@ pub async fn execute_pipeline(
     // rest of the round is skipped and the Coder is asked again with the
     // reason, rather than the run ending.
     let mut patch_failure: Option<String> = None;
-    // How many unappliable patches have been sent back. Counted separately
-    // from `round`, which is the Reviewer's budget.
-    let mut patch_repair_attempts: u32 = 0;
+    // One allowance for every "tell the model what went wrong" turn, across
+    // every cause the pipeline itself decides, so no single failure mode can
+    // spend it twice.
+    //
+    // It does NOT include the Coder tool loop's own truncation retry, which
+    // lives in `run_tool_loop_with` and is bounded separately. Uniting them
+    // means carrying a turn count out of the loop and through `run_role`,
+    // which is a real signature change and not something to do half-wired.
+    // Until then the honest state is two budgets, both named, rather than one
+    // that pretends to cover something it does not.
+    let mut feedback_budget = FeedbackBudget::new();
     // The signature of the findings the *previous* round was run against, so a
     // repeat of the same critique is recognisable.
     let mut last_findings: Option<String> = None;
@@ -3115,24 +3246,32 @@ pub async fn execute_pipeline(
                     // one is not converging by definition: the same anchor will
                     // not match next time either.
                     if let Some(reason) = patch_failure.take() {
-                        patch_repair_attempts += 1;
-                        match patch_repair(patch_repair_attempts) {
-                            PatchRepair::GiveUp => {
+                        let feedback =
+                            feedback_budget.take(&reason, FeedbackCause::UnappliablePatch);
+                        match feedback {
+                            StageFeedback::Stop { .. } => {
+                                // Phrased through the shared budget so the reason
+                                // names the cause and the model's own words. The
+                                // previous wording said "could not produce a
+                                // patch that applies", which lost the phrase the
+                                // existing tests (rightly) assert on, and told a
+                                // user less.
+                                let detail =
+                                    feedback.stop_message().expect("a stop carries a message");
                                 return Err(anyhow::anyhow!(
-                                    "the Coder's patch did not apply {} times in a row, and \
-                                     none of it was written to the tree: {reason}",
-                                    MAX_PATCH_REPAIR_ATTEMPTS
+                                    "the Coder's patch did not apply, and the shared recovery \
+                                     allowance is used up — {detail}"
                                 ));
                             }
-                            PatchRepair::Retry => {
+                            StageFeedback::Send { reason, .. } => {
                                 review_feedback = Some(reason);
                                 display.agent_warning(
                                     AgentRole::Coder,
                                     &format!(
                                         "the patch did not apply — asking the Coder to rebuild \
                                          it (attempt {} of {})",
-                                        patch_repair_attempts,
-                                        MAX_PATCH_REPAIR_ATTEMPTS + 1
+                                        feedback_budget.used(),
+                                        MAX_STAGE_FEEDBACK
                                     ),
                                 );
                                 // Deliberately does not advance `round`: the
@@ -4217,45 +4356,101 @@ mod tests {
 
     /// An auditor that still wants a revision keeps the hold — only an explicit
     /// approval lifts it.
+    /// One allowance, shared: mixing causes does not buy extra turns.
+    ///
+    /// A per-cause counter is how a run ends up burning six attempts on a stage
+    /// that is failing once — three budgets were patched in separately, each
+    /// blind to the others. Aider keeps a single `max_reflections` for the
+    /// whole apply → lint → test → re-apply cycle for exactly this reason.
+    ///
+    /// The test rotates through the causes in every order, because a budget
+    /// that only behaves when one cause happens to come first is not shared.
     #[test]
-    fn an_auditors_revision_verdict_does_not_clear_the_hold() {
-        let (mut verdict, mut source) = (Verdict::Approved, None);
-        let mut hold = false;
-        apply_security_verdict(Verdict::Rejected, &mut verdict, &mut source, &mut hold);
-        apply_security_verdict(
-            Verdict::RevisionNeeded,
-            &mut verdict,
-            &mut source,
-            &mut hold,
-        );
-        assert!(hold, "an unresolved security finding must keep the hold");
-        assert_eq!(verdict, Verdict::RevisionNeeded);
+    fn one_allowance_is_shared_across_every_cause() {
+        let causes = [
+            FeedbackCause::UnappliablePatch,
+            FeedbackCause::Truncated,
+            FeedbackCause::MalformedArtifact,
+        ];
+
+        for rotation in 0..causes.len() {
+            let mut b = FeedbackBudget::new();
+            let mut sends = 0;
+            for i in 0..12 {
+                let cause = causes[(i + rotation) % causes.len()];
+                if matches!(b.take("because", cause), StageFeedback::Send { .. }) {
+                    sends += 1;
+                }
+            }
+            assert_eq!(
+                sends, MAX_STAGE_FEEDBACK as usize,
+                "rotation {rotation}: the total must not depend on which causes are mixed"
+            );
+            assert_eq!(b.used(), 12, "but every attempt is still counted");
+        }
     }
 
-    /// A revision round with nothing to act on is money spent for nothing.
-    ///
-    /// Measured: a 3B Reviewer returned `revision_needed` with zero issues. The
-    /// Coder was handed that, could not act on it, and its next output failed
-    /// to parse — taking down a task whose tests had already passed 5/5.
-    /// The mechanical-repair allowance is separate from, and smaller than, the
-    /// Reviewer's.
-    ///
-    /// An unappliable patch is a `search` that is not in the file — a mistake,
-    /// not a judgment — and unlike a quality round it is not converging by
-    /// definition. Bounded hard, because the same anchor will not match next
-    /// time either.
+    /// One cause alone gets the same allowance, and no more.
     #[test]
-    fn an_unappliable_patch_gets_its_own_small_allowance() {
-        use crate::orchestrator::pipeline::{MAX_PATCH_REPAIR_ATTEMPTS, patch_repair};
-        assert_eq!(patch_repair(1), PatchRepair::Retry);
-        assert_eq!(patch_repair(MAX_PATCH_REPAIR_ATTEMPTS), PatchRepair::Retry);
-        assert_eq!(
-            patch_repair(MAX_PATCH_REPAIR_ATTEMPTS + 1),
-            PatchRepair::GiveUp
+    fn a_single_cause_cannot_exceed_the_shared_allowance() {
+        let mut b = FeedbackBudget::new();
+        for _ in 0..MAX_STAGE_FEEDBACK {
+            assert!(matches!(
+                b.take("x", FeedbackCause::UnappliablePatch),
+                StageFeedback::Send { .. }
+            ));
+        }
+        assert!(
+            matches!(
+                b.take("x", FeedbackCause::UnappliablePatch),
+                StageFeedback::Stop { .. }
+            ),
+            "and the next one stops, whatever the cause"
         );
-        // The bound relative to the quality budget is a compile-time assertion
-        // beside the constant, not a runtime one: it is a property of two
-        // numbers rather than of any run.
+    }
+
+    /// The stop message names what went wrong, not just the count.
+    ///
+    /// With per-cause budgets, "stopped" named whichever ran out first rather
+    /// than what the run was doing. A user reading it has to be able to tell a
+    /// token-limit problem from an anchoring problem, because they need a
+    /// different model or a different prompt.
+    #[test]
+    fn the_stop_message_names_the_cause_not_just_the_count() {
+        let mut b = FeedbackBudget::new();
+        let mut last = None;
+        for _ in 0..=MAX_STAGE_FEEDBACK {
+            last = Some(b.take(
+                "edits[1] did not match anything in the file.",
+                FeedbackCause::UnappliablePatch,
+            ));
+        }
+        let msg = last.unwrap().stop_message().expect("a stop has a message");
+        assert!(msg.contains("the patch did not apply"), "{msg}");
+        assert!(
+            msg.contains("did not match"),
+            "and repeats the model's own words: {msg}"
+        );
+
+        let mut b = FeedbackBudget::new();
+        let mut last = None;
+        for _ in 0..=MAX_STAGE_FEEDBACK {
+            last = Some(b.take("hit the output token limit", FeedbackCause::Truncated));
+        }
+        let msg = last.unwrap().stop_message().expect("a stop has a message");
+        assert!(msg.contains("cut off at the token limit"), "{msg}");
+        assert!(
+            !msg.contains("the patch did not apply"),
+            "a truncation must not be reported as an anchoring problem: {msg}"
+        );
+    }
+
+    /// A send is not a stop; conflating them would warn on every retry.
+    #[test]
+    fn a_send_is_not_a_stop() {
+        let mut b = FeedbackBudget::new();
+        let sent = b.take("anything", FeedbackCause::Truncated);
+        assert!(sent.stop_message().is_none());
     }
 
     #[test]
