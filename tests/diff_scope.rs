@@ -816,3 +816,83 @@ async fn a_near_miss_is_suggested_but_never_applied() {
     );
     sb.destroy().await.unwrap();
 }
+
+/// Uniqueness is enforced for the *trimmed* match too, not only the exact one.
+///
+/// An anchor that fits two places is not a choice the harness may make for the
+/// model, and that is as true one strategy down as it is at the top. A search
+/// differing only in indentation from two blocks of code matches exactly once
+/// and trimmed twice — and the second case was editing the first, silently, in
+/// a file the model did not name.
+///
+/// pi enforces uniqueness in *normalized* space for the same reason: the match
+/// that counts is the one the strategy will actually use.
+///
+/// The fixture is built so the *exact* strategy cannot catch it: a single
+/// indented line is still a byte-substring of the search, so the difference
+/// has to be between lines. An earlier version of this test did not do that,
+/// and its own sanity assertion caught it.
+#[test]
+fn an_anchor_that_fits_two_places_after_trimming_is_also_refused() {
+    // Two candidate blocks, each with *trailing* whitespace on every line.
+    //
+    // Trailing rather than leading, and both lines rather than one: a leading
+    // indent is still a byte-substring match (the search simply starts one
+    // character later), and one defective line out of two is enough for the
+    // other half of the search to line up. Two earlier fixtures got this wrong
+    // and the test's own sanity assertion is what caught them.
+    let a = "fn a() { 1 }";
+    let b = "fn b() { 2 }";
+    let pad = "   ";
+    // *Both* candidates have to be padded. One padded block and one clean one
+    // leaves the clean one findable by the exact strategy, which is a third
+    // way to write a fixture that does not test what it says.
+    let block = format!("{a}{pad}\n{b}{pad}\n");
+    let content = format!("fn x() {{}}\n{block}{block}");
+    let search = format!("{a}\n{b}");
+
+    // Sanity: this really is a case the exact strategy cannot see.
+    assert_eq!(
+        content.matches(&search).count(),
+        0,
+        "if the exact strategy can find it, this test is not exercising the trimmed one"
+    );
+    assert_eq!(
+        content.lines().filter(|l| l.trim() == a).count(),
+        2,
+        "and both trimmed candidates must really be there"
+    );
+
+    let err = niki::sandbox::edit_format::apply_single_edit_block(&content, &search, "changed")
+        .expect_err("two trimmed candidates is still ambiguous");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("matches 2 times"),
+        "the error must say the anchor is ambiguous, and how many candidates there are: {msg}"
+    );
+    assert!(
+        msg.contains("more surrounding context"),
+        "and what to do about it, or the model repeats itself: {msg}"
+    );
+}
+
+/// And a trimmed match that is genuinely unique still applies — the guard must
+/// not cost us the recovery it exists to protect.
+#[test]
+fn a_uniquely_trimmed_anchor_still_applies() {
+    let a = "fn a() { 1 }";
+    let b = "fn b() { 2 }";
+    let content = format!("{a}\n{b}   \n");
+    let out = niki::sandbox::edit_format::apply_single_edit_block(
+        &content,
+        &format!("{a}\n{b}"),
+        &format!("{a}\nfn b() {{ 99 }}"),
+    )
+    .expect("a unique trimmed match applies")
+    .expect("and produces content");
+    assert!(out.contains("fn b() { 99 }"), "{out:?}");
+    assert!(
+        out.contains("fn a() { 1 }"),
+        "and leaves the other alone: {out:?}"
+    );
+}
