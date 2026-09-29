@@ -175,6 +175,22 @@ pub fn apply_single_edit_block(
     )
 }
 
+/// The error for an anchor that fits more than one place.
+///
+/// One message for both tiers that can detect it, so the fix a model is given
+/// is the same either way: quote more context, or split the edit. The line
+/// number is in lines rather than bytes because the reader is looking at a
+/// file, not a buffer.
+fn ambiguous_anchor(search: &str, matches: usize) -> anyhow::Error {
+    let first_line = search.lines().count().max(1);
+    anyhow::anyhow!(
+        "the anchor for this edit matches {matches} times in the file (the first candidate \
+         starts around line {first_line}). Add more surrounding context so it is unique, or \
+         split the edit. Applying it to an arbitrary one of them would change code the model \
+         did not name."
+    )
+}
+
 /// Try to apply a single edit block. Returns the edited content if applied successfully.
 fn apply_single_edit(content: &str, edit: &EditBlock) -> Result<Option<String>> {
     // An edit must not be able to match text it just wrote.
@@ -261,14 +277,7 @@ fn apply_single_edit(content: &str, edit: &EditBlock) -> Result<Option<String>> 
             return Ok(Some(result));
         }
         (Some(_), Some(_)) => {
-            let first_at = content.find(&edit.search).unwrap_or(0);
-            let first_line = content[..first_at].lines().count().max(1);
-            return Err(anyhow::anyhow!(
-                "the anchor for this edit matches {matches} times in the file (first at line \
-                 {first_line}). Add more surrounding context so it is unique, or split the \
-                 edit. Applying it to an arbitrary one of them would change code the model \
-                 did not name."
-            ));
+            return Err(ambiguous_anchor(&edit.search, matches));
         }
         (None, _) => {
             // Fall through to the looser strategies below.
@@ -279,7 +288,24 @@ fn apply_single_edit(content: &str, edit: &EditBlock) -> Result<Option<String>> 
     let search_lines: Vec<&str> = edit.search.lines().collect();
     let content_lines: Vec<&str> = content.lines().collect();
 
-    if let Some(start_line) = find_trimmed_match(&content_lines, &search_lines) {
+    // Uniqueness is enforced here too, and for the same reason as the exact
+    // match: an anchor that fits two places is not a choice the harness may make
+    // for the model. A search differing only in indentation from two blocks of
+    // code matches exactly once and trimmed twice, and the second case was
+    // editing the first silently.
+    //
+    // pi enforces uniqueness in *normalized* space for the same reason — the
+    // match that counts is the one the strategy actually uses.
+    let trimmed = find_trimmed_matches(&content_lines, &search_lines);
+    if trimmed.len() > 1 {
+        // Reported, not quietly treated as "no match". A caller that gets
+        // `None` here learns only that the anchor was not found; the two
+        // situations have different fixes — one is a typo, the other is an
+        // anchor that needs more surrounding context — and the second is the
+        // one a model cannot guess at.
+        return Err(ambiguous_anchor(&edit.search, trimmed.len()));
+    }
+    if let Some(&start_line) = trimmed.first() {
         let end_line = start_line + search_lines.len();
         let mut result = String::new();
 
@@ -336,22 +362,26 @@ fn apply_single_edit(content: &str, edit: &EditBlock) -> Result<Option<String>> 
 }
 
 /// Find a match using line-trimmed comparison.
-fn find_trimmed_match(content_lines: &[&str], search_lines: &[&str]) -> Option<usize> {
-    if search_lines.is_empty() {
-        return None;
+fn find_trimmed_matches(content_lines: &[&str], search_lines: &[&str]) -> Vec<usize> {
+    if search_lines.is_empty() || content_lines.len() < search_lines.len() {
+        return Vec::new();
     }
 
-    'outer: for i in 0..=content_lines.len().saturating_sub(search_lines.len()) {
+    let mut found = Vec::new();
+    'outer: for i in 0..=(content_lines.len() - search_lines.len()) {
         for (j, search_line) in search_lines.iter().enumerate() {
-            let content_line = content_lines[i + j].trim();
-            let search_line = search_line.trim();
-            if content_line != search_line {
+            if content_lines[i + j].trim() != search_line.trim() {
                 continue 'outer;
             }
         }
-        return Some(i);
+        found.push(i);
+        // Two is enough: the decision is "unique or not", and scanning the rest
+        // of a large file to count a number nothing uses is not worth it.
+        if found.len() == 2 {
+            break;
+        }
     }
-    None
+    found
 }
 
 /// Find a fuzzy match using sequence matching.
