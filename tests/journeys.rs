@@ -433,6 +433,124 @@ fn j_doctor_does_not_fail_a_first_run(ctx: &JourneyCtx) -> JourneyResult {
     JourneyResult::Pass
 }
 
+/// J12 — bare `niki` is the first thing a new user types, and where it lands
+/// decides what they think this is.
+///
+/// On a terminal it should open the chat surface, like Codex and Claude Code
+/// do. Without one, there is nothing to open: the TUI cannot enter raw mode,
+/// returns immediately, and the process exits **0 having printed nothing at
+/// all**. This journey runs the binary with a pipe on stdout and stdin, which
+/// is what a script, a CI step, and `$(niki)` all look like — and the old
+/// behaviour was indistinguishable from success in all three.
+fn j_bare_niki_offers_help_instead_of_hanging_up(ctx: &JourneyCtx) -> JourneyResult {
+    let out = ctx.run(&[]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+
+    if combined.contains("panicked at") {
+        return JourneyResult::Fail("bare `niki` panicked".to_string());
+    }
+    if combined.trim().is_empty() {
+        return JourneyResult::Fail(
+            "bare `niki` with no terminal printed nothing and exited — a program \
+             that hangs up silently is worse than one that refuses"
+                .to_string(),
+        );
+    }
+    if out.status.success() {
+        return JourneyResult::Fail(format!(
+            "bare `niki` with no terminal exited 0. A script cannot tell that from \
+             a successful run. It said: {combined}"
+        ));
+    }
+    // It must be useful, not merely non-empty.
+    if !combined.contains("niki run") && !combined.contains("Usage") {
+        return JourneyResult::Fail(format!(
+            "bare `niki` failed without telling the user what to do instead: {combined}"
+        ));
+    }
+    JourneyResult::Pass
+}
+
+/// J13 — the same dead end, one level down and explicitly requested.
+///
+/// `niki chat` on a pipe did exactly what bare `niki` did: nothing, exit 0.
+/// A pipeline that runs it has no way to tell that the conversation never
+/// happened.
+fn j_chat_without_a_terminal_says_so(ctx: &JourneyCtx) -> JourneyResult {
+    let out = ctx.run(&["chat"]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+
+    if combined.contains("panicked at") {
+        return JourneyResult::Fail("`niki chat` panicked without a terminal".to_string());
+    }
+    if combined.trim().is_empty() {
+        return JourneyResult::Fail("`niki chat` with no terminal printed nothing".to_string());
+    }
+    if out.status.success() {
+        return JourneyResult::Fail(format!(
+            "`niki chat` with no terminal exited 0. It said: {combined}"
+        ));
+    }
+    if !combined.contains("--message") {
+        return JourneyResult::Fail(format!(
+            "`niki chat` refused without naming the way to do it non-interactively: \
+             {combined}"
+        ));
+    }
+    JourneyResult::Pass
+}
+
+/// J14 — an empty task is not a task, and the pipeline will not notice.
+///
+/// The Planner is handed "" and asked for a spec, produces one, and the run
+/// continues through four paid model calls to hand back a change nobody asked
+/// for. `niki run ""` is not hypothetical: it is what a shell variable that
+/// expanded to nothing produces, which is one of the easiest ways to spend
+/// money by accident.
+///
+/// The assertion that matters is the absence of side effects, not the message:
+/// a rejection that still mints a task directory has already cost something.
+fn j_an_empty_task_is_refused_before_any_spend(ctx: &JourneyCtx) -> JourneyResult {
+    let entries = |p: &std::path::Path| std::fs::read_dir(p).map(|d| d.count()).unwrap_or(0);
+    let before = entries(&ctx.project);
+    let out = ctx.run(&["run", "   "]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+
+    if combined.contains("panicked at") {
+        return JourneyResult::Fail("`niki run \"\"` panicked".to_string());
+    }
+    if out.status.success() {
+        return JourneyResult::Fail(
+            "`niki run` with a blank task reported success — it either ran a \
+             pipeline on nothing or exited zero having done nothing"
+                .to_string(),
+        );
+    }
+    if !combined.to_lowercase().contains("task") {
+        return JourneyResult::Fail(format!(
+            "the refusal does not say what was missing: {combined}"
+        ));
+    }
+    let niki_dir = ctx.project.join(".niki");
+    if niki_dir.exists() {
+        let tasks = niki_dir.join("tasks");
+        if tasks.exists() {
+            return JourneyResult::Fail(
+                "a blank task created .niki/tasks — the run started before the \
+                 input was checked, which is the spend this is meant to prevent"
+                    .to_string(),
+            );
+        }
+    }
+    let after = entries(&ctx.project);
+    if after != before {
+        return JourneyResult::Fail(format!(
+            "a blank task changed the project directory ({before} -> {after} entries)"
+        ));
+    }
+    JourneyResult::Pass
+}
+
 static JOURNEYS: &[Journey] = &[
     Journey {
         id: "J00",
@@ -503,6 +621,25 @@ static JOURNEYS: &[Journey] = &[
         intent: "pass a project path that does not exist",
         guards: "users typo paths; a panic here is the first thing a new user sees",
         run: j_nonexistent_project_is_a_clean_error,
+    },
+    Journey {
+        id: "J12",
+        intent: "type bare `niki` with no terminal",
+        guards: "the first thing a new user runs; it must land somewhere useful \
+                  or say why it cannot, never exit 0 in silence",
+        run: j_bare_niki_offers_help_instead_of_hanging_up,
+    },
+    Journey {
+        id: "J13",
+        intent: "run `niki chat` from a script, with no terminal",
+        guards: "the same dead end one level down, explicitly requested this time",
+        run: j_chat_without_a_terminal_says_so,
+    },
+    Journey {
+        id: "J14",
+        intent: "run `niki run` with a task that expanded to nothing",
+        guards: "four paid model calls to hand back a change nobody asked for",
+        run: j_an_empty_task_is_refused_before_any_spend,
     },
     Journey {
         id: "J11",

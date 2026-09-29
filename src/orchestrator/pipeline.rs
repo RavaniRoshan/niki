@@ -1300,6 +1300,52 @@ async fn run_experimental_research(
     Ok(Some((appendix, metric)))
 }
 
+/// Name the stage a topology needs and cannot find.
+///
+/// These three lookups were `expect()`, which means a hand-edited
+/// `[pipeline] stages = [...]` with no Coder in it — or with the Coder
+/// marked `skip = true` — ended the run with a Rust panic and a backtrace
+/// instead of a sentence. The configuration is the user's; the crash is
+/// ours, and it says nothing about what to change.
+///
+/// It also arrives *after* the run has started and after real calls have been
+/// billed, so a panic here is the most expensive possible way to report a
+/// typo.
+fn missing_stage_error(
+    needed: AgentRole,
+    present: &[&PipelineStageConfig],
+    mode: &str,
+) -> crate::NikiError {
+    use std::fmt::Write as _;
+    let mut msg = format!(
+        "{mode} mode needs a `{}` stage, and this configuration does not have one.\n\
+         The stages this run would execute: ",
+        crate::display::theme::role_name(needed)
+    );
+    let listed: Vec<String> = present
+        .iter()
+        .map(|s| {
+            if s.skip {
+                format!("{} (skipped)", crate::display::theme::role_name(s.role))
+            } else {
+                crate::display::theme::role_name(s.role).to_string()
+            }
+        })
+        .collect();
+    let _ = write!(
+        msg,
+        "{}.\n\nFix it in niki.toml: either name `{}` in `[pipeline] stages`, or \
+         remove `skip = true` from it.",
+        if listed.is_empty() {
+            "none".to_string()
+        } else {
+            listed.join(", ")
+        },
+        crate::display::theme::role_name(needed),
+    );
+    crate::NikiError::Config(msg)
+}
+
 /// Run one agent: stream its output, measure latency, compute cost, record a
 /// metric, and return the raw JSON artifact.
 async fn run_stage(
@@ -2806,7 +2852,9 @@ run_stage(
                 let coder_stage = body_stages
                     .iter()
                     .find(|s| s.role == AgentRole::Coder)
-                    .expect("parallel mode requires a Coder stage");
+                    .ok_or_else(|| {
+                        missing_stage_error(AgentRole::Coder, &body_stages, "parallel")
+                    })?;
                 let coder_cache_key = provider_cache_key(coder_stage);
                 let per_coder = run_parallel_coders(
                     config.parallel.coder_count,
@@ -2860,7 +2908,9 @@ run_stage(
                 let synth_stage = body_stages
                     .iter()
                     .find(|s| s.role == AgentRole::Synthesizer)
-                    .expect("parallel mode requires a Synthesizer stage");
+                    .ok_or_else(|| {
+                        missing_stage_error(AgentRole::Synthesizer, &body_stages, "parallel")
+                    })?;
                 let synth_cache_key = provider_cache_key(synth_stage);
                 let synth_llm = provider_cache.get(&synth_cache_key).ok_or_else(|| {
                     anyhow::anyhow!("Provider '{}' not found in cache", synth_stage.provider)
@@ -3450,7 +3500,9 @@ run_stage(
             let coder_stage = body_stages
                 .iter()
                 .find(|s| s.role == AgentRole::Coder)
-                .expect("single-agent mode requires a Coder stage");
+                .ok_or_else(|| {
+                    missing_stage_error(AgentRole::Coder, &body_stages, "single-agent")
+                })?;
             let coder_cache_key = provider_cache_key(coder_stage);
             let coder_llm = provider_cache.get(&coder_cache_key).ok_or_else(|| {
                 anyhow::anyhow!("Provider '{}' not found in cache", coder_stage.provider)

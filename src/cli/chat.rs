@@ -213,6 +213,22 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
         return Ok(());
     }
 
+    // A TUI needs a terminal. Asking for one that is not there used to fail
+    // silently: `run_tui` cannot enter raw mode, returns, and `handle` returns
+    // `Ok(())` — so `niki chat` exited **0 having printed nothing**, which a
+    // script cannot tell from a conversation. An explicit `niki chat` in a
+    // pipeline is a mistake worth naming rather than absorbing.
+    if !std::io::IsTerminal::is_terminal(&std::io::stdout())
+        || !std::io::IsTerminal::is_terminal(&std::io::stdin())
+    {
+        anyhow::bail!(
+            "`niki chat` needs an interactive terminal and there isn't one.\n\
+             For a one-shot exchange, pipe it instead:\n  \
+             niki chat --message \"your question\"\n\
+             For a coding task:  niki run \"<task>\""
+        );
+    }
+
     // Create a long-lived channel so the TUI doesn't see Disconnect.
     let (tx, rx) = mpsc::channel::<DisplayEvent>();
 
