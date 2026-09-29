@@ -101,6 +101,7 @@ fn explicit_custom_topology_is_never_rewritten() {
         max_tokens: 0,
         temperature: 0.0,
         fallbacks: vec![],
+        reasoning_effort: None,
     }];
     config.risk.mode = niki::config::types::RiskMode::Security;
     let risk = classify(&spec("Anything", &["src/auth/x.rs"]), &config);
@@ -121,6 +122,7 @@ fn existing_critic_is_not_duplicated() {
         max_tokens: 0,
         temperature: 0.0,
         fallbacks: vec![],
+        reasoning_effort: None,
     });
     let files: Vec<String> = (0..12).map(|i| format!("src/f{i}.rs")).collect();
     let refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();

@@ -29,6 +29,11 @@ pub async fn run_agent(
     display: &mut crate::display::agent_stream::AgenticDisplay,
     max_tokens: u32,
     temperature: f32,
+    // Passed to the provider as-is. `None` sends no such field at all, which
+    // is the safe default: a provider that does not know the key may reject
+    // the whole request, and a value guessed from a model name turns a
+    // working run into a 400.
+    reasoning_effort: Option<&str>,
     steer_rx: Option<&std::sync::Arc<std::sync::Mutex<Option<String>>>>,
 ) -> Result<(String, TokenUsage, u32, u32)> {
     let mut env = Environment::new();
@@ -82,7 +87,7 @@ pub async fn run_agent(
         temperature,
         json_schema: None,
         tools: None,
-        ..Default::default()
+        reasoning_effort: reasoning_effort.map(str::to_string),
     };
 
     display.agent_start(role);

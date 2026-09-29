@@ -1179,6 +1179,7 @@ async fn a_truncated_one_shot_response_is_reported_as_truncated() {
         4096,
         0.0,
         None,
+        None,
     )
     .await
     .expect_err("a response cut off mid-artifact is not an answer");
@@ -1459,4 +1460,197 @@ async fn reasoning_effort_reaches_the_wire_only_when_set() {
     );
 
     let _ = TokenUsage::default();
+}
+
+/// `reasoning_effort` in `niki.toml` must reach the provider.
+///
+/// Every hop is one line and the whole thing is four hops, which is exactly
+/// why it needed pinning: a plumb that compiles is not a plumb that works.
+/// The previous commit added the field to the request and the payload and
+/// stopped there, because the remaining hops were three more signature
+/// changes — which is right *if* the config knob does not exist yet, and
+/// wrong the moment it does. A knob that parses and then does nothing is a
+/// promise the program does not keep, and the user finds out at run time.
+#[tokio::test]
+async fn a_configured_reasoning_effort_reaches_the_provider() {
+    use niki::config::types::AgentConfig;
+
+    // 1. It parses out of TOML.
+    // The whole file, not an isolated section: parsing `[agents.coder]` into
+    // `AgentsConfig` silently ignores it, because the path there is `coder`,
+    // not `agents.coder`. A first version of this test did exactly that and
+    // would have passed against a field that was never read from disk.
+    let toml = r#"
+[agents.coder]
+provider = "openrouter"
+model = "openai/o3-mini"
+reasoning_effort = "high"
+"#;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("niki.toml");
+    std::fs::write(&path, toml).expect("write");
+    let config = niki::config::NikiConfig::load(dir.path()).expect("niki.toml must load");
+    assert_eq!(config.agents.coder.model, "openai/o3-mini", "sanity");
+    assert_eq!(
+        config.agents.coder.reasoning_effort.as_deref(),
+        Some("high"),
+        "reasoning_effort must survive a round trip through niki.toml"
+    );
+
+    // 2. It reaches the stage the run actually uses.
+    let stages = niki::orchestrator::pipeline::resolve_stages(&config);
+    let coder = stages
+        .iter()
+        .find(|s| s.role == niki::artifacts::types::AgentRole::Coder)
+        .expect("a coder stage");
+    assert_eq!(
+        coder.reasoning_effort.as_deref(),
+        Some("high"),
+        "the stage must carry the agent's effort, or the value is dropped between \\
+         config and the wire"
+    );
+
+    // 3. Unset stays unset — the safe default, since a provider that does not
+    //    know the key may reject the whole request.
+    let plain = niki::config::types::AgentConfig::default();
+    assert_eq!(
+        plain.reasoning_effort, None,
+        "no configuration must mean no field sent"
+    );
+    let _ = AgentConfig::default();
+}
+
+/// And the two fields are genuinely different things, which is the easiest
+/// thing to get wrong here: `effort` is NIKI's own preset, expanded locally
+/// into `max_tokens` and `temperature`; `reasoning_effort` goes to the
+/// provider. A user who sets one and expects the other is the failure.
+#[test]
+fn effort_and_reasoning_effort_are_not_the_same_thing() {
+    use niki::config::types::AgentConfig;
+
+    let a = AgentConfig {
+        effort: Some("high".into()),
+        ..AgentConfig::default()
+    };
+    assert_eq!(
+        a.reasoning_effort, None,
+        "the local preset must not silently become a vendor request field"
+    );
+    // And the preset still does its own job.
+    assert!(
+        a.effective_max_tokens() > AgentConfig::default().effective_max_tokens(),
+        "effort still expands into max_tokens"
+    );
+
+    let b = AgentConfig {
+        reasoning_effort: Some("high".into()),
+        ..AgentConfig::default()
+    };
+    assert_eq!(
+        b.effective_max_tokens(),
+        AgentConfig::default().effective_max_tokens(),
+        "reasoning_effort must not change the local token budget — it is the \\
+         provider's dial, not ours"
+    );
+}
+
+/// The last hop: what the stage carries is what goes on the wire.
+///
+/// The previous test stopped at the stage, so dropping the value between
+/// `run_role` and the request passed it — a plumb that compiles, and that
+/// drops the value four lines later, is exactly the failure this is here to
+/// catch.
+#[tokio::test]
+async fn the_stage_value_is_what_the_provider_receives() {
+    use niki::llm::provider::{
+        CompletionRequest, CompletionResponse, LlmProvider, StreamChunk, TokenUsage,
+    };
+    use std::sync::{Arc, Mutex};
+
+    let seen: Arc<Mutex<Vec<Option<String>>>> = Arc::new(Mutex::new(Vec::new()));
+
+    struct Recorder {
+        seen: Arc<Mutex<Vec<Option<String>>>>,
+        artifact: String,
+    }
+    #[async_trait::async_trait]
+    impl LlmProvider for Recorder {
+        fn provider_name(&self) -> &str {
+            "recorder"
+        }
+        async fn complete(&self, r: CompletionRequest) -> Result<CompletionResponse> {
+            self.seen
+                .lock()
+                .expect("lock")
+                .push(r.reasoning_effort.clone());
+            Ok(CompletionResponse {
+                content: self.artifact.clone(),
+                model: r.model,
+                usage: TokenUsage::default(),
+                tool_calls: Vec::new(),
+                finish_reason: Some("stop".into()),
+            })
+        }
+        async fn stream(
+            &self,
+            r: CompletionRequest,
+        ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = Result<StreamChunk>> + Send>>>
+        {
+            self.seen
+                .lock()
+                .expect("lock")
+                .push(r.reasoning_effort.clone());
+            // Streaming chunks carry no effort field today, so this test also
+            // records what the streaming path can and cannot say about it.
+            let artifact = self.artifact.clone();
+            Ok(Box::pin(futures::stream::iter(vec![
+                Ok(StreamChunk::Text(artifact)),
+                Ok(StreamChunk::Finish {
+                    reason: "stop".to_string(),
+                }),
+                Ok(StreamChunk::Usage(TokenUsage::default())),
+            ])))
+        }
+    }
+
+    let artifact = r#"{"edits":[{"search":"old","replace":"new"}],"files_changed":[{"path":"src/lib.rs","action":"modify","language":"rust"}],"implementation_notes":"x","spec_adherence":"y"}"#;
+    let provider = Recorder {
+        seen: seen.clone(),
+        artifact: artifact.to_string(),
+    };
+    let mut display = niki::display::agent_stream::AgenticDisplay::new();
+
+    for effort in [Some("high"), None] {
+        niki::agents::run_agent(
+            niki::artifacts::types::AgentRole::Coder,
+            &provider,
+            "m",
+            "coder.md",
+            minijinja::context! {
+                input_artifacts => vec![r#"{"summary":"x"}"#.to_string()],
+                revision_round => 0,
+                project_knowledge => "",
+                project_memory => "",
+                current_files => "",
+                mcp_tools => "",
+                tool_loop => false,
+            },
+            "schemas/code_diff.schema.json",
+            &mut display,
+            4096,
+            0.0,
+            effort,
+            None,
+        )
+        .await
+        .expect("the run completes");
+    }
+
+    let seen = seen.lock().expect("lock").clone();
+    assert_eq!(
+        seen,
+        vec![Some("high".to_string()), None],
+        "the provider must receive exactly what the stage was given — a value dropped \
+         between run_role and the request would show up here"
+    );
 }
