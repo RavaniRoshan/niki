@@ -1272,3 +1272,113 @@ async fn ollama_emits_the_stop_reason_on_its_stream() {
         "and the guard must read it"
     );
 }
+
+/// The catalogue must be *fetched*, against the wire shape a real provider
+/// sends.
+///
+/// This is the feature behind the claim that third-party providers are natively
+/// supported. It did not exist: `niki recommend` carries a hardcoded table of
+/// `claude-opus-4` / `gpt-4o-mini`, which cannot know what an account can
+/// reach, and on OpenRouter it is wrong by construction — several hundred
+/// models, fully-qualified names, and a per-model effort control the name tells
+/// you nothing about.
+///
+/// Driven over HTTP rather than against a parsed struct, because the parts
+/// that break are the parts a unit test cannot see: the URL, the auth header,
+/// and what a provider does when the key is wrong.
+#[tokio::test]
+async fn a_provider_catalogue_is_fetched_over_the_wire() {
+    use wiremock::matchers::{header_regex, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    // The OpenAI-compatible shape, including a `:free` tier and a reasoning
+    // model — the two axes a user picking from OpenRouter actually cares about.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/models"))
+        .and(header_regex("authorization", "^Bearer sk-or-v1-.*$"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": [
+                {"id": "anthropic/claude-sonnet-4",
+                 "pricing": {"prompt": "0.000003", "completion": "0.000015"}},
+                {"id": "openai/o3-mini",
+                 "pricing": {"prompt": "0.0000011", "completion": "0.0000044"}},
+                {"id": "meta-llama/llama-3.3-70b-instruct:free",
+                 "pricing": {"prompt": "0", "completion": "0"}}
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let models = niki::cli::catalogue::fetch(
+        "openrouter",
+        Some(&format!("{}/api/v1", server.uri())),
+        Some("sk-or-v1-test"),
+    )
+    .await
+    .expect("the catalogue is fetched");
+
+    assert_eq!(models.len(), 3);
+    assert_eq!(models[0].id, "anthropic/claude-sonnet-4");
+    assert_eq!(models[0].vendor(), Some("anthropic"));
+    assert_eq!(models[0].price_per_mtok, Some((Some(3.0), Some(15.0))));
+    assert!(
+        models[1]
+            .traits
+            .contains(&niki::cli::catalogue::ModelTrait::Reasoning),
+        "o3 takes an effort control, and that is the axis a user needs flagged"
+    );
+    assert!(
+        models[2]
+            .traits
+            .contains(&niki::cli::catalogue::ModelTrait::Free),
+        "and a :free tier is the other one"
+    );
+}
+
+/// A key without catalogue access must not look like a provider with no models.
+#[tokio::test]
+async fn a_refused_key_is_an_error_not_an_empty_catalogue() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/models"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "error": "No auth credentials found"
+        })))
+        .mount(&server)
+        .await;
+
+    let err = niki::cli::catalogue::fetch(
+        "openrouter",
+        Some(&format!("{}/api/v1", server.uri())),
+        Some("sk-or-v1-wrong"),
+    )
+    .await
+    .expect_err("403 is not an empty catalogue");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("403"),
+        "the user must see what the provider said, not a generic failure: {msg}"
+    );
+}
+
+/// A missing key must say how to set it — the first-hour-error rule.
+#[tokio::test]
+async fn a_catalogue_without_a_key_explains_how_to_set_one() {
+    let err = niki::cli::catalogue::fetch("openrouter", Some("https://example.invalid/v1"), None)
+        .await
+        .expect_err("no key is an error");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("OPENROUTER_API_KEY"),
+        "and must name the variable, or the user is left guessing: {msg}"
+    );
+    assert!(
+        msg.contains("auth login"),
+        "and the command that sets it: {msg}"
+    );
+}
