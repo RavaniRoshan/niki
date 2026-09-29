@@ -42,7 +42,7 @@ concurrency:
 jobs:
   guard:
     name: Trigger guard
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       run: ${{ steps.decide.outputs.run }}
       task: ${{ steps.decide.outputs.task }}
@@ -96,7 +96,7 @@ jobs:
     # so the needs-keys gate lives in the `keys` step below; every later step
     # requires its `have == 'true'` output and the run skips gracefully.
     if: needs.guard.outputs.run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 40
     steps:
       - id: keys
@@ -119,7 +119,7 @@ jobs:
           echo "This job must not report success without executing anything."
           echo "On a fork, secrets are never exposed — the live-provider job cannot run there."
           exit 1
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@v1
         if: steps.keys.outputs.have == 'true'
         with:
           ref: ${{ needs.guard.outputs.ref || github.sha }}
