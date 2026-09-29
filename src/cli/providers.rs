@@ -6,6 +6,21 @@ use clap::Subcommand;
 pub enum ProviderCommands {
     /// Check health of all configured providers (sends a minimal test request)
     Check,
+    /// List the models a provider actually offers.
+    ///
+    /// The catalogue is fetched, never assumed. `niki recommend` carries a
+    /// hardcoded table, which cannot know what your account can reach — and on
+    /// OpenRouter that table is wrong by construction: several hundred models,
+    /// fully-qualified names, and a per-model effort control that the name
+    /// tells you nothing about.
+    Models {
+        /// Which provider. Defaults to every configured one.
+        #[arg(long)]
+        provider: Option<String>,
+        /// Print one model per line, for scripting.
+        #[arg(long)]
+        plain: bool,
+    },
 }
 
 #[derive(clap::Args)]
@@ -17,7 +32,94 @@ pub struct ProvidersArgs {
 pub async fn handle(args: &ProvidersArgs) -> Result<()> {
     match &args.command {
         ProviderCommands::Check => handle_check().await,
+        ProviderCommands::Models { provider, plain } => {
+            handle_models(provider.as_deref(), *plain).await
+        }
     }
+}
+
+/// List what a provider can actually serve, and say plainly when it cannot.
+///
+/// The failure modes are the interesting part. A provider with no catalogue
+/// endpoint, a key that is not authorised for one, and a base URL that is
+/// wrong are three different problems with three different fixes, and a single
+/// "could not list models" would send a user to the wrong one every time.
+async fn handle_models(provider: Option<&str>, plain: bool) -> Result<()> {
+    let config = NikiConfig::load(std::path::Path::new("."))?;
+
+    let names: Vec<String> = match provider {
+        Some(p) => vec![p.to_string()],
+        None if config.providers.is_empty() => {
+            println!("No providers configured. Add providers to niki.toml first.");
+            return Ok(());
+        }
+        None => config.providers.keys().cloned().collect(),
+    };
+
+    let mut any = false;
+    for name in names {
+        let cfg = config.providers.get(&name);
+        let base = cfg
+            .and_then(|c| c.base_url.clone())
+            .or_else(|| crate::llm::provider::default_base_url(&name).map(str::to_string));
+        // Config first, then the env, then the keyring — the same order
+        // `auth login` and the request path use, so a model list is fetched
+        // with the credential the run would actually use.
+        let key = cfg
+            .and_then(|c| c.api_key.clone())
+            .or_else(|| crate::cli::auth::resolve_api_key(&name));
+
+        match crate::cli::catalogue::fetch(&name, base.as_deref(), key.as_deref()).await {
+            Ok(models) if models.is_empty() => {
+                if !plain {
+                    println!("{name}: catalogue is empty");
+                }
+            }
+            Ok(models) => {
+                any = true;
+                if plain {
+                    for m in &models {
+                        println!("{name}\t{}", m.id);
+                    }
+                } else {
+                    println!("\n{name} — {} model(s):", models.len());
+                    for m in &models {
+                        let mut notes: Vec<String> = Vec::new();
+                        if m.traits
+                            .contains(&crate::cli::catalogue::ModelTrait::Reasoning)
+                        {
+                            notes.push("reasoning (effort control likely)".into());
+                        }
+                        if m.traits.contains(&crate::cli::catalogue::ModelTrait::Free) {
+                            notes.push("free tier".into());
+                        }
+                        if let Some((Some(p), _)) = m.price_per_mtok {
+                            notes.push(format!("${p}/Mtok in"));
+                        }
+                        if notes.is_empty() {
+                            println!("  {}", m.id);
+                        } else {
+                            println!("  {}  [{}]", m.id, notes.join(", "));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                if !plain {
+                    println!("{name}: {e}");
+                }
+            }
+        }
+    }
+
+    if !any && !plain {
+        println!(
+            "\nNo catalogue could be read. That is normal for a provider without a \
+             `/models` endpoint, and it does not stop you using niki — set a model \
+             explicitly in niki.toml."
+        );
+    }
+    Ok(())
 }
 
 async fn handle_check() -> Result<()> {
