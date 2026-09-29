@@ -1100,6 +1100,9 @@ async fn run_parallel_coders(
     // 36 requests, and it is the same mistake in a different costume: the cap
     // is real for every stage except the ones that loop.
     parallel_step_cap: Option<usize>,
+    // Split, like the step cap: N coders each allowed the whole remaining
+    // budget is how one cap becomes N.
+    parallel_cost_ceiling: Option<f64>,
 ) -> Result<Vec<CodeDiff>> {
     let event_tx = base_display
         .tui_tx()
@@ -1170,6 +1173,7 @@ async fn run_parallel_coders(
                 // to submit and nothing more — which is the honest reading of
                 // what the user asked for.
                 parallel_step_cap,
+                parallel_cost_ceiling,
             )
             .await?;
             let output = solo.output;
@@ -1492,6 +1496,9 @@ async fn run_coder_tool_loop(
     // they set was honoured by every other stage and by the run as a whole,
     // and ignored by the one stage that can spend the most.
     step_cap: Option<usize>,
+    // The run's remaining dollar allowance, so the loop can stop at the
+    // ceiling instead of discovering it at the next stage boundary.
+    cost_ceiling_usd: Option<f64>,
     // Sent to the provider on every request the loop makes. See
     // `LoopOptions::reasoning_effort` for why this is a parameter at all.
     reasoning_effort: Option<&str>,
@@ -1552,6 +1559,7 @@ async fn run_coder_tool_loop(
             // `reasoning_effort` on the Coder — the stage where a thinking
             // budget helps most — was paying for a dial that did nothing.
             reasoning_effort: reasoning_effort.map(str::to_string),
+            cost_ceiling_usd,
         },
         llm,
         model,
@@ -1816,6 +1824,11 @@ async fn run_role(
     // spends, and lending it the budget it must also charge is how the two
     // ended up fighting over one borrow.
     step_cap: Option<usize>,
+    // The run's remaining dollar allowance. A plain value, like `step_cap`,
+    // for the same reason: the loop is the thing that spends and the run is
+    // the thing that accounts, and lending one to the other is how the two
+    // ended up unable to see each other.
+    cost_ceiling: Option<f64>,
 ) -> Result<RoleRun> {
     // Recovery turns the Coder's tool loop spends on its own reasons, handed on
     // so the pipeline's shared allowance starts where the loop's left off.
@@ -2005,6 +2018,7 @@ async fn run_role(
             project_path,
             max_tokens,
             step_cap,
+            cost_ceiling,
             reasoning_effort,
             display,
             metrics,
@@ -2157,6 +2171,7 @@ async fn run_bookkept_stage(
         hook_task_id,
         steer_rx,
         state.run_budget.remaining_steps(),
+        state.run_budget.remaining_usd(),
     )
     .await?;
     let RoleRun {
@@ -3018,6 +3033,10 @@ run_stage(
                         .run_budget
                         .remaining_steps()
                         .map(|r| r / config.parallel.coder_count.max(1) as usize),
+                    state
+                        .run_budget
+                        .remaining_usd()
+                        .map(|u| u / config.parallel.coder_count.max(1) as f64),
                 )
                 .await?;
                 // Phase 5.5: close the parallel-coder spend hole — N coders
@@ -3080,6 +3099,7 @@ run_stage(
                     &task.id,
                     steer_rx,
                     state.run_budget.remaining_steps(),
+                    state.run_budget.remaining_usd(),
                 )
                 .await?;
                 let (json, summary, role_output) =
@@ -3167,6 +3187,7 @@ run_stage(
                         &task.id,
                         steer_rx,
                         state.run_budget.remaining_steps(),
+                        state.run_budget.remaining_usd(),
                     )
                     .await?;
                     let (json, summary, role_output) =
@@ -3293,6 +3314,7 @@ run_stage(
                             &task.id,
                             steer_rx,
                             state.run_budget.remaining_steps(),
+                            state.run_budget.remaining_usd(),
                         )
                         .await?;
                         if stage.role == AgentRole::Coder {
@@ -3688,6 +3710,7 @@ run_stage(
                 &task.project_path,
                 coder_stage.max_tokens,
                 state.run_budget.remaining_steps(),
+                state.run_budget.remaining_usd(),
                 coder_stage.reasoning_effort.as_deref(),
                 display,
                 &mut metrics,

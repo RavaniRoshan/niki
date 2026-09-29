@@ -123,6 +123,19 @@ impl RunBudget {
         Some(self.max_steps.saturating_sub(self.steps_used) as usize)
     }
 
+    /// How many dollars are left, or `None` when cost is not capped.
+    ///
+    /// A plain value for the same reason as [`Self::remaining_steps`]: the
+    /// Coder's tool loop has to be able to *stop itself* at the ceiling, and
+    /// it cannot do that while the thing that spends and the thing that
+    /// accounts are fighting over one borrow.
+    pub fn remaining_usd(&self) -> Option<f64> {
+        if self.max_usd <= 0.0 {
+            return None;
+        }
+        Some((self.max_usd - self.cost_used).max(0.0))
+    }
+
     /// Check all three dimensions. First exhausted dimension wins, named in
     /// the typed error.
     pub fn check(&self) -> anyhow::Result<()> {

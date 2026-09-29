@@ -147,6 +147,7 @@ fn run_truncated_then_complete(
         .block_on(run_tool_loop_with(
             LoopOptions {
                 reasoning_effort: None,
+                cost_ceiling_usd: None,
                 submit_artifact: Some(submit_artifact_spec(serde_json::json!({
                     "type": "object",
                     "properties": artifact(),
@@ -209,6 +210,7 @@ fn run_with_prose(
         .block_on(run_tool_loop_with(
             LoopOptions {
                 reasoning_effort: None,
+                cost_ceiling_usd: None,
                 submit_artifact: Some(submit_artifact_spec(serde_json::json!({
                     "type": "object",
                     "properties": artifact(),
@@ -313,6 +315,7 @@ fn run_with(
         .block_on(run_tool_loop_with(
             LoopOptions {
                 reasoning_effort: None,
+                cost_ceiling_usd: None,
                 submit_artifact: Some(submit_artifact_spec(serde_json::json!({
                     "type": "object",
                     "properties": artifact(),
@@ -1765,6 +1768,7 @@ async fn the_tool_loop_puts_the_reasoning_effort_on_the_wire() {
     run_tool_loop_with(
         LoopOptions {
             reasoning_effort: Some("high".to_string()),
+            cost_ceiling_usd: None,
             submit_artifact: Some(submit_artifact_spec(serde_json::json!({
                 "type": "object",
                 "properties": {

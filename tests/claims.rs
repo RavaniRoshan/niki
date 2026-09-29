@@ -161,26 +161,30 @@ fn every_backticked_niki_command_in_a_user_facing_string_exists() {
     let body = &main_rs[main_rs.find("enum Commands {").expect("Commands")..];
     let body = &body[..body.find("\n#[tokio::main]").unwrap_or(body.len())];
     for variant in re_derive_variants(body) {
-        let snake = to_snake(&variant);
-        known.push(snake.clone());
-        // Subcommands: `niki config init`, `niki providers models`, ...
-        for sub in subcommands_of(&root, &snake) {
-            known.push(format!("{snake} {sub}"));
-        }
+        known.push(to_snake(&variant));
     }
+    let _ = &root;
 
     let mut checked = 0usize;
     for (path, text) in rust_sources(&root) {
         for reference in backticked_niki_commands(&text) {
-            let word = reference.split_whitespace().next().unwrap_or("");
-            if word.ends_with(".toml") || word == "niki" {
+            // Drop the binary name. `known` holds subcommands ("run",
+            // "config check"), so comparing the whole "`niki run`" would fail
+            // on the first reference and tell us nothing — which is what the
+            // first version of this test did.
+            let invocation: Vec<String> = reference
+                .split_whitespace()
+                .skip(1)
+                .take(2)
+                .map(|s| {
+                    s.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.')
+                        .to_string()
+                })
+                .filter(|s| !s.is_empty())
+                .collect();
+            if invocation.is_empty() {
                 continue;
             }
-            let invocation: Vec<&str> = reference
-                .split_whitespace()
-                .take(2)
-                .map(|s| s.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.'))
-                .collect();
             let invocation = invocation.join(" ");
             if !known.iter().any(|k| k == &invocation) {
                 panic!(
@@ -231,20 +235,6 @@ fn to_snake(s: &str) -> String {
     out
 }
 
-/// The `Subcommand` enum variants under `src/cli/<name>.rs`.
-fn subcommands_of(root: &Path, snake: &str) -> Vec<String> {
-    let path = root.join(format!("src/cli/{snake}.rs"));
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Vec::new();
-    };
-    let Some(start) = text.find("enum ") else {
-        return Vec::new();
-    };
-    let body = &text[start..];
-    let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
-    re_derive_variants(body)
-}
-
 fn rust_sources(root: &Path) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(root.join("src")) else {
@@ -272,18 +262,31 @@ fn collect_rs(dir: &Path, out: &mut Vec<(String, String)>) {
     }
 }
 
-/// `` `niki foo bar` `` — a backticked span that starts with the binary name.
+/// Every `` `niki <word> `` reference in the text.
+///
+/// Bounded by the **end of the line**, not the next backtick in the file.
+/// Pairing backticks across the whole document does not work: the sources are
+/// full of them in doc comments, so a span opened in a string literal closes
+/// somewhere in an unrelated comment and the scan silently finds nothing. That
+/// is not hypothetical — the first version of this function did exactly that,
+/// and the test's own "found nothing" guard is the only reason it was caught
+/// rather than passing vacuously.
+///
+/// A reference is always on one line, so the line is the correct span.
 fn backticked_niki_commands(text: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let mut rest = text;
-    while let Some(i) = rest.find('`') {
-        let after = &rest[i + 1..];
-        let Some(j) = after.find('`') else { break };
-        let span = &after[..j];
-        if span.starts_with("niki ") {
-            out.push(span.to_string());
+    for line in text.lines() {
+        let mut from = 0usize;
+        while let Some(i) = line[from..].find("`niki ") {
+            let start = from + i;
+            let after = &line[start + 1..];
+            let end = after.find('`').unwrap_or(after.len());
+            let span = &after[..end];
+            if span.starts_with("niki ") && span.len() > "niki ".len() {
+                out.push(span.to_string());
+            }
+            from = start + 1;
         }
-        rest = &after[j + 1..];
     }
     out
 }
