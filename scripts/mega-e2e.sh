@@ -40,7 +40,13 @@ BIN="${NIKI_BIN:-$REPO_ROOT/target/release/niki}"
 BASE_URL="${NIKI_BASE_URL:-}"
 MODEL="${NIKI_MODEL:-}"
 PROVIDER="${NIKI_PROVIDER:-openai}"
-KEY_ENV="${NIKI_KEY_ENV:-${PROVIDER}_API_KEY}"
+# Uppercase, because that is how the key is looked up. `PROVIDER` is the
+# config's spelling (`[providers.openai]`, provider name `openai`) and the
+# env var is `OPENAI_API_KEY`; deriving one from the other without
+# uppercasing produced `openai_API_KEY`, which nothing reads — so the run
+# died with "OpenAI API key not configured" against a local endpoint that
+# needs no key at all, and the script blamed the provider.
+KEY_ENV="${NIKI_KEY_ENV:-$(printf '%s' "$PROVIDER" | tr '[:lower:]' '[:upper:]')_API_KEY}"
 TIMEOUT="${NIKI_MEGA_TIMEOUT:-900}"
 WORK="${NIKI_MEGA_WORK:-$(mktemp -d)}"
 KEEP=0
@@ -121,6 +127,21 @@ def test_mean_of_several_values():
 def test_median_is_required_too():
     from stats import median
     assert median([3, 1, 2]) == 2
+
+
+def test_median_of_an_even_count_averages_the_middle_two():
+    # This assertion is the load-bearing one, and it arrived late.
+    #
+    # With only the odd-length case, `median` was satisfiable by
+    # `ordered[n // 2]` — which is wrong for every even-length input and
+    # right for every odd one. The suite went red before the change and
+    # green after, the branch was produced, the artifacts validated, and a
+    # function that is wrong half the time passed every check the repository
+    # has. The harness self-test found it by asking whether a deliberately
+    # wrong implementation is rejected, which no test of the product could
+    # ever ask.
+    from stats import median
+    assert median([1, 2, 3, 4]) == 2.5
 PY
 
 cat >niki.toml <<TOML
@@ -197,10 +218,17 @@ else
 fi
 
 # ── 4. The run ────────────────────────────────────────────────────────────
-TASK="Add a `median(values)` function to src/stats.py alongside `mean`. It
+# Single-quoted, deliberately. The task is prose *about code*: it contains
+# backticks and parentheses, which an unquoted heredoc hands to the shell. The
+# first version did, and bash duly ran `mean` as a command and choked on
+# `median(values)` — so the run was handed a task that had been mangled by
+# the harness, and then failed for reasons that had nothing to do with the
+# product. A test that corrupts its own input is worse than no test, because
+# the failure it produces is real and the cause is invisible.
+TASK='Add a `median(values)` function to src/stats.py alongside `mean`. It
 returns the middle value of an odd-length sequence and the mean of the two
 middle values for an even-length one, raises ValueError on an empty sequence,
-and has a doc comment. The test suite in tests/ must pass afterwards."
+and has a doc comment. The test suite in tests/ must pass afterwards.'
 cyan "── 2. niki run ─────────────────────────────────────────────────"
 rm -rf .niki
 START=$(date +%s)
