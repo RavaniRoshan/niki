@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use toml;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct NikiConfig {
     /// Where this config was loaded from. Not serialised, not part of the
     /// documented schema, and not something a user ever sets — it exists so a
@@ -101,6 +102,7 @@ pub struct NikiConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct KnowledgeConfig {
     /// Glob patterns (relative to the project root) of extra doc files to
     /// include as agent context (e.g. `["docs/**/*.md", "README.md"]`).
@@ -127,6 +129,7 @@ pub struct KnowledgeConfig {
 /// it is checked against the deny-list first; denied commands are rejected with
 /// a clear error. An empty allow-list means "allow everything not denied".
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SecurityPolicyConfig {
     /// Exact command prefixes that are always allowed (bypasses deny-check).
     #[serde(default)]
@@ -308,6 +311,7 @@ pub fn default_reviewer_policy() -> SecurityPolicyConfig {
 /// after the Reviewer. The audit verdict is recorded as an artifact but does not
 /// gate the revision loop by default.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SecurityConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -350,6 +354,7 @@ fn default_policies() -> HashMap<String, SecurityPolicyConfig> {
 /// never collide — then a `Synthesizer` stage reconciles the diffs into one
 /// change the rest of the pipeline consumes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ParallelConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -376,6 +381,7 @@ impl Default for ParallelConfig {
 /// call per run; it remains the product's core thesis — enable it via
 /// `[red_blue] enabled = true` in niki.toml.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RedBlueConfig {
     #[serde(default = "default_red_blue_enabled")]
     pub enabled: bool,
@@ -405,6 +411,7 @@ fn default_red_blue_enabled() -> bool {
 
 /// Goal runner configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GoalConfig {
     #[serde(default = "default_goal_max_iterations")]
     pub max_iterations: u32,
@@ -478,6 +485,7 @@ impl ThemePreference {
 
 /// TUI display configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct UiConfig {
     #[serde(default)]
     pub tips: TipsConfig,
@@ -502,6 +510,7 @@ pub struct UiConfig {
 
 /// Transcript view configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TranscriptConfig {
     /// Collapse completed activity blocks (default: true).
     #[serde(default = "default_true")]
@@ -530,6 +539,7 @@ impl Default for TranscriptConfig {
 
 /// Tips banner configuration for the TUI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TipsConfig {
     #[serde(default = "default_tips_enabled")]
     pub enabled: bool,
@@ -556,6 +566,7 @@ fn default_tips_rotation_seconds() -> u64 {
 
 /// Session management configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SessionConfig {
     #[serde(default = "default_session_enabled")]
     pub enabled: bool,
@@ -585,6 +596,7 @@ pub fn default_max_sessions() -> usize {
 
 /// Context compaction configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CompactionConfig {
     #[serde(default = "default_compaction_enabled")]
     pub enabled: bool,
@@ -621,6 +633,7 @@ fn default_compaction_reserved_tokens() -> u32 {
 
 /// MCP server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct McpConfig {
     #[serde(default)]
     pub servers: Vec<McpServerConfigEntry>,
@@ -663,6 +676,7 @@ fn default_mcp_timeout_ms() -> u64 {
 
 /// Tool-loop configuration (Layers 4+5 executable path).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct ToolsConfig {
     #[serde(default)]
     pub experimental_tool_loop: bool,
@@ -685,6 +699,7 @@ fn default_tool_loop_max_steps() -> usize {
 
 /// Unified hysteresis/step-cost budget configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct BudgetConfig {
     #[serde(default = "default_budget_max_steps")]
     pub max_steps: u32,
@@ -713,7 +728,8 @@ fn default_budget_max_wallclock_secs() -> u64 {
 }
 
 /// A single MCP server configuration entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct McpServerConfigEntry {
     pub name: String,
     pub command: Option<String>,
@@ -744,6 +760,7 @@ fn default_mcp_server_enabled() -> bool {
 
 /// Permission system configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PermissionsConfig {
     #[serde(default)]
     pub auto_approve: bool,
@@ -790,6 +807,7 @@ impl Default for PermissionsConfig {
 /// Unknown event names warn and are skipped. Contract per command is the
 /// HookBus one: exit 2 (or JSON `{"deny": true}` on stdout) blocks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct HooksConfig {
     /// Event name (PascalCase or snake_case) to shell commands.
     #[serde(default)]
@@ -817,6 +835,7 @@ fn default_hook_timeout_seconds() -> u64 {
 
 /// Slash-command source directories.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct CommandsConfig {
     /// Extra dirs of `*.md` command files (project-relative or absolute).
     #[serde(default)]
@@ -824,7 +843,8 @@ pub struct CommandsConfig {
 }
 
 /// A single permission rule.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct PermissionRuleConfig {
     pub action: String,
     pub permission: String,
@@ -833,6 +853,7 @@ pub struct PermissionRuleConfig {
 
 /// AGENTS.md / project instructions configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct InstructionsConfig {
     #[serde(default = "default_instructions_enabled")]
     pub enabled: bool,
@@ -866,6 +887,7 @@ fn default_auto_detect_agents_md() -> bool {
 /// miner, KB) degrades to warn-and-continue when disabled or when a step
 /// fails, so `niki run` never breaks because of intelligence bookkeeping.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct RepositoryIntelligenceConfig {
     /// Master switch for repo-intel consumers (inspect, KB, structural index).
     #[serde(default = "default_true")]
@@ -938,6 +960,7 @@ pub enum RiskMode {
 /// No LLM call: classification is a cheap keyword/path heuristic over the
 /// TaskSpec, so it can run before any stage executes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct RiskConfig {
     #[serde(default)]
     pub mode: RiskMode,
@@ -1006,6 +1029,7 @@ fn default_risk_severity_keywords() -> Vec<String> {
 /// Run snapshot anchoring: records the exact repo/config state a run reasoned
 /// about so later runs (and `niki status`) can answer "what did this see?".
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct SnapshotConfig {
     /// Write `.niki/tasks/<id>/manifest.json` provenance records.
     #[serde(default = "default_true")]
@@ -1035,6 +1059,7 @@ fn default_snapshot_retention_days() -> u64 {
 /// that the verdict's claims are grounded (cited files/lines exist, issues
 /// reference the actual diff) and can force at most one Reviewer retry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct CriticConfig {
     /// Inject the Critic stage on Normal+ risk tiers.
     #[serde(default = "default_true")]
@@ -1126,6 +1151,7 @@ pub enum TopologyMode {
 /// after the Planner (in order) until a Reviewer stage returns a terminal
 /// verdict or `max_revision_rounds` is exhausted.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct PipelineConfig {
     #[serde(default)]
     pub stages: Vec<PipelineStageConfig>,
@@ -1142,7 +1168,8 @@ pub struct PipelineConfig {
     pub single_agent_max_complexity: Complexity,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct PipelineStageConfig {
     pub role: AgentRole,
     pub provider: String,
@@ -1168,6 +1195,7 @@ pub struct PipelineStageConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GeneralConfig {
     /// How many times the pipeline may send a rejected change back.
     ///
@@ -1243,6 +1271,7 @@ impl Default for GeneralConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct ProviderConfig {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
@@ -1273,6 +1302,7 @@ impl ProviderConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AgentsConfig {
     #[serde(default = "default_anthropic_agent")]
     pub planner: AgentConfig,
@@ -1399,6 +1429,7 @@ fn default_openai_agent() -> AgentConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AgentConfig {
     pub provider: String,
     pub model: String,
@@ -2673,6 +2704,98 @@ mod topology_spellings {
         assert_eq!(configured, vec!["openai"]);
     }
 
+    /// No field in a config struct may be required by accident.
+    ///
+    /// Four separate bugs had this shape before the struct-level
+    /// `#[serde(default)]` went on, and every one of them was the same
+    /// experience for a user:
+    ///
+    /// * `[general] output_dir = "..."` — `missing field max_revision_rounds`
+    /// * `[agents.coder] model = "..."` — `missing field provider`
+    /// * `[providers.openrouter]` with a key and a base URL — `missing field
+    ///   default_model`
+    /// * `[pipeline] stages = [{ role = "coder" }]` — the same
+    ///
+    /// One required field makes the whole section unusable, and the failure is
+    /// silent: `load` returns `Err`, a dozen callers `.unwrap_or_default()`,
+    /// and the user watches their configuration be ignored with nothing on
+    /// screen. The most damaging case is the most natural line anyone writes.
+    ///
+    /// This is a property of the *schema*, not of any one field, so the test
+    /// is too: each section is written with a single representative key and
+    /// must parse. The next struct that loses its default fails here rather
+    /// than in someone's `niki.toml`.
+    #[test]
+    fn no_config_section_requires_a_field_the_user_did_not_know_about() {
+        let cases: &[(&str, &str)] = &[
+            ("[general]", "spend_cap_usd = 1.0"),
+            ("[agents.coder]", "reasoning_effort = \"high\""),
+            ("[agents.tester]", "test_command = \"cargo test\""),
+            (
+                "[providers.openrouter]",
+                "base_url = \"https://openrouter.ai/api/v1\"",
+            ),
+            ("[docker]", "backend = \"worktree\""),
+            ("[security]", "enabled = true"),
+            ("[parallel]", "enabled = true"),
+            ("[red_blue]", "enabled = true"),
+            ("[budget]", "max_steps = 20"),
+            ("[tools]", "experimental_tool_loop = true"),
+            ("[ui]", "reduced_motion = true"),
+            ("[session]", "max_messages = 10"),
+            ("[compaction]", "enabled = true"),
+            ("[mcp]", "enabled = true"),
+            ("[hooks]", "enabled = true"),
+            ("[knowledge]", "enabled = true"),
+            ("[repo_intel]", "enabled = true"),
+            ("[risk]", "enabled = true"),
+            ("[snapshot]", "enabled = true"),
+            ("[critic]", "enabled = true"),
+            ("[goal]", "enabled = true"),
+            ("[instructions]", "enabled = true"),
+            ("[commands]", "enabled = true"),
+            ("[permissions]", "enabled = true"),
+        ];
+        for (section, line) in cases {
+            let dir = tempfile::tempdir().expect("tmp");
+            let path = dir.path().join("niki.toml");
+            std::fs::write(&path, format!("{section}\n{line}\n")).expect("write");
+            NikiConfig::load_file_only(&path).unwrap_or_else(|e| {
+                panic!(
+                    "`{section}` with only `{line}` must be valid. A section that \
+                     needs a field the user was never told about is a section \
+                     nobody can use: {e}"
+                )
+            });
+        }
+    }
+
+    /// A `[pipeline] stages` entry names roles; it does not re-specify the
+    /// whole pipeline for each one.
+    ///
+    /// This is the case that made `PipelineStageConfig` need a `Default` at
+    /// all, and it is a table a user writes by hand to skip a stage — so
+    /// every field it does not mention has to be optional.
+    #[test]
+    fn a_pipeline_stage_entry_needs_only_its_role() {
+        let dir = tempfile::tempdir().expect("tmp");
+        std::fs::write(
+            dir.path().join("niki.toml"),
+            "[pipeline]\nstages = [\n  { role = \"coder\", skip = true },\n  { role = \"reviewer\" },\n]\n",
+        )
+        .expect("write");
+        let cfg = NikiConfig::load(dir.path()).expect("loads");
+        let stages: &[PipelineStageConfig] = &cfg.pipeline.stages;
+        assert_eq!(
+            stages.len(),
+            2,
+            "explicit stages are preserved verbatim, not filtered or defaulted away"
+        );
+        assert_eq!(stages[0].role, AgentRole::Coder);
+        assert!(stages[0].skip);
+        assert_eq!(stages[1].role, AgentRole::Reviewer);
+    }
+
     /// Every field in `[general]` must be settable on its own.
     ///
     /// `max_revision_rounds` was the only one without a default, which made
@@ -2687,7 +2810,7 @@ mod topology_spellings {
     #[test]
     fn every_general_option_can_be_set_on_its_own() {
         let cases = [
-            ("output_dir", "custom-out"),
+            ("output_dir", "\"custom-out\""),
             ("spend_cap_usd", "1.5"),
             ("max_diff_lines", "200"),
             ("max_context_chars", "12000"),
