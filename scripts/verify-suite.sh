@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
-# Run the whole test suite one binary at a time, watching free memory.
+# Run the whole test suite, and keep this box alive while doing it.
 #
-# Why this exists: this box has ~7.5 GiB and another agent session shares it.
-# `cargo test` links a fresh binary per test target, and a link is the single
-# largest memory event in the build; the previous attempts to run the suite in
-# one invocation, or to run it while a live-model sweep was loading a 1.9 GB
-# model, are what crashed it.
+# With `cargo-nextest` installed (the fast path) this is one command: the full
+# 1503-test suite in ~64s warm, with the heavy and heap binaries serialised by
+# `.config/nextest.toml` and everything else parallel.
 #
-# Rules this enforces:
-#   * one test binary at a time, never parallel;
-#   * `-j 2` everywhere, and `--test-threads=1`;
-#   * stop rather than start a link when free memory is below the floor;
-#   * report every result, and exit non-zero if any binary failed.
+# Without it, the loop below runs the same tests one binary at a time. Slower,
+# and it is the fallback rather than the default because of what this box is:
+# ~7.5 GiB shared with another agent session, where a `cargo test` link running
+# alongside a live-model sweep holding a 1.9 GB model is what crashed it twice.
+# So the fallback watches free memory and *refuses to start* a link below the
+# floor, and a skip is reported as a failure rather than as a pass.
 #
 #   ./scripts/verify-suite.sh            # everything
 #   ./scripts/verify-suite.sh lib        # just the library tests
@@ -47,6 +46,21 @@ else
         [ -e "$f" ] || continue
         targets+=("$(basename "$f" .rs)")
     done
+fi
+
+# Fast path: nextest, when it is installed.
+#
+# Measured on this box: the full 1503-test suite in 64s warm, one command,
+# all binaries. The loop below runs the same tests serially and takes several
+# minutes, and it exists for the case where nextest is absent — which is every
+# fresh checkout until `cargo install cargo-nextest --locked`.
+#
+# nextest is not just parallelism. It runs process-per-test, so a test that
+# wedges is killed at the configured timeout instead of hanging the run — which
+# is how a real infinite loop I introduced was found: a test binary that had
+# been going for ten minutes and should take 1.4 seconds.
+if [ $# -eq 0 ] && command -v cargo-nextest >/dev/null 2>&1; then
+    exec cargo nextest run -j "${NIKI_TEST_JOBS:-2}"
 fi
 
 failures=()

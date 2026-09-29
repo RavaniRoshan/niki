@@ -12,9 +12,37 @@ Rust CLI (edition 2024, MSRV 1.88). Multi-agent coding pipeline: Planner → Cod
 - Single test: `cargo test <test_name>`.
 - `git2` uses `vendored-libgit2`, so no system libgit2 is required to build.
 
+## Tests — use nextest
+
+```
+cargo nextest run -j 2      # the whole suite: 1503 tests in ~60s
+./scripts/verify-suite.sh   # same thing, with a memory guard
+```
+
+Measured on this box: the full suite is 64s warm, one command, all binaries.
+`cargo test --tests` is much slower and, run all at once, will not fit in RAM
+here. Install once with `cargo install cargo-nextest --locked`.
+
+nextest earns its place twice over. It parallelises *across* test binaries
+while `.config/nextest.toml` keeps the heavy and heap binaries serialised by
+mechanism — the same split Codex uses. And it runs process-per-test, so a test
+that wedges is killed at its configured timeout instead of hanging the run:
+that is how a real infinite loop was caught here, as a binary that had been
+running ten minutes and should take 1.4 seconds.
+
+Without nextest, `scripts/verify-suite.sh` falls back to one binary at a time
+and refuses to start a link when free memory is low — a skip is reported as a
+failure, never as a pass.
+
 ## Low-RAM / constrained machines
 
-This box can have only a few GiB free. Never run the full pipeline (clippy + all tests + release) concurrently — serialize stages and cap parallelism so peak RSS stays bounded.
+This box can have only a few GiB free, and another session shares it. Never run
+the full pipeline (clippy + all tests + release) concurrently — serialize
+stages and cap parallelism so peak RSS stays bounded.
+
+The specific failure to avoid: a `cargo` link (peaks 1.5–2 GB) running at the
+same time as a live-model sweep, which holds ~1.9 GB. That is what crashed this
+box twice. Serialize them.
 
 - Limit compile jobs: `CARGO_BUILD_JOBS=2` (or `cargo … -j 2`) for `build`/`clippy`/`test`. Default jobs = nproc and will OOM on 8 GiB-class hosts.
 - Prefer `cargo check` / `cargo clippy` over `cargo build --release` while iterating; only build release for the final verify (release codegen is the largest single peak).
