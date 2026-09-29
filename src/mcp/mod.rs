@@ -337,11 +337,28 @@ impl McpManager {
             if let Some(ts) = &self.trust_store
                 && ts.needs_gate(server_config)
             {
+                // The old message told the user to run `niki mcp trust <name>`.
+                // There is no `mcp` subcommand, so they copy it, get a usage
+                // error, and learn the tool does not know what it is talking
+                // about.
+                //
+                // The obvious replacement — "add it to .niki/mcp_trust.json" —
+                // is no better. `allowed` maps a server name to the
+                // *fingerprint* of its command, args and URL, so a user cannot
+                // hand-write a correct entry; and nothing in the product
+                // constructs a trust store, so this branch does not currently
+                // run at all. Two fictional remedies in a row.
+                //
+                // So it says the true thing: the server is being skipped, the
+                // decision is recorded in a file, and there is no interactive
+                // prompt yet. A log line that admits the gap is worth more than
+                // one that sends a user to edit a value they cannot compute.
                 tracing::warn!(
-                    "MCP server '{}' is not trusted — skipping until allowed \
-                     (run `niki mcp trust {}` or edit .niki/mcp_trust.json)",
+                    "MCP server '{}' is not trusted — skipping it. NIKI has no \
+                     interactive trust prompt yet, so the decision has to come from \
+                     elsewhere; the recorded state lives in {}.",
                     server_config.name,
-                    server_config.name
+                    ".niki/mcp_trust.json"
                 );
                 continue;
             }
