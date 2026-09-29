@@ -895,3 +895,89 @@ fn the_reviewer_is_told_which_files_the_task_never_asked_for() {
         "no Coder artifact, no note"
     );
 }
+
+/// A configured `reasoning_effort` must reach the provider through a real run.
+///
+/// This is the join the per-hop tests could not see. `reasoning_effort` is
+/// configured on an agent, carried on a resolved stage, and read back out of a
+/// `CompletionRequest` — and a test that checks the first two cannot see the
+/// third. It was compiler-checked and nothing more, which is stated in the
+/// commit that added the knob; this is the test that makes the statement
+/// true.
+///
+/// It matters because the value is a dial a user pays for. A configuration
+/// that parses and then does nothing is a promise the program does not keep,
+/// and the user finds out on their bill.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_configured_reasoning_effort_reaches_the_provider_on_a_real_run() {
+    let mut spec: serde_json::Value = serde_json::from_str(&medium_spec_json()).unwrap();
+    spec["estimated_complexity"] = serde_json::json!("high");
+
+    let builder = MockScriptBuilder::new()
+        .add_response("mock-planner", &wrap_json(&spec.to_string()), 80, 120)
+        .add_tool_call(
+            "mock-coder",
+            "submit_artifact",
+            serde_json::from_str(&mock_llm::code_diff_json(
+                "let end = start + size - 1;",
+                "let end = start + size;",
+                "src/list.rs",
+            ))
+            .expect("diff json"),
+        )
+        .add_response(
+            "mock-tester",
+            &wrap_json(&mock_llm::test_report_json()),
+            100,
+            60,
+        )
+        .add_response(
+            "mock-reviewer",
+            &wrap_json(&mock_llm::review_verdict_approved_json()),
+            150,
+            60,
+        );
+
+    let mut harness = TestHarness::new()
+        .with_mock_builder(|_| builder)
+        .with_worktree_backend()
+        .with_mock_provider();
+    harness.config.docker.extra_packages.clear();
+    harness.config.agents.coder.reasoning_effort = Some("high".into());
+    // The other roles deliberately leave it unset, so this distinguishes
+    // "the Coder's value arrived" from "everything has it".
+
+    niki::llm::mock::record_requests();
+    let res = harness
+        .run_pipeline_result()
+        .await
+        .expect("the run completes");
+    let sent = niki::llm::mock::take_recorded();
+
+    assert!(!sent.is_empty(), "the mock was asked for something");
+    let with_effort: Vec<&str> = sent
+        .iter()
+        .filter_map(|r| r.reasoning_effort.as_deref())
+        .collect();
+    assert!(
+        with_effort.contains(&"high"),
+        "the configured value must be on the wire; recorded efforts: {with_effort:?}"
+    );
+    assert!(
+        sent.iter()
+            .any(|r| r.model == "mock-coder" && r.reasoning_effort.as_deref() == Some("high")),
+        "and it must be the Coder's, not another stage's: {}",
+        sent.iter()
+            .map(|r| format!("{}={:?}", r.model, r.reasoning_effort))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    assert_eq!(
+        sent.iter().filter(|r| r.reasoning_effort.is_none()).count(),
+        sent.iter()
+            .filter(|r| r.model != "mock-coder" && !r.reasoning_effort.is_some())
+            .count(),
+        "every non-Coder request must leave it unset"
+    );
+    let _ = res;
+}

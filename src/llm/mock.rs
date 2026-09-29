@@ -60,6 +60,34 @@ struct ModelCursor {
     retry_count: u32,
 }
 
+/// Requests the mock has been asked for, while recording is armed.
+///
+/// A test asserts on what the harness *sent*, not on what a function returned.
+/// The gap that matters: the Coder's `reasoning_effort` is configured on an
+/// agent, carried on a stage, and read back out of a request — and a test that
+/// only checks the first two cannot see the third. A plumb that compiles is
+/// not a plumb that arrives.
+///
+/// Process-global rather than thread-local because the pipeline runs tasks on a
+/// multi-threaded runtime and a thread-local would record only whichever task
+/// happened to run on the arming thread.
+static RECORDED: Mutex<Vec<CompletionRequest>> = Mutex::new(Vec::new());
+
+/// Start recording requests. Everything the mock is asked for is kept until
+/// [`take_recorded`] is called.
+pub fn record_requests() {
+    RECORDED.lock().expect("recordings").clear();
+}
+
+/// Stop recording and return what was asked for.
+pub fn take_recorded() -> Vec<CompletionRequest> {
+    std::mem::take(&mut *RECORDED.lock().expect("recordings"))
+}
+
+fn note(request: &CompletionRequest) {
+    RECORDED.lock().expect("recordings").push(request.clone());
+}
+
 pub struct MockProvider {
     #[allow(dead_code)]
     script_path: PathBuf,
@@ -116,6 +144,7 @@ impl MockProvider {
 #[async_trait]
 impl LlmProvider for MockProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse> {
+        note(&request);
         let response = self.next_response(&request.model)?;
         if let Some(err) = response.error {
             let msg = err.message.clone();
@@ -173,6 +202,7 @@ impl LlmProvider for MockProvider {
         &self,
         request: CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
+        note(&request);
         let response = self.next_response(&request.model)?;
 
         if let Some(err) = response.error {
