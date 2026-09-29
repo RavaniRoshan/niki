@@ -323,12 +323,12 @@ niki run "..." --backend worktree   # no container runtime
 | `niki doctor` | Diagnostics: install, config, providers, sandbox, image presence, security. |
 | `niki smoke` | Quick pipeline verification. |
 | `niki chat` | Interactive TUI session. |
-| `niki config` | Manage configuration (`init`, `schema`). |
+| `niki config` | Manage configuration (`init`, `schema`, `check`). |
 | `niki recommend` | Per-agent model recommendations + observed spend from past runs. |
 | `niki dashboard [id]` | Static HTML diff viewer. |
 | `niki eval [grade]` | Seeded-defect harness (replay/live) with cost accounting, disclosure manifest, maintainer grading. |
 | `niki auth` | Manage API credentials. |
-| `niki providers` | Check LLM provider configurations. |
+| `niki providers` | Check LLM provider configurations, and list the models an account can actually run (`providers models`). |
 | `niki memory` | View agent memory. |
 | `niki goal` | Manage persistent goals. |
 | `niki research <query>` | Web research with cited summary. |
