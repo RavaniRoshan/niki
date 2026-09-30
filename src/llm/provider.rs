@@ -255,6 +255,15 @@ where
     last.expect("send_request: loop always stashes a response before returning")
 }
 
+/// Whether a status code is transient, for tests.
+///
+/// A test cannot name a  without depending on reqwest's
+/// constructors, and a re-implementation of the list in the test would assert
+/// nothing about the real one — so the real predicate is exposed by code.
+pub fn status_is_retryable_for_test(code: u16) -> bool {
+    is_retryable_status(reqwest::StatusCode::from_u16(code).expect("a valid status code"))
+}
+
 pub(crate) fn is_retryable_status(status: reqwest::StatusCode) -> bool {
     status.as_u16() == 429 || status.is_server_error()
 }
