@@ -177,3 +177,11 @@ acp-and-goal-deliver | acp_and_goal_deliver_specifically | the two that were lef
 delivery-failure-is-not-completion | a_delivery_failure_is_not_reported_as_completion | a lost deliverable counted as progress
 record-branch-holds-a-branch | the_record_branch_holds_a_branch_not_a_diff | `niki report` printing a unified diff where a branch belongs
 branch-named-the-same-way | every_entry_point_names_the_branch_the_same_way | a branch shape that depends on which surface made it
+# B4-02 · Google's stream says why it stopped (and google.rs has tests at all)
+google-truncation-is-visible | a_truncated_response_keeps_its_stop_reason | MAX_TOKENS reported as a malformed model
+complete-and-truncated-differ | a_complete_response_and_a_truncated_one_differ | the two indistinguishable, which is the whole point of the enum
+google-text-still-streams | text_is_still_streamed | the fix breaking streaming to add a chunk
+google-usage-still-streams | usage_is_still_streamed_with_reasoning_tokens | reasoning-token accounting dropped
+google-sse-noise-is-survivable | sentinel_and_noise_lines_are_handled | one bad provider line killing the reader
+google-empty-reason-not-emitted | an_empty_stop_reason_is_not_emitted | a blank stop reason shown to the user
+every-streamer-emits-finish | every_streaming_provider_emits_a_finish_chunk | the defect as a property, not one file

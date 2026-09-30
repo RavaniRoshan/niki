@@ -217,48 +217,8 @@ impl LlmProvider for GoogleProvider {
                             let line = buffer[..pos].to_string();
                             buffer = buffer[pos + 1..].to_string();
 
-                            let line = line.trim();
-                            if let Some(data) = line.strip_prefix("data: ") {
-                                if data == "[DONE]" {
-                                    continue;
-                                }
-                                if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                                    if let Some(usage) = json["usageMetadata"].as_object()
-                                        && tx
-                                            .send(Ok(StreamChunk::Usage(TokenUsage {
-                                                input_tokens: usage["promptTokenCount"]
-                                                    .as_u64()
-                                                    .unwrap_or(0)
-                                                    as u32,
-                                                output_tokens: usage["candidatesTokenCount"]
-                                                    .as_u64()
-                                                    .unwrap_or(0)
-                                                    as u32,
-                                                cached_input_tokens:
-                                                    usage["cachedContentTokenCount"]
-                                                        .as_u64()
-                                                        .unwrap_or(0)
-                                                        as u32,
-                                                reasoning_tokens: usage["thoughtsTokenCount"]
-                                                    .as_u64()
-                                                    .unwrap_or(0)
-                                                    as u32,
-                                            })))
-                                            .is_err()
-                                    {
-                                        return;
-                                    }
-                                    if let Some(candidates) = json["candidates"].as_array()
-                                        && let Some(candidate) = candidates.first()
-                                        && let Some(parts) =
-                                            candidate["content"]["parts"].as_array()
-                                        && let Some(part) = parts.first()
-                                        && let Some(text) = part["text"].as_str()
-                                        && tx.send(Ok(StreamChunk::Text(text.to_string()))).is_err()
-                                    {
-                                        return;
-                                    }
-                                }
+                            if !handle_sse_line(&line, &tx) {
+                                return;
                             }
                         }
                     }
@@ -278,4 +238,75 @@ impl LlmProvider for GoogleProvider {
     fn provider_name(&self) -> &str {
         "google"
     }
+}
+
+/// Apply one SSE line from a `streamGenerateContent` response.
+///
+/// Returns `false` when the receiver is gone and the reader should stop.
+///
+/// Extracted from the spawned reader so it can be tested without an HTTP
+/// server: the whole of Google's streaming behaviour — which chunks it emits,
+/// what it drops — lived inside a `tokio::spawn` closure over a live response,
+/// which is why this file had no tests at all. The first thing a test then
+/// found is below, in `a_truncated_response_keeps_its_stop_reason`.
+pub fn handle_sse_line(
+    line: &str,
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<StreamChunk>>,
+) -> bool {
+    let line = line.trim();
+    if let Some(data) = line.strip_prefix("data: ") {
+        if data == "[DONE]" {
+            return true;
+        }
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+            if let Some(usage) = json["usageMetadata"].as_object()
+                && tx
+                    .send(Ok(StreamChunk::Usage(TokenUsage {
+                        input_tokens: usage["promptTokenCount"].as_u64().unwrap_or(0) as u32,
+                        output_tokens: usage["candidatesTokenCount"].as_u64().unwrap_or(0) as u32,
+                        cached_input_tokens: usage["cachedContentTokenCount"].as_u64().unwrap_or(0)
+                            as u32,
+                        reasoning_tokens: usage["thoughtsTokenCount"].as_u64().unwrap_or(0) as u32,
+                    })))
+                    .is_err()
+            {
+                return false;
+            }
+            if let Some(candidates) = json["candidates"].as_array()
+                && let Some(candidate) = candidates.first()
+            {
+                if let Some(parts) = candidate["content"]["parts"].as_array()
+                    && let Some(part) = parts.first()
+                    && let Some(text) = part["text"].as_str()
+                    && tx.send(Ok(StreamChunk::Text(text.to_string()))).is_err()
+                {
+                    return false;
+                }
+                // The stop reason, which the
+                // non-streaming path above already
+                // reads and this one dropped.
+                //
+                // Without it a Google response cut off
+                // at the token limit is
+                // indistinguishable from a malformed
+                // one, gets fed to the JSON repairer,
+                // and is reported as "did not satisfy
+                // the artifact requirements" — sending
+                // a user to blame the model for
+                // something the token limit did. The
+                // enum exists to prevent exactly that.
+                if let Some(reason) = candidate["finishReason"].as_str()
+                    && !reason.is_empty()
+                    && tx
+                        .send(Ok(StreamChunk::Finish {
+                            reason: reason.to_string(),
+                        }))
+                        .is_err()
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
