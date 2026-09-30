@@ -101,3 +101,9 @@ doctor-check-uses-the-corpus | the_doctor_check_reads_the_same_corpus_the_tests_
 subpage-q-reaches-the-page | a_subpage_q_reaches_the_page_not_the_nav_layer | the nav layer above the router, killing 11 page handlers
 quit-modal-is-reachable | the_confirm_quit_modal_is_reachable_from_a_subpage | the confirm-quit modal as unreachable dead code
 pty-case-proves-liveness | the_pty_case_exists_and_waits_for_the_session_to_die | a case that passes against a session about to exit
+# B3-01 · `j`/`k` reach the page that advertises them (dead on 10 of 14 pages)
+jk-routing-is-gated | both_event_loops_gate_the_nav_block | the navigator taking j/k before the page, killing 10 pages' advertised key
+jk-scrolls-the-page | j_scrolls_a_page_whose_footer_says_it_does | "[j/k] scroll" in a footer that scrolls nothing
+jk-scrolls-back | k_scrolls_back | a handler that only ever increments
+jk-does-not-wrap | k_at_the_top_does_not_wrap_to_the_bottom | `k` at the top jumping to the bottom
+jk-reaches-help-sections | j_moves_the_help_sections | a section cursor that moves and is never drawn
