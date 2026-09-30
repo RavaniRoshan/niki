@@ -234,3 +234,9 @@ write-restricted-is-atomic | write_restricted_is_the_atomic_path | a bare `fs::w
 no-unreferenced-public-module | no_public_module_is_unreferenced | 697 lines of `pub`, invisible to `dead_code`
 removed-modules-stay-removed | the_three_removed_modules_stay_removed | three scaffolds resurrected by accident
 dead-code-blind-spot-is-stated | a_module_only_referenced_by_itself_is_dead | this suite's own limit, written as a passing test
+# B5-01 · two runs cannot apply each other's patch
+patch-path-unique-per-caller | the_patch_path_is_unique_per_caller | a fixed `.niki-tmp.patch` shared across runs
+concurrent-applies-never-cross | concurrent_applies_never_read_each_others_patch | two tasks' work silently merged on the host tree
+patch-temp-is-removed | the_patch_temp_file_is_removed | a patch left behind after an apply
+this-repo-ignores-patches | this_repository_ignores_every_patch_temporary | the old fixed name in our own .gitignore, matching none of the new ones
+leftover-patch-is-ignored | a_leftover_patch_file_is_ignored_by_git | a killed run's patch one `git add -A` from a commit

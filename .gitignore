@@ -81,5 +81,5 @@ tui-smoke-logs/
 # it was not ignored — so it showed up in `git status` after a run and could be
 # committed. Written in a user's repo, so it has to be ignored like everything
 # else NIKI leaves behind.
-.niki-tmp.patch
+.niki-tmp*.patch
 .odw/*/runs/
