@@ -2,6 +2,8 @@ use anyhow::Result;
 use clap::Args;
 use std::time::Instant;
 
+use crate::config::NikiConfig;
+
 #[derive(Args)]
 pub struct SmokeArgs {
     /// Path to the project directory to smoke-test in
@@ -45,6 +47,29 @@ pub async fn handle(args: &SmokeArgs) -> Result<()> {
         let name = match backend {
             super::run::BackendArg::Docker => "docker",
             super::run::BackendArg::Worktree => "worktree",
+        };
+        cmd.args(["--backend", name]);
+    } else {
+        // No flag: inherit the configured backend rather than letting the
+        // default take over.
+        //
+        // `niki smoke` is the command a user runs to find out whether their
+        // setup works. It used to pass no `--backend` at all, so it fell
+        // through to the `docker` default — on a machine with no container
+        // runtime, `niki smoke` failed for exactly the reason `niki doctor`
+        // had just told them was optional. Its own doc comment called
+        // "Ollama + worktree" the zero-setup path; nothing in this function
+        // used it.
+        //
+        // An explicit `--backend` still wins, so a user can smoke-test the
+        // container path on a machine that defaults to worktree.
+        let backend = match NikiConfig::load(&project_path) {
+            Ok(cfg) => cfg.docker.backend,
+            Err(_) => crate::sandbox::default_backend_for_this_machine(),
+        };
+        let name = match backend {
+            crate::sandbox::SandboxBackend::Docker => "docker",
+            crate::sandbox::SandboxBackend::Worktree => "worktree",
         };
         cmd.args(["--backend", name]);
     }

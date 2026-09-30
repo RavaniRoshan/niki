@@ -135,6 +135,240 @@ fn stdout_of(out: &Output) -> String {
 
 // ── Journeys ───────────────────────────────────────────────────────────
 
+/// J20 — the setup wizard writes a config the machine can actually run.
+///
+/// It used to write a provider, a model, and nothing else. `[docker] backend`
+/// kept its default of `docker`, so on a machine with no container runtime —
+/// which is the machine the README opens by describing, and the one the
+/// worktree backend exists for — the wizard completed with a success message
+/// and the very next command could not start.
+///
+/// The journey therefore does not care *which* backend gets written, only that
+/// one is written and that the file parses: a config with no backend is a
+/// config whose behaviour is decided by a default the user never chose.
+fn j_init_writes_a_runnable_config(ctx: &JourneyCtx) -> JourneyResult {
+    let out = ctx.run(&["init", "--interactive"]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    if combined.contains("panicked at") {
+        return JourneyResult::Fail("`niki init --interactive` panicked".to_string());
+    }
+    let path = ctx.project.join("niki.toml");
+    if !path.exists() {
+        return JourneyResult::Fail(format!(
+            "the wizard wrote no niki.toml at all.\nOutput:\n{combined}"
+        ));
+    }
+    let text = std::fs::read_to_string(&path).expect("config readable");
+    // A commented default is not a setting. The template ships
+    // `# backend = "docker"`, which means "docker" — and that is the whole bug.
+    let active = text
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("backend = "));
+    let Some(line) = active else {
+        return JourneyResult::Fail(format!(
+            "the written config selects no backend, so `niki run` falls back to a \
+             default the user never chose.\nOutput:\n{combined}"
+        ));
+    };
+    if !(line.contains("\"docker\"") || line.contains("\"worktree\"")) {
+        return JourneyResult::Fail(format!("the backend line is not one NIKI knows: {line}"));
+    }
+    // Whatever the wizard wrote has to be a config, not a file.
+    if let Err(e) = niki::config::NikiConfig::load(&ctx.project) {
+        return JourneyResult::Fail(format!("the wizard wrote a config that will not load: {e}"));
+    }
+    JourneyResult::Pass
+}
+
+/// J21 — and that backend is one this machine can actually reach.
+///
+/// The complement to J20. Writing *some* backend is not enough; on a machine
+/// with no container runtime, writing `docker` reproduces the original failure
+/// one layer down. This one reads the machine the same way the product does
+/// and fails if the two disagree.
+fn j_written_config_selects_a_reachable_backend(ctx: &JourneyCtx) -> JourneyResult {
+    let _ = ctx.run(&["init", "--interactive"]);
+    let cfg = match niki::config::NikiConfig::load(&ctx.project) {
+        Ok(c) => c,
+        Err(e) => return JourneyResult::Fail(format!("no loadable config was written: {e}")),
+    };
+    let runtime = niki::sandbox::detect_container_runtime();
+    match (cfg.docker.backend, runtime) {
+        (niki::sandbox::SandboxBackend::Worktree, _) => JourneyResult::Pass,
+        (niki::sandbox::SandboxBackend::Docker, Some(_)) => JourneyResult::Pass,
+        (niki::sandbox::SandboxBackend::Docker, None) => JourneyResult::Fail(
+            "the wizard wrote backend = docker on a machine with no container runtime, \
+             so the first `niki run` cannot start"
+                .to_string(),
+        ),
+    }
+}
+
+/// J22 — `niki doctor` passes on that same machine.
+///
+/// It used to hard-fail "no container runtime" and exit 1, having no notion that
+/// a second backend exists. So the command the README tells a new user to run
+/// first, in order to check their install, reported a broken install on an
+/// install that works — and told them to install a container runtime the
+/// product does not need.
+fn j_doctor_passes_on_a_keyless_containerless_machine(ctx: &JourneyCtx) -> JourneyResult {
+    let _ = ctx.run(&["init", "--interactive"]);
+    let out = ctx.run(&["doctor"]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    if combined.contains("panicked at") {
+        return JourneyResult::Fail("`doctor` panicked".to_string());
+    }
+    if !out.status.success() {
+        return JourneyResult::Fail(format!(
+            "`doctor` exited {:?} on a keyless, containerless machine after the wizard \
+             configured it. Exit 0 is what tells a user their setup works.\nOutput:\n{combined}",
+            out.status.code()
+        ));
+    }
+    // It must also be the *backend* check that is honest, not merely absent.
+    if niki::sandbox::detect_container_runtime().is_none()
+        && combined.contains("checks passed") == false
+        && !combined.contains("warning")
+    {
+        return JourneyResult::Fail(
+            "`doctor` reported neither a pass nor a warning; silence is not a report".to_string(),
+        );
+    }
+    JourneyResult::Pass
+}
+
+/// J23 — the first `niki run` gets as far as the model, not as far as the sandbox.
+///
+/// This is the assertion that says "the backend resolved". It cannot run a
+/// pipeline — there is no key on a first-run machine by definition — but it can
+/// demand that the *reason* the run stopped is a model, never a container
+/// runtime. If the backend were unresolved, this fails with the container
+/// error instead.
+fn j_first_run_does_not_die_on_backend_resolution(ctx: &JourneyCtx) -> JourneyResult {
+    let _ = ctx.run(&["init", "--interactive"]);
+    let out = ctx.run(&["run", "Add a health endpoint"]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    if combined.contains("panicked at") {
+        return JourneyResult::Fail("`niki run` panicked on a keyless machine".to_string());
+    }
+    let blamed_container = combined.contains("Container runtime error")
+        || combined.contains("requires a running Podman or Docker daemon");
+    if blamed_container {
+        return JourneyResult::Fail(format!(
+            "`niki run` with no --backend flag died on backend resolution. The config the \
+             wizard just wrote should have selected a backend this machine can run, so \
+             this failure means the wizard and the runner disagree about the backend.\n\
+             Output:\n{combined}"
+        ));
+    }
+    JourneyResult::Pass
+}
+
+/// J24 — a scripted wizard must not exit 0 onto a config that cannot run.
+///
+/// `niki init --interactive` reads stdin. Piped, closed, or empty — which is
+/// what a script, a Makefile target, and a container build all do — it used to
+/// fall through the "no provider selected" arm, write the template, print a
+/// cheerful summary, and return success. The user then had a config pointing at
+/// Anthropic with no key, and an exit code of 0 saying setup worked.
+fn j_scripted_init_does_not_succeed_onto_a_dead_end(ctx: &JourneyCtx) -> JourneyResult {
+    let out = ctx.run(&["init", "--interactive"]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    if combined.contains("panicked at") {
+        return JourneyResult::Fail("`niki init --interactive` panicked on empty stdin".to_string());
+    }
+    let wrote_config = ctx.project.join("niki.toml").exists();
+    let unfinished = combined.contains("setup is not finished");
+    if wrote_config && !unfinished && out.status.success() {
+        return JourneyResult::Fail(
+            "a scripted `niki init --interactive` wrote a config with no provider \
+             configured and still exited 0"
+                .to_string(),
+        );
+    }
+    if unfinished && out.status.success() {
+        return JourneyResult::Fail(
+            "the wizard reported that setup is unfinished but still exited 0, so a \
+             script cannot tell the difference between ready and not ready"
+                .to_string(),
+        );
+    }
+    JourneyResult::Pass
+}
+
+/// J25 — and that path must be sound *even on a machine that has containers*.
+///
+/// Every other journey in this file is at the mercy of the host: on a box with
+/// podman installed, the wizard writes `backend = "docker"` and the containerless
+/// path is never exercised at all. That is precisely the gap this journey
+/// closes. The README's first claim is that NIKI runs with no container runtime
+/// and no key, and on a developer's machine with both installed, that claim was
+/// untested — so it could rot unnoticed and the suite would stay green.
+///
+/// So: force the worktree backend, and require the run to get as far as the
+/// model on any host. The container runtime, present or not, must not change the
+/// answer.
+fn j_the_containerless_path_works_even_where_containers_exist(ctx: &JourneyCtx) -> JourneyResult {
+    let _ = ctx.run(&["init", "--interactive"]);
+    let path = ctx.project.join("niki.toml");
+    let text = std::fs::read_to_string(&path).expect("wizard wrote a config");
+
+    // Force the containerless backend, whatever the wizard decided.
+    let forced = if let Some(pos) = text.find("backend = ") {
+        let end = text[pos..]
+            .find('\n')
+            .map(|i| pos + i)
+            .unwrap_or(text.len());
+        format!("{}{}\n{}", &text[..pos], "backend = \"worktree\"", &text[end..])
+    } else {
+        format!("{text}\n[docker]\nbackend = \"worktree\"\n")
+    };
+    std::fs::write(&path, &forced).expect("config rewritten");
+
+    let cfg = match niki::config::NikiConfig::load(&ctx.project) {
+        Ok(c) => c,
+        Err(e) => {
+            return JourneyResult::Fail(format!(
+                "a config with backend = \"worktree\" did not load: {e}\n{forced}"
+            ));
+        }
+    };
+    if cfg.docker.backend != niki::sandbox::SandboxBackend::Worktree {
+        return JourneyResult::Fail(
+            "backend = \"worktree\" did not survive a config round-trip; the documented \
+             containerless path is not reachable"
+                .to_string(),
+        );
+    }
+
+    // Doctor must pass with no container runtime, whether or not one exists.
+    let out = ctx.run(&["doctor"]);
+    if !out.status.success() {
+        let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+        return JourneyResult::Fail(format!(
+            "`doctor` exited {:?} with backend = worktree. That backend needs no \
+             container runtime, so this configuration is complete.\nOutput:\n{combined}",
+            out.status.code()
+        ));
+    }
+
+    // And the run must reach the model rather than the sandbox. There is no key
+    // on a first-run machine, so a model error is the correct and expected
+    // outcome; anything about containers is not.
+    let out = ctx.run(&["run", "Add a health endpoint"]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    if combined.contains("Container runtime error")
+        || combined.contains("requires a running Podman or Docker daemon")
+    {
+        return JourneyResult::Fail(format!(
+            "with backend = worktree the run still demanded a container runtime.\n\
+             Output:\n{combined}"
+        ));
+    }
+    JourneyResult::Pass
+}
+
 /// J01 — a stranger with nothing installed can at least get a version.
 fn j_version_on_a_bare_machine(_ctx: &JourneyCtx) -> JourneyResult {
     let out = _ctx.run(&["--version"]);
@@ -800,6 +1034,42 @@ static JOURNEYS: &[Journey] = &[
         intent: "read a report by a mistyped id",
         guards: "short prefixes are mistyped constantly",
         run: j_unknown_report_id_is_a_clean_error,
+    },
+    Journey {
+        id: "J20",
+        intent: "`niki init --interactive` produces a config this machine can run",
+        guards: "a setup wizard that writes a config selecting an unavailable backend",
+        run: j_init_writes_a_runnable_config,
+    },
+    Journey {
+        id: "J21",
+        intent: "the written config selects the backend this machine can actually reach",
+        guards: "the container backend on a machine with no container runtime",
+        run: j_written_config_selects_a_reachable_backend,
+    },
+    Journey {
+        id: "J22",
+        intent: "`niki doctor` passes on the machine the README opens by describing",
+        guards: "the verification command failing a working keyless, containerless install",
+        run: j_doctor_passes_on_a_keyless_containerless_machine,
+    },
+    Journey {
+        id: "J23",
+        intent: "`niki run` with no flags fails about the model, not about containers",
+        guards: "a first run dying on backend resolution before it ever reaches the task",
+        run: j_first_run_does_not_die_on_backend_resolution,
+    },
+    Journey {
+        id: "J24",
+        intent: "a scripted `niki init --interactive` reports that setup is unfinished",
+        guards: "a wizard that exits 0 onto a config that cannot run",
+        run: j_scripted_init_does_not_succeed_onto_a_dead_end,
+    },
+    Journey {
+        id: "J25",
+        intent: "the documented keyless, containerless path is sound on any host",
+        guards: "the worktree backend only being correct on machines without containers",
+        run: j_the_containerless_path_works_even_where_containers_exist,
     },
 ];
 
