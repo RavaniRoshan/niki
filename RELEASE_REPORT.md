@@ -6,7 +6,7 @@ Produced by executing `plans/namor-obsidian-jay-garrick.md`, with the four owner
 decisions in §0a. Every gate below was produced by `./scripts/verify.sh`; the raw
 output is in `EVIDENCE.md` and `.evidence/`.
 
-Batches 2, 3 and 4 are §2b, §2c and §2d. Batch 1 is §2.
+Batches 2, 3, 4 and 5 are §2b, §2c, §2d and §2e. Batch 1 is §2.
 
 ---
 
@@ -18,8 +18,8 @@ Run of 2026-09-30, after batch 2's last commit. Raw output in `EVIDENCE.md`.
 |---|---|---|
 | **G1** clean clone, install, README quick start | **PASS** | all scripts parse; every published download URL resolves; `niki 0.9.0 — README quick start commands accepted` |
 | **G2** build, lint | **PASS** | `cargo fmt --check`; `cargo clippy --all-targets -D warnings` warning-free; debug and release both build |
-| **G3** tests + can-fail map | **PASS** | lib **943**; `run_lifecycle` **14**; **175 can-fail entries** all resolve to a real test |
-| **G4** the core flow, for real | **PASS** | `run_lifecycle` 14; `chat_runs_the_pipeline`; `scripts/demo.sh`; the tmux suite **14/14** |
+| **G3** tests + can-fail map | **PASS** | lib **943**; `run_lifecycle` **14**; **217 can-fail entries** all resolve to a real test |
+| **G4** the core flow, for real | **PASS** | `run_lifecycle` 14; `chat_runs_the_pipeline`; `scripts/demo.sh`; the tmux suite **15/15** |
 | **G5** security | **PASS** | `cargo deny check` ok; `cargo audit` ok (11 pre-existing allowed warnings); **no credentials in the tree or in history** |
 | **G6** failure paths | **PASS** | every failure path exits non-zero *and* says something a person can act on |
 | **G7** docs match reality | **PASS** | the audit's counts are re-derived from the tree; every README command parses against the real binary |
@@ -307,6 +307,64 @@ observable from outside — and say so.
   states its own blind spot as a passing test.
 - **A test that took 232 seconds** — it re-read every source file per module.
   One pass now: 232s → 0.67s.
+
+## 2e · Batch 5 — verifying the record, and finding it wrong
+
+Twelve commits, `a3303de`…`a409bbf`. Canary map 175 → 217. PTY 14 → 15.
+
+Batch 5 is the first drawn from `ROADMAP.md` §9 — the list this programme
+wrote about itself. Most of it was **checking the previous batches' claims
+rather than making new ones**, and three claims did not survive.
+
+### Three wrong numbers, found by measuring instead of reading
+
+- **"Three unsound advisories."** `cargo audit` reports **four**, across two
+  crates. The count lived in a document whose whole job is to stay true.
+- **"19 of 28 CLI commands have no test."** Re-measured: **one** — only
+  `dashboard`. The other eighteen were closed by batches 1–4 and the number was
+  never updated.
+- **`run_page_ignores_navigation_hotkeys`** asserted that page letters do
+  nothing on the Run page. It passed, and the shipped binary opens Diff: the
+  test drove `PageRouter::handle_key`, a *page-local* handler, while global
+  jumps live in `global_page_jump` and run after the router declines. Now
+  measured by a pty case.
+
+### What it fixed
+
+- **Two runs could apply each other's patch** — a fixed `.niki-tmp.patch` that
+  `git apply` reads back *by path*, so concurrent runs mixed two tasks' work
+  and deleted the file under each other.
+- **"Is this failure worth retrying?" existed three times with three answers**,
+  and the agent loop *above* the transport had the weakest list, so a 502 got
+  **less** resilience for having a retry layer above it.
+- **Redaction destroyed git SHAs** — 40 hex, redacted, in a report whose
+  commit references are the evidence.
+- **MCP leaked a process per configured server** and told the model to call
+  tools `McpManager::call_tool` has no production path for.
+- **The container's four hardening settings were asserted by nothing** — a
+  test file *named* after them, spending six of eight tests on a string
+  parser.
+- **`niki run --project X --tui` rendered with the shell cwd's `niki.toml`**,
+  because `run_tui` took `project_path` and never used it.
+
+### The theme, carried from batch 4: a test that cannot fail
+
+Fifteen times across five batches. Batch 5's own share, with the reason each
+one stayed green:
+
+| Test | Why it passed anyway |
+|---|---|
+| `the_processor_applies_the_badge` | Asserted `is_retryable_code(` — a function *reference* to `is_some_and`, no parenthesis |
+| `no_prompt_instructs_a_model_to_call_an_mcp_tool` | Searched for the old instruction; both files **quote it in a comment** explaining why it is gone |
+| `every_unsound_advisory_is_named_with_a_reason` | Compared against every `ID:` line, including six `unmaintained` advisories |
+| `the_page_letter_case_exists…` | The canary named a *filename* — not a `grep` target — so it resolved against a doc comment |
+| `perf_is_machine_independent` | Compared a "cold" and a "warm" pass; `render_once` builds a fresh `TestBackend`, so they were the same measurement, 2% apart |
+| `the_most_recent_run_is_the_one_dashboarded` | The sabotage left `read_dir` order to decide, and it happened to land on the newer task |
+| `the_dashboard_escapes_what_it_embeds` | I sabotaged the wrong **file**, so nothing changed and the probe "passed" |
+
+The corrective is always three moves: **count** instead of `contains`, **name
+the region** instead of searching for a string, and — the slowest to learn —
+**assert the sabotage actually applied** before believing its result.
 
 ## 3 · Can every one of these prove it can fail?
 
