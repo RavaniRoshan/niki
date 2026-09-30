@@ -584,6 +584,13 @@ impl AgenticDisplay {
                 "total_latency_ms": total_ms,
                 "agents": result.metrics.iter().map(|m| serde_json::json!({
                     "role": format!("{:?}", m.role),
+                    // The Cost page used to hard-code "anthropic/claude-sonnet-4"
+                    // for every agent in every configuration, so a local
+                    // `qwen2.5-coder` run was reported as four Anthropic calls.
+                    // The data was already on `StageMetric` and simply was not
+                    // being carried across.
+                    "provider": m.provider,
+                    "model": m.model,
                     "input_tokens": m.input_tokens,
                     "output_tokens": m.output_tokens,
                     "cost_usd": m.cost_usd,

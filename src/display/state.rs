@@ -908,6 +908,14 @@ pub struct AppState {
     pub report_content: Option<String>,
     /// Cost JSON.
     pub cost_json: Option<String>,
+    /// Per-agent provider and model, as the run actually reported them.
+    ///
+    /// Carried separately from `cost_json` so the Cost page reads structured
+    /// values instead of a hard-coded model name standing in for a fact nobody
+    /// had looked up.
+    pub cost_agents: Vec<CostAgent>,
+    /// The task directory most recently opened from History.
+    pub opened_task_dir: Option<std::path::PathBuf>,
     /// Test log.
     pub test_log: Option<String>,
     /// Artifacts directory.
@@ -1051,6 +1059,49 @@ pub struct AppState {
 }
 
 /// Stage information (mirrors existing StageInfo).
+/// One agent's row in the Cost page, as reported by the run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CostAgent {
+    pub role: String,
+    pub provider: String,
+    pub model: String,
+}
+
+/// Pull the per-agent provider and model out of the cost JSON.
+///
+/// Tolerant on purpose: the Cost page must not be the thing that fails because
+/// one row of a cost report has an unexpected shape. A row it cannot read
+/// keeps its role and shows the model as unknown.
+pub fn parse_cost_agents(json: &str) -> Vec<CostAgent> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    v.get("agents")
+        .and_then(|a| a.as_array())
+        .map(|rows| {
+            rows.iter()
+                .map(|r| CostAgent {
+                    role: r
+                        .get("role")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("?")
+                        .to_string(),
+                    provider: r
+                        .get("provider")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    model: r
+                        .get("model")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Clone)]
 pub struct StageInfo {
     pub role: AgentRole,
@@ -1181,6 +1232,8 @@ impl AppState {
             diff_content: None,
             report_content: None,
             cost_json: None,
+            cost_agents: Vec::new(),
+            opened_task_dir: None,
             test_log: None,
             artifacts_dir: None,
             finished: false,
@@ -1363,6 +1416,47 @@ impl AppState {
     }
 
     /// Apply a DisplayEvent to update pipeline-related state.
+    /// Load a finished run from disk so the TUI can show what actually happened.
+    ///
+    /// History's `Enter` used to copy a branch name into `state.branch_name`
+    /// and jump to the Run page. Nothing was read from the task directory, so
+    /// the Run page rendered that branch beside the current run's contents and
+    /// the user saw what read as "my last run, reopened" and was not.
+    ///
+    /// Everything it reads is optional: a task directory with a report but no
+    /// patch, or neither, still opens — showing what exists rather than
+    /// refusing.
+    pub fn open_task_from_history(&mut self, dir: &std::path::Path, branch: &str) {
+        self.opened_task_dir = Some(dir.to_path_buf());
+        if !branch.is_empty() {
+            self.branch_name = branch.to_string();
+        }
+        if let Ok(patch) = std::fs::read_to_string(dir.join("changes.patch")) {
+            self.diff_content = Some(patch);
+        }
+        if let Ok(report) = std::fs::read_to_string(dir.join("report.md")) {
+            self.report_content = Some(report);
+        }
+        let artifacts = dir.join("artifacts");
+        if artifacts.is_dir() {
+            self.artifacts_dir = Some(artifacts);
+        }
+        // Tests and the report are per-run evidence; the previous run's are
+        // worse than none at all.
+        self.test_log = None;
+        self.cost_json = None;
+        self.cost_agents.clear();
+        // The stages are reconstructed from the artifacts, not invented.
+        self.stages.clear();
+        self.chat_log.push((
+            "notice".to_string(),
+            format!(
+                "Opened task {} — report, patch and artifacts loaded.",
+                dir.display()
+            ),
+        ));
+    }
+
     pub fn apply_display_event(&mut self, ev: DisplayEvent) {
         match ev {
             DisplayEvent::Banner { description } => {
@@ -1496,6 +1590,15 @@ impl AppState {
                 self.report_content = Some(report);
             }
             DisplayEvent::CostJson(json) => {
+                // `state.cost` was never assigned by anything, so the status
+                // bar's `$` readout and `/cost`'s "Total Spend" both showed
+                // $0.0000 after real, paid API calls.
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json)
+                    && let Some(total) = v.get("total_cost_usd").and_then(|c| c.as_f64())
+                {
+                    self.cost = total;
+                }
+                self.cost_agents = parse_cost_agents(&json);
                 self.cost_json = Some(json);
             }
             DisplayEvent::TestLogContent(content) => {

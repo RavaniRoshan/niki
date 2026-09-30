@@ -104,8 +104,13 @@ pub fn render_adaptive_header(
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or(".");
+        // Never asserted. This read "main" whenever no run had set a branch, so
+        // on a feature branch with no run yet the header claimed to be on
+        // `main`. An empty branch is now rendered as unknown rather than as a
+        // specific one; reading the real branch needs a git call, which a
+        // render function should not be making.
         let branch = if state.branch_name.is_empty() {
-            "main".to_string()
+            String::new()
         } else {
             state.branch_name.clone()
         };

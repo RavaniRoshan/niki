@@ -106,10 +106,8 @@ pub fn render_fleet(fleet: &FleetState, area: ratatui::layout::Rect, buf: &mut B
 
     // Mission grid (2 columns)
     if fleet.missions.is_empty() {
-        let empty = Paragraph::new(
-            "No missions yet — nothing is running.\nStart one from Chat (press Tab).",
-        )
-        .style(Style::default().fg(crate::display::theme::fg_dim()));
+        let empty = Paragraph::new("No missions recorded.\nStart one from Chat with: /run <task>")
+            .style(Style::default().fg(crate::display::theme::fg_dim()));
         empty.render(
             ratatui::layout::Rect {
                 x: area.x + 2,

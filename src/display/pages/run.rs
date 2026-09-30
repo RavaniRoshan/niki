@@ -95,8 +95,19 @@ impl Page for RunPage {
         let title_line = Line::from(title_spans);
         frame.render_widget(Paragraph::new(title_line), card_chunks[0]);
 
-        // Tags line (bordered badges)
-        let tags = vec!["sandbox", "docker"];
+        // Tags line (bordered badges).
+        //
+        // These were the literals "sandbox" and "docker", printed on every run
+        // regardless of `--backend`. A worktree run — the backend the zero-setup
+        // install uses, and the one the setup wizard writes into `niki.toml` on
+        // any machine without Podman — was labelled as running in Docker.
+        let tags: Vec<String> = vec![
+            "sandbox".to_string(),
+            match state.config.docker.backend {
+                crate::sandbox::SandboxBackend::Docker => "docker".to_string(),
+                crate::sandbox::SandboxBackend::Worktree => "worktree".to_string(),
+            },
+        ];
         let mut tag_spans = vec![Span::styled("  ", Style::default())];
         for tag in &tags {
             tag_spans.push(Span::styled(
@@ -116,7 +127,12 @@ impl Page for RunPage {
                 format!("niki run \"{}\"", state.description),
                 Style::default().fg(theme::fg_color()),
             ),
-            Span::styled(" --project ./my-app", Style::default().fg(theme::fg_dim())),
+            // The real project path. This was the literal "./my-app", on every
+            // run, in every project.
+            Span::styled(
+                format!(" --project {}", state.project_path.display()),
+                Style::default().fg(theme::fg_dim()),
+            ),
         ]);
         frame.render_widget(Paragraph::new(cmd_line), chunks[1]);
 
@@ -177,19 +193,26 @@ impl Page for RunPage {
             crate::artifacts::types::AgentRole::Tester,
             crate::artifacts::types::AgentRole::Reviewer,
         ];
-        for role in &primary_roles {
-            if !started_roles.contains(role) {
-                pipeline_lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("{} ", theme::role_glyph(*role)),
-                        Style::default().fg(theme::fg_dim()),
-                    ),
-                    Span::styled(
-                        theme::role_name(*role).to_string(),
-                        Style::default().fg(theme::fg_dim()),
-                    ),
-                    Span::styled(" · queued", Style::default().fg(theme::fg_dim())),
-                ]));
+        // Only once a run exists. This synthesised four `· queued` agents
+        // whenever `state.stages` was empty — which, before `/run` existed,
+        // was always. The Run page is one Tab from every user, so a fresh
+        // session showed a pipeline that had been planned and was about to
+        // start, for a run nobody had asked for.
+        if !started_roles.is_empty() {
+            for role in &primary_roles {
+                if !started_roles.contains(role) {
+                    pipeline_lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("{} ", theme::role_glyph(*role)),
+                            Style::default().fg(theme::fg_dim()),
+                        ),
+                        Span::styled(
+                            theme::role_name(*role).to_string(),
+                            Style::default().fg(theme::fg_dim()),
+                        ),
+                        Span::styled(" · queued", Style::default().fg(theme::fg_dim())),
+                    ]));
+                }
             }
         }
 
@@ -299,11 +322,10 @@ impl Page for RunPage {
         frame.render_widget(Paragraph::new(separator), chunks[3]);
 
         // ── Results ───────────────────────────────────────────────────────
-        let branch_str = if state.branch_name.is_empty() {
-            "niki/xxxxx".to_string()
-        } else {
-            state.branch_name.clone()
-        };
+        // No invented branch. This rendered "niki/xxxxx" whenever no run had
+        // produced one — a ref that does not exist, presented with the same
+        // weight as a real one.
+        let branch_str = state.branch_name.clone();
 
         let result_spans = vec![
             Span::styled("branch ", Style::default().fg(theme::fg_color())),
@@ -320,11 +342,22 @@ impl Page for RunPage {
         ];
         frame.render_widget(Paragraph::new(Line::from(result_spans)), chunks[4]);
 
-        // Working tree line
-        let working_tree = Line::from(vec![
-            Span::styled("working tree: ", Style::default().fg(theme::fg_dim())),
-            Span::styled("untouched", Style::default().fg(theme::success())),
-        ]);
+        // Working tree line. This printed "untouched" in success green,
+        // unconditionally and without ever looking: a repo with four hundred
+        // dirty files was reported as untouched. It is now shown only when a
+        // run has actually finished, and it reports what was done rather than
+        // asserting a property nothing measured.
+        let working_tree = if state.finished {
+            Line::from(vec![
+                Span::styled("working tree: ", Style::default().fg(theme::fg_dim())),
+                Span::styled(
+                    "diff applied for review",
+                    Style::default().fg(theme::fg_subtle()),
+                ),
+            ])
+        } else {
+            Line::from(Span::styled("", Style::default()))
+        };
         let wt_area = Rect {
             x: chunks[4].x,
             y: chunks[4].y + 1,
