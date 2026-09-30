@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::artifacts::types::Verdict;
@@ -65,6 +65,10 @@ impl GoalRunner {
                 .join(&config.general.output_dir)
                 .join("tasks")
                 .join(pipeline_task.id.to_string());
+            // Before the run, for the hermetic proof — `niki run` and the
+            // chat both take it here, because a snapshot taken afterwards
+            // describes the change rather than the state it changed.
+            let pre_snapshot = crate::safety::snapshot(Path::new(&state.scope)).ok();
             match execute_pipeline(
                 &pipeline_task,
                 config,
@@ -79,7 +83,54 @@ impl GoalRunner {
             )
             .await
             {
-                Ok(result) => {
+                Ok(mut result) => {
+                    // Deliver, or the iteration's work is thrown away.
+                    //
+                    // This path called `execute_pipeline` and stopped, so
+                    // `niki goal` ran four agents per iteration and kept
+                    // nothing: no branch, no patch, no report. The chat and
+                    // `niki run` were fixed in T3a/T3 and this one was left,
+                    // which is how the product's central promise held on two
+                    // of its three front doors and not the third.
+                    let branch_name = format!("niki/{}", &pipeline_task.id.to_string()[..8]);
+                    let uses_docker = docker.is_some();
+                    let delivered = crate::orchestrator::deliver::deliver(
+                        crate::orchestrator::deliver::DeliverInput {
+                            task: &pipeline_task,
+                            config,
+                            result: &mut result,
+                            project_dir: Path::new(&state.scope),
+                            task_dir: &task_dir,
+                            branch_name: branch_name.clone(),
+                            pre_snapshot: pre_snapshot.as_ref(),
+                            uses_docker,
+                            dry_run: false,
+                            force: false,
+                            json_mode: false,
+                            display: None,
+                        },
+                    );
+                    if let Err(e) = &delivered {
+                        // The agents ran; the deliverable did not land. The
+                        // task is Blocked, not Done, and the reason is the
+                        // delivery failure rather than a missing gate.
+                        state.tasks[task_idx].status = TaskStatus::Blocked;
+                        state
+                            .negative_knowledge
+                            .push(format!("Task {task_id} ran but delivery failed: {e}"));
+                        state.context_summary.push_str(&format!(
+                            "\n  Task {task_id} blocked: delivery failed ({e})."
+                        ));
+                        continue;
+                    }
+                    let delivered = delivered.expect("checked above");
+                    if !delivered.branch_created
+                        && let Some(note) = &delivered.block_note
+                    {
+                        state
+                            .context_summary
+                            .push_str(&format!("\n  Task {task_id} produced no branch: {note}"));
+                    }
                     // Phase 5.5: accrue the task's estimated cost into the
                     // goal budget (micro-USD) so the cost halt can fire.
                     let task_usd: f64 = result.metrics.iter().map(|m| m.cost_usd).sum();

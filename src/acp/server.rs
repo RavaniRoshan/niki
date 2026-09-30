@@ -74,6 +74,11 @@ async fn run_prompt(
     let docker = connect_runtime(&config).await;
     let containers: ActiveContainers = Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
+    // Before the run, for the hermetic proof. Taken here for the same reason
+    // `niki run` does: a snapshot taken after the pipeline has already written
+    // describes the change rather than the state it changed.
+    let pre_snapshot = crate::safety::snapshot(&project_dir).ok();
+
     let result = execute_pipeline(
         &task,
         &config,
@@ -135,7 +140,7 @@ async fn run_prompt(
     }
 
     match result {
-        Ok(r) => {
+        Ok(mut r) => {
             let mut record = TaskRecord::new(task.id, prompt);
             record.add_metrics(&r.metrics);
             record.status = match r.verdict {
@@ -146,8 +151,63 @@ async fn run_prompt(
                     error: format!("{:?}", v),
                 },
             };
-            record.branch = Some(r.final_diff.clone());
+            // The Coder's work is delivered, exactly as `niki run` and the
+            // chat do. It used not to be: this path called `execute_pipeline`
+            // and stopped, so an ACP client — an IDE — ran four agents and
+            // the whole change evaporated. It then wrote the *diff text* into
+            // `record.branch`, a field every reader treats as a branch name,
+            // so `niki report` printed a unified diff where a branch belonged.
+            let branch_name = format!("niki/{}", &task.id.to_string()[..8]);
+            let uses_docker = docker.is_some();
+            let delivered = match crate::orchestrator::deliver::deliver(
+                crate::orchestrator::deliver::DeliverInput {
+                    task: &task,
+                    config: &config,
+                    result: &mut r,
+                    project_dir: &project_dir,
+                    task_dir: &task_dir,
+                    branch_name: branch_name.clone(),
+                    pre_snapshot: pre_snapshot.as_ref(),
+                    uses_docker,
+                    dry_run: false,
+                    force: false,
+                    json_mode: false,
+                    display: None,
+                },
+            ) {
+                Ok(d) => d,
+                Err(e) => {
+                    // The run happened; delivery did not. Say so rather
+                    // than reporting a clean completion.
+                    notify(
+                        out,
+                        "task.delivery_failed",
+                        serde_json::json!({
+                            "task_id": task.id.to_string(),
+                            "error": e.to_string(),
+                        }),
+                    );
+                    return JsonRpcResponse::err(
+                        serde_json::json!(null),
+                        -32000,
+                        format!("Delivery failed: {e}"),
+                    );
+                }
+            };
+            record.branch = Some(branch_name.clone());
             let _ = record.save_to_disk(&task_dir);
+
+            notify(
+                out,
+                "task.delivered",
+                serde_json::json!({
+                    "task_id": task.id.to_string(),
+                    "branch": branch_name,
+                    "branch_created": delivered.branch_created,
+                    "forced": delivered.forced,
+                    "note": delivered.block_note,
+                }),
+            );
 
             notify(
                 out,
