@@ -141,8 +141,14 @@ pub async fn run_agent(
                     break;
                 }
                 Err(e) => {
+                    // By type first: a total-deadline expiry prints as
+                    // "request or response body error" and carries "timeout"
+                    // only in its source chain, so the substring test below
+                    // cannot see it — and the stage died unretried.
+                    let is_transient = crate::llm::provider::is_timeout_error(&e);
                     let err_str = e.to_string().to_lowercase();
-                    let is_transient = err_str.contains("timeout")
+                    let is_transient = is_transient
+                        || err_str.contains("timeout")
                         || err_str.contains("rate")
                         || err_str.contains("429")
                         || err_str.contains("503")
@@ -666,6 +672,12 @@ pub fn should_retry_mid_stream(
 pub const MAX_MID_STREAM_RETRIES: u32 = 2;
 
 pub fn is_mid_stream_retryable(e: &anyhow::Error) -> bool {
+    // A stall mid-answer is the same event as a stall before one: the upstream
+    // stopped sending. `is_timeout_error` sees it by type where the string
+    // list below sees only "request or response body error".
+    if super::llm::provider::is_timeout_error(e) {
+        return true;
+    }
     let msg = e.to_string().to_ascii_lowercase();
     const RETRYABLE: [&str; 5] = [
         "error decoding response body",
