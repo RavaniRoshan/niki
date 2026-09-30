@@ -1830,7 +1830,16 @@ impl Tool for WebSearchTool {
     fn def(&self) -> &ToolDef {
         static DEF: ToolDef = ToolDef {
             name: "web_search",
-            description: "Search the web for information",
+            // Not "Search the web for information". This tool cannot search
+            // the web, and `agent_access: &[]` means **every** role is offered
+            // it, so the description is the model's only evidence that it
+            // exists and what it does. A tool that says it can search and then
+            // cannot is a trap: the model calls it, gets a confident answer
+            // with nothing in it, and reports that the web has no results on
+            // the query.
+            description: "NOT IMPLEMENTED — always fails. Web search is not \
+                          available in this build; if a search MCP server is \
+                          configured, use its tools instead.",
             category: ToolCategory::Research,
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
@@ -1845,19 +1854,31 @@ impl Tool for WebSearchTool {
             Ok(q) => q,
             Err(e) => return make_error_result(&e),
         };
-        // Placeholder — real implementation uses firecrawl or similar
+        // A **failure**, not an empty success.
+        //
+        // This returned `ToolStatus::Success` with an empty
+        // `WebSearchResults` and the real fact in `diagnostics` — which no
+        // model reads. The model saw a successful search that found nothing,
+        // and the correct model response to that is to report the web has no
+        // information on the subject. An error tells it to try something else;
+        // a confident empty result tells it to stop looking. `diagnostics` is
+        // the one field a model never sees, which is exactly why the fact
+        // cannot live there alone.
+        let msg = format!(
+            "web_search is not implemented in this build, so nothing was searched \
+             for {query:?}. Do not report this as a search that found no \
+             results. Configure a search MCP server, or say the search was \
+             unavailable."
+        );
         ToolResult {
             tool_id: ToolId::generate(),
             tool_name: "web_search".into(),
-            status: ToolStatus::Success,
-            summary: format!("search: {}", query),
-            data: ToolData::WebSearchResults {
-                query: query.to_string(),
-                results: Vec::new(),
-            },
+            status: ToolStatus::Failed,
+            summary: msg.clone(),
+            data: ToolData::None,
             duration: Duration::ZERO,
             artifacts: Vec::new(),
-            diagnostics: vec!["web search not yet wired — use firecrawl MCP".into()],
+            diagnostics: vec![msg],
             metadata: HashMap::new(),
         }
     }
