@@ -592,6 +592,75 @@ green when the Session tab was wired back to the field nothing writes, because
 they checked what the event loop *passed* and not what the page *used*. Two
 wiring points, and they fail separately.
 
+## Iteration 4 — 2026-09-30 · batch 4, twelve slices
+
+Commits `c9da119`…`d6ef83b`. Canary map 122 → 175.
+
+Batch 4 is the first one that was **not** driven by the ranked list. §1 was
+already closed, so the work came from three places the earlier passes had
+surfaced: the roadmap's own deferred items, the defects the new tests kept
+finding next to the ones being fixed, and one standing instruction from the
+owner — the four Claude-architecture tasks, recorded in `ROADMAP.md` §8 as
+**queued, not started**.
+
+| # | Commit | Slice |
+|---|---|---|
+| B4-01 | `c9da119` | Every front door that runs the pipeline delivers its work |
+| B4-02 | `07c2c33` | A truncated response says so, and `google.rs` has tests at all |
+| B4-03 | `122f9a9` | A leftover sandbox is not in the user's next commit |
+| B4-04 | `5b4c318` | `niki resume` does not claim it continued something |
+| B4-05 | `4c539b3` | The provider tests assert an endpoint, not a name |
+| B4-06 | `15f0849` | The page-render tests assert what is drawn |
+| B4-07 | `54b64a2` | A tool that cannot do the thing does not report that it did |
+| B4-08 | `1a698d9` | `web_fetch` honours the configured allowlist |
+| B4-09 | `49d84a1` | A stream retries a transient failure like `complete()` does |
+| B4-10 | `150762f` | State files survive the crash that writes them |
+| B4-11 | `d6ef83b` | 697 lines of unreferenced code, deleted and stopped accumulating |
+
+### Three of these were data loss, not cosmetics
+
+**`niki acp` and `niki goal` ran the pipeline and threw the work away.** The
+TUI chat was fixed in T3a; these two were not, so the product's central promise
+held on two of its three front doors. ACP also wrote the *diff text* into
+`record.branch`, a field every reader treats as a branch name.
+
+**A SIGKILL left a complete copy of your repository in `.niki-worktrees/`**, and
+the next `git add -A` committed all of it. Now git's own per-clone `exclude`
+file gets the entry — never your tracked `.gitignore`.
+
+**A truncated `checkpoint.json` does not parse**, so the file you need *after* a
+crash was the one most likely to be unreadable after one. `write_restricted` was
+a bare `fs::write` at fifteen sites, and the atomic writer that sat beside it —
+used for JSON session state, so the choice was a coin flip — had a **fixed temp
+name** and raced under concurrency.
+
+### The through-line: tests that passed the sabotage
+
+Seven times in this batch, a test stayed green while the thing it claimed to
+cover was broken. Every one is recorded in the commit that fixed it, because the
+pattern is the lesson:
+
+| What the test asserted | Why it passed anyway |
+|---|---|
+| Five page-render tests | Drew every page and asserted nothing but "no panic" |
+| The provider endpoint tests | Compared a struct field to the string it was built from |
+| `create_provider("anthropic").provider_name() == "anthropic"` | True of *any* implementation |
+| Seven worktree tests | Each called the helper itself, so deleting the call site changed nothing |
+| `contains("network_allowlist…")` | The string appears at seven sites; emptying one still matched |
+| `contains("!sub_page_owns(…)") == 2` | A later slice legitimately added more guards |
+| Seven atomic-write tests | A completed write looks the same with or without a temp file |
+
+The corrective pattern was always the same: make the assertion **count**, name
+the specific region, or state in the test body that the property is not
+observable from outside and say so.
+
+### The four queued tasks
+
+`ROADMAP.md` §8 records the owner's Claude-architecture work — the living
+working status, the two-layer classifier, the streaming tool executor, and
+context compression — with the constraint that decides each one's design rather
+than only the intent. They start when §1–§7 have no unstarted item left.
+
 ### Next
 
 Batch 3 is complete: twelve slices, and `ROADMAP.md` §1 is closed in full.

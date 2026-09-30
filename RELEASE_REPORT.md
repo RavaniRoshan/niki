@@ -1,12 +1,12 @@
-# RELEASE REPORT — NIKI hardening programme, batches 1–3
+# RELEASE REPORT — NIKI hardening programme, batches 1–4
 
-Branch `niki/hardening` · base `c7e297d` · 42 commits.
+Branch `niki/hardening` · base `c7e297d` · 57 commits.
 
 Produced by executing `plans/namor-obsidian-jay-garrick.md`, with the four owner
 decisions in §0a. Every gate below was produced by `./scripts/verify.sh`; the raw
 output is in `EVIDENCE.md` and `.evidence/`.
 
-Batches 2 and 3 are §2b and §2c. Batch 1 is §2.
+Batches 2, 3 and 4 are §2b, §2c and §2d. Batch 1 is §2.
 
 ---
 
@@ -18,7 +18,7 @@ Run of 2026-09-30, after batch 2's last commit. Raw output in `EVIDENCE.md`.
 |---|---|---|
 | **G1** clean clone, install, README quick start | **PASS** | all scripts parse; every published download URL resolves; `niki 0.9.0 — README quick start commands accepted` |
 | **G2** build, lint | **PASS** | `cargo fmt --check`; `cargo clippy --all-targets -D warnings` warning-free; debug and release both build |
-| **G3** tests + can-fail map | **PASS** | lib **953**; `run_lifecycle` **14**; **122 can-fail entries** all resolve to a real test |
+| **G3** tests + can-fail map | **PASS** | lib **943**; `run_lifecycle` **14**; **175 can-fail entries** all resolve to a real test |
 | **G4** the core flow, for real | **PASS** | `run_lifecycle` 14; `chat_runs_the_pipeline`; `scripts/demo.sh`; the tmux suite **14/14** |
 | **G5** security | **PASS** | `cargo deny check` ok; `cargo audit` ok (11 pre-existing allowed warnings); **no credentials in the tree or in history** |
 | **G6** failure paths | **PASS** | every failure path exits non-zero *and* says something a person can act on |
@@ -241,6 +241,73 @@ And one test that was **too narrow**: five stayed green when the Session tab
 was wired back to the field nothing writes, because they checked what the
 event loop *passed* and not what the page *used*.
 
+## 2d · Batch 4 — data loss, silent degradation, and dead weight
+
+Twelve commits, `c9da119`…`d6ef83b`. Canary map 122 → 175.
+
+Batch 4 is the first one not driven by the ranked list: §1 was already closed, so
+the work came from the roadmap's deferred items and from the defects the new
+tests kept finding *next to* the ones being fixed.
+
+### Three of these were data loss
+
+**Two front doors ran the pipeline and threw the work away.** `niki run` and the
+TUI chat have delivered since T3a; `niki acp` and `niki goal` did not. So the
+product's central promise held on two of its three front doors — and ACP
+additionally wrote the **diff text** into `record.branch`, a field every reader
+treats as a branch name, so `niki report` printed a unified diff where a branch
+belonged.
+
+**A SIGKILL left a complete copy of your repository in `.niki-worktrees/`,** and
+the next `git add -A` committed all of it. Git's own per-clone `exclude` file now
+gets the entry — never your tracked `.gitignore`, which would be a change to
+your repository made by a tool you ran once.
+
+**A truncated `checkpoint.json` does not parse**, so the file you need *after* a
+crash was the one most likely to be unreadable after one. `write_restricted` was
+a bare `fs::write` at fifteen sites, and the atomic writer beside it — used for
+JSON session state, so the choice was a coin flip — had a **fixed temp name** and
+raced under concurrency. One writer now, atomic, unique temp per writer, cleanup
+on a failed rename.
+
+### Two tools that reported work they did not do
+
+`web_search` returned `Success` with an **empty result set** and the truth in
+`diagnostics` — a field no model reads. So a model that called it concluded the
+*web* had nothing on the subject. It now returns `Failed` with no
+`WebSearchResults` payload at all, and says what to use instead.
+
+`web_fetch` could never fetch anything: constructed with `vec![]`, and its own
+`is_allowed` says *"Empty allowlist = block all"*. `[network] domain_allowlist`
+existed, was documented for exactly this, and was read by nothing. It is
+threaded now through seven call sites, and **the default does not move** — empty
+still blocks, and that is asserted.
+
+### The through-line: seven tests that passed the sabotage
+
+| What the test asserted | Why it passed anyway |
+|---|---|
+| Five page-render tests | Drew every page and asserted nothing but "no panic" |
+| Two "endpoint resolves" tests | Set a `base_url` and asserted the provider's *name* |
+| Nine `create_provider(X)` tests | Compared a struct field to the string it was built from |
+| Seven worktree tests | Each called the helper itself, so deleting the call site changed nothing |
+| `contains("network_allowlist…")` | The string appears at seven sites; emptying one still matched |
+| `contains("!sub_page_owns(…)") == 2` | A later slice legitimately added more guards |
+| Seven atomic-write tests | A completed write looks the same with or without a temp file |
+
+The corrective pattern was always the same: make the assertion **count**, name
+the specific region, or state in the test body that the property is not
+observable from outside — and say so.
+
+### Also
+
+- **697 lines of unreferenced code deleted** (`errors.rs`, `control_plane/`,
+  `persistence/`), all `pub` and so invisible to `dead_code`. A test now
+  requires every `pub mod` to be referenced from outside its own subtree, and
+  states its own blind spot as a passing test.
+- **A test that took 232 seconds** — it re-read every source file per module.
+  One pass now: 232s → 0.67s.
+
 ## 3 · Can every one of these prove it can fail?
 
 Yes, and each was run. The proof is in the commit message for that slice and in
@@ -349,6 +416,14 @@ limitations stops being readable:
 - ~~The redaction Pass was a constant.~~ It is a 13-shape corpus, and two
   shapes it missed were leaking (`B2-14`).
 - ~~Every dead control in §1.~~ All ten items (`B3-01`…`B3-11`).
+- ~~The TUI could not check out a branch.~~ `/branch` runs git, with the
+  argument validated first (`B2-13`).
+- ~~Two of the three front doors delivered.~~ All three do (`B4-01`).
+- ~~A crash in a tool could commit a copy of your repository.~~ `B4-03`.
+- ~~`web_search` and `web_fetch` reported work they did not do.~~ `B4-07`,
+  `B4-08`.
+- ~~A truncated checkpoint did not parse.~~ `B4-10`.
+- ~~697 lines of unreferenced code.~~ Deleted, with a gate (`B4-11`).
 - ~~The permission badge is cosmetic.~~ It governs every stage that has not
   started (`B3-12`), with the default still `manual`.
 
@@ -399,7 +474,9 @@ a contiguous key-shaped literal in `src/` was verified to fail the gate.
 
 ## 8 · Where batch 3 leaves the plan
 
-`ROADMAP.md` §1 is closed. What remains, in the order it should be taken:
+`ROADMAP.md` §1 is closed and `ROADMAP.md` §9 now lists what batch 4 left open
+— eight items, each with the reason it is still open. The order they should be
+taken:
 
 **§2 · Chat ↔ pipeline depth.** The largest item is a *feature*, not a fix:
 the tool cards are fully built (`components/tool_card.rs`, `tool_detail.rs`,
