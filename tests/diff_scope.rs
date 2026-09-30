@@ -50,7 +50,8 @@ fn scoped_diff_excludes_preexisting_dirt() {
     let patch = niki::output::git::working_tree_diff_scoped(
         repo,
         &["tracked.rs".to_string(), "agent-new.rs".to_string()],
-    );
+    )
+    .expect("a scoped diff of a healthy repo must succeed");
     assert!(patch.contains("tracked.rs"), "agent edit must be present");
     assert!(patch.contains("agent-new.rs"), "new agent file must appear");
     assert!(
@@ -92,7 +93,8 @@ fn empty_agent_files_yield_empty_diff_without_host_mutation() {
     let dir = fixture_repo();
     let repo = dir.path();
     let before = git(repo, &["status", "--porcelain"]);
-    let patch = niki::output::git::working_tree_diff_scoped(repo, &[]);
+    let patch = niki::output::git::working_tree_diff_scoped(repo, &[])
+        .expect("an empty agent-file list is an empty diff, not a failure");
     assert!(patch.is_empty());
     assert_eq!(git(repo, &["status", "--porcelain"]), before);
 }
@@ -983,4 +985,54 @@ async fn the_path_guard_still_allows_an_ordinary_nested_create() {
         "the guard must refuse escapes, not ordinary work"
     );
     sb.destroy().await.unwrap();
+}
+
+/// A diff that could not be produced is not a diff that is empty.
+///
+/// All three producers returned `""` on a git failure and on a clean tree, and
+/// the pipeline reports an empty diff to the user as a run that changed
+/// nothing. The agent's edits are on disk the whole time; they are simply
+/// invisible, and the run is delivered as having done no work.
+///
+/// The reproducible way to make `git diff` fail is a stale index lock — which
+/// is what two `niki run`s in one repository, or a `git` process the user left
+/// open, actually produces.
+#[test]
+fn a_failed_diff_is_reported_rather_than_looking_like_no_changes() {
+    let dir = fixture_repo();
+    let repo = dir.path();
+    std::fs::write(repo.join("agent-new.rs"), "fn added() {}\n").unwrap();
+    std::fs::write(repo.join("tracked.rs"), "fn changed() {}\n").unwrap();
+
+    let lock = repo.join(".git").join("index.lock");
+    std::fs::write(&lock, "").expect("create a stale index lock");
+
+    let result = niki::output::git::working_tree_diff_scoped(
+        repo,
+        &["tracked.rs".to_string(), "agent-new.rs".to_string()],
+    );
+
+    std::fs::remove_file(&lock).ok();
+
+    let err = result.expect_err(
+        "with the index locked, `git diff` cannot run and that must not look like an empty diff",
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("git diff") || msg.contains("stage"),
+        "the error must name what failed, so the user knows to close the other git process: {msg}"
+    );
+}
+
+/// And the healthy case is still an ordinary empty string, not an error.
+#[test]
+fn a_clean_repo_with_nothing_to_report_is_not_an_error() {
+    let dir = fixture_repo();
+    let repo = dir.path();
+    let out = niki::output::git::working_tree_diff_scoped(repo, &["tracked.rs".to_string()])
+        .expect("a clean repo is a real answer, not a failure");
+    assert!(
+        out.is_empty(),
+        "an unchanged file produces an empty diff and that is correct: {out:?}"
+    );
 }

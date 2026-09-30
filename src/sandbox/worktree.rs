@@ -399,10 +399,36 @@ impl Sandbox for WorktreeSandbox {
             let mut add_args = vec!["-C", wt_str, "add", "-N", "--"];
             let refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
             add_args.extend(refs.iter().copied());
-            let _ = Command::new("git").args(&add_args).output();
+            // A failed intent-to-add, and a failed diff, were both discarded.
+            // Both produce exactly the same observable as "the agent changed
+            // nothing" — an empty string — and an empty diff is what the
+            // pipeline reports to the user as a run that did no work. The
+            // agent's edits are on disk the whole time; they are simply
+            // invisible.
+            //
+            // Not fatal, because a stale index lock or a path git refuses to
+            // stage should not destroy a run whose earlier work is already
+            // saved. Visible, because the alternative is a confident wrong
+            // answer.
+            if let Ok(staged) = Command::new("git").args(&add_args).output()
+                && !staged.status.success()
+            {
+                eprintln!(
+                    "Warning: could not stage the agent's new files for diffing ({}). \
+                     A brand-new file may be missing from the diff.",
+                    String::from_utf8_lossy(&staged.stderr).trim()
+                );
+            }
             let mut diff_args = vec!["-C", wt_str, "diff", "--"];
             diff_args.extend(refs);
             let out = Command::new("git").args(&diff_args).output()?;
+            if !out.status.success() {
+                return Err(anyhow!(
+                    "`git diff` in the worktree failed ({}): {}",
+                    out.status,
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ));
+            }
             Ok(String::from_utf8_lossy(&out.stdout).to_string())
         })
         .await

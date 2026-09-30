@@ -4098,7 +4098,10 @@ run_stage(
         .collect();
     let final_diff = match config.docker.backend {
         SandboxBackend::Docker => {
-            crate::output::git::working_tree_diff_scoped(&task.project_path, &agent_files)
+            // Propagated, not defaulted to "". A git failure and a clean tree
+            // were the same value here, so a run that could not read its own
+            // work reported that it had none.
+            crate::output::git::working_tree_diff_scoped(&task.project_path, &agent_files)?
         }
         _ => sandbox.get_diff(&agent_files).await?,
     };

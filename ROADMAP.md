@@ -101,10 +101,14 @@ pipeline uses. Best done after §1 stabilises the router.
 - The Coder's tool loop has no transport retry and swallows its errors with
   `.await.ok()?` — a network failure silently degrades to the one-shot fallback
   with no message. (`pipeline.rs:1606-1607`)
-- `git diff`'s exit status is unchecked in all three diff producers and
-  `git add -N` failures are swallowed: a failed git call is indistinguishable
-  from "no changes", and the agent's work is discarded with a misleading
-  message. (`git.rs:118-125`, `worktree.rs:380-381`, `docker.rs:526-528`)
+- ~~`git diff`'s exit status is unchecked in all three diff producers.~~
+  **DONE in batch 2.** All three now check it, and `working_tree_diff_scoped`
+  returns `Result` rather than `String` — the signature was the defect, because
+  a caller could not tell the two cases apart. The sandbox producers warn
+  rather than abort, so a stale index lock does not destroy a run whose work is
+  already on disk. Canary: `a_failed_diff_is_reported_rather_than_looking_like_
+  no_changes`, which reproduces the real cause — a stale `.git/index.lock`,
+  what two concurrent runs produce.
 - ~~A signal-killed child is reported as **exit 0**.~~ **DONE in batch 2.**
   Now `128 + signal`, the convention a shell uses, so an OOM kill reads as 137
   and a segfault as 139. A missing status entirely stays -1, because "the
