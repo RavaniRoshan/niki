@@ -202,3 +202,58 @@ async fn per_role_timeouts_are_honoured_independently() {
     .expect("generous exec runs");
     assert!(generous.is_ok(), "a 60s limit must not fire against `true`");
 }
+
+/// A child killed by a signal is not a success.
+///
+/// `ExitStatus::code()` is `None` when the process was signalled, and
+/// `unwrap_or(0)` turned that into exit code 0. The `test` tool maps 0 to
+/// `ToolStatus::Success`, and the red-suite gate reads that to decide whether to
+/// cut a branch — so a suite killed by the OOM killer, by SIGSEGV, or by a
+/// `panic = "abort"` profile was reported as **passing** and the branch was
+/// cut. Every one of those is an ordinary way for a large `cargo test` to die
+/// on a loaded machine, and `src/runtime/tools.rs:2673` already used
+/// `unwrap_or(-1)` for exactly this.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_signalled_child_is_not_reported_as_exit_zero() {
+    let out = run("kill -SEGV $$", 10)
+        .await
+        .expect("the exec itself should succeed — the *child* is what dies");
+
+    let exec = out.expect("no transport error");
+    assert_ne!(
+        exec.exit_code, 0,
+        "a child killed by a signal must never read as success: {exec:?}"
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        exec.exit_code, 139,
+        "SIGSEGV should report 128 + 11, the convention a shell uses: {exec:?}"
+    );
+    assert!(
+        exec.exit_code > 128,
+        "the code should name the signal rather than lump it in with 'exited 1': {exec:?}"
+    );
+}
+
+/// The ordinary path is untouched: a real non-zero exit is still that exit.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ordinary_failure_still_reports_its_own_exit_code() {
+    let out = run("exit 3", 10)
+        .await
+        .expect("exec runs")
+        .expect("no transport error");
+    assert_eq!(
+        out.exit_code, 3,
+        "an ordinary exit code must pass through unchanged: {out:?}"
+    );
+}
+
+/// And a real success is still zero.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_real_success_is_still_zero() {
+    let out = run("exit 0", 10)
+        .await
+        .expect("exec runs")
+        .expect("no transport error");
+    assert_eq!(out.exit_code, 0, "{out:?}");
+}

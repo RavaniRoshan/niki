@@ -155,11 +155,53 @@ pub async fn exec_with_timeout(
     let stdout = stdout_task.await.unwrap_or_default();
     let stderr = stderr_task.await.unwrap_or_default();
 
+    // A child killed by a signal has **no** exit code, and `unwrap_or(0)` read
+    // that as success.
+    //
+    // The consequence was not cosmetic. The `test` tool maps `exit_code == 0` to
+    // `ToolStatus::Success`, and the red-suite gate reads
+    // `test_execution.passed` to decide whether to cut the branch — so a suite
+    // killed by the OOM killer, or by SIGSEGV, or by a `panic = "abort"`
+    // profile, was reported as **passing** and the branch was cut. All of these
+    // are ordinary ways for a large `cargo test` or `npm install` to die on a
+    // loaded machine, and `src/runtime/tools.rs:2673` already used
+    // `unwrap_or(-1)` for exactly this — so the codebase had the right answer
+    // in one place and the wrong one here.
+    //
+    // 128 + signal is what a shell reports, and it names the cause rather than
+    // lumping "killed by the kernel" in with "exited 1". A missing status
+    // entirely stays -1: the process never ran, which is a different fact.
+    let exit_code = match status {
+        None => -1,
+        Some(s) => match s.code() {
+            Some(code) => code as i64,
+            None => 128 + signal_of(&s),
+        },
+    };
+
     Ok(Ok(ExecOutput {
-        exit_code: status.and_then(|s| s.code()).unwrap_or(0) as i64,
+        exit_code,
         stdout: truncate(&String::from_utf8_lossy(&stdout), 1500, 65536),
         stderr: truncate(&String::from_utf8_lossy(&stderr), 1500, 65536),
     }))
+}
+
+/// The signal that killed a child, or 0 when it exited normally.
+///
+/// `ExitStatus::code()` is `None` for a signalled child; this is the only way to
+/// recover *which* signal. Used to report `128 + n`, the convention a shell
+/// uses, so a caller reading an exit code can tell an OOM kill (137) from a
+/// segfault (139) from a test binary aborting (134).
+#[cfg(unix)]
+fn signal_of(status: &std::process::ExitStatus) -> i64 {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal().unwrap_or(0) as i64
+}
+
+/// Not signal-reporting on this platform; the exit code stands alone.
+#[cfg(not(unix))]
+fn signal_of(_status: &std::process::ExitStatus) -> i64 {
+    0
 }
 
 #[cfg(unix)]
