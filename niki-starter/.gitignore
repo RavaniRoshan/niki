@@ -1,0 +1,5 @@
+# Run artifacts, exactly as the root project ignores them.
+.niki/
+# The diff NIKI hands back, if a student copies it here.
+changes.patch
+node_modules/

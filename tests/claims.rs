@@ -63,6 +63,10 @@ fn claim_surfaces() -> Vec<(String, String)> {
     // Directory roots: everything a person can be told.
     collect_ext(&repo_root().join("docs"), &["md", "mdx"], &mut out);
     collect_ext(&repo_root().join("prompts"), &["md"], &mut out);
+    // The handover starter is the first thing a newcomer reads, and it is the
+    // document most likely to send them to a command that does not exist. It
+    // is in scope for the same reason the docs site is.
+    collect_ext(&repo_root().join("niki-starter"), &["md", "mdx"], &mut out);
 
     // Nothing found is itself the failure mode this change exists to prevent, so
     // the guard below is not optional decoration.
@@ -556,6 +560,23 @@ fn the_claim_walk_covers_the_documentation_site() {
         assert!(
             names.contains(&required),
             "{required} is not in scope, so nothing checks it"
+        );
+    }
+
+    // The starter is the handover artefact: a student is handed this and
+    // nothing else. Its links and its commands are checked like any other
+    // surface, and a broken one lands on the first person to try it.
+    for required in [
+        "niki-starter/README.md",
+        "niki-starter/HONESTY.md",
+        "niki-starter/TROUBLESHOOTING.md",
+        "niki-starter/REPORT-GUIDE.md",
+    ] {
+        assert!(
+            names.contains(&required),
+            "{required} is missing or not in scope. The handover starter is the \
+             first thing a newcomer reads; a claim gate that skips it is a gate \
+             that skips the reader."
         );
     }
 
