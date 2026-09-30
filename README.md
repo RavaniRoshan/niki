@@ -37,9 +37,9 @@ produced.
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0_·_open_source-2da44f)](LICENSE)
 [![Status: beta](https://img.shields.io/badge/status-beta-58a6ff)](#roadmap)
 
-<sub>754 unit tests · 448 integration tests across 37 binaries · 69 adversarial-harness tests ·
-8 canaries that inject real defects to prove the suite fails when the product is broken ·
-Apache-2.0, no telemetry, your own keys</sub>
+<sub>946 unit tests · ~540 integration tests across 53 binaries · 11 canaries that inject real
+defects to prove the suite fails when the product is broken · Apache-2.0, no telemetry, your
+own keys</sub>
 
 <br>
 
@@ -88,7 +88,7 @@ Full walkthrough in [Quick Start](#quick-start).
   <img src="assets/demo.gif" alt="NIKI Demo" />
 </p>
 
-Describe a change in plain English. NIKI runs a four-stage agent pipeline in an isolated container and gives you back a branch to review — nothing lands on `main` until you say so.
+Describe a change in plain English. NIKI runs a four-stage agent pipeline and gives you back a branch to review — nothing lands on `main` until you say so. Stages run inside a container sandbox by default, or in a git worktree with `--backend worktree` when you have no container runtime.
 
 ```bash
 niki run "Add a GET /health endpoint returning { status: 'ok', uptime }" --project ./my-app
@@ -381,7 +381,7 @@ docker/            # sandbox image (Dockerfile)
 
 ## Roadmap
 
-### v0.7.0 (shipped)
+### Shipped
 - [x] Cost & performance analytics
 - [x] User-defined pipeline topologies
 - [x] Parallel coders + synthesis
