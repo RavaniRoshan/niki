@@ -170,3 +170,10 @@ badge-travels-with-the-submit | the_badge_travels_with_the_submit | the posture 
 badge-reaches-the-processor | the_processor_applies_the_badge | a label change and nothing else
 badge-notice-says-when-it-lands | the_notice_says_when_the_change_lands | a working control indistinguishable from a decorative one
 badge-default-is-manual | the_default_posture_is_still_manual | a real badge that made the product less safe
+# B4-01 · every front door that runs the pipeline delivers its work
+every-entry-point-delivers | every_pipeline_entry_point_delivers | an IDE or goal loop running four agents and keeping nothing
+niki-run-delivers-after | niki_run_delivers_after_its_pipeline | delivery ordered before the pipeline it belongs to
+acp-and-goal-deliver | acp_and_goal_deliver_specifically | the two that were left behind by T3a/T3
+delivery-failure-is-not-completion | a_delivery_failure_is_not_reported_as_completion | a lost deliverable counted as progress
+record-branch-holds-a-branch | the_record_branch_holds_a_branch_not_a_diff | `niki report` printing a unified diff where a branch belongs
+branch-named-the-same-way | every_entry_point_names_the_branch_the_same_way | a branch shape that depends on which surface made it
