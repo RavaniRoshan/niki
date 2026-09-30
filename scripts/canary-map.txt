@@ -62,5 +62,9 @@ timeout-comes-from-the-source-chain | the_source_chain_is_walked_for_a_hidden_ti
 permanent-errors-are-not-retried | a_permanent_error_is_not_swept_up_with_the_timeouts | a 404 retried as if it were a stall
 # B2-07 · a late failure preserves the Coder's work
 late-failure-preserves-work | a_late_failure_preserves_the_coders_work_as_evidence | the Coder's CodeDiff deleted with the worktree
+# B2-08 · a killed run does not keep claiming to be running
+killed-run-is-not-running | a_killed_run_is_reported_as_interrupted | a dead run reported as in progress forever
+slow-run-is-not-killed | a_live_run_is_never_reported_as_interrupted | a slow model misreported as dead
+heartbeat-is-persisted | saving_a_record_stamps_a_heartbeat | the check passing because nothing writes a heartbeat
 # T10 · the surface is gated at all
 first-run-answers | a first run answers instead of hanging | a first session that is a hang
