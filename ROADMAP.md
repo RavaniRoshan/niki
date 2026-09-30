@@ -102,10 +102,12 @@ pipeline uses. Best done after §1 stabilises the router.
   chain — because reqwest reports a stalled *body* as a body-decode failure
   whose `is_timeout()` is false. Wired into all three retry paths.
   (`provider.rs:85` vs `agents/mod.rs:141-147`, `failover.rs:203-216`)
-- `anthropic::stream` bypasses `send_request`, so it gets no HTTP retry; the
-  agent-level matcher catches 429/503 but not 500/502. The comment at
-  `anthropic.rs:96-98` claims "Retries on 429/5xx" and is true of `complete()`
-  only.
+- ~~`anthropic::stream` bypasses `send_request`, so it gets no HTTP retry.~~
+  **DONE in batch 4** (`49d84a1`). One 429 or 503 killed a stream on its first
+  attempt while the identical non-streaming call retried four times. Retrying a
+  *stream* is safe only because `send_request` returns on response headers,
+  before anything is yielded — a retry around the body read would duplicate
+  output, which is why the fix is at that line and the reason is in the comment.
 - Google never emits `StreamChunk::Finish`, so a truncated Google response is
   misdiagnosed as "model output was not a usable artifact" — the exact failure
   that enum exists to prevent on the pipeline path.
@@ -117,9 +119,15 @@ pipeline uses. Best done after §1 stabilises the router.
   larger semantic change than a hardening pass should make alone. The user
   gets the `CodeDiff` and decides. (`run.rs` error arm,
   `pipeline.rs:3410`, `runtime/mod.rs:321`)
-- `niki resume` restores state and exits: *"Ready for continuation."* No code
-  path re-enters the pipeline from a checkpoint. Checkpoints are also written
-  with a bare `fs::write` where an atomic writer already exists.
+- ~~`niki resume` restores state and exits: "Ready for continuation."~~ **DONE
+  in batch 4** (`5b4c318`). It said so and then nothing happened — the runtime
+  holding the session was dropped on the next line. Actually resuming is a
+  *feature* (starting the pipeline partway and deciding which stages a
+  checkpoint's `produced_artifacts` satisfy), so the command now says plainly
+  that nothing was re-run and names the commands that do something.
+  ~~Checkpoints written with a bare `fs::write`.~~ **DONE** (`150762f`): one
+  atomic writer, temp name unique per writer, cleanup on a failed rename.
+  *Resuming mid-flight is still open* and is listed in §9.
 - The Coder's tool loop has no transport retry and swallows its errors with
   `.await.ok()?` — a network failure silently degrades to the one-shot fallback
   with no message. (`pipeline.rs:1606-1607`)
@@ -153,8 +161,15 @@ pipeline uses. Best done after §1 stabilises the router.
   `run_page_ignores_navigation_hotkeys` asserts behaviour the shipped binary
   contradicts. Two `page_router_render_current_*` tests draw every page and
   assert nothing.
-- 697 lines of dead code: `src/errors.rs` (70), `src/control_plane/` (294),
-  `src/persistence/` (333) — all `pub`, so `dead_code` is silent.
+- ~~697 lines of dead code: `src/errors.rs`, `src/control_plane/`,
+  `src/persistence/` — all `pub`, so `dead_code` is silent.~~ **DONE in batch 4**
+  (`d6ef83b`). All three had **zero** external references. Two were not
+  accidents: `persistence` was a working mission store superseded by
+  `mission::MissionStore`, and `control_plane` was a documented Convex mirror
+  whose own header said "intentionally not wired". Git keeps both.
+  `tests/no_unreferenced_public_modules.rs` now requires every `pub mod` to be
+  referenced from outside its own subtree, and names its own blind spot as a
+  passing test.
 - `.niki-worktrees/` is not git-ignored and passes `is_publishable_path`, so
   after a SIGKILL the user's next `git add -A` commits a whole sandbox copy.
   A fixed temp patch path (`git.rs:158`) also collides across concurrent runs.
@@ -163,10 +178,15 @@ pipeline uses. Best done after §1 stabilises the router.
   T3a/T3; **not fixed for these two**. `acp/server.rs:149` also stores the diff
   *text* in a field named `branch`.
 - MCP is a documented Advanced feature that is a stub: `McpManager::call_tool`
-  has zero callers outside `src/mcp/`, stdio children leak, and
-  `web_fetch` is registered to the model with a permanently empty allowlist.
-  `web_search` returns `ToolStatus::Success` with *"not yet wired"*. **Flagged,
-  not decided** — either wire them or remove the README rows.
+  has zero callers outside `src/mcp/`, and stdio children leak. **Flagged, not
+  decided** — either wire them or remove the README rows.
+  ~~`web_search` returns `ToolStatus::Success` with "not yet wired".~~ **DONE in
+  batch 4** (`54b64a2`): it now returns `Failed` with no
+  `WebSearchResults` payload at all, and says what to do instead — an empty
+  success told the model the *web* had nothing on the subject.
+  ~~`web_fetch` has a permanently empty allowlist.~~ **DONE** (`1a698d9`): it
+  now honours `[network] domain_allowlist`, threaded through seven call sites.
+  The default is unchanged — empty still means block-all, and that is asserted.
 - Two `cargo clippy` items the gate does not yet check: `tui_perf.rs` asserts
   wall-clock budgets with 2× headroom, so it can only fail on a machine twice
   as slow as the calibration box; and `tests/headless_tui.py` has two
@@ -243,3 +263,16 @@ this codebase has no data for.
 counted and reported in the transcript, so a run that lost context says which
 strategy took it — the same rule B2-01 through B2-12 have been applying to
 every other silent degradation in this codebase.
+
+## 9 · Still open after batch 4
+
+| # | Item | Why it is not closed |
+|---|---|---|
+| 9.1 | **Resuming a pipeline from a checkpoint.** `niki resume` now says honestly that nothing is re-run. Actually resuming means starting `execute_pipeline` partway and deciding which stages a checkpoint's `produced_artifacts` already satisfy — a design question with product consequences, and the roadmap's to answer. | `cli/resume.rs`; `runtime/checkpoint.rs` |
+| 9.2 | **MCP.** `McpManager::call_tool` has zero callers outside `src/mcp/`, and stdio children leak. Flagged in §6 and still undecided: wire it or remove the README rows. | `src/mcp/` |
+| 9.3 | **The `anthropic::stream` *agent-level* matcher.** The transport now retries 429/5xx. The agent-level matcher above it still catches 429 and 503 but not 500 or 502, so those are not retried a second time. Narrower than the bug it sat next to, and worth settling when the retry sets are unified. | `agents/mod.rs:141-147` |
+| 9.4 | **`git.rs:158` fixed temp patch path.** Collides across concurrent runs, the same shape as the temp-file bug fixed in `write_restricted_atomic` (`150762f`). Different file, same class, not yet done. | `src/output/git.rs:158` |
+| 9.5 | **§4.2b, the base64 catch-all.** `[A-Za-z0-9+/]{40,}` blanks any unbroken 40+ character alphanumeric run. Pre-existing, confirmed, and the reason batch 2 did not add redaction at the report boundary. Needs entropy-based detection. | `llm/provider.rs:542` |
+| 9.6 | **§4.5, three unsound advisories** including `git2 0.20.4` with `RUSTSEC-2026-0184`. Needs a real dependency bump, not a config flip. | `deny.toml` |
+| 9.7 | **`tests/tui_perf.rs` and `tests/headless_tui.py`** carry the two clippy items the gate does not check: wall-clock budgets with 2× headroom that can only fail on a machine twice as slow, and two unconditional `pytest.skip`s. | as cited |
+| 9.8 | **`G8` has never run on this branch.** Not a defect; the owner's decision to work locally. It goes green on a push and nothing before. | — |
