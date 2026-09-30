@@ -96,7 +96,14 @@ impl CommandPalette {
             },
             PaletteItem {
                 label: "help",
-                shortcut: "?",
+                // Not `?`. Every other entry here is a bare letter because
+                // `global_page_jump` reads them, and `PageId::from_key('?')`
+                // does resolve to `Help` — but `?` never reaches
+                // `global_page_jump`, because the `ToggleHelp` binding consumes
+                // it first and opens the which-key overlay. So this entry
+                // advertised a shortcut that could not get you here. The route
+                // is the palette itself.
+                shortcut: "ctrl+p",
                 page: Some(PageId::Help),
                 action: PaletteAction::Navigate(PageId::Help),
             },
@@ -120,12 +127,19 @@ impl CommandPalette {
             },
             PaletteItem {
                 label: "theme: cycle",
-                shortcut: "t",
+                // `ctrl+t`, not a bare `t`. The bare letter was moved to the
+                // chord and this entry was left advertising the old one, so
+                // the palette told a user to press a key that does nothing —
+                // the same drift the Help page had, in a second place.
+                shortcut: "ctrl+t",
                 page: None,
                 action: PaletteAction::CycleTheme,
             },
             PaletteItem {
                 label: "quit",
+                // `q` on Chat and on the Run page; *back* on a sub-page. The
+                // label says quit because that is the action the palette
+                // performs, and the row sits with the other global actions.
                 shortcut: "q",
                 page: None,
                 action: PaletteAction::Quit,

@@ -8,14 +8,18 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use super::{AppState, Page, PageId};
 use crate::display::theme;
 
+/// One help row. `String` rather than `&'static str` because the GLOBAL section
+/// is generated from the keybinding table at runtime — see [`HelpPage::new`].
+type Row = (String, String);
+
 struct HelpSection {
     title: &'static str,
-    items: Vec<(&'static str, &'static str)>,
+    items: Vec<Row>,
     collapsed: bool,
 }
 
 impl HelpSection {
-    fn new(title: &'static str, items: Vec<(&'static str, &'static str)>) -> Self {
+    fn new(title: &'static str, items: Vec<Row>) -> Self {
         Self {
             title,
             items,
@@ -36,65 +40,141 @@ impl Default for HelpPage {
     }
 }
 
+/// The GLOBAL rows, generated from the central keybinding table.
+/// The GLOBAL rows, generated from the central keybinding table.
+///
+/// This section used to be a hand-written copy, and it drifted: it advertised
+/// `[t] theme` when the binding is `ctrl+t`, because a bare `t` was fixed once
+/// and the help was never updated with it. It also said `[q] quit`, which is
+/// true on Chat and false everywhere else — `q` goes *back* from a sub-page
+/// (`ROADMAP.md` §1.4, fixed in batch 2).
+///
+/// The which-key overlay already builds its rows from the same table, so the
+/// two help surfaces disagreed with each other as well as with the code. One
+/// generator, two consumers.
+fn global_rows() -> Vec<Row> {
+    use crate::display::keybindings::KeyBindings;
+    let (bindings, _conflicts) = KeyBindings::with_overrides(&std::collections::HashMap::new());
+    let mut rows: Vec<Row> = bindings
+        .help_rows(&[])
+        .into_iter()
+        .map(|(combo, description, _overridden)| {
+            if combo.is_empty() {
+                (String::new(), description)
+            } else {
+                (format!("[{combo}]"), description)
+            }
+        })
+        .collect();
+
+    // Not in the table, because they are resolved in the event loop rather
+    // than bound globally. Stated here so the page is not silently short a key
+    // the user will press.
+    rows.push((
+        "[Esc]".into(),
+        "Close a modal, or go back to the previous page".into(),
+    ));
+    rows.push((
+        "[q]".into(),
+        "Go back on a page; quit on the Run page and on Chat".into(),
+    ));
+    rows
+}
+
 impl HelpPage {
+    /// The page as plain text, one row per line.
+    ///
+    /// Exists so a test can assert what the page *says* rather than what it
+    /// draws. A footer that advertises `[t] theme` is a claim about text, and
+    /// comparing rendered buffers to check a string is a roundabout way to
+    /// lose a fight with the padding.
+    pub fn plain_text(&self) -> String {
+        let mut out = Vec::new();
+        for section in &self.sections {
+            out.push(section.title.to_string());
+            for (key, description) in &section.items {
+                out.push(format!("    {key:<20}  {description}"));
+            }
+        }
+        out.join("\n")
+    }
+
     pub fn new() -> Self {
         Self {
             sections: vec![
-                HelpSection::new(
-                    "GLOBAL",
-                    vec![
-                        ("[q] quit", "Quit NIKI"),
-                        (
-                            "[Esc] close/back",
-                            "Close current modal or return to previous page",
-                        ),
-                        ("[?] this help", "Toggle this help page"),
-                        ("[Tab] chat", "Toggle between chat and page view"),
-                        ("[Ctrl+P] commands", "Open command palette"),
-                        ("[t] theme", "Cycle light/dark/auto themes"),
-                        (
-                            "[g] fleet",
-                            "Jump to Fleet (Run page uses g for scroll-top)",
-                        ),
-                        ("[s] session", "Open the Session view"),
-                    ],
-                ),
+                HelpSection::new("GLOBAL", global_rows()),
                 HelpSection::new(
                     "PAGES",
                     vec![
-                        ("[p] pipeline", "View pipeline stage cards and status"),
-                        ("[a] agents", "View agent transcripts and token usage"),
-                        ("[d] diff", "View code changes with line numbers"),
-                        ("[v] verdict", "View reviewer verdict and report"),
-                        ("[c] cost", "View token usage and cost breakdown"),
-                        ("[f] artifacts", "Browse generated artifacts"),
-                        ("[h] history", "View past runs from .niki/tasks/"),
-                        ("[,] config", "View and edit niki.toml settings"),
+                        (
+                            "[p] pipeline".into(),
+                            "View pipeline stage cards and status".into(),
+                        ),
+                        (
+                            "[a] agents".into(),
+                            "View agent transcripts and token usage".into(),
+                        ),
+                        (
+                            "[d] diff".into(),
+                            "View code changes with line numbers".into(),
+                        ),
+                        (
+                            "[v] verdict".into(),
+                            "View reviewer verdict and report".into(),
+                        ),
+                        (
+                            "[c] cost".into(),
+                            "View token usage and cost breakdown".into(),
+                        ),
+                        ("[f] artifacts".into(), "Browse generated artifacts".into()),
+                        (
+                            "[h] history".into(),
+                            "View past runs from .niki/tasks/".into(),
+                        ),
+                        (
+                            "[,] config".into(),
+                            "View and edit niki.toml settings".into(),
+                        ),
                     ],
                 ),
                 HelpSection::new(
                     "RUN",
                     vec![
-                        ("[Space] pause/resume", "Pause or resume live stream"),
-                        ("[g/G] top/bottom", "Scroll to top or bottom of stream"),
-                        ("[j/k] scroll", "Scroll up/down line by line"),
+                        (
+                            "[Space] pause/resume".into(),
+                            "Pause or resume live stream".into(),
+                        ),
+                        (
+                            "[g/G] top/bottom".into(),
+                            "Scroll to top or bottom of stream".into(),
+                        ),
+                        ("[j/k] scroll".into(), "Scroll up/down line by line".into()),
                     ],
                 ),
                 HelpSection::new(
                     "PIPELINE / AGENTS",
                     vec![
-                        ("[j/k] next/prev", "Navigate stages or agents"),
-                        ("[Tab] next agent", "Switch between agent tabs"),
-                        ("[Enter] select", "Select a stage card or entry"),
+                        ("[j/k] next/prev".into(), "Navigate stages or agents".into()),
+                        (
+                            "[Tab] next agent".into(),
+                            "Switch between agent tabs".into(),
+                        ),
+                        (
+                            "[Enter] select".into(),
+                            "Select a stage card or entry".into(),
+                        ),
                     ],
                 ),
                 HelpSection::new(
                     "DIFF",
                     vec![
-                        ("[j/k] scroll", "Scroll up/down through diff"),
-                        ("[g/G] top/bottom", "Jump to top or bottom of diff"),
-                        ("[r] annot", "Toggle inline annotations"),
-                        ("[n] lines", "Toggle line numbers"),
+                        ("[j/k] scroll".into(), "Scroll up/down through diff".into()),
+                        (
+                            "[g/G] top/bottom".into(),
+                            "Jump to top or bottom of diff".into(),
+                        ),
+                        ("[r] annot".into(), "Toggle inline annotations".into()),
+                        ("[n] lines".into(), "Toggle line numbers".into()),
                     ],
                 ),
             ],
@@ -165,7 +245,7 @@ impl Page for HelpPage {
                             format!("    {:<20}  ", key),
                             Style::default().fg(theme::fg_color()),
                         ),
-                        Span::styled(*desc, Style::default().fg(theme::fg_dim())),
+                        Span::styled(desc.clone(), Style::default().fg(theme::fg_dim())),
                     ]));
                 }
             }
