@@ -124,3 +124,8 @@ tab-owned-only-where-advertised | the_pages_that_claim_tab_are_the_only_ones | T
 config-cursor-is-visible | the_selected_field_is_visible | `[Tab] next field` moving a cursor that is never rendered
 config-cycle-has-no-dead-stops | the_tab_cycle_has_no_dead_stops | a hand-typed `% 15` over 13 fields: five presses, nothing
 config-count-is-derived | the_field_count_is_derived_not_typed | the count typed back in instead of taken from the form
+# B3-05 · a page's own shortcut reaches that page
+page-letters-not-claimed | the_page_letters_are_not_claimed_by_the_navigator | `h`/`l` claimed by the navigator, so History and TestLog are unreachable
+no-page-letter-claimed | no_page_letter_is_claimed_by_the_navigator | a third collision nobody checked for
+page-nav-survives | page_navigation_still_works_on_the_keys_that_are_not_page_letters | losing prev/next page along with the collision
+page-letter-in-composer-is-text | a_page_letter_in_the_composer_is_text_not_navigation | a letter typed into a field navigating away
