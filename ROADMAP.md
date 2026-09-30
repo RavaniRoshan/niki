@@ -81,6 +81,23 @@ error (fixed in T9 — but the duplication remains). `run_tui` loads
 `niki run --project X --tui` renders against a different config than the
 pipeline uses. Best done after §1 stabilises the router.
 
+**The config half is DONE in batch 5.** `run_tui` took `project_path` as a
+parameter and never used it, so `cd /somewhere/else && niki run --project
+~/my-project --tui` drew the interface with the *shell directory's*
+`niki.toml` while the pipeline underneath ran the project's. Two halves of one
+run disagreeing about which project they are in, over a two-character path.
+
+`both_surfaces_read_one_project` asserts **both** entry points load the project
+they were given, because a property asserted about one of two hand-written
+ladders says nothing about the other.
+
+**What is not done:** the two ladders remain two ladders. The duplication is
+what let this divergence exist at all, and it is what would let the next one.
+Unifying them is a refactor of a working interface with a 15-case pty suite
+behind it. `ROADMAP.md` §7 killed "unify before stabilising the router"; the
+router is now stable, so this is the first point at which the trade is a real
+one rather than a reason to wait.
+
 ## 4 · Security (P5)
 
 | # | Defect | Evidence | Why deferred |
