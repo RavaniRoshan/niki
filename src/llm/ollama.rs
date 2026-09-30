@@ -39,16 +39,7 @@ impl LlmProvider for OllamaProvider {
         // loop.
         let mut payload = json!({
             "model": request.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": request.system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": request.user_message
-                }
-            ],
+            "messages": super::openai::messages_with_system(&request),
             "stream": false,
             "options": {
                 "temperature": request.temperature,
@@ -151,16 +142,7 @@ impl LlmProvider for OllamaProvider {
 
         let payload = json!({
             "model": request.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": request.system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": request.user_message
-                }
-            ],
+            "messages": super::openai::messages_with_system(&request),
             "stream": true,
             "options": {
                 "temperature": request.temperature,

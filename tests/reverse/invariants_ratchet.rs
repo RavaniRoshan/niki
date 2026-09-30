@@ -230,6 +230,8 @@ fn a_model_emitting_osc52_trips_the_terminal_invariant() {
                 json_schema: None,
                 tools: None,
                 reasoning_effort: None,
+
+                history: Vec::new(),
             })
             .await
             .ok()

@@ -168,6 +168,8 @@ fn a_fallback_served_call_is_priced_by_the_fallback() {
                 json_schema: None,
                 tools: None,
                 reasoning_effort: None,
+
+                history: Vec::new(),
             })
             .await
             .expect("fallback serves");

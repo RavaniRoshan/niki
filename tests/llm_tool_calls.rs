@@ -26,6 +26,8 @@ fn tool_request(model: &str) -> CompletionRequest {
             }),
         }]),
         reasoning_effort: None,
+
+        history: Vec::new(),
     }
 }
 

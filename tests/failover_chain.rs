@@ -71,6 +71,8 @@ async fn failover_chain_falls_back_on_429() {
         json_schema: None,
         tools: None,
         reasoning_effort: None,
+
+        history: Vec::new(),
     };
 
     let resp = provider.complete(request).await.unwrap();

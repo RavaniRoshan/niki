@@ -24,6 +24,23 @@ fn openai_endpoint(base: &str) -> String {
     }
 }
 
+/// The OpenAI-shaped message array: the system prompt, then the full chain.
+///
+/// Ollama's `/api/chat` takes the same shape, so `ollama.rs` reuses this rather
+/// than keeping a second copy that can drift.
+pub(crate) fn messages_with_system(request: &CompletionRequest) -> Vec<serde_json::Value> {
+    let mut messages = vec![json!({
+        "role": "system",
+        "content": request.system_prompt
+    })];
+    messages.extend(
+        super::provider::message_chain(request)
+            .iter()
+            .map(|t| json!({ "role": t.role, "content": t.content })),
+    );
+    messages
+}
+
 pub struct OpenAiProvider {
     config: ProviderConfig,
     client: Client,
@@ -109,16 +126,7 @@ impl LlmProvider for OpenAiProvider {
             "model": request.model,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": request.system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": request.user_message
-                }
-            ]
+            "messages": messages_with_system(&request)
         });
         // Only when set. An OpenAI-compatible provider that does not know the
         // key may reject the whole request, so this is opt-in and never
@@ -243,16 +251,7 @@ impl LlmProvider for OpenAiProvider {
             "model": request.model,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": request.system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": request.user_message
-                }
-            ],
+            "messages": messages_with_system(&request),
             "stream": true,
             "stream_options": {
                 "include_usage": true
@@ -404,16 +403,7 @@ impl LlmProvider for OpenAiProvider {
             "model": request.model,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": request.system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": request.user_message
-                }
-            ],
+            "messages": messages_with_system(&request),
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {

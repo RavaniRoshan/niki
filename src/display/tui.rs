@@ -90,6 +90,46 @@ pub enum DisplayEvent {
         role: String,
         text: String,
     },
+    /// A chat turn is now in flight; draw the "thinking" indicator.
+    ///
+    /// This replaces a literal `"(thinking…)"` assistant bubble that used to be
+    /// pushed on the `--message` boot path. Being an assistant turn, it stayed
+    /// in the transcript permanently and read as something the model had said.
+    /// Typed messages got no such marker at all.
+    ChatPending,
+    ///
+    /// Separate from `ChatMessage` so the transcript grows a *visible* reply as
+    /// tokens arrive instead of after a 20-second silence. The chat surface
+    /// called `complete()`, a single non-streaming POST, while the provider's
+    /// `stream()` was already implemented and already consumed by `niki run` —
+    /// so the one place a person waits most often was the one place with
+    /// nothing to watch.
+    ChatDelta {
+        text: String,
+    },
+    /// A chat turn failed. Rendered as an error, not as something the model
+    /// said.
+    ///
+    /// This used to be a `ChatMessage { role: "assistant" }` whose text began
+    /// with the literal `(offline)`. A 401 — a wrong API key — was therefore
+    /// shown to the user as the assistant telling them it was offline, in the
+    /// same bubble style as a real answer. Errors that look like answers are
+    /// the hardest kind to notice.
+    ChatError {
+        message: String,
+        /// `true` when the user cancelled, so the UI can say so rather than
+        /// showing a failure.
+        cancelled: bool,
+    },
+    /// The provider's stop reason for the turn that just finished, and whether
+    /// it was the token limit rather than a real completion.
+    ///
+    /// Without this a reply cut at `max_tokens` is presented as a finished
+    /// answer — the same class of misdiagnosis `StreamChunk::Finish` exists to
+    /// prevent on the pipeline path.
+    ChatFinished {
+        finish_reason: Option<String>,
+    },
     /// Total token/cost info for the status line.
     StageTotals {
         input_tokens: u32,
@@ -1276,19 +1316,31 @@ fn detect_synchronized_output() -> bool {
 
 /// Run the TUI in interactive chat mode (no pipeline events).
 /// Used by `niki chat` — the channel is held by the caller so it never disconnects.
+/// A user message handed from the TUI to whoever is driving the LLM.
+///
+/// Carries the conversation with it. The TUI owns `chat_log`; the processor
+/// thread has no other way to know what was said before. Sending the bare
+/// string — as this used to — is why the transport had nowhere to put the
+/// rest of the conversation: turn 3 went to the provider with turns 1 and 2
+/// erased, while the transcript on screen showed all three.
+pub struct ChatSubmit {
+    pub text: String,
+    pub history: Vec<crate::llm::provider::ChatTurn>,
+    /// The caller's cancel flag, so the processor thread observes the same
+    /// handle the TUI's Esc sets. Handing each side its own flag is how Esc
+    /// came to print "Stopping…" and stop nothing.
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
 pub fn run_chat(
     rx: Receiver<DisplayEvent>,
     description: String,
     project_path: PathBuf,
-    on_submit: Option<mpsc::Sender<String>>,
+    on_submit: Option<mpsc::Sender<ChatSubmit>>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     let _guard = RestoreGuard;
 
-    // Ctrl+C needs somewhere to record "the second press". `run_chat` has no
-    // run-cancellation channel of its own — it is a chat surface, not an
-    // executing pipeline — so the flag is local; what the caller acts on is the
-    // `break`, not the flag.
-    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut last_ctrl_c: Option<std::time::Instant> = None;
 
     if enable_raw_mode().is_err() {
@@ -1318,6 +1370,12 @@ pub fn run_chat(
 
     let config = crate::config::NikiConfig::load(&project_path).unwrap_or_default();
     let mut state = AppState::new(description, config, project_path.clone());
+    // `run_tui` has always wired this. `run_chat` did not, so `request_cancel`
+    // had nothing to set and Esc painted a "Stopping…" notice while the
+    // in-flight request kept running and its answer still landed. The flag is
+    // local to this loop; the processor thread gets its own handle in the
+    // `ChatSubmit` payload.
+    state.cancel = Some(cancel.clone());
     state.current_page = PageId::Chat;
 
     if onboarding::should_show_onboarding(&project_path) {
@@ -1486,9 +1544,33 @@ pub fn run_chat(
                         if state.chat_log.len() > before_len {
                             if let Some((role, text)) = state.chat_log.last() {
                                 if role == "user" {
+                                    // Everything said before this message is the
+                                    // model's context. The just-pushed turn is
+                                    // the request, not part of the history.
+                                    let history = state
+                                        .chat_log
+                                        .iter()
+                                        .take(state.chat_log.len().saturating_sub(1))
+                                        .filter(|(r, _)| r == "user" || r == "assistant")
+                                        .map(|(r, t)| match r.as_str() {
+                                            "assistant" => {
+                                                crate::llm::provider::ChatTurn::assistant(t)
+                                            }
+                                            _ => crate::llm::provider::ChatTurn::user(t),
+                                        })
+                                        .collect();
                                     if let Some(tx) = &on_submit {
-                                        let _ = tx.send(text.clone());
+                                        let _ = tx.send(ChatSubmit {
+                                            text: text.clone(),
+                                            history,
+                                            cancel: cancel.clone(),
+                                        });
                                     }
+                                    // Something is now in flight. Without this
+                                    // the surface shows nothing at all until the
+                                    // first delta arrives.
+                                    state.chat_pending = true;
+                                    state.chat_truncated = false;
                                 }
                             }
                         }

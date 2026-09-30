@@ -62,17 +62,16 @@ impl LlmProvider for AnthropicProvider {
                 .unwrap_or("https://api.anthropic.com"),
         );
 
+        let messages: Vec<serde_json::Value> = super::provider::message_chain(&request)
+            .iter()
+            .map(|t| json!({ "role": t.role, "content": t.content }))
+            .collect();
         let mut payload = json!({
             "model": request.model,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
             "system": request.system_prompt,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": request.user_message
-                }
-            ]
+            "messages": messages
         });
 
         // Native tool calling (Phase 3.1): Anthropic `tool_use` blocks.
@@ -183,17 +182,16 @@ impl LlmProvider for AnthropicProvider {
                 .unwrap_or("https://api.anthropic.com"),
         );
 
+        let messages: Vec<serde_json::Value> = super::provider::message_chain(&request)
+            .iter()
+            .map(|t| json!({ "role": t.role, "content": t.content }))
+            .collect();
         let payload = json!({
             "model": request.model,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
             "system": request.system_prompt,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": request.user_message
-                }
-            ],
+            "messages": messages,
             "stream": true
         });
 

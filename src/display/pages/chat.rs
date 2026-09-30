@@ -1433,6 +1433,99 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
         push_line(&mut lines, String::new(), usize::MAX, 0, false, None, None);
     }
 
+    // The turn in flight. Kept out of `chat_log` so a partial reply is never
+    // mistaken for a finished one, and rendered with the same styling as a
+    // committed assistant turn so it does not visibly restyle itself when it
+    // lands.
+    if !state.chat_stream.is_empty() {
+        let i = state.chat_log.len();
+        for (l_idx, line_str) in state.chat_stream.lines().enumerate() {
+            let rich_line = if l_idx == 0 {
+                Line::from(vec![
+                    Span::styled("⟠ ", Style::default().fg(theme::sand())),
+                    Span::styled(
+                        "assistant: ",
+                        Style::default()
+                            .fg(theme::sand())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        line_str.to_string(),
+                        Style::default().fg(theme::fg_bright()),
+                    ),
+                    Span::styled("", Style::default()), // SEGMENT_RESET
+                ])
+            } else {
+                Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(
+                        line_str.to_string(),
+                        Style::default().fg(theme::fg_bright()),
+                    ),
+                    Span::styled("", Style::default()), // SEGMENT_RESET
+                ])
+            };
+            push_line(
+                &mut lines,
+                if l_idx == 0 {
+                    format!("⟠ assistant: {}", line_str)
+                } else {
+                    format!("   {}", line_str)
+                },
+                i,
+                0,
+                false,
+                Some(rich_line),
+                None,
+            );
+        }
+    }
+
+    // Something is in flight and no token has arrived yet. Previously the only
+    // "waiting" signal was a literal "(thinking…)" assistant bubble, so a typed
+    // message produced no feedback at all and the surface looked frozen.
+    if state.chat_pending && state.chat_stream.is_empty() {
+        push_line(
+            &mut lines,
+            "  ⟠ thinking… (esc to cancel)".to_string(),
+            usize::MAX,
+            0,
+            false,
+            Some(Line::from(vec![
+                Span::styled("  ⟠ ", Style::default().fg(theme::sand())),
+                Span::styled(
+                    "thinking… ",
+                    Style::default()
+                        .fg(theme::fg_subtle())
+                        .add_modifier(Modifier::ITALIC),
+                ),
+                Span::styled("(esc to cancel)", Style::default().fg(theme::fg_subtle())),
+                Span::styled("", Style::default()), // SEGMENT_RESET
+            ])),
+            None,
+        );
+    }
+
+    if state.chat_truncated {
+        push_line(
+            &mut lines,
+            "  ⚠ the reply was cut off at the model's token limit — it is not complete."
+                .to_string(),
+            usize::MAX,
+            0,
+            false,
+            Some(Line::from(vec![
+                Span::styled("  ⚠ ", Style::default().fg(theme::warning())),
+                Span::styled(
+                    "the reply was cut off at the model's token limit — it is not complete.",
+                    Style::default().fg(theme::warning()),
+                ),
+                Span::styled("", Style::default()), // SEGMENT_RESET
+            ])),
+            None,
+        );
+    }
+
     let base = state.chat_log.len();
 
     // R8: Sliding-window transcript fold — when auto_collapse_turns is enabled

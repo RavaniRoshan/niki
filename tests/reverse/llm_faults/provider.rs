@@ -30,6 +30,8 @@ fn request(model: &str) -> CompletionRequest {
         json_schema: None,
         tools: None,
         reasoning_effort: None,
+
+        history: Vec::new(),
     }
 }
 
