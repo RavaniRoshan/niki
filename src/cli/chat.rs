@@ -303,9 +303,15 @@ fn process_message(
 /// No streaming: stdout is a pipe and the consumer wants the whole reply on
 /// one line. History is still threaded through, so `--message` and the TUI
 /// cannot disagree about what the model sees.
-async fn reply_text(config: &NikiConfig, user_text: &str) -> String {
+/// The headless reply, and whether it failed.
+///
+/// The second value is what makes the exit code honest. Everything here —
+/// no provider, an authentication failure, an unknown model, a timeout — is a
+/// failure the caller must be able to act on, and all of it was previously
+/// returned as ordinary text.
+async fn reply_text_with_status(config: &NikiConfig, user_text: &str) -> (String, bool) {
     let Some((provider, model)) = build_provider(config) else {
-        return NO_PROVIDER_MESSAGE.to_string();
+        return (NO_PROVIDER_MESSAGE.to_string(), true);
     };
     let req = crate::llm::provider::CompletionRequest {
         model,
@@ -320,10 +326,10 @@ async fn reply_text(config: &NikiConfig, user_text: &str) -> String {
     };
     match provider.complete(req).await {
         Ok(resp) if resp.content.trim().is_empty() => {
-            "(the model returned an empty response)".to_string()
+            ("(the model returned an empty response)".to_string(), true)
         }
-        Ok(resp) => resp.content,
-        Err(e) => describe_error(&e),
+        Ok(resp) => (resp.content, false),
+        Err(e) => (describe_error(&e), true),
     }
 }
 
@@ -361,7 +367,18 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
     if let Some(msg) = &args.message
         && !std::io::IsTerminal::is_terminal(&std::io::stdout())
     {
-        println!("{}", reply_text(&config, msg).await);
+        // A failed exchange must not exit 0.
+        //
+        // `reply_text` renders a provider failure as an ordinary assistant
+        // message, so `niki chat --message hi` with a bad key printed the
+        // error text on stdout and exited 0 — indistinguishable, to a script,
+        // from a successful answer. `--message` is the documented non-
+        // interactive path, so it is exactly the one a pipeline would use.
+        let (reply, failed) = reply_text_with_status(&config, msg).await;
+        println!("{reply}");
+        if failed {
+            anyhow::bail!("the model request failed; see the message above");
+        }
         return Ok(());
     }
 

@@ -1,7 +1,12 @@
 # NIKI Repository Audit — Launch Readiness
 
 > **Date:** 2026-09-30
-> **Crate version:** 0.9.0 · **MSRV:** 1.88 · **Edition:** 2024
+> **Crate version:** 0.8.0 · **MSRV:** 1.88 · **Edition:** 2024
+>
+> The working tree was 0.9.0 when this audit was written. It was repinned to
+> 0.8.0 because 0.9.0 was never cut, so every published download URL 404'd
+> while `Cargo.toml` claimed a version nobody could install. The count in the
+> table below is the tree as it stands.
 > **Purpose:** State, without hedging, what this repository actually is.
 
 ---
@@ -36,7 +41,7 @@ date above. Where a number is a judgement rather than a count, it says so.
 |---|---|---|
 | Crate version | 0.9.0 | `Cargo.toml:3` |
 | Edition / MSRV | 2024 / 1.88 | `Cargo.toml:4-5` |
-| Rust source files | 194 | `find src -name '*.rs'` |
+| Rust source files | 195 | `find src -name '*.rs'` |
 | Rust lines in `src/` | ~82,000 | `find src -name '*.rs' -exec cat {} + \| wc -l` |
 | Module directories | 31 | `ls -d src/*/` |
 | CLI subcommands | 22 | `enum Commands` in `src/main.rs` |

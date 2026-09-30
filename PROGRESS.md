@@ -175,7 +175,7 @@ test result: FAILED. 0 passed; 2 failed
 **T2 total: 17 new tests** (15 in `tests/chat_conversation.rs`, 2 unit tests in
 `src/display/pages/chat.rs`), all can-fail proven.
 
-### T3 · A task typed in the TUI runs the pipeline — in progress
+### T3 · A task typed in the TUI runs the pipeline ✅
 
 Clause **C-J2**. The chat is a coding agent, not a viewer. This is the one High-risk slice in the
 programme, and measuring it first is what changed the plan.
@@ -259,6 +259,156 @@ a task typed in the chat must produce a branch, got: ""
 the in-process `mock` provider, then reads the committed blob with `git show` — the same assertion
 `run_lifecycle` uses for `niki run`, so the two entry points are held to one standard.
 
+### T4 · The UI stops lying about outcomes ✅
+
+`DisplayEvent::Final` carried no outcome; `state.rs` set `RunState::AwaitingApproval` on receipt, and
+the Verdict tile rendered that as a pulsing green **A P P R O V E D** — for *every* ending.
+`show_failure` emits the same event on the way out, so a run that died on an API error and a run a
+Reviewer rejected both ended up painted approved. `Final` now carries `{ verdict, error }` and the
+state is derived: approved / rejected / no-verdict / failed. `NoVerdict` is deliberately distinct
+from `Approved` — `verdict_source` exists because "a Reviewer approved this" and "nothing reviewed
+it" are different facts. `AwaitingApproval` is also gone as a name: nothing awaits approval.
+
+`show_failure` had **zero call sites** for its life. Both it and `render_failure` took a
+`&NikiError` and a `&PipelineState` neither used, which is a good way to keep a function from ever
+being called; both now take the message, and both are wired. Added `show_cancelled` — a run the user
+stopped is not a run that failed.
+
+The `[r]etry` button is **removed**: it was the primary bold-amber action and its only effect was
+`OverlayOutcome::Quit`, so the first thing a user pressed on a failed run, having been told
+"retry", quit NIKI. `ModalAction::Retry` is still produced by the key and mouse handlers and now
+resolves to a no-op rather than the quit path.
+
+Added `DisplayEvent::Notice`. The pipeline's diagnostics were all `eprintln!`, which under `--tui`
+writes into the alternate-screen buffer that `LeaveAlternateScreen` then discards — "Branch
+blocked: test suite `cargo test` failed (exit 1)" was written to a screen about to be thrown away,
+and a comment in the pipeline claimed a "TUI notice line" that did not exist.
+
+Can-fail: `Final` reverted to ignoring its payload → **2 failed**, including
+`a_failed_run_is_never_approved`.
+
+### T5 · Delete the fabricated UI ✅
+
+The Run page is one Tab from every user and, until `/run` existed, was permanently empty of real
+data. Everything on it was invented: a `--project ./my-app` literal, a `niki/xxxxx` ref that does not
+exist, **"working tree: untouched" in success green with nothing behind it**, four agents marked
+`queued` for a run nobody started, and `["sandbox","docker"]` on every run.
+
+The Cost page printed the literal `anthropic/claude-sonnet-4` for every agent in every
+configuration, so a local `qwen2.5-coder` run was displayed as four Anthropic calls — `StageMetric`
+already carried provider and model; the JSON just was not passing them across. And `state.cost` was
+never assigned by anything, so the status bar's `$` and `/cost`'s "Total Spend" both read $0.0000
+after real paid API calls.
+
+History's `Enter` copied a branch string and jumped to the Run page — reading as "I opened my last
+run" and not reading the task directory it pointed at. It loads it now. The header read `main`
+whenever no run had set a branch. Fleet said "Start one from Chat (press Tab)"; Tab cannot start
+anything, and `/run` can.
+
+**A regression this caught in my own previous commit:** three chat tests were pinned to the *old
+pixel layout* (a literal `"assistant: world"`, hard-coded columns `13..18`) and failed for reasons
+unrelated to what they claimed to test. They now derive columns from the row they find.
+
+### T6 · Slash commands work, or say they are not wired ✅
+
+Twelve commands printed success for work they did not take. `/compact` was destructive *and*
+misreported — it said "Compacted N previous turns into memory checkpoint" and then `split_off` the
+turns. The worst needed no command: everything unmatched fell through to
+`chat_log.push(("user", trimmed))` and was **sent to the LLM as text**, so `/doctor` and `/review` —
+both in the slash menu and in `/help` — were silently dispatched to the model as the string
+"/doctor". A user's first slash command was likely one of them.
+
+Unwired commands now share one `NOT_WIRED` constant. An unknown command is an error naming itself.
+`/doctor` and `/review` got real handlers. `/model` also lied in its read-only branch: it printed
+`state.model`, which `/model` could set without changing anything.
+
+**The new tests caught a bug this slice introduced:** `/run` is dispatched by the processor, one
+layer below the key handler, so the new unknown-command arm rejected the command the previous slice
+added. Fixed, and the menu now carries each command's syntax.
+
+### T7 · Onboarding tells the truth, and the first minute survives ✅
+
+Bare `niki` opens onboarding, so it is the first thing a new user reads. Three of its five pages
+asserted things the product does not do: `[1][2][3]` with no digit handler at all (the screen was
+byte-identical before and after pressing 1) and a "Colorblind" theme that does not exist; "Sign in
+with your provider (API key or **OAuth**)" with no OAuth in the crate and no command named; and
+"Niki collects anonymous usage data… Telemetry is OFF by default" — no collector in the binary, and
+`README.md:299` says "No telemetry". A consent screen that contradicts the product's own
+documentation is worse than none.
+
+The `telemetry.enabled` settings row is removed: it wrote a config key nothing reads. `niki doctor`
+now lists the OTLP endpoint, which its "the *only* hosts NIKI will ever contact" check omitted.
+
+The small-terminal black hole is fixed. Below 10 rows the surface `return`ed silently while the
+overlay ladder kept eating keystrokes — at 80x9 and 80x8 the user got a black void with no way out
+but an unmentioned `Esc`.
+
+### T8 · `niki auth login` is a real path, not a dead end ✅
+
+`niki auth login` writes to the OS keyring and says "Run `niki doctor` to verify your setup."
+`niki doctor` reads it. **Nothing on the request path did.** So the most likely first session was:
+
+    $ niki auth login     "stored securely in your OS keyring"
+    $ niki doctor         green
+    $ niki                 > hello
+                          "No LLM provider is configured yet. Run `niki auth login`…"
+
+The chat naming as the fix the command that was just run. `NikiConfig::load` now consults the
+keyring, so `run`, `chat` and `doctor` cannot disagree about whether a key exists.
+
+**The four behavioural tests call `resolve_keyring_with` directly and would have stayed green with
+the wiring removed** — which is exactly why a fifth, source-scanning test exists for the real path.
+Both kinds are here, and the second is what caught the missing slice.
+
+### T9 · Survive the terminal it is given ✅
+
+Four defects, one shape: the surface looked alive while doing nothing. A draw error was swallowed
+with `.ok()` and the chat kept consuming keystrokes against a frozen frame — `run_tui` already broke
+on the same error. A panic in the chat thread exited **0**. The mouse addressed an 80-column line
+map while the screen drew at the real width, so in a wide terminal clicking a message copied a
+different one. And `active_focus` knew about three overlays while four are painted, so a click on
+the status bar during onboarding cycled the permission mode toward BYPASS.
+
+Can-fail, each defect reintroduced individually: **4 tests red**.
+
+One assertion here was wrong on first run: the discarded-join test read this file's own comment
+quoting the old line as the defect. Now line-anchored.
+
+### T10 · Gate the surface that has never been gated ✅
+
+`niki chat` was in **zero** e2e legs, and the tmux suite's nine cases covered no first run. Three
+cases added, each aimed at a defect from the last three slices. `lib.sh` now points `HOME` at a
+throwaway so a "first run" case is actually one — inheriting the developer's `~/.config/niki` is how
+the first version of case 10 failed on a machine that has a provider configured.
+
+`10_first_run_no_key` asserts the *property* (a first run answers rather than hangs), not a
+particular message: what a first run can legitimately do depends on the machine. The two defects
+reintroduced for the can-fail proof did not touch its path, so it stayed green — the honest report
+is that it is a regression guard, not a proof that T6 or T7 landed. The other two cases went red.
+
+Also closed: `page_id_titles` and `page_id_key_hints` each listed 11 of 14 `PageId` variants, and
+`Fleet`/`Session` appeared **zero** times in a 1,664-line file — both deliberately absent from
+`PageRouter`, so a key routed to either is a silent no-op.
+
+**Smoke suite: 9 → 12, all passing.**
+
+### T11 · `scripts/verify.sh` — one command, nine gates ✅
+
+The repository had **twelve** verification scripts and no single source of truth.
+`verify-product.sh` is a full product verifier with startup-time, demo-time and eval-recall gates —
+and **no workflow runs it**.
+
+**The G6 gate found six real defects on its first run**, which is the argument for writing it:
+`niki report` exited 0 on an unknown id, on no tasks, and on a missing report; `niki status` exited 0
+while printing a failed run; and `niki chat --message` exited 0 after a provider error. All fixed.
+The other two were my own wrong expectations — a test that depends on the machine is a test that
+will fail on someone else's.
+
+Four bugs in the gate itself, all found by running it: the canary-map loop never matched, the
+`cfg(test)` filter flagged three trait stubs inside a test module as production, the secret scan
+flagged the fixtures whose entire purpose is holding credential-shaped strings, and the README
+command extractor kept its backtick. All four are fixed, and three of them are the kind of false
+positive that gets a gate switched off.
 ### Next
 
 T4 · The UI stops lying about outcomes. `DisplayEvent::Final` sets `AwaitingApproval`

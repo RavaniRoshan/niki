@@ -27,19 +27,15 @@ pub async fn handle(args: &ReportArgs) -> Result<()> {
     let task_id = match &args.task_id {
         Some(id) => match resolve_task_id(&tasks_dir, id) {
             Ok(resolved) => resolved,
-            Err(e) => {
-                eprintln!("{e}");
-                return Ok(());
-            }
+            Err(e) => return Err(anyhow::anyhow!("{e}")),
         },
         None => match latest_task_id(&tasks_dir) {
             Some(id) => id,
             None => {
-                eprintln!(
+                return Err(anyhow::anyhow!(
                     "No tasks found in {}. Run `niki run \"<task>\"` to create one (or `niki plan \"<task>\"` to review a plan first).",
                     tasks_dir.display()
-                );
-                return Ok(());
+                ));
             }
         },
     };
@@ -53,7 +49,13 @@ pub async fn handle(args: &ReportArgs) -> Result<()> {
             "{}",
             crate::display::sanitize::sanitize_for_terminal(content)
         ),
-        Err(_) => eprintln!("Report not found: {}", report_path.display()),
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Report not found at {} ({e}). The run may not have finished; \
+                 `niki status` will say.",
+                report_path.display()
+            ));
+        }
     }
 
     Ok(())

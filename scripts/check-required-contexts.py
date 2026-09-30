@@ -131,6 +131,13 @@ def main() -> int:
             file=sys.stderr,
         )
 
+    if "--list" in sys.argv:
+        # One name per line, for `scripts/ci-is-green.sh`. Parsing the prose
+        # summary above would be parsing a sentence to get a list.
+        for name in sorted(required):
+            print(name)
+        return 0 if not failed else 1
+
     if "--live" not in sys.argv:
         # The reverse direction needs the settings, and the settings are not
         # in the repository. `--live` is the only place it can be checked.

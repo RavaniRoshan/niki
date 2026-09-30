@@ -322,7 +322,8 @@ niki run "..." --backend worktree   # no container runtime
 | `niki report [id]` | Print a task's report (UUID or short prefix). |
 | `niki doctor` | Diagnostics: install, config, providers, sandbox, image presence, security. |
 | `niki smoke` | Quick pipeline verification. |
-| `niki chat` | Interactive TUI session. |
+| `niki chat` | **The default surface.** A bare `niki` on a terminal opens this. Type a message to talk to the model; `/run <task>` starts the four agents and hands back a branch. |
+| `niki skills` | List, show and manage the skills available to agents. |
 | `niki config` | Manage configuration (`init`, `schema`, `check`). |
 | `niki recommend` | Per-agent model recommendations + observed spend from past runs. |
 | `niki dashboard [id]` | Static HTML diff viewer. |
