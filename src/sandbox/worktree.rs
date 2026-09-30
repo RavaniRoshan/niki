@@ -41,8 +41,15 @@ impl WorktreeSandbox {
         policy: SecurityPolicyConfig,
         event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
     ) -> Result<Self> {
-        let base = source_repo.join(".niki-worktrees");
+        let base = source_repo.join(WORKTREE_DIR);
         std::fs::create_dir_all(&base)?;
+        // Before anything is written into it, so a crash cannot leave a
+        // publishable copy of the user's repository sitting in their tree —
+        // and therefore in their next commit.
+        //
+        // Best-effort: a repository with no writable `.git` is not a reason to
+        // fail a run, and `is_publishable_path` refuses the path either way.
+        let _ = ensure_git_excluded(source_repo, WORKTREE_DIR);
 
         // Prune stale worktrees from crashed or interrupted prior runs (>24h old)
         let _ = cleanup_stale_worktrees(source_repo, std::time::Duration::from_secs(86400));
@@ -146,12 +153,63 @@ fn is_registered_worktree(repo: &Path, path: &Path) -> bool {
     }
 }
 
+/// The directory the worktree backend keeps its sandboxes in.
+pub const WORKTREE_DIR: &str = ".niki-worktrees";
+
+/// Keep `.niki-worktrees/` out of the user's commits, in git's *own* local
+/// exclude file rather than their tracked `.gitignore`.
+///
+/// A SIGKILL leaves the directory behind holding a full copy of the
+/// repository, and the user's next `git add -A` commits all of it —
+/// `ROADMAP.md` §6. Two things make that fixable without NIKI touching
+/// anything the user can see:
+///
+/// - `.git/info/exclude` is per-clone and never committed, so NIKI can write
+///   it without adding a line to a file the user reviews and shares. The
+///   alternative — appending to their `.gitignore` — is a tracked change to
+///   their repository made by a tool they ran once.
+/// - The write is idempotent and best-effort: a repository with no `.git`
+///   (or a read-only one) is not a reason to fail a run.
+///
+/// It also stops an agent from *reporting* a sandbox path as a change it
+/// made, which `is_publishable_path` refuses for the same reason it refuses
+/// `.niki/`.
+pub fn ensure_git_excluded(repo: &Path, dir: &str) -> std::io::Result<bool> {
+    let exclude = repo.join(".git").join("info").join("exclude");
+    if let Some(parent) = exclude.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+    // Matched loosely on purpose: a user's `/.niki-worktrees/` or
+    // `.niki-worktrees/*` is already the intent, and writing a second,
+    // differently-spelled line would be noise in a file they can read.
+    // Compared with the slashes normalised off both sides, because the ways a
+    // user can already have written this are several: `/.niki-worktrees/`,
+    // `.niki-worktrees`, `.niki-worktrees/*`. Matching exactly one spelling
+    // would append a second line to a file they can read.
+    fn normalise(l: &str) -> &str {
+        l.trim().trim_start_matches('/').trim_end_matches('/')
+    }
+    if existing.lines().any(|l| normalise(l) == dir) {
+        return Ok(false);
+    }
+    let mut out = existing;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "\n# added by niki: sandbox worktrees, not part of your project\n{dir}/\n"
+    ));
+    std::fs::write(&exclude, out)?;
+    Ok(true)
+}
+
 /// Remove every worktree dir belonging to `task_id`: the exact
 /// `.niki-worktrees/<id>` dir plus suffixed parallel-coder siblings
 /// (`<id>-1`, …). Used by the Ctrl+C/SIGTERM handlers, which cannot track
 /// per-sandbox paths. Returns the number of dirs removed.
 pub fn cleanup_worktrees_for_task(source_repo: &Path, task_id: &str) -> usize {
-    let base = source_repo.join(".niki-worktrees");
+    let base = source_repo.join(WORKTREE_DIR);
     let Ok(entries) = std::fs::read_dir(&base) else {
         return 0;
     };
@@ -672,7 +730,7 @@ fn is_active_worktree(
 
 /// Scan the `.niki-worktrees` directory for stale worktrees older than `max_age` and prune them.
 pub fn cleanup_stale_worktrees(source_repo: &Path, max_age: std::time::Duration) -> usize {
-    let base = source_repo.join(".niki-worktrees");
+    let base = source_repo.join(WORKTREE_DIR);
     if !base.is_dir() {
         return 0;
     }

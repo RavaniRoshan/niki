@@ -185,3 +185,11 @@ google-usage-still-streams | usage_is_still_streamed_with_reasoning_tokens | rea
 google-sse-noise-is-survivable | sentinel_and_noise_lines_are_handled | one bad provider line killing the reader
 google-empty-reason-not-emitted | an_empty_stop_reason_is_not_emitted | a blank stop reason shown to the user
 every-streamer-emits-finish | every_streaming_provider_emits_a_finish_chunk | the defect as a property, not one file
+# B4-03 · a leftover sandbox is not in the user's next commit
+sandbox-not-staged | a_leftover_sandbox_is_not_staged_by_git_add | a crash in a tool becoming a copy of the repo in their history
+exclude-not-the-users-gitignore | the_exclude_is_written_without_touching_the_users_gitignore | a tool writing to a file the user reviews and shares
+exclude-written-once | the_exclude_is_written_once | every run appending another line
+users-own-line-respected | an_existing_exclude_line_is_not_duplicated | a second, differently-spelled line in a file they can read
+sandbox-creation-writes-it | creating_a_sandbox_writes_the_exclude | a working helper nothing calls
+sandbox-path-not-publishable | a_sandbox_path_is_not_publishable | an agent reporting a sandbox path as its change
+this-repo-ignores-sandboxes | this_repository_ignores_its_own_sandboxes | NIKI running inside NIKI

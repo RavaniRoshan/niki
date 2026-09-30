@@ -51,7 +51,24 @@ fn diff_files(diff: &str) -> Vec<String> {
 /// `.git/` is git's own metadata — the last two are also in the permission
 /// layer's default protected-path list. These are the *only* dot-paths that
 /// are refused.
-const EXCLUDED_PREFIXES: [&str; 3] = [".niki/", ".niki\\", ".git/"];
+/// Directories NIKI owns inside the user's project, which are never part of a
+/// deliverable.
+///
+/// `.niki-worktrees/` is here for the same reason as `.niki/`: it is NIKI's,
+/// not the user's, and it holds a **complete copy of their repository**. An
+/// agent that reported a path inside it would have the published diff carry a
+/// whole sandbox — and after a crash the directory survives with nothing left
+/// to exclude it from the user's next `git add -A`.
+///
+/// A fixed temp patch path (`git.rs:158`) also collides across concurrent
+/// runs; that is `ROADMAP.md` §6 and is not this.
+const EXCLUDED_PREFIXES: [&str; 5] = [
+    ".niki/",
+    ".niki\\",
+    ".niki-worktrees/",
+    ".niki-worktrees\\",
+    ".git/",
+];
 
 /// Whether an agent-reported path may appear in the published diff.
 ///
@@ -74,8 +91,12 @@ pub fn is_publishable_path(path: &str) -> bool {
     if path == "niki.toml" {
         return false;
     }
-    // A Windows-style separator must not smuggle a path past the prefix check.
+    // A Windows-style separator must not smuggle a path past the prefix check,
+    // and neither must a leading `./`: git prints `./.niki-worktrees/<id>/…`
+    // in some outputs, and a `starts_with(".niki-worktrees/")` test that
+    // `./` walks straight past is the same defect with one more character.
     let normalised = path.replace('\\', "/");
+    let normalised = normalised.strip_prefix("./").unwrap_or(&normalised);
     !EXCLUDED_PREFIXES
         .iter()
         .any(|p| normalised.starts_with(&p.replace('\\', "/")))
