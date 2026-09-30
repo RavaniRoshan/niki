@@ -45,5 +45,7 @@ mouse-cannot-reach-past-overlays | every_overlay_the_keyboard_blocks_is_one_the_
 # B2-01 · a model-authored path cannot escape the worktree
 model-path-cannot-escape | a_create_edit_cannot_write_outside_the_worktree | an absolute or `..` path written outside the project
 path-guard-allows-real-work | the_path_guard_still_allows_an_ordinary_nested_create | a guard that refuses every ordinary create
+# B2-02 · a signalled child is not a success
+signalled-child-is-not-success | a_signalled_child_is_not_reported_as_exit_zero | an OOM-killed suite reported as passing
 # T10 · the surface is gated at all
 first-run-answers | a first run answers instead of hanging | a first session that is a hang

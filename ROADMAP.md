@@ -105,11 +105,11 @@ pipeline uses. Best done after §1 stabilises the router.
   `git add -N` failures are swallowed: a failed git call is indistinguishable
   from "no changes", and the agent's work is discarded with a misleading
   message. (`git.rs:118-125`, `worktree.rs:380-381`, `docker.rs:526-528`)
-- A signal-killed child is reported as **exit 0**, so an OOM-killed or
-  segfaulting test suite returns `ToolStatus::Success` and the branch is cut.
-  The fix is two lines (`sandbox/exec.rs:158-162`) and the precedent is in-tree
-  (`tools.rs:2673` uses `unwrap_or(-1)`). It is here only because T4–T11 filled
-  the batch.
+- ~~A signal-killed child is reported as **exit 0**.~~ **DONE in batch 2.**
+  Now `128 + signal`, the convention a shell uses, so an OOM kill reads as 137
+  and a segfault as 139. A missing status entirely stays -1, because "the
+  process never ran" is a different fact from "the kernel killed it". Canary:
+  `a_signalled_child_is_not_reported_as_exit_zero`.
 
 ## 6 · Coverage and hygiene (P5)
 
