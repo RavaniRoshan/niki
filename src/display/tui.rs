@@ -81,7 +81,31 @@ pub enum DisplayEvent {
     /// Test log content — feed it to the TUI TestLog page.
     TestLogContent(String),
     ArtifactsDir(String),
-    Final,
+    /// Something the run needs to say, which is not an error and not a verdict.
+    ///
+    /// The pipeline's diagnostics — "the Coder produced nothing, falling back",
+    /// "spend cap exceeded", "branch blocked: the test suite failed" — were all
+    /// `eprintln!`. Under `--tui` an `eprintln!` lands in the alternate-screen
+    /// buffer, which `LeaveAlternateScreen` then discards, so the most important
+    /// line of a failed run was written to a screen that was about to be thrown
+    /// away. This carries the same text into the surface that is still up.
+    Notice {
+        text: String,
+        /// Warnings are shown without demanding acknowledgement.
+        warning: bool,
+    },
+    /// The run is over — either way.
+    ///
+    /// Carries what happened, because there is more than one ending: a run
+    /// that a Reviewer approved, one it rejected, one that produced no verdict
+    /// at all, and one that failed outright. A bare `Final` collapsed all four
+    /// into "approved", on a surface whose whole promise is not lying about it.
+    Final {
+        /// `"approved"`, `"rejected"`, … or `None` when nothing reviewed it.
+        verdict: Option<String>,
+        /// The failure, when the run failed.
+        error: Option<String>,
+    },
     /// Branch name from the pipeline (fixes the never-populated branch_name).
     BranchName(String),
     /// A chat message submitted/typed into the session (user or assistant turn).
@@ -323,7 +347,13 @@ fn route_overlay_key(
                 state.modal = None;
                 return OverlayOutcome::Consumed;
             }
-            ModalAction::Confirm | ModalAction::Retry => return OverlayOutcome::Quit,
+            // `Retry` is deliberately NOT grouped with `Confirm` here. It used
+            // to be, and the only producer of `Retry` was the error modal's
+            // "press [r] to retry" button — so pressing retry exited the app.
+            // Retry needs a real stage restart, which does not exist yet; until
+            // it does, the honest behaviour is to stay put.
+            ModalAction::Confirm => return OverlayOutcome::Quit,
+            ModalAction::Retry => return OverlayOutcome::Consumed,
             ModalAction::Config => {
                 state.current_page = PageId::Config;
                 state.modal = None;
@@ -678,18 +708,15 @@ fn route_mouse(
                     }
                     dirty = true;
                 }
-                ModalAction::Retry => {
+                // `Retry` is produced by the key handler and does nothing yet;
+                // both it and a click on the modal close it.
+                ModalAction::Retry | ModalAction::Dismiss => {
                     state.modal = None;
-                    // Retry is handled by the key handler
                     dirty = true;
                 }
                 ModalAction::Config => {
                     state.modal = None;
                     state.current_page = PageId::Config;
-                    dirty = true;
-                }
-                ModalAction::Dismiss => {
-                    state.modal = None;
                     dirty = true;
                 }
                 ModalAction::None => {}

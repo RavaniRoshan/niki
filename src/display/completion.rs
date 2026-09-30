@@ -1,8 +1,6 @@
-use crate::NikiError;
 use crate::artifacts::types::Verdict;
 use crate::display::theme::Theme;
 use crate::orchestrator::pipeline::PipelineResult;
-use crate::orchestrator::state::PipelineState;
 use std::path::Path;
 
 pub fn render_completion(
@@ -151,9 +149,15 @@ fn cost_totals(result: &PipelineResult) -> (u32, u32, f64, u64) {
     (total_in, total_out, total_cost, total_ms)
 }
 
-pub fn render_failure(error: &NikiError, _state: &PipelineState, theme: &Theme, is_tty: bool) {
+/// Draw the failure panel.
+///
+/// Takes the message rather than a `NikiError` and a `PipelineState`, neither of
+/// which was used: the function printed one string. Taking a typed error it
+/// cannot inspect forced every caller to fabricate one, which is a good way to
+/// keep a function from ever being called.
+pub fn render_failure(message: &str, theme: &Theme, is_tty: bool) {
     if !is_tty {
-        println!("Task failed: {}", error);
+        println!("Task failed: {message}");
         return;
     }
     let term = console::Term::stdout();
@@ -163,6 +167,6 @@ pub fn render_failure(error: &NikiError, _state: &PipelineState, theme: &Theme, 
         theme.error.apply_to("✗"),
         theme.heading.apply_to("Task Failed")
     ));
-    let _ = term.write_line(&format!("   {}", error));
+    let _ = term.write_line(&format!("   {message}"));
     let _ = term.write_line("");
 }

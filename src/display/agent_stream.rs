@@ -1,11 +1,9 @@
-use crate::NikiError;
 use crate::artifacts::types::{AgentRole, ReviewIssue};
 use crate::config::NikiConfig;
 use crate::display::theme::Theme;
 use crate::display::tui::{DisplayEvent, spawn_tui};
 use crate::llm::provider::TokenUsage;
 use crate::orchestrator::pipeline::{PipelineResult, Task};
-use crate::orchestrator::state::PipelineState;
 use console::Term;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -627,7 +625,10 @@ impl AgenticDisplay {
                 ));
             }
 
-            self.emit(DisplayEvent::Final);
+            self.emit(DisplayEvent::Final {
+                verdict: Some(format!("{:?}", result.verdict)),
+                error: None,
+            });
             return;
         }
         crate::display::completion::render_completion(
@@ -639,22 +640,73 @@ impl AgenticDisplay {
         );
     }
 
-    pub fn show_failure(&self, error: &NikiError, _state: &PipelineState) {
+    /// Report a failed run to whatever surface is watching.
+    ///
+    /// Had **zero call sites** for its entire life: the failure panel was
+    /// designed, rendered by `render_failure`, and never reached — the run's
+    /// error path went straight from "the pipeline returned Err" to "restore
+    /// the terminal and print an anyhow line", so under `--tui` the alternate
+    /// screen vanished mid-run still reading `Running`.
+    ///
+    /// It emits `Final { error }`, which is what puts the run into
+    /// `RunState::Failed` and the reason into the transcript. Cancellation is
+    /// reported the same way with its own wording, because a run the user
+    /// stopped is not a run that failed.
+    pub fn show_failure(&self, message: &str) {
         crate::display::notify::pipeline_complete(false, "");
         if self.tui.is_some() {
             self.emit(DisplayEvent::Revision {
                 round: 0,
                 max: 0,
-                issues: vec![format!("Task failed: {}", error)],
+                issues: vec![format!("Task failed: {message}")],
             });
-            self.emit(DisplayEvent::Final);
+            self.emit(DisplayEvent::Final {
+                verdict: None,
+                error: Some(message.to_string()),
+            });
             return;
         }
         if !self.is_tty {
-            self.log("NIKI", &format!("Task failed: {}", error));
+            self.log("NIKI", &format!("Task failed: {message}"));
             return;
         }
-        crate::display::completion::render_failure(error, _state, &self.theme, self.is_tty);
+        crate::display::completion::render_failure(message, &self.theme, self.is_tty);
+    }
+
+    /// Say something that is neither an error nor a verdict.
+    pub fn notice(&self, text: String, warning: bool) {
+        if self.tui.is_some() {
+            self.emit(DisplayEvent::Notice { text, warning });
+            return;
+        }
+        if !self.is_tty {
+            self.log("NIKI", &text);
+            return;
+        }
+        let _ = self
+            .term
+            .write_line(&format!("   {}", self.theme.subtext.apply_to(text)));
+    }
+
+    /// Report a run the user stopped. Not a failure.
+    pub fn show_cancelled(&self) {
+        crate::display::notify::pipeline_cancelled();
+        if self.tui.is_some() {
+            self.emit(DisplayEvent::Final {
+                verdict: None,
+                error: Some("Cancelled — you stopped this run. Nothing was committed.".to_string()),
+            });
+            return;
+        }
+        if !self.is_tty {
+            self.log("NIKI", "Cancelled.");
+            return;
+        }
+        crate::display::completion::render_failure(
+            "Cancelled — you stopped this run. Nothing was committed.",
+            &self.theme,
+            self.is_tty,
+        );
     }
 
     /// Emit cumulative token/cost totals (feeds the status line + Cost page).
@@ -721,7 +773,10 @@ mod tests {
         display.emit(DisplayEvent::Banner {
             description: "test banner".to_string(),
         });
-        display.emit(DisplayEvent::Final);
+        display.emit(DisplayEvent::Final {
+            verdict: None,
+            error: None,
+        });
 
         let forked = display.fork();
         forked.emit(DisplayEvent::DiffContent("diff --git a b".to_string()));
@@ -733,7 +788,7 @@ mod tests {
             _ => panic!("unexpected event 0"),
         }
         match &drained[1] {
-            DisplayEvent::Final => {}
+            DisplayEvent::Final { .. } => {}
             _ => panic!("unexpected event 1"),
         }
         match &drained[2] {

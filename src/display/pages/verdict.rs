@@ -64,18 +64,24 @@ impl Page for VerdictPage {
         frame.render_widget(Paragraph::new(header), chunks[0]);
 
         // Verdict tile
+        // Every ending is named. The `_` arm used to be the catch-all for
+        // "a Reviewer rejected this" and "nothing reviewed this at all", both
+        // of which rendered as a dim "NO VERDICT" under a green APPROVED
+        // border — and the run's actual ending had no representation here.
         let (verdict_text, verdict_color) = match state.run_state {
-            RunState::AwaitingApproval => ("A P P R O V E D", theme::GREEN()),
+            RunState::Approved => ("A P P R O V E D", theme::GREEN()),
+            RunState::Rejected => ("R E J E C T E D", theme::RED()),
+            RunState::NoVerdict => ("N O   V E R D I C T", theme::fg_dim()),
             RunState::Failed => ("F A I L E D", theme::RED()),
             RunState::Running => ("I N   P R O G R E S S", theme::AMBER()),
+            RunState::AwaitingReviewer => ("I N   R E V I E W", theme::AMBER()),
             RunState::Cancelled => ("C A N C E L L E D", theme::fg_dim()),
-            _ => ("N O   V E R D I C T", theme::fg_dim()),
+            RunState::Idle => ("N O   V E R D I C T", theme::fg_dim()),
         };
 
-        // AwaitingApproval pulses the tile border: a pending decision is the
-        // one moment that must catch the eye. Settled verdicts stay static.
-        // Reduced-motion renders the final (warning) border immediately.
-        let awaiting = matches!(state.run_state, RunState::AwaitingApproval);
+        // Approved pulses its border: it is the one settled outcome a user
+        // scans for. Everything else is already its own colour.
+        let awaiting = matches!(state.run_state, RunState::Approved);
         let border_color = if awaiting
             && crate::display::motion::pulse_phase(
                 state.tick,

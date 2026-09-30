@@ -1274,12 +1274,57 @@ fn appstate_apply_event_artifacts_dir() {
     );
 }
 
+/// Every ending of a run has to be distinguishable on the Verdict tile.
+///
+/// This used to assert that `Final` produced `AwaitingApproval`, which the tile
+/// renders as a pulsing green "A P P R O V E D". `show_failure` emits the same
+/// bare `Final` on the way out, so a run that died on an API error, and a run
+/// a Reviewer rejected, both ended up painted as approved. One assertion, four
+/// wrong outcomes.
 #[test]
-fn appstate_apply_event_final() {
+fn appstate_apply_event_final_reports_what_actually_happened() {
+    for (verdict, expected) in [
+        (Some("approved"), RunState::Approved),
+        (Some("Approved"), RunState::Approved),
+        (Some("rejected"), RunState::Rejected),
+        (Some("Rejected"), RunState::Rejected),
+        (Some("revision_needed"), RunState::Rejected),
+        (Some("RevisionNeeded"), RunState::Rejected),
+        // Ended with nothing having reviewed it. Not an approval — the whole
+        // point of `verdict_source` is that these are different facts.
+        (None, RunState::NoVerdict),
+    ] {
+        let mut state = make_state();
+        state.apply_event(DisplayEvent::Final {
+            verdict: verdict.map(str::to_string),
+            error: None,
+        });
+        assert!(state.finished);
+        assert_eq!(
+            state.run_state, expected,
+            "verdict {verdict:?} must not read as {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn a_failed_run_is_never_approved() {
     let mut state = make_state();
-    state.apply_event(DisplayEvent::Final);
-    assert!(state.finished);
-    assert_eq!(state.run_state, RunState::AwaitingApproval);
+    state.apply_event(DisplayEvent::Final {
+        verdict: None,
+        error: Some("HTTP 401: the API key was rejected".to_string()),
+    });
+    assert_eq!(state.run_state, RunState::Failed);
+    assert!(
+        !matches!(state.run_state, RunState::Approved),
+        "a failed run must never render as approved"
+    );
+    // And the reason reaches the transcript rather than only a status bar.
+    assert!(
+        state.chat_log.iter().any(|(_, t)| t.contains("401")),
+        "the failure must be visible: {:?}",
+        state.chat_log
+    );
 }
 
 // ============================================================================
@@ -1661,4 +1706,35 @@ fn the_defaults_for_the_keys_the_chat_loop_used_to_hardcode() {
         kb.resolve(&KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL)),
         Some(GlobalAction::CommandPalette)
     );
+}
+
+/// A pipeline diagnostic has to reach the surface that is still on screen.
+///
+/// The branch-blocked reason, the Coder-fallback notice and the spend-cap
+/// warning were all `eprintln!`. Under `--tui` that writes into the
+/// alternate-screen buffer, which `LeaveAlternateScreen` then discards — so
+/// "Branch blocked: test suite `cargo test` failed (exit 1)", the single most
+/// important line of a failed run, was written to a screen that was about to be
+/// thrown away. `DisplayEvent` had no notice channel at all, and a comment in
+/// the pipeline claimed a "TUI notice line" that did not exist.
+#[test]
+fn a_notice_reaches_the_transcript_rather_than_a_discarded_screen() {
+    let mut state = make_state();
+    state.apply_event(DisplayEvent::Notice {
+        text: "Branch blocked: test suite `cargo test` failed (exit 1)".to_string(),
+        warning: false,
+    });
+    let (_, text) = &state.chat_log[0];
+    assert!(
+        text.contains("Branch blocked"),
+        "the block reason must be in the transcript, got: {text:?}"
+    );
+
+    // A warning is labelled as one, so it is not mistaken for the run's verdict.
+    let mut state = make_state();
+    state.apply_event(DisplayEvent::Notice {
+        text: "spend cap exceeded".to_string(),
+        warning: true,
+    });
+    assert_eq!(state.chat_log[0].0, "warning");
 }

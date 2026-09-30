@@ -88,16 +88,22 @@ pub fn render_modal(frame: &mut Frame, modal: &Modal, area: Rect) {
             ]));
         }
         Modal::Error { .. } => {
+            // No `[r]etry`. It was drawn as the primary, bold-amber action and
+            // its only effect was `OverlayOutcome::Quit` — so the first thing a
+            // user pressed on a failed run, having been told "retry", quit
+            // NIKI and took the transcript with it. `ModalAction::Retry` is
+            // still produced by the key and mouse handlers and is handled
+            // explicitly below as a no-op, so re-adding a real retry later
+            // cannot silently land on the quit path.
             lines.push(Line::from(vec![
                 Span::styled("      ", Style::default()),
                 Span::styled(
-                    "[r]etry",
+                    "[c]onfig",
                     Style::default()
-                        .fg(theme::AMBER())
+                        .fg(theme::BLUE())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("   [c]onfig   ", Style::default().fg(theme::BLUE())),
-                Span::styled("[Esc] back", Style::default().fg(theme::fg_dim())),
+                Span::styled("   [Esc] back", Style::default().fg(theme::fg_dim())),
             ]));
         }
     }
@@ -158,7 +164,8 @@ pub fn modal_hit_test(
         Modal::Error { .. } => {
             // "[r]etry" at col 6, "[c]onfig" at col 15, "[Esc] back" at col 26
             if (6..13).contains(&rel_col) {
-                Some(ModalAction::Retry)
+                // The retry button is gone; see `Modal::Error` rendering.
+                Some(ModalAction::Dismiss)
             } else if (15..24).contains(&rel_col) {
                 Some(ModalAction::Config)
             } else if (26..38).contains(&rel_col) {
