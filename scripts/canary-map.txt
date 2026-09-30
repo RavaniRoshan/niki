@@ -159,3 +159,7 @@ fleet-session-not-a-bare-assignment | fleet_and_session_are_not_reachable_only_b
 one-helper-for-both-loops | fleet_and_session_go_through_one_helper | two loops, two copies of the same rule
 s-opens-a-session | s_opens_a_session_rather_than_navigating_to_nothing | `s` navigating to a page that renders nothing
 advertised-nav-keys-are-bound | the_advertised_navigation_keys_are_bound | a palette key resolving to nothing
+# B3-11 · `[Enter] open` opens something
+history-enter-opens-the-run | enter_opens_the_run_it_selected | a run loaded and nowhere to see it
+history-footer-says-where | the_footer_says_where_enter_goes | a footer describing a destination it does not have
+history-esc-still-goes-back | escape_still_goes_back | no way out but the digits
