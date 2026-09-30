@@ -523,9 +523,9 @@ committed                 # the edit is gone
 of its own options, and the trailing `--` that makes branch-vs-path safe does
 not help, because the flag is parsed first.
 
-## Iteration 3 — 2026-09-30 · batch 3, eleven slices
+## Iteration 3 — 2026-09-30 · batch 3, twelve slices
 
-Commits `4e57fdb`…`0599708`. Canary map 65 → 116. **`ROADMAP.md` §1 — navigation
+Commits `4e57fdb`…`6c8a3be`. Canary map 65 → 122. **`ROADMAP.md` §1 — navigation
 and the dead controls — is closed: all ten items.**
 
 §1 was called "the largest quality-of-life cluster, and the one left undone".
@@ -546,6 +546,7 @@ because the work kept finding things next to the thing being fixed.
 | B3-09 | `1fa2f7f` | The key matrix describes the codebase that exists |
 | B3-10 | `d22def0` | `g` and `s` work in `niki chat`, and `s` is not a blank page |
 | B3-11 | `0599708` | `[Enter] open` opens the run it selected |
+| B3-12 | `6c8a3be` | The permission badge governs a run instead of describing one |
 
 ### The pattern: fixing a dead key reveals the next dead thing
 
@@ -593,11 +594,22 @@ wiring points, and they fail separately.
 
 ### Next
 
-Batch 3 continues into `ROADMAP.md` §2 (chat ↔ pipeline depth). The largest
-items there are features rather than fixes — the tool cards are fully built
-and unreachable because the chat sends `tools: None` — so the honest
-candidates are the permission-wiring items, which are a claim about the
-product's security posture and not a feature.
+Batch 3 is complete: twelve slices, and `ROADMAP.md` §1 is closed in full.
+
+Next is `ROADMAP.md` §2. Two items there are now **corrected rather than
+pending**, and both corrections matter more than the fix would have:
+
+- The permission modal is not "structurally unreachable in chat" because of a
+  missing sender. A plain chat turn calls `stream_reply` — no tools, no
+  sandbox — so the modal is unreachable *because chat does not run tools*,
+  which is the owner's §0a decision. There is nothing to repair.
+- The permission badge was cosmetic, and is now real (B3-12).
+
+What is genuinely left in §2 is one item, and it is a feature: the tool cards
+are fully built (`components/tool_card.rs`, `tool_detail.rs`, the Enter
+hit-test) and unreachable because the chat sends `tools: None`. Wiring it is
+real work and is a product decision about how much of the agent's loop belongs
+in a conversation — not a defect.
 
 ### Blockers
 

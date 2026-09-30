@@ -40,19 +40,31 @@ built on a stable router (§1).
 - Tool cards in the transcript, with arguments and results. The renderer
   (`components/tool_card.rs`, `tool_detail.rs`, the Enter hit-test) is fully
   built and unreachable, because the chat sends `tools: None`.
-- **Branch checkout from the TUI.** `grep 'checkout' src/display/` → one hit,
-  and it is a printed hint on the *non*-TUI path. The last step of the core
-  journey still needs a second terminal.
-- History `Enter` now loads the task directory (T5) but does not switch to the
-  Diff page for it.
-- The permission modal is structurally unreachable in chat: `cli/chat.rs`
-  creates a channel whose sender is never given to `create_sandbox`, so
-  `DisplayEvent::PermissionRequest` can never be sent.
+- ~~**Branch checkout from the TUI.**~~ **DONE in batch 2** (`aa1a244`).
+  `session::branch`, shared by the TUI and the CLI, with the argument
+  validated first — `git checkout -f --` discards uncommitted work and exits
+  0, and the trailing `--` that makes branch-vs-path safe does not help
+  because the flag is parsed before it.
+- ~~History `Enter` loads the task directory but does not switch to the Diff
+  page.~~ **DONE in batch 3** (`0599708`): `[Enter] open` goes to the diff, and
+  `view` moves with `current_page` so the rendered page and the footer agree.
+- ~~The permission modal is structurally unreachable in chat: `cli/chat.rs`
+  creates a channel whose sender is never given to `create_sandbox`.~~
+  **This was wrong, and the correction matters.** A plain chat turn calls
+  `stream_reply` — no tools, no sandbox, no `create_sandbox` at all. So the
+  modal is unreachable in chat because **chat does not run tools**, which is
+  the owner's §0a decision ("`/run <task>` starts the pipeline, plain messages
+  stay conversation turns"), not a wiring bug. The sandbox *does* emit
+  `DisplayEvent::PermissionRequest` (`sandbox/worktree.rs:453`,
+  `sandbox/docker.rs:606`) and `state.rs:1702` handles it. There is nothing to
+  fix unless chat is to run tools, which is a product decision, not a repair.
 - `ask_user` / `approval` return "cannot ask" in any TUI run, because
   `TUI_OWNS_STDIN` makes `is_interactive_stdin()` false. No modal exists.
-- The permission badge is still cosmetic: `state.permission_mode` is read only
-  to pick the badge label, and never reaches `ToolContext`, `PermissionChecker`
-  or the sandbox. `--permission-mode` does not gate the sandbox path either.
+- ~~The permission badge is still cosmetic.~~ **DONE in batch 3** (`6c8a3be`).
+  The posture travels with `ChatSubmit` and lands on every stage that has not
+  started, because `ToolContext` reads `config.permissions.mode` per stage.
+  Both notices say so, since the stage in flight keeps its posture. The
+  default is still `manual`, asserted.
 - ~~Permission prompts auto-deny after **5 seconds**, saying
   *"Command denied by user"*.~~ **DONE in batch 2.** A timeout and a refusal
   are now distinct outcomes, the default window is two minutes rather than
