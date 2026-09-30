@@ -92,11 +92,14 @@ pipeline uses. Best done after §1 stabilises the router.
 - Google never emits `StreamChunk::Finish`, so a truncated Google response is
   misdiagnosed as "model output was not a usable artifact" — the exact failure
   that enum exists to prevent on the pipeline path.
-- A mid-pipeline failure destroys the Coder's work: all deliverable assembly
-  happens after `execute_pipeline` returns, and `Drop for WorktreeSandbox`
-  removes the worktree. A Tester OOM means no branch, no patch, no report. The
-  per-stage checkpoint already holds the Coder's `CodeDiff`; nothing reads it
-  back. (`run.rs:1010-1075`, `worktree.rs:520-536`, `pipeline.rs:3410-3418`)
+- ~~A mid-pipeline failure destroys the Coder's work.~~ **DONE in batch 2.**
+  The error path now salvages: the per-stage checkpoint's `produced_artifacts`
+  are written to `artifacts/` and a `SALVAGED.md` records what survived.
+  Deliberately **no branch and no working-tree mutation** — a failed run has
+  nothing verified to deliver, and quietly applying an unreviewed diff is a
+  larger semantic change than a hardening pass should make alone. The user
+  gets the `CodeDiff` and decides. (`run.rs` error arm,
+  `pipeline.rs:3410`, `runtime/mod.rs:321`)
 - `niki resume` restores state and exits: *"Ready for continuation."* No code
   path re-enters the pipeline from a checkpoint. Checkpoints are also written
   with a bare `fs::write` where an atomic writer already exists.

@@ -203,6 +203,30 @@ fn unreviewed_script(path: &std::path::Path) -> PathBuf {
         )
         .write(&path)
 }
+/// The Coder finishes; the Tester dies. The exact case that used to delete
+/// finished work.
+fn coder_then_tester_fails_script(path: &std::path::Path) -> PathBuf {
+    let path = path.to_path_buf();
+    MockScriptBuilder::new()
+        .add_response(
+            "mock-planner",
+            &wrap_json(&common::mock_llm::task_spec_json()),
+            100,
+            100,
+        )
+        .add_response(
+            "mock-coder",
+            &wrap_json(&common::mock_llm::code_diff_json(
+                "let end = start + size - 1;",
+                "let end = start + size;",
+                "src/list.rs",
+            )),
+            200,
+            100,
+        )
+        .add_error("mock-tester", "fatal", "the test run was killed")
+        .write(&path)
+}
 
 /// The same fixture with the multi-agent chain pinned.
 ///
@@ -1110,4 +1134,92 @@ async fn the_code_change_is_on_the_branch_not_only_in_a_sidecar_file() {
         serde_json::from_str::<serde_json::Value>(&body)
             .unwrap_or_else(|e| panic!("artifact {name} must be valid JSON: {e}"));
     }
+}
+
+/// A failed run must not destroy work an earlier stage already finished.
+///
+/// Every deliverable is assembled *after* `execute_pipeline` returns `Ok`, so an
+/// `Err` skipped the branch, the artifacts, the report and the patch — and
+/// `Drop for WorktreeSandbox` then ran `git worktree remove --force` and
+/// `remove_dir_all` on a directory holding the Coder's edits. A Tester failure
+/// therefore deleted finished work and left an error message and nothing else.
+///
+/// What must survive is the Coder's `CodeDiff` — the change itself, as data —
+/// written where `niki report` and the TUI's History page already look. What
+/// must **not** happen is a branch: a failed run has nothing verified to
+/// deliver, and an unreviewed diff is not a result.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_late_failure_preserves_the_coders_work_as_evidence() {
+    let repo = create_fixture_repo();
+    let project = repo.dir.path().to_path_buf();
+    let script_path = project.join(".niki-mock-script.json");
+    coder_then_tester_fails_script(&script_path);
+
+    // The shared fixture, with the topology the scenario needs. Hand-writing
+    // the agent tables is how the first version of this test picked up a
+    // reviewer still routed at `anthropic` and failed for the wrong reason —
+    // a missing API key, not the Tester blowing up.
+    let toml = minimal_mock_toml(&script_path, None)
+        .replace("topology = \"singleagent\"", "topology = \"multiagent\"");
+    std::fs::write(project.join("niki.toml"), toml).unwrap();
+
+    let err = niki::cli::run::handle(&run_args(project.clone()))
+        .await
+        .expect_err("the tester fails, so the run must fail");
+    assert!(
+        err.to_string().contains("killed") || err.to_string().contains("tester"),
+        "the run must fail for the reason it failed: {err:?}"
+    );
+
+    // Still no branch — a failed run delivers nothing.
+    let branches = git(&project, &["branch", "--list", "niki/*"]);
+    assert!(
+        branches.trim().is_empty(),
+        "a failed run must not cut a branch, got: {branches:?}"
+    );
+
+    // But the Coder's work must be recoverable.
+    let tasks_dir = project.join(".niki").join("tasks");
+    let task_dir = std::fs::read_dir(&tasks_dir)
+        .expect("a task dir")
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.is_dir())
+        .expect("exactly one task dir");
+
+    let salvaged = task_dir.join("SALVAGED.md");
+    assert!(
+        salvaged.exists(),
+        "a failed run must say what survived; the task dir is {task_dir:?}"
+    );
+    let note = std::fs::read_to_string(&salvaged).unwrap();
+    assert!(
+        note.contains("No branch was created"),
+        "the note must be explicit that nothing was delivered:\n{note}"
+    );
+    assert!(
+        note.to_lowercase().contains("not been reviewed"),
+        "recovered work is unreviewed and must say so:\n{note}"
+    );
+
+    // And the artifact itself — the actual change — must be there.
+    let coder_json = task_dir.join("artifacts/coder.json");
+    assert!(
+        coder_json.exists(),
+        "the Coder's CodeDiff must be preserved, not deleted with the worktree. \
+         Files present: {:?}",
+        std::fs::read_dir(task_dir.join("artifacts"))
+            .map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
+    );
+    let body = std::fs::read_to_string(&coder_json).unwrap();
+    assert!(
+        body.contains("let end = start + size;"),
+        "the recovered artifact must contain the change the Coder made:\n{body}"
+    );
+    // The host repository is untouched: salvage is evidence, not an edit.
+    assert_eq!(
+        git(&project, &["status", "--porcelain", "src/list.rs"]),
+        "",
+        "salvage must not silently modify the user's working tree"
+    );
 }

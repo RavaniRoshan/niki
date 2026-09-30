@@ -133,7 +133,7 @@ fn write_plan_md(task_dir: &std::path::Path, task: &Task, result: &PipelineResul
     }
 }
 
-fn role_filename(role: AgentRole) -> &'static str {
+pub fn role_filename(role: AgentRole) -> &'static str {
     match role {
         AgentRole::Planner => "planner",
         AgentRole::Coder => "coder",
