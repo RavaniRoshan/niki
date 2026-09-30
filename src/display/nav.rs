@@ -77,10 +77,19 @@ pub fn intent_from_key(key: &KeyEvent, text_focus: bool) -> Option<NavIntent> {
             KeyCode::Left => return Some(NavIntent::Page(Dir::Prev)),
             KeyCode::Down => return Some(NavIntent::Select(Dir::Next)),
             KeyCode::Up => return Some(NavIntent::Select(Dir::Prev)),
-            KeyCode::Char('l') | KeyCode::Char(']') => {
+            // `[` and `]` are page navigation. `h` and `l` **are not** — they
+            // are page letters, and both `PageId::from_key` and the command
+            // palette say so: `h` is History (`pages/help.rs`, PAGES section)
+            // and `l` is TestLog (`command_palette.rs:87`). Claiming them here
+            // meant neither page could ever be reached by its own key from any
+            // sub-page, because the nav block runs before the router.
+            //
+            // Prev/next page is not lost: the arrows and `[`/`]` do it, and a
+            // key that is *also* a page shortcut cannot be both.
+            KeyCode::Char(']') => {
                 return Some(NavIntent::Page(Dir::Next));
             }
-            KeyCode::Char('h') | KeyCode::Char('[') => {
+            KeyCode::Char('[') => {
                 return Some(NavIntent::Page(Dir::Prev));
             }
             KeyCode::Char('j') => return Some(NavIntent::Select(Dir::Next)),
@@ -234,12 +243,29 @@ mod tests {
             intent_from_key(&key(KeyCode::Char('k')), false),
             Some(NavIntent::Select(Dir::Prev))
         );
+        // `h` and `l` are page letters — History and TestLog — and must not
+        // be claimed here. See the arms in `intent_from_key` for why, and
+        // `tests/tui_page_letters_win.rs` for what a user loses if they are.
         assert_eq!(
             intent_from_key(&key(KeyCode::Char('l')), false),
-            Some(NavIntent::Page(Dir::Next))
+            None,
+            "`l` is the shortcut for TestLog in both `PageId::from_key` and the \
+             command palette; claiming it for page navigation makes TestLog \
+             unreachable by its own key"
         );
         assert_eq!(
             intent_from_key(&key(KeyCode::Char('h')), false),
+            None,
+            "`h` is the shortcut for History; claiming it makes History \
+             unreachable by its own key"
+        );
+        // `[` and `]` keep page navigation, so nothing is lost with them.
+        assert_eq!(
+            intent_from_key(&key(KeyCode::Char(']')), false),
+            Some(NavIntent::Page(Dir::Next))
+        );
+        assert_eq!(
+            intent_from_key(&key(KeyCode::Char('[')), false),
             Some(NavIntent::Page(Dir::Prev))
         );
     }
