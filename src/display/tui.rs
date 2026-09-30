@@ -1207,6 +1207,12 @@ fn run_tui(
                         } else if state.current_page == PageId::Fleet {
                             if handle_fleet_nav(key, &mut state) {
                                 engine.mark_dirty();
+                            } else if key.code == KeyCode::Char('q') {
+                                state.modal = Some(super::pages::Modal::Confirm {
+                                    title: "Quit".into(),
+                                    message: "Exit NIKI?".into(),
+                                });
+                                engine.mark_dirty();
                             } else if let Some(page) = global_page_jump(key) {
                                 state.current_page = page;
                                 engine.mark_dirty();
@@ -1214,10 +1220,32 @@ fn run_tui(
                         } else if state.current_page == PageId::Session {
                             if handle_session_nav(key, &mut state) {
                                 engine.mark_dirty();
+                            } else if key.code == KeyCode::Char('q') {
+                                // Neither Fleet nor Session answers `q`, and
+                                // both fall through here, so with the nav layer
+                                // no longer eating it they would have swallowed
+                                // it. A page that declines `q` confirms the quit
+                                // instead — never silently doing nothing.
+                                state.modal = Some(super::pages::Modal::Confirm {
+                                    title: "Quit".into(),
+                                    message: "Exit NIKI?".into(),
+                                });
+                                engine.mark_dirty();
                             } else if let Some(page) = global_page_jump(key) {
                                 state.current_page = page;
                                 engine.mark_dirty();
                             }
+                        } else if router.handle_key(key, &mut state) {
+                            // The remaining sub-pages' own keys, `q` included.
+                            //
+                            // This branch used to go straight to the nav layer,
+                            // which read `q` as `NavIntent::Quit` and broke the
+                            // event loop. Every one of these pages answers `q`
+                            // with "back to Run" — `pages/diff.rs:189`,
+                            // `pages/history.rs:281`, and nine more — and none
+                            // of them could run. The page goes first now, and
+                            // `q` is left for the modal below.
+                            engine.mark_dirty();
                         } else if let Some(intent) = crate::display::nav::intent_from_key(
                             &key,
                             crate::display::nav::text_focus_active(&state),
@@ -1257,14 +1285,18 @@ fn run_tui(
                                     }
                                 }
                                 NavIntent::Quit => {
-                                    // Mirror the Ctrl+C exit path: signal the
-                                    // run to stop first, so quitting does not
-                                    // leave a stage running.
-                                    if let Some(c) = state.cancel.clone() {
-                                        c.store(true, std::sync::atomic::Ordering::Relaxed);
-                                    }
+                                    // The page above already had its turn with
+                                    // `q` and declined it, so this is the
+                                    // fallback — and it asks, exactly as the Run
+                                    // page does. It used to `break` out of the
+                                    // event loop, which is how a user pressing
+                                    // "go back" on a sub-page lost the
+                                    // interface entirely.
+                                    state.modal = Some(super::pages::Modal::Confirm {
+                                        title: "Quit".into(),
+                                        message: "Exit NIKI?".into(),
+                                    });
                                     engine.mark_dirty();
-                                    break;
                                 }
                             }
                         } else if state.keybindings.resolve(&key) == Some(GlobalAction::GotoFleet) {
@@ -1568,10 +1600,25 @@ pub fn run_chat(
                     // Page navigation, before the chat composer. `niki chat` runs
                     // this second event loop, so the handler added to the first
                     // loop did not apply here — arrows and digits were bound and
-                    // advertised in the footer but did nothing. Page-scoped keys
-                    // still win: this sits after the router and the Fleet/Session
-                    // handlers below, and is skipped entirely in the composer.
+                    // advertised in the footer but did nothing.
+                    //
+                    // `q` is the exception, and the reason is 11 dead handlers.
+                    // Every sub-page answers `q` with "go back to Run"
+                    // (`pages/diff.rs:189`, `pages/history.rs:281`, and nine
+                    // more), and none of them could ever run: the nav layer sat
+                    // above the router, read `q` as `NavIntent::Quit`, and broke
+                    // the event loop. So a user on the Diff page pressing `q`
+                    // — the key that goes *back* everywhere else in the app —
+                    // lost the interface entirely. It also made the confirm-quit
+                    // modal below unreachable dead code, because the loop had
+                    // already exited before reaching it.
+                    //
+                    // So: on Chat, `q` quits. On a sub-page, `q` is not ours to
+                    // interpret — it falls through to the page, and a page that
+                    // does not want it lands on the confirm modal.
                     if state.current_page != PageId::Chat
+                        && (key.code != KeyCode::Char('q')
+                            || crate::display::nav::text_focus_active(&state))
                         && let Some(intent) = crate::display::nav::intent_from_key(
                             &key,
                             crate::display::nav::text_focus_active(&state),
@@ -1597,7 +1644,17 @@ pub fn run_chat(
                                     state.view = crate::display::state::ViewMode::Page(page);
                                 }
                             }
-                            NavIntent::Quit => break,
+                            NavIntent::Quit => {
+                                // Unreachable while the block above excludes
+                                // `q`, and kept honest rather than left as
+                                // `break`: if the gate above is ever loosened
+                                // and `q` reaches here again, it must ask, the
+                                // way every other route out of the app does.
+                                state.modal = Some(crate::display::pages::Modal::Confirm {
+                                    title: "Quit".into(),
+                                    message: "Exit NIKI?".into(),
+                                });
+                            }
                         }
                         state.view = match state.current_page {
                             PageId::Chat => crate::display::state::ViewMode::Chat,
@@ -1658,8 +1715,21 @@ pub fn run_chat(
 
                     // Fleet/Session own their navigation (tabs, selection); other
                     // keys fall back to global page jumps, same as run_tui.
+                    //
+                    // Neither handles `q`, and both `continue` before the router
+                    // — so with the nav layer no longer eating `q`, they would
+                    // have swallowed it entirely. They get the same rule every
+                    // other sub-page gets: the page's handler first, and a page
+                    // that declines `q` falls back to the confirm modal rather
+                    // than to nothing.
                     if state.current_page == PageId::Fleet {
                         if handle_fleet_nav(key, &mut state) {
+                            needs_render = true;
+                        } else if key.code == KeyCode::Char('q') {
+                            state.modal = Some(crate::display::pages::Modal::Confirm {
+                                title: "Quit".into(),
+                                message: "Exit NIKI?".into(),
+                            });
                             needs_render = true;
                         } else if let Some(page) = global_page_jump(key) {
                             state.current_page = page;
@@ -1669,6 +1739,12 @@ pub fn run_chat(
                     }
                     if state.current_page == PageId::Session {
                         if handle_session_nav(key, &mut state) {
+                            needs_render = true;
+                        } else if key.code == KeyCode::Char('q') {
+                            state.modal = Some(crate::display::pages::Modal::Confirm {
+                                title: "Quit".into(),
+                                message: "Exit NIKI?".into(),
+                            });
                             needs_render = true;
                         } else if let Some(page) = global_page_jump(key) {
                             state.current_page = page;
@@ -1705,24 +1781,28 @@ pub fn run_chat(
                         continue;
                     }
 
-                    match key.code {
-                        KeyCode::Char('q') => {
-                            state.modal = Some(crate::display::pages::Modal::Confirm {
-                                title: "Quit".into(),
-                                message: "Exit NIKI?".into(),
-                            });
-                            needs_render = true;
-                        }
-                        _ => {
-                            if router.handle_key(key, &mut state) {
-                                needs_render = true;
-                            } else if let Some(page) = global_page_jump(key) {
-                                // Page bindings win; bare letters fall back to
-                                // global jumps so every page is reachable.
-                                state.current_page = page;
-                                needs_render = true;
-                            }
-                        }
+                    // The page's own handler runs first, `q` included.
+                    //
+                    // This used to read `q` as a special case *above* the
+                    // router, which made the `q` branch below unreachable:
+                    // 11 pages answer `q` with "back to Run" and none of them
+                    // could run, while the confirm-quit modal — the only thing
+                    // that branch ever did — was dead code. A key can only
+                    // mean one thing, so the page gets it, and the modal is
+                    // what a page that declines `q` falls back to.
+                    if router.handle_key(key, &mut state) {
+                        needs_render = true;
+                    } else if key.code == KeyCode::Char('q') {
+                        state.modal = Some(crate::display::pages::Modal::Confirm {
+                            title: "Quit".into(),
+                            message: "Exit NIKI?".into(),
+                        });
+                        needs_render = true;
+                    } else if let Some(page) = global_page_jump(key) {
+                        // Page bindings win; bare letters fall back to
+                        // global jumps so every page is reachable.
+                        state.current_page = page;
+                        needs_render = true;
                     }
                 }
                 Ok(Event::Mouse(mouse)) => {
