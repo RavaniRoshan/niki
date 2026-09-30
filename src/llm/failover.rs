@@ -323,13 +323,19 @@ impl LlmProvider for FailoverProvider {
                 }
                 Err(e) => {
                     let err_str = e.to_string().to_lowercase();
+                    // Whether this is a deadline expiry, by type — see
+                    // `is_timeout_error`. Its Display carries no "timeout",
+                    // only its source chain does, so the string test inside
+                    // `classify_error` cannot see it.
+                    let timed_out = super::provider::is_timeout_error(&e);
                     // Whole-class HTTP status matching, not just 429/503: any
                     // 5xx is an upstream fault and a different provider is
                     // exactly the remedy. Previously a 500 from the primary
                     // returned immediately, so a single upstream error defeated
                     // the entire failover chain — the feature silently did
                     // nothing for the most common server-side failure.
-                    let (is_transient, auth_failure) = classify_error(&err_str);
+                    let (mut is_transient, auth_failure) = classify_error(&err_str);
+                    is_transient |= timed_out;
 
                     {
                         let mut b = breaker.lock().await;

@@ -80,13 +80,90 @@ pub trait LlmProvider: Send + Sync {
     }
 }
 
-/// Build an HTTP client with a bounded request timeout. Without this, a hung
-/// upstream API blocks the whole run indefinitely. See research report S12.
+/// How long to wait for the TCP connection and TLS handshake.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// How long a single read may stall before the request is abandoned.
+///
+/// This was a **total** deadline: `ClientBuilder::timeout` is documented as
+/// applying "from when the request starts connecting until the response body
+/// has finished", so it capped the whole generation, not the wait between
+/// bytes. A 3B model on CPU — the README's zero-setup path — spends minutes
+/// producing an answer, and a stage that ran long was killed mid-stream.
+///
+/// `read_timeout` resets on every chunk, so a slow model is fine as long as it
+/// is still saying something; what it catches is a genuinely hung upstream,
+/// which is what the original deadline was for.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Build an HTTP client with bounded connect and read timeouts. Without these,
+/// a hung upstream API blocks the whole run indefinitely. See research report
+/// S12.
 pub fn http_client() -> anyhow::Result<reqwest::Client> {
     reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
         .build()
         .map_err(|e| anyhow!("failed to build HTTP client: {e}"))
+}
+
+/// Is this error a timeout?
+///
+/// Classified by **type**, not by string, and that is the whole point. A
+/// total-deadline expiry surfaces as `reqwest::Error` of kind `Body`, whose
+/// `Display` is *"request or response body error for url (…)"* — the
+/// underlying `io::Error(TimedOut)` is only in the source chain and is never
+/// printed. So every classifier in this codebase, all of which match on
+/// substrings like `"timeout"`, classified it as a **permanent** failure: not
+/// retried at the provider level (transport errors are deliberately not
+/// retried there), not retried at the agent level, and not routed through the
+/// failover chain. The stage simply died.
+///
+/// Downcasting to `reqwest::Error` and asking `is_timeout()` is the only
+/// version of this question the type system can answer.
+pub fn is_timeout_error(e: &anyhow::Error) -> bool {
+    if let Some(re) = e.downcast_ref::<reqwest::Error>() {
+        if re.is_timeout() || re.is_connect() {
+            return true;
+        }
+        // A stalled **body** is not reported as a timeout even when it is one.
+        // Measured against a server that accepts the connection and then never
+        // answers: reqwest surfaces
+        // `error decoding response body`, with the real cause only in the
+        // source chain. `is_timeout()` is false there, so the type test alone
+        // would miss the case this exists for — which is a generation that
+        // stalled part-way through.
+        // `std::error::Error::source`, reached through the `dyn` view so the
+        // chain is walkable without knowing reqwest's internals.
+        let as_dyn: &(dyn std::error::Error + 'static) = re;
+        if is_timeout_cause(as_dyn) {
+            return true;
+        }
+    }
+    if is_timeout_cause(e.as_ref()) {
+        return true;
+    }
+    // An error that has already been stringified (logged, or carried through a
+    // `map_err` that dropped the type) still answers the old way.
+    let msg = e.to_string().to_ascii_lowercase();
+    msg.contains("timeout") || msg.contains("timed out")
+}
+
+/// Walk an error's source chain for an `io::Error` that is a timeout.
+fn is_timeout_cause(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut cursor: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cursor {
+        if let Some(io) = e.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::TimedOut
+        {
+            return true;
+        }
+        if e.to_string().to_ascii_lowercase().contains("timed out") {
+            return true;
+        }
+        cursor = e.source();
+    }
+    false
 }
 
 const RETRY_MAX_ATTEMPTS: u32 = 4;
