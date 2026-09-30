@@ -332,3 +332,9 @@ permission-survives-a-tiny-terminal | a_tiny_terminal_does_not_break_the_permiss
 # B6-05 · four of §6's five claims had rotted; the fifth was two doc lies
 readme-does-not-advertise-mcp | the_readme_does_not_advertise_mcp_as_something_agents_can_use | a feature-table row promising a half-built feature
 example-config-does-not-claim-mcp-prompt-injection | the_example_config_does_not_claim_mcp_tools_reach_the_agent | a config comment telling a user their tools reach the model
+# B6-06 · §4.5, §5 and §9.3/§9.4 were four claims the code had already fixed
+provider-500-502-are-transient | a_500_or_502_from_a_provider_is_transient | the agent loop's weaker matcher, so a 502 got less resilience for having a second retry layer
+provider-400-is-not-transient | a_400_is_not_transient | a matcher that became "retry everything", turning a bad key into four slow identical failures
+agent-loop-uses-shared-predicate | the_agent_loop_uses_the_shared_predicate | a shared retry helper nothing calls, the shape found three times already
+coder-loop-reports-its-failure | the_coder_loop_reports_its_failure | `.ok()?` again, so a network failure is a silent fallback
+git-temp-paths-are-run-scoped | no_temporary_path_in_git_output_is_shared_between_runs | a temp path shared by every run on the machine
