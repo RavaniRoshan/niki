@@ -150,7 +150,7 @@ pub fn render_session(state: &SessionState, area: ratatui::layout::Rect, buf: &m
     }
 
     // Footer
-    let footer = Paragraph::new(" Tab Cycle · ←→ Switch · Esc Back to Fleet · P Pause · R Resume")
+    let footer = Paragraph::new(" Tab Cycle · ←→ Switch · P Pause/Resume · Esc Back to Fleet")
         .style(Style::default().fg(crate::display::theme::fg_dim()));
     footer.render(
         ratatui::layout::Rect {

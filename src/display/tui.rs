@@ -2170,8 +2170,21 @@ fn handle_fleet_nav(key: KeyEvent, state: &mut AppState) -> bool {
             // Open the selected mission's Session view directly from Fleet.
             state.open_selected_mission();
         }
+        // `P` toggles the live stream, which is `state.paused` — the same
+        // flag the Run page's `Space` and the command palette's `pause /
+        // resume` both flip. The footer advertised `P Pause` and `R Resume`
+        // separately and neither was handled: one toggle, two advertised keys,
+        // neither wired. `R` is gone rather than aliased, because two keys for
+        // one action is how a footer rots.
+        KeyCode::Char('p') => {
+            state.paused = !state.paused;
+        }
         KeyCode::Enter => state.open_selected_mission(),
         KeyCode::Esc => state.current_page = PageId::Chat,
+        // `K Kill` and `V Diff` were advertised here and have no
+        // implementation anywhere in the tree. They are retracted from the
+        // footer rather than wired to something approximate, because a key
+        // that kills the wrong thing is worse than a key that is not there.
         _ => return false,
     }
     true
@@ -2194,6 +2207,11 @@ fn handle_session_nav(key: KeyEvent, state: &mut AppState) -> bool {
             if let Some(ref mut sv) = state.session_view {
                 sv.next_tab();
             }
+        }
+        // Same one flag as the Run page's `Space` and the Fleet grid's `P`.
+        // The footer advertised `P Pause` and `R Resume`; neither did anything.
+        KeyCode::Char('p') => {
+            state.paused = !state.paused;
         }
         KeyCode::Esc => state.close_session_to_fleet(),
         _ => return false,

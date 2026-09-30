@@ -129,3 +129,7 @@ page-letters-not-claimed | the_page_letters_are_not_claimed_by_the_navigator | `
 no-page-letter-claimed | no_page_letter_is_claimed_by_the_navigator | a third collision nobody checked for
 page-nav-survives | page_navigation_still_works_on_the_keys_that_are_not_page_letters | losing prev/next page along with the collision
 page-letter-in-composer-is-text | a_page_letter_in_the_composer_is_text_not_navigation | a letter typed into a field navigating away
+# B3-06 · a footer's claims are the ones the handlers back
+footer-keys-are-handled | an_advertised_key_is_either_handled_or_retracted | six advertised controls, none of them handled
+retracted-keys-are-gone | the_retracted_keys_are_gone_from_the_footers | `K Kill` / `V Diff` / `R Resume` back in a footer
+pause-is-one-flag-everywhere | the_real_handlers_carry_the_pause_arm | a new pause flag per surface instead of the one

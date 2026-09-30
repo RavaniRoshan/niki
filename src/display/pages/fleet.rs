@@ -144,10 +144,9 @@ pub fn render_fleet(fleet: &FleetState, area: ratatui::layout::Rect, buf: &mut B
     }
 
     // Footer
-    let footer = Paragraph::new(
-        " ↑↓ Navigate · Enter Open · P Pause · R Resume · K Kill · V Diff · Esc Back",
-    )
-    .style(Style::default().fg(crate::display::theme::fg_dim()));
+    let footer =
+        Paragraph::new(" ↑↓ Navigate · Enter Open · S Session · P Pause/Resume · Esc Back")
+            .style(Style::default().fg(crate::display::theme::fg_dim()));
     footer.render(
         ratatui::layout::Rect {
             x: area.x,
