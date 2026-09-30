@@ -1,5 +1,6 @@
 /target
 .niki/
+.niki-worktrees/
 niki.toml
 skills-lock.json
 
