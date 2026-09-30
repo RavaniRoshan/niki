@@ -669,3 +669,78 @@ fn backticked_niki_commands(text: &str) -> Vec<String> {
     }
     out
 }
+
+/// A feature table row that promises a working feature must not survive the
+/// feature being half-built.
+///
+/// `ROADMAP.md` §6 said MCP "is a documented Advanced feature that is a stub",
+/// and offered "either wire them or remove the README rows". Four of that
+/// section's five claims turned out to be **stale** when re-measured — the
+/// code had moved on and the record had not. This is the one place the record
+/// and the code agreed, and they agreed on something a user hits first: the
+/// README's feature table.
+///
+/// The honest row is not "MCP: removed". Servers are discovered, the config
+/// parses, and `mcp list` reports them; what does not happen is an agent
+/// *calling* one. So the row has to say that.
+#[test]
+fn the_readme_does_not_advertise_mcp_as_something_agents_can_use() {
+    let readme = read("README.md");
+    let mcp_rows: Vec<&str> = readme
+        .lines()
+        .filter(|l| l.to_lowercase().contains("mcp") && l.contains('|'))
+        .collect();
+    assert!(
+        !mcp_rows.is_empty(),
+        "MCP should still be mentioned in the README — a row removed outright \
+         is a different lie from a row that overstates it"
+    );
+    for row in mcp_rows {
+        let lower = row.to_lowercase();
+        // A row in a feature table reads as "this works". The words that say
+        // otherwise have to be in the row, not in a footnote three sections
+        // down.
+        let qualifies = ["not yet", "not callable", "discovered", "no", "planned"]
+            .iter()
+            .any(|w| lower.contains(w));
+        assert!(
+            qualifies,
+            "this README row advertises MCP without saying the agents cannot \
+             call it, which is the one thing a reader needs: {row:?}"
+        );
+    }
+}
+
+/// And the example config must not tell a user their MCP tools reach the
+/// model. They do not: `McpManager::tools_summary` says "NOT YET CALLABLE"
+/// and routes to a display notice, never to a prompt.
+#[test]
+fn the_example_config_does_not_claim_mcp_tools_reach_the_agent() {
+    let example = read("niki.example.toml");
+    let mcp_block: String = example
+        .lines()
+        .skip_while(|l| !l.contains("MCP (Model Context Protocol)"))
+        .take_while(|l| !l.trim_start().starts_with('#') || l.contains("MCP"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        mcp_block.contains("MCP"),
+        "the [mcp] section must still be documented — it is real config"
+    );
+    for lie in [
+        "injected into agent prompts",
+        "extending their capabilities",
+        // A command that does not exist. A user who copies it gets a usage
+        // error and concludes the tool does not know what it is talking about
+        // — and `every_niki_command_in_every_documented_surface_exists` is the
+        // gate that caught this one being written.
+        "niki mcp list",
+    ] {
+        assert!(
+            !mcp_block.to_lowercase().contains(lie),
+            "the example config claims {lie:?}, which the code does not do: \
+             no MCP tool is ever called by an agent, so nothing is injected \
+             into any prompt. The block reads:\n{mcp_block}"
+        );
+    }
+}

@@ -200,7 +200,12 @@ network_disabled = true
 # backend = "docker"
 
 # MCP (Model Context Protocol) — connect to external tool servers.
-# MCP tools are injected into agent prompts, extending their capabilities.
+#
+# Servers are discovered, and a run prints a notice naming the tools it found
+# on them. Their tools are NOT yet callable: no agent can invoke one, and
+# nothing is injected into any agent prompt. There is no subcommand for MCP at
+# all, so the run notice is the only place this surfaces. The README feature
+# table carries the same caveat.
 #
 # [mcp]
 # read_only = true  # Governance: agents can only call read-only MCP tools
