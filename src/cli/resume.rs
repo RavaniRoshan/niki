@@ -25,6 +25,7 @@ pub async fn handle(args: &ResumeArgs) -> Result<()> {
     };
 
     let config = NikiConfig::load(&project_dir)?;
+    let output_dir = config.general.output_dir.clone();
     let runtime = AgentRuntime::new(config);
 
     println!(
@@ -57,7 +58,47 @@ pub async fn handle(args: &ResumeArgs) -> Result<()> {
         println!("Active branch:      {}", branch);
     }
     println!("============================================================");
-    println!("Session state restored successfully. Ready for continuation.");
+
+    // What actually happened, and what to do about it.
+    //
+    // This used to print "Session state restored successfully. Ready for
+    // continuation." and exit 0. Nothing was restored into anything: the
+    // `runtime` holding the session is dropped on the next line, and no code
+    // path anywhere re-enters the pipeline from a checkpoint. The message told
+    // a user with an interrupted run that they could carry on, and then
+    // nothing happened.
+    //
+    // Re-entering the pipeline from a checkpoint is a feature, not a repair —
+    // it is the whole of the next slice's decision, and pretending otherwise
+    // here would be the exact dishonesty this branch has been removing
+    // elsewhere. So this says what is true and names the commands that do
+    // something.
+    let task_dir = project_dir
+        .join(&output_dir)
+        .join("tasks")
+        .join(checkpoint.task_id.to_string());
+    println!("Nothing was re-run. This command located and described the checkpoint;");
+    println!("it did not restart the pipeline, and NIKI cannot yet continue one mid-flight.");
+    println!();
+    println!(
+        "  What survived: {} artifact(s) from the checkpoint above.",
+        checkpoint.produced_artifacts.len()
+    );
+    if task_dir.is_dir() {
+        println!("  On disk:      {}", task_dir.display());
+        println!(
+            "                report.md, changes.patch and artifacts/ are there if the run got that far."
+        );
+    }
+    println!(
+        "  To continue:  re-run the task — `niki run \"{}\"`",
+        session.task_description
+    );
+    println!(
+        "                or, from the TUI, `niki chat` then `/run {}`.",
+        session.task_description
+    );
+    println!("  To inspect:   `niki report {}`", checkpoint.task_id);
 
     Ok(())
 }

@@ -193,3 +193,7 @@ users-own-line-respected | an_existing_exclude_line_is_not_duplicated | a second
 sandbox-creation-writes-it | creating_a_sandbox_writes_the_exclude | a working helper nothing calls
 sandbox-path-not-publishable | a_sandbox_path_is_not_publishable | an agent reporting a sandbox path as its change
 this-repo-ignores-sandboxes | this_repository_ignores_its_own_sandboxes | NIKI running inside NIKI
+# B4-04 · `niki resume` does not claim it continued something
+resume-does-not-claim-continuation | resume_does_not_claim_it_continued | "Ready for continuation" with nothing re-entered
+resume-still-reports | resume_still_reports_the_checkpoint | the useful half of the command removed with the lie
+resume-missing-still-fails | a_missing_checkpoint_still_fails_loudly | a table of zeroes and exit 0
