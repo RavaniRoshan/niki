@@ -818,7 +818,11 @@ fn route_mouse(
                             }
                         };
                         state.set_notice(
-                            &format!("Permission mode: {:?}", state.permission_mode),
+                            &format!(
+                                "Permission mode: {} — applies from the next stage \
+                                 (set [permissions] mode to make it the default)",
+                                state.permission_mode.label()
+                            ),
                             1500,
                         );
                         dirty = true;
@@ -1415,6 +1419,17 @@ pub struct ChatSubmit {
     /// handle the TUI's Esc sets. Handing each side its own flag is how Esc
     /// came to print "Stopping…" and stop nothing.
     pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The permission posture the TUI is displaying, as a `[permissions] mode`
+    /// value.
+    ///
+    /// The status-bar badge used to cycle `state.permission_mode`, which
+    /// **nothing else in the tree read**: all six `PermissionMode` variants
+    /// existed to be rendered as a label. The posture that actually governs a
+    /// run is `config.permissions.mode`, which `ToolContext` reads when it
+    /// builds each stage — so it is re-read per stage and this field lands on
+    /// the next one. `None` means "whatever the config says", which is the
+    /// headless `--message` path, where there is no TUI to press a key on.
+    pub permission_mode: Option<String>,
 }
 
 pub fn run_chat(
@@ -1690,6 +1705,9 @@ pub fn run_chat(
                                             text: text.clone(),
                                             history,
                                             cancel: cancel.clone(),
+                                            permission_mode: Some(
+                                                state.permission_mode.config_value().to_string(),
+                                            ),
                                         });
                                     }
                                     // Something is now in flight. Without this

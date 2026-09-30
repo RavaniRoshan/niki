@@ -567,7 +567,19 @@ impl Page for ChatPage {
         {
             if state.input_state.buffer.is_empty() {
                 state.permission_mode = state.permission_mode.next();
-                state.set_notice(&format!("⏵⏵ {}", state.permission_mode.label()), 2000);
+                // Say what it means and when it lands. The badge used to change
+                // a label and nothing else; now it reaches the stages that
+                // have not started, and a notice that said only "manual" left
+                // the user unable to tell a working control from a decorative
+                // one — which is the whole problem with the old version.
+                state.set_notice(
+                    &format!(
+                        "Permission mode: {} (applies from the next stage; \
+                         set [permissions] mode to make it the default)",
+                        state.permission_mode.label()
+                    ),
+                    3000,
+                );
             } else {
                 state.show_thinking = !state.show_thinking;
                 state.set_notice(

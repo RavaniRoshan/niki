@@ -103,6 +103,29 @@ impl PermissionMode {
         }
     }
 
+    /// The `[permissions] mode` value this badge stands for.
+    ///
+    /// The labels are not the values: the badge says "don't ask" and the
+    /// config says `dontask`, and the badge says "manual" where the config
+    /// says `manual` but a *third* thing — `parse_permission_mode` — coerces
+    /// anything unrecognised to. Only `manual`, `auto`, `dontask` and `bypass`
+    /// are postures the tool loop acts on, so the two that are not real
+    /// postures say which real one they mean rather than inventing a value
+    /// nothing would honour.
+    pub fn config_value(&self) -> &'static str {
+        match self {
+            PermissionMode::Default => "manual",
+            PermissionMode::Plan => "manual",
+            PermissionMode::Auto => "auto",
+            PermissionMode::DontAsk => "dontask",
+            PermissionMode::BypassPermissions => "bypass",
+            // `accept edits` has no counterpart in `parse_permission_mode`,
+            // which would coerce it to `manual` — so it says so rather than
+            // sending a value that quietly means something else.
+            PermissionMode::AcceptEdits => "manual",
+        }
+    }
+
     /// Short badge label for the status bar.
     pub fn badge(&self) -> &'static str {
         match self {

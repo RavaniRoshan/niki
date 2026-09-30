@@ -222,6 +222,7 @@ fn a_submit_carries_the_conversation_before_it() {
             niki::llm::provider::ChatTurn::assistant("Billing, Auth, Storage."),
         ],
         cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        permission_mode: None,
     };
     assert_eq!(submit.history.len(), 2);
     assert_eq!(submit.history[1].role, "assistant");
