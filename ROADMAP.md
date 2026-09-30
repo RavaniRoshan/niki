@@ -58,7 +58,7 @@ built on a stable router (§1).
   `DisplayEvent::PermissionRequest` (`sandbox/worktree.rs:453`,
   `sandbox/docker.rs:606`) and `state.rs:1702` handles it. There is nothing to
   fix unless chat is to run tools, which is a product decision, not a repair.
-- `ask_user` / `approval` return "cannot ask" in any TUI run, because
+- ~~`ask_user` / `approval` return "cannot ask" in any TUI run, because `TUI_OWNS_STDIN` makes `is_interactive_stdin()` false.~~ **The first half of this was never a defect and the record said it was.** Failing closed there is deliberate, and `runtime/tools.rs` documents why at length: the TUI holds stdin in raw mode and runs its own `event::read()`, so `read_line` would race it and could take a stray `y` — typed at the *interface*, for something it never showed the user — as consent to a command. **DONE in batch 6**: what was missing is that both descriptions said "when stdin is not interactive", a condition the model cannot check, so it had to guess. They now name the situation, say what to do instead, and say that `approval` is a denial rather than a question. **What remains is a capability gap, not a correctness one:** in a TUI run there is no way to ask the user anything. Closing it means a modal the TUI owns, fed by a channel from the tool loop — a feature, and the next slice that wants it. `nothing_in_the_product_relies_on_them_working` fails the day something does. |
   `TUI_OWNS_STDIN` makes `is_interactive_stdin()` false. No modal exists.
 - ~~The permission badge is still cosmetic.~~ **DONE in batch 3** (`6c8a3be`).
   The posture travels with `ChatSubmit` and lands on every stage that has not

@@ -286,3 +286,8 @@ dashboard-escapes-what-it-embeds | the_dashboard_escapes_what_it_embeds | a run'
 run-tui-loads-its-project | run_tui_loads_its_own_project_config | `niki run --project X --tui` rendering with the shell cwd's niki.toml
 both-surfaces-agree | both_surfaces_load_the_project_they_were_given | one surface fixed while the other keeps its own path
 tui-spawnable-without-a-pipeline | the_tui_can_be_spawned_without_a_pipeline | losing the way to observe the divergence
+# B6-01 · the two human-input tools say what the model can act on
+ask-user-says-when-it-fails | ask_user_says_it_is_unavailable_in_a_tui_run | a precondition the model cannot check
+approval-says-it-always-denies | approval_says_it_always_denies_in_a_tui_run | a denial presented as a question the model can retry
+fail-closed-behaviour-untouched | the_fail_closed_behaviour_is_untouched | a description edit quietly relaxing a safety path
+nothing-depends-on-them | nothing_in_the_product_relies_on_them_working | a real caller for a tool that always fails
