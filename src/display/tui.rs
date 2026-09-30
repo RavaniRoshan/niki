@@ -333,8 +333,16 @@ fn route_overlay_key(
         return OverlayOutcome::Consumed;
     }
 
-    // The two globals that must work over a help overlay: they toggle it, and
-    // the toggle is the only way out of it.
+    // `?` opens the which-key overlay, which is what the status bar advertises
+    // it as ("? keys") and what the binding is named for.
+    //
+    // The Help *page* is the other help surface, and the two used to disagree:
+    // the overlay builds its rows from `BINDING_TABLE` so it always matched
+    // behaviour, while the page was a hand-written copy that had drifted to
+    // `[t] theme` when the binding is `ctrl+t`. The page's GLOBAL rows are
+    // generated from the same table now, so `?` here is the quick global
+    // reference and `Ctrl+P → help` is the full one — and neither claims to be
+    // the other.
     if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleHelp) {
         state.show_help = !state.show_help;
         return OverlayOutcome::Consumed;

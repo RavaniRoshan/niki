@@ -107,3 +107,12 @@ jk-scrolls-the-page | j_scrolls_a_page_whose_footer_says_it_does | "[j/k] scroll
 jk-scrolls-back | k_scrolls_back | a handler that only ever increments
 jk-does-not-wrap | k_at_the_top_does_not_wrap_to_the_bottom | `k` at the top jumping to the bottom
 jk-reaches-help-sections | j_moves_the_help_sections | a section cursor that moves and is never drawn
+# B3-02 · the help a user reaches describes the keys they press
+help-has-no-stale-bare-t | the_help_page_does_not_claim_a_bare_t_for_theme | a hand-written help page drifting from the keybinding table
+help-q-is-not-always-quit | the_help_page_does_not_say_q_is_always_quit | "q quit" on 11 pages where q goes back
+help-lists-every-bound-global | every_bound_global_appears_in_the_help | a help page that can silently shrink
+help-reflects-a-rebound-key | the_help_page_reflects_a_rebound_key | help that ignores the user's own keybindings
+palette-theme-names-the-chord | the_palette_theme_entry_names_the_bound_key | the stale `t` in a second place
+palette-does-not-claim-a-dead-shortcut | the_palette_does_not_claim_question_mark_reaches_help | `?` advertised as a route it cannot be
+palette-shortcuts-are-page-letters | every_other_palette_shortcut_is_a_real_page_letter | an entry whose shortcut cannot reach its page
+help-page-can-be-left | the_help_page_can_be_left | a help page with no way out
