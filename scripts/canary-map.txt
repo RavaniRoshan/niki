@@ -139,3 +139,9 @@ no-digit-aliases | no_two_digits_reach_the_same_page | a numbering where two key
 help-documents-every-digit | the_help_documents_every_digit | the numbering knowable only from the source
 unnumbered-pages-say-how-to-reach-them | the_pages_past_the_digits_say_how_to_reach_them | a list that stops at 9 and goes quiet
 shortcut-is-the-inverse | every_pages_shortcut_actually_reaches_it | a shortcut table that names a key which does not work
+# B3-08 · the Session Conversation tab is not permanently empty
+session-conversation-is-live | the_conversation_tab_shows_the_live_transcript | a first tab that renders "No messages yet" forever
+session-empty-state-is-honest | an_empty_conversation_says_so_and_says_how | an empty tab claiming to be populated, or the reverse
+session-shows-the-tail | a_long_conversation_shows_its_most_recent_turns | turn one of ninety, which reads as a broken page
+session-log-is-wired | the_event_loop_passes_the_live_chat_log | the loop passing an empty log
+session-tab-uses-the-log | the_tab_uses_the_log_it_is_given | the page reading the field nothing writes
