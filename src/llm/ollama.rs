@@ -246,6 +246,17 @@ impl LlmProvider for OllamaProvider {
         ))
     }
 
+    fn endpoint(&self) -> String {
+        format!(
+            "{}/api/chat",
+            self.config
+                .base_url
+                .as_deref()
+                .unwrap_or("http://localhost:11434")
+                .trim_end_matches('/')
+        )
+    }
+
     fn provider_name(&self) -> &str {
         "ollama"
     }

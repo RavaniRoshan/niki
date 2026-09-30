@@ -42,6 +42,24 @@ pub trait LlmProvider: Send + Sync {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>>;
     fn provider_name(&self) -> &str;
 
+    /// The URL this provider will actually send to, resolved from the config.
+    ///
+    /// Exists because eleven tests in `tests/multi_provider.rs` asserted
+    /// `create_provider(X, …).provider_name() == X` — comparing a struct field
+    /// to the string it was constructed from, which any implementation passes —
+    /// and two of them were *named* `openrouter_endpoint_resolves_correctly`
+    /// while setting a `base_url` and never reading it. The endpoint was
+    /// therefore untested: a provider pointed at the wrong host, or one that
+    /// double-suffixed `/v1/messages`, would have gone unnoticed.
+    ///
+    /// Each implementation calls the **same resolver its request path uses**,
+    /// so this cannot report an endpoint the provider would not use. An empty
+    /// string means the provider has no single endpoint (the mock), which is
+    /// better than a plausible lie.
+    fn endpoint(&self) -> String {
+        String::new()
+    }
+
     /// Whether this provider supports native structured output (JSON schema constrained decoding).
     fn supports_structured_output(&self) -> bool {
         false

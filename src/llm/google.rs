@@ -235,6 +235,16 @@ impl LlmProvider for GoogleProvider {
         ))
     }
 
+    /// Google's URL is per-model and per-method, so this reports the base the
+    /// request path resolves from, without inventing a model name to hang a
+    /// method off.
+    fn endpoint(&self) -> String {
+        match self.config.base_url.as_deref() {
+            Some(b) => b.trim_end_matches('/').to_string(),
+            None => "https://generativelanguage.googleapis.com/v1beta".to_string(),
+        }
+    }
+
     fn provider_name(&self) -> &str {
         "google"
     }
