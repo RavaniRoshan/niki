@@ -896,3 +896,91 @@ fn a_uniquely_trimmed_anchor_still_applies() {
         "and leaves the other alone: {out:?}"
     );
 }
+
+/// A model-authored path must not escape the worktree.
+///
+/// The `create` branch did `wt.join(target)` and then `create_dir_all` +
+/// `write`. `target` is `CodeDiff.files_changed[].path`, carried verbatim from
+/// model output — `schemas/code_diff.schema.json:27-29` types it as a bare
+/// string with no pattern — and `Path::join` **discards the base entirely** for
+/// an absolute path. A `..` traversal was equally unchecked.
+///
+/// So one edit with an empty `search` and a target of `/home/user/.bashrc`
+/// passed `validate_artifact` (the semantic layer only rejects a block empty on
+/// *both* sides), created the parent directories if needed, and wrote outside
+/// the project, as the user, with no permission check anywhere on this path. It
+/// reached the model on the worktree backend — the one the setup wizard selects
+/// on any machine without Podman, and the one the README's zero-setup path
+/// names.
+///
+/// `resolve_tool_path` is the guard every read/write/edit/patch tool already
+/// uses. The test drives the real applier with a real absolute target and
+/// asserts both that it is refused *and* that nothing was written.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_create_edit_cannot_write_outside_the_worktree() {
+    let dir = fixture_repo();
+    let repo = dir.path();
+    let sb = worktree_sandbox(repo).await;
+
+    let outside = dir.path().join("escaped.txt");
+    assert!(!outside.exists(), "precondition: the target does not exist");
+
+    let patch = format!(
+        "FILE: {}\n<<<<<<< SEARCH\n\n=======\nowned\n>>>>>>> REPLACE\n\n",
+        outside.display()
+    );
+    let err = sb
+        .apply_patch(&patch, repo)
+        .await
+        .expect_err("an absolute target must be refused");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("outside") || msg.contains("..") || msg.contains("refusing"),
+        "the refusal must say why, so the model can correct itself: {msg}"
+    );
+    assert!(
+        !outside.exists(),
+        "nothing may be written outside the worktree, whatever the message says"
+    );
+
+    // A traversal that does not start absolute, for the same reason.
+    let traversal = dir.path().join("traversed.txt");
+    let patch = format!(
+        "FILE: ../{name}\n<<<<<<< SEARCH\n\n=======\nowned\n>>>>>>> REPLACE\n\n",
+        name = traversal.file_name().unwrap().to_string_lossy()
+    );
+    let _ = sb.apply_patch(&patch, repo).await;
+    assert!(
+        !traversal.exists(),
+        "a `..` traversal must not escape either"
+    );
+
+    sb.destroy().await.unwrap();
+}
+
+/// The guard must not break the legitimate case it was protecting.
+///
+/// `resolve_tool_path` canonicalises, and this repo's fixture root lives under
+/// a temp dir that is itself a symlink on macOS (`/var` → `/private/var`). A
+/// guard that compared uncanonicalised prefixes would refuse every real create
+/// on that platform — which is worse than no guard, because the model would
+/// stop being able to create files at all and would have no way to tell why.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_path_guard_still_allows_an_ordinary_nested_create() {
+    let dir = fixture_repo();
+    let repo = dir.path();
+    let sb = worktree_sandbox(repo).await;
+
+    sb.apply_patch(
+        "FILE: src/deeply/nested/new.rs\n<<<<<<< SEARCH\n\n=======\nfn added() {}\n>>>>>>> REPLACE\n\n",
+        repo,
+    )
+    .await
+    .expect("a normal nested create must still work");
+
+    assert!(
+        sb.worktree_path.join("src/deeply/nested/new.rs").exists(),
+        "the guard must refuse escapes, not ordinary work"
+    );
+    sb.destroy().await.unwrap();
+}

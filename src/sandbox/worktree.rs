@@ -241,7 +241,32 @@ impl Sandbox for WorktreeSandbox {
                             ));
                         }
                         if let Some(target) = &block.file {
-                            let path = wt.join(target);
+                            // The target is model-authored: it comes verbatim
+                            // from `CodeDiff.files_changed[].path`, which
+                            // `schemas/code_diff.schema.json` types as a bare
+                            // string with no pattern.
+                            //
+                            // `wt.join(target)` therefore honoured an absolute
+                            // path (discarding the base entirely) and a `..`
+                            // traversal, and this branch then created the
+                            // parent directories and wrote the file. A
+                            // CodeDiff with one edit whose `search` is empty
+                            // and whose target is `/home/user/.bashrc` passed
+                            // `validate_artifact` — the semantic layer only
+                            // rejects a block empty on *both* sides — and
+                            // wrote outside the project, as the user, with no
+                            // permission check anywhere on this path.
+                            //
+                            // The same guard every read/write/edit/patch tool
+                            // already uses: it rejects `..`, canonicalises
+                            // through a symlinked parent, and refuses anything
+                            // that does not resolve inside the root.
+                            let path = match crate::runtime::tools::resolve_tool_path(&wt, target) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    return Err(anyhow!("refusing to create {target:?}: {e}"));
+                                }
+                            };
                             if !contents.contains_key(&path) {
                                 // The file does not exist, so this is a
                                 // creation: there was nothing to anchor to and
