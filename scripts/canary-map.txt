@@ -152,3 +152,10 @@ no-quit-from-a-page-key | no_loop_quits_from_a_key_the_page_owns | a loop breaki
 tab-goes-to-run-in-both | both_loops_send_tab_to_run | the two loops disagreeing about Tab again
 ctrl-c-is-one-handler | ctrl_c_goes_through_one_handler | Ctrl+C handled in two places
 matrix-keeps-its-chords | the_matrix_still_documents_the_chord_keys_it_claims | a binding dropped from the doc without saying so
+# B3-10 · §1's exit criterion, as a test: every bound action in both loops
+every-binding-in-both-loops | every_bound_action_is_handled_in_both_event_loops | `g` and `s` dead in `niki chat`; `s` to a blank page
+shared-helpers-are-really-shared | shared_really_is_shared | a helper one loop calls, counted as if both did
+fleet-session-not-a-bare-assignment | fleet_and_session_are_not_reachable_only_by_bare_assignment | `current_page =` with no state behind it
+one-helper-for-both-loops | fleet_and_session_go_through_one_helper | two loops, two copies of the same rule
+s-opens-a-session | s_opens_a_session_rather_than_navigating_to_nothing | `s` navigating to a page that renders nothing
+advertised-nav-keys-are-bound | the_advertised_navigation_keys_are_bound | a palette key resolving to nothing

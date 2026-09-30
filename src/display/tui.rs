@@ -1304,19 +1304,7 @@ fn run_tui(
                                     engine.mark_dirty();
                                 }
                             }
-                        } else if state.keybindings.resolve(&key) == Some(GlobalAction::GotoFleet) {
-                            // 'g' jumps to the Fleet grid from any page.
-                            state.current_page = PageId::Fleet;
-                            engine.mark_dirty();
-                        } else if state.keybindings.resolve(&key) == Some(GlobalAction::GotoSession)
-                        {
-                            // 's' opens the Session view (falls back to the Fleet
-                            // selection when nothing is open yet).
-                            if state.session_view.is_none() {
-                                state.open_selected_mission();
-                            } else {
-                                state.current_page = PageId::Session;
-                            }
+                        } else if apply_nav_action(state.keybindings.resolve(&key), &mut state) {
                             engine.mark_dirty();
                         } else {
                             // On sub-pages: page-specific key handling first —
@@ -1728,6 +1716,13 @@ pub fn run_chat(
                     // other sub-page gets: the page's handler first, and a page
                     // that declines `q` falls back to the confirm modal rather
                     // than to nothing.
+                    // `g` and `s`, which `run_tui` has always handled and
+                    // `run_chat` never did. Checked before the page branches so
+                    // a sub-page cannot swallow them.
+                    if apply_nav_action(state.keybindings.resolve(&key), &mut state) {
+                        needs_render = true;
+                        continue;
+                    }
                     if state.current_page == PageId::Fleet {
                         if handle_fleet_nav(key, &mut state) {
                             needs_render = true;
@@ -2151,11 +2146,57 @@ fn sub_page_owns(key: KeyEvent, state: &crate::display::state::AppState) -> bool
     false
 }
 
+/// Apply a global navigation action, or report that this key is not one.
+///
+/// `g` (Fleet) and `s` (Session) are `BINDING_TABLE` actions, and only
+/// `run_tui` handled them. In `niki chat` — the surface most users land on —
+/// `g` did nothing at all, and `s` fell through to `global_page_jump`, which
+/// sets `current_page = Session` **without** opening a session. The Session
+/// page renders only when `state.session_view` is `Some`, so `s` from any
+/// sub-page in `niki chat` navigated to a blank screen and stayed there.
+///
+/// Both loops now go through here, so the two cannot drift again — which is
+/// the whole of `docs/tui/key-matrix.md`'s "known divergences", item by item.
+fn apply_nav_action(
+    action: Option<GlobalAction>,
+    state: &mut crate::display::state::AppState,
+) -> bool {
+    match action {
+        Some(GlobalAction::GotoFleet) => {
+            state.current_page = PageId::Fleet;
+            true
+        }
+        Some(GlobalAction::GotoSession) => {
+            // Open the selected mission when nothing is open, so the page has
+            // something to draw. Setting `current_page` alone is what left it
+            // blank.
+            if state.session_view.is_none() {
+                state.open_selected_mission();
+            } else {
+                state.current_page = PageId::Session;
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 fn global_page_jump(key: KeyEvent) -> Option<PageId> {
     if key.modifiers.is_empty()
         && let KeyCode::Char(c) = key.code
     {
-        return PageId::from_key(c);
+        // Fleet and Session are excluded. `PageId::from_key` maps `g` and `s`
+        // to them like any other letter, but their renderers need state a bare
+        // `current_page =` does not set: Fleet needs a selection and Session
+        // needs `session_view`. Routing here without that left a blank screen
+        // the user had to guess their way out of. `apply_nav_action` is the
+        // only way in, and it runs first.
+        if let Some(p) = PageId::from_key(c)
+            && !matches!(p, PageId::Fleet | PageId::Session)
+        {
+            return Some(p);
+        }
+        return None;
     }
     None
 }
