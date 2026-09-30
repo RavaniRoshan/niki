@@ -10,6 +10,16 @@ use crate::sandbox::SandboxBackend;
 /// the host (without scheme/port) so the `niki doctor` security output lists a
 /// stable, human-readable set rather than user-supplied full URLs (which may
 /// embed path secrets).
+/// The OTLP endpoint from config, if the config has one.
+///
+/// `--otel-endpoint` is a per-run flag and `OTEL_EXPORTER_OTLP_ENDPOINT` is
+/// read directly by the exporter, so this is the only place a persisted setting
+/// could live. Absent today; kept so the outbound list does not have to be
+/// revisited when one is added.
+fn otlp_endpoint_from_config(_cfg: &NikiConfig) -> Option<String> {
+    None
+}
+
 fn url_host(url: &str) -> Option<String> {
     let stripped = url
         .trim_start_matches("https://")
@@ -395,6 +405,19 @@ fn check_security_for(cfg: &NikiConfig) -> Vec<Check> {
     for u in &cfg.knowledge.urls {
         if let Some(host) = url_host(u) {
             outbound.push(host);
+        }
+    }
+    // The OTLP trace endpoint, when one is set. This check calls itself "the
+    // *only* hosts NIKI will ever contact" and did not list it — so a user who
+    // had exported traces to their own collector was shown a report omitting
+    // the one host NIKI was, in fact, contacting.
+    if let Some(ep) = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .ok()
+        .filter(|e| !e.is_empty())
+        .or_else(|| otlp_endpoint_from_config(cfg))
+    {
+        if let Some(host) = url_host(&ep) {
+            outbound.push(format!("{host} (OTLP trace export)"));
         }
     }
     checks.push(Check {

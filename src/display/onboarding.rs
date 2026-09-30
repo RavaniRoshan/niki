@@ -17,7 +17,7 @@ pub enum OnboardingPage {
     Welcome,
     AuthSecurity,
     TerminalSetup,
-    Telemetry,
+    Privacy,
     Help,
 }
 
@@ -26,7 +26,7 @@ impl OnboardingPage {
         OnboardingPage::Welcome,
         OnboardingPage::AuthSecurity,
         OnboardingPage::TerminalSetup,
-        OnboardingPage::Telemetry,
+        OnboardingPage::Privacy,
         OnboardingPage::Help,
     ];
 
@@ -49,7 +49,7 @@ impl OnboardingPage {
             OnboardingPage::Welcome => "Welcome to Niki",
             OnboardingPage::AuthSecurity => "Authentication & Security",
             OnboardingPage::TerminalSetup => "Terminal Setup",
-            OnboardingPage::Telemetry => "Telemetry",
+            OnboardingPage::Privacy => "Privacy & data",
             OnboardingPage::Help => "Getting Help",
         }
     }
@@ -169,13 +169,7 @@ impl OnboardingModal {
             ])
             .split(inner);
 
-        let content_lines = match self.page {
-            OnboardingPage::Welcome => self.render_welcome(),
-            OnboardingPage::AuthSecurity => self.render_auth_security(),
-            OnboardingPage::TerminalSetup => self.render_terminal_setup(),
-            OnboardingPage::Telemetry => self.render_telemetry(),
-            OnboardingPage::Help => self.render_help_page(),
-        };
+        let content_lines = self.page_lines();
 
         let truncated: Vec<Line> = content_lines
             .into_iter()
@@ -235,6 +229,22 @@ impl OnboardingModal {
         frame.render_widget(Paragraph::new(footer), chunks[2]);
     }
 
+    /// The current page's body, before layout and truncation.
+    ///
+    /// Public so the content of every page can be asserted on directly. The
+    /// claims these pages make — which themes exist, whether there is OAuth,
+    /// what NIKI contacts — are product promises, and a promise nobody reads
+    /// back is a promise nobody keeps.
+    pub fn page_lines(&self) -> Vec<Line<'static>> {
+        match self.page {
+            OnboardingPage::Welcome => self.render_welcome(),
+            OnboardingPage::AuthSecurity => self.render_auth_security(),
+            OnboardingPage::TerminalSetup => self.render_terminal_setup(),
+            OnboardingPage::Privacy => self.render_privacy(),
+            OnboardingPage::Help => self.render_help_page(),
+        }
+    }
+
     fn render_welcome(&self) -> Vec<Line<'static>> {
         vec![
             Line::from(""),
@@ -259,12 +269,25 @@ impl OnboardingModal {
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "  Select a text style:",
+                "  Colour theme:",
+                Style::default().fg(theme::fg_color()),
+            )),
+            // The three themes that exist, and no numbered keys. This page
+            // offered `[1] Dark  [2] Light  [3] Colorblind`: the digits had no
+            // handler at all — the screen was byte-identical before and after
+            // pressing 1 — and `ThemeMode` is `Auto | Dark | Light`, so
+            // "Colorblind" was a theme that has never existed. The same repo
+            // already wrote the lesson down at `sheets/theme.rs:22-31`: "A
+            // picker that offers themes the product cannot apply is worse than
+            // a cycling key: it teaches the user that the list is not to be
+            // trusted."
+            Line::from(Span::styled(
+                "  auto (follows your terminal) · dark · light",
                 Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
-                "  [1] Dark  [2] Light  [3] Colorblind",
-                Style::default().fg(theme::fg_color()),
+                "  Change it later with /theme, or set ui.theme in niki.toml.",
+                Style::default().fg(theme::fg_dim()),
             )),
             Line::from(""),
             Line::from(Span::styled(
@@ -284,13 +307,40 @@ impl OnboardingModal {
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
+            // Two numbered items and no commands. A user cannot act on this
+            // page from inside the TUI — it owns stdin — so the commands have to
+            // be spelled out for the shell they will be run in. "OAuth" was the
+            // only occurrence of the word in the entire crate:
+            // `niki auth login` is a masked-prompt walk over a fixed provider
+            // table, and there is no OAuth flow anywhere.
             Line::from(Span::styled(
-                "  1. Sign in with your provider (API key or OAuth).",
+                "  Niki needs a model to talk to. Pick one of these, in a shell:",
                 Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
-                "  2. Niki will use your keys for LLM calls.",
+                "    niki init --interactive      guided setup; pick Ollama and no key is needed",
                 Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "    niki auth login <provider>   store a key in your OS keyring",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "    ollama pull qwen2.5-coder    fully offline, no account",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Keys stay on your machine. Niki makes no other outbound request",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "  except the model calls you ask it to make.",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "  (This screen owns the keyboard, so run those from another shell.)",
+                Style::default().fg(theme::fg_dim()),
             )),
             Line::from(""),
             Line::from(Span::styled(
@@ -345,28 +395,47 @@ impl OnboardingModal {
         ]
     }
 
-    fn render_telemetry(&self) -> Vec<Line<'static>> {
+    fn render_privacy(&self) -> Vec<Line<'static>> {
         vec![
             Line::from(""),
             Line::from(Span::styled(
-                "  Telemetry",
+                "  Privacy & data",
                 Style::default()
                     .fg(theme::BLUE())
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
+            // This page said "Niki collects anonymous usage data to improve
+            // the product… Telemetry is OFF by default." There is no
+            // collector in the binary: no analytics SDK in Cargo.toml, no
+            // telemetry module in src/config/. README:299 says "No telemetry"
+            // and README:379 repeats it. A consent screen that contradicts the
+            // product's own documentation is worse than no consent screen, so
+            // the page now states what is actually true.
             Line::from(Span::styled(
-                "  Niki collects anonymous usage data to improve",
+                "  Niki has no telemetry. There is no analytics collector in",
                 Style::default().fg(theme::fg_color()),
             )),
             Line::from(Span::styled(
-                "  the product. No code or prompts are ever sent.",
+                "  the product and no code or prompts are ever sent.",
                 Style::default().fg(theme::fg_color()),
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "  Telemetry is OFF by default.",
-                Style::default().fg(theme::success()),
+                "  The only outbound requests Niki makes are:",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "    • the model calls you configure (or a local Ollama)",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "    • sources you add under [knowledge] urls",
+                Style::default().fg(theme::fg_color()),
+            )),
+            Line::from(Span::styled(
+                "    • an OTLP trace endpoint, only if you pass --otel-endpoint",
+                Style::default().fg(theme::fg_color()),
             )),
             Line::from(""),
             Line::from(Span::styled(
@@ -501,7 +570,7 @@ mod tests {
 
         let help = OnboardingPage::Help;
         assert_eq!(help.next(), None);
-        assert_eq!(help.prev(), Some(OnboardingPage::Telemetry));
+        assert_eq!(help.prev(), Some(OnboardingPage::Privacy));
     }
 
     #[test]
@@ -539,7 +608,7 @@ mod tests {
             KeyCode::Tab,
             ratatui::crossterm::event::KeyModifiers::NONE,
         ));
-        assert_eq!(modal.page, OnboardingPage::Telemetry);
+        assert_eq!(modal.page, OnboardingPage::Privacy);
 
         modal.handle_key(KeyEvent::new(
             KeyCode::Right,

@@ -1806,6 +1806,34 @@ fn render_activity_spinner(
     );
 }
 
+/// The smallest terminal NIKI can draw into, and what it says when it cannot.
+///
+/// Below this the surface used to `return` silently while the overlay ladder
+/// kept consuming every keystroke, so a user in a short pane got a black void
+/// that ate their typing, with `Esc` as the only exit and nothing saying so.
+pub const MIN_TERMINAL: (u16, u16) = (20, 10);
+
+/// Draw the "your terminal is too small" screen.
+pub fn render_too_small(frame: &mut ratatui::Frame, area: ratatui::layout::Rect) {
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+    let msg = Paragraph::new(vec![
+        Line::from(Span::styled(
+            "Terminal too small",
+            Style::default()
+                .fg(theme::warning())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(format!(
+            "  NIKI needs at least {}x{}. This terminal is {}x{}.",
+            MIN_TERMINAL.0, MIN_TERMINAL.1, area.width, area.height
+        )),
+        Line::from("  Resize the window, or press Ctrl+C to exit."),
+    ]);
+    frame.render_widget(msg, area);
+}
+
 fn render(
     frame: &mut ratatui::Frame,
     state: &AppState,
@@ -1813,7 +1841,14 @@ fn render(
     command_palette: &CommandPalette,
 ) {
     let size = frame.area();
-    if size.height < 10 {
+    if size.height < MIN_TERMINAL.1 || size.width < MIN_TERMINAL.0 {
+        // Not a silent `return`. At 80x9 and 80x8 — both verified — the whole
+        // surface drew nothing while `route_overlay_key` kept consuming every
+        // keystroke, so the user got a black void that swallowed their typing
+        // and no way out but `Esc`, which nothing mentioned. Saying the size
+        // is the fix; a program that cannot render should say so rather than
+        // pretend to be working.
+        render_too_small(frame, size);
         return;
     }
 

@@ -141,12 +141,6 @@ pub const SETTINGS: &[Setting] = &[
         kind: FieldKind::Bool,
         help: "Motion such as the activity spinner and notice fades.",
     },
-    Setting {
-        path: "telemetry.enabled",
-        label: "Telemetry",
-        kind: FieldKind::Bool,
-        help: "Send anonymous usage counters. Errors are never reported.",
-    },
 ];
 
 /// The form.
