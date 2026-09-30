@@ -251,3 +251,8 @@ identifiers-are-not-secrets | identifiers_are_not_secrets | a git SHA redacted: 
 encoded-secrets-still-caught | encoded_secrets_are_still_caught | a narrower pattern that catches less is not a fix
 redaction-rule-is-shape | the_rule_is_shape_not_length | the boundary: no uppercase, or no digit, is not a secret
 key-in-error-body-caught | a_real_key_inside_a_provider_error_body_is_still_caught | the catch-all's actual purpose, narrowed away
+# B5-04 · the gate's unchecked items, now checked (§9.7)
+python-skip-says-why | every_python_skip_says_why | a skip with no reason, looking like a test and covering nothing
+python-skip-names-its-coverage | every_python_skip_names_where_it_is_covered | a skip that is a hole rather than a redirect
+perf-not-only-wall-clock | perf_assertions_are_not_only_wall_clock | a slow host reporting a regression that did not happen
+perf-claims-no-cache-it-lacks | the_perf_test_does_not_claim_a_cache_it_does_not_use | a docstring promising a memoisation the code never exercises
