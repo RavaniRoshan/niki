@@ -90,6 +90,8 @@ fn ctx() -> niki::runtime::ToolContext {
         permissions: std::collections::HashMap::new(),
         permission_mode: "bypass".into(),
         fail_closed_headless: false,
+        // Empty = block-all, the shipped default.
+        network_allowlist: Vec::new(),
         task_store: None,
     }
 }

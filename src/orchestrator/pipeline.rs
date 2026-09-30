@@ -1107,6 +1107,9 @@ async fn run_parallel_coders(
     // and these are not consumable so they are simply shared.
     permission_mode: String,
     fail_closed_headless: bool,
+    // `[network] domain_allowlist`, shared like the posture above: N coders
+    // must not each get a different view of what they may reach.
+    network_allowlist: Vec<String>,
 ) -> Result<Vec<CodeDiff>> {
     let event_tx = base_display
         .tui_tx()
@@ -1130,6 +1133,7 @@ async fn run_parallel_coders(
         // copy rather than borrowing the caller's — which is why this cannot
         // simply be read at the use site below.
         let permission_mode = permission_mode.clone();
+        let network_allowlist = network_allowlist.clone();
 
         tasks.push(tokio::spawn(async move {
             // Own worktree sandbox per coder → isolated changes.
@@ -1184,6 +1188,7 @@ async fn run_parallel_coders(
                 parallel_cost_ceiling,
                 permission_mode.clone(),
                 fail_closed_headless,
+                network_allowlist,
             )
             .await?;
             let output = solo.output;
@@ -1264,6 +1269,7 @@ async fn run_experimental_research(
             &config.permissions.mode,
         ),
         fail_closed_headless: config.permissions.fail_closed_headless,
+        network_allowlist: config.docker.network_allowlist.clone(),
         task_store: None,
     };
     let messages = vec![
@@ -1515,6 +1521,8 @@ async fn run_coder_tool_loop(
     // must not need a borrow of the configuration to do it.
     permission_mode: &str,
     fail_closed_headless: bool,
+    // See `run_role`: a plain value, not a config borrow.
+    network_allowlist: Vec<String>,
     // Sent to the provider on every request the loop makes. See
     // `LoopOptions::reasoning_effort` for why this is a parameter at all.
     reasoning_effort: Option<&str>,
@@ -1560,6 +1568,7 @@ async fn run_coder_tool_loop(
         // `fail_closed_headless` is finally able to fail *open* by default and
         // closed on request, as it is documented to.
         fail_closed_headless,
+        network_allowlist,
         task_store: None,
     };
 
@@ -1920,6 +1929,11 @@ async fn run_role(
     // loop. Plain strings and a bool for the same reason as `step_cap`.
     permission_mode: String,
     fail_closed_headless: bool,
+    // `[network] domain_allowlist`, as a plain value for the same reason as
+    // `permission_mode`: the Coder's loop builds its own `ToolContext` and
+    // must not need a borrow of the configuration to do it. Empty means
+    // block-all, which is the default and the safe answer.
+    network_allowlist: Vec<String>,
 ) -> Result<RoleRun> {
     // Recovery turns the Coder's tool loop spends on its own reasons, handed on
     // so the pipeline's shared allowance starts where the loop's left off.
@@ -2112,6 +2126,7 @@ async fn run_role(
             cost_ceiling,
             &permission_mode,
             fail_closed_headless,
+            network_allowlist.clone(),
             reasoning_effort,
             display,
             metrics,
@@ -2267,6 +2282,7 @@ async fn run_bookkept_stage(
         state.run_budget.remaining_usd(),
         config.permissions.mode.clone(),
         config.permissions.fail_closed_headless,
+        config.docker.network_allowlist.clone(),
     )
     .await?;
     let RoleRun {
@@ -3134,6 +3150,7 @@ run_stage(
                         .map(|u| u / config.parallel.coder_count.max(1) as f64),
                     config.permissions.mode.clone(),
                     config.permissions.fail_closed_headless,
+                    config.docker.network_allowlist.clone(),
                 )
                 .await?;
                 // Phase 5.5: close the parallel-coder spend hole — N coders
@@ -3199,6 +3216,7 @@ run_stage(
                     state.run_budget.remaining_usd(),
                     config.permissions.mode.clone(),
                     config.permissions.fail_closed_headless,
+                    config.docker.network_allowlist.clone(),
                 )
                 .await?;
                 let (json, summary, role_output) =
@@ -3289,6 +3307,7 @@ run_stage(
                         state.run_budget.remaining_usd(),
                         config.permissions.mode.clone(),
                         config.permissions.fail_closed_headless,
+                        config.docker.network_allowlist.clone(),
                     )
                     .await?;
                     let (json, summary, role_output) =
@@ -3418,6 +3437,7 @@ run_stage(
                             state.run_budget.remaining_usd(),
                             config.permissions.mode.clone(),
                             config.permissions.fail_closed_headless,
+                            config.docker.network_allowlist.clone(),
                         )
                         .await?;
                         if stage.role == AgentRole::Coder {
@@ -3816,6 +3836,7 @@ run_stage(
                 state.run_budget.remaining_usd(),
                 &config.permissions.mode,
                 config.permissions.fail_closed_headless,
+                config.docker.network_allowlist.clone(),
                 coder_stage.reasoning_effort.as_deref(),
                 display,
                 &mut metrics,

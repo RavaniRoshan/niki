@@ -163,6 +163,8 @@ async fn test_tool_router_and_policy_enforcement() {
         permissions: std::collections::HashMap::new(),
         permission_mode: "manual".to_string(),
         fail_closed_headless: false,
+        // Empty = block-all, the shipped default.
+        network_allowlist: Vec::new(),
         task_store: None,
     };
 

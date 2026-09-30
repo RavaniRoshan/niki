@@ -211,3 +211,9 @@ search-failure-says-what-instead | the_failure_says_why_and_what_instead | an er
 search-description-is-honest | the_description_does_not_advertise_a_capability_it_lacks | the model's only evidence, saying it can search
 network-tool-does-not-succeed | a_tool_that_cannot_reach_the_network_does_not_succeed | web_fetch succeeding with an empty allowlist
 no-stub-reports-success | no_registered_tool_succeeds_while_saying_it_is_not_wired | the next stub, caught by the same rule
+# B4-08 · web_fetch honours the configured allowlist
+allowlist-permits-its-domains | a_configured_allowlist_permits_its_domains | a fetcher that refuses every URL while the setting is read by nothing
+empty-allowlist-still-blocks | an_empty_allowlist_still_blocks_everything | a slice that loosened the default
+other-domains-stay-blocked | a_domain_outside_the_allowlist_is_still_blocked | one listed domain opening the network to another
+context-carries-the-allowlist | the_tool_context_carries_the_configured_allowlist | a working setting with no path to the tool
+no-hardcoded-empty-allowlist | the_tool_does_not_hardcode_an_empty_allowlist | the tool constructing itself with `vec![]` again
