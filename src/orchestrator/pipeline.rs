@@ -1618,8 +1618,28 @@ async fn run_coder_tool_loop(
         display.tui_tx(),
         None,
     )
-    .await
-    .ok()?;
+    .await;
+
+    // A loop that *errored* is not a loop that produced nothing.
+    //
+    // `.ok()?` made both the same value: an `Err` became `None`, the caller
+    // fell back to the one-shot path, and the user saw a stage that had
+    // apparently declined to use the tool loop. Measured against a live
+    // provider, that is exactly what happened — the Coder spent its budget,
+    // something went wrong, nothing said so, and the fallback then stalled too.
+    //
+    // This is the last of the "every way the loop can come back empty has to
+    // say so" cases the comment below describes; it was the one that mattered
+    // most, because it is the only one that means something is wrong.
+    let out = match out {
+        Ok(o) => o,
+        Err(e) => {
+            let msg = tool_loop_failure_notice(&e);
+            tracing::warn!(target: "niki::pipeline", role = "coder", error = %e, "{}", msg);
+            eprintln!("niki: {msg}");
+            return None;
+        }
+    };
 
     // Every way the loop can come back empty has to say so.
     //
@@ -1732,6 +1752,32 @@ pub fn record_loop_cost(
         retry_count: 0,
         ttft_ms: 0,
     });
+}
+
+/// What to tell the user when the Coder's tool loop *errored*.
+///
+/// Distinct from [`coder_loop_fallback_notice`], which covers the loop that ran
+/// and came back empty. This one covers the loop that never got an answer, and
+/// it matters more: a live run against a free provider produced
+///
+///     error sending request for url (.../v1/chat/completions): client error
+///     (SendRequest): connection error: Connection timed out (os error 110)
+///
+/// and `.ok()?` turned that into the same `None` as an empty loop, so the user
+/// saw a stage appear to decline the tool loop rather than a stage that had
+/// lost its network. The run then stalled again inside the fallback, so the
+/// one message that explained the whole thing never appeared.
+///
+/// Public so the wording is testable, and so the wording can only be changed
+/// in one place — the fallback path's own message is different and must not be
+/// used here.
+pub fn tool_loop_failure_notice(e: &anyhow::Error) -> String {
+    format!(
+        "the Coder's tool loop failed: {e:#}. Falling back to a single-shot call, \
+         which is less capable — the model will answer blind rather than reading \
+         the file it is editing. Any error that follows describes the fallback, \
+         not this."
+    )
 }
 
 /// What to tell the user when the Coder's tool loop produced no artifact.
