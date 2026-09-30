@@ -193,12 +193,29 @@ pub enum DisplayEvent {
 /// Which panel currently owns list navigation / mouse routing. Overlays win
 /// over the chat view, in priority order (permission → palette → slash menu).
 fn active_focus(state: &AppState) -> FocusState {
+    // Every overlay this function must know about, highest first.
+    //
+    // It knew about three. It did not know about onboarding, the error modal,
+    // the quit-confirm modal, or an open sheet — all of which are painted
+    // full-ish-screen further down. The keyboard ladder checks all of them
+    // first, so keys were blocked while the mouse was not: a click landed on
+    // the page *behind* the modal, and a click on the status bar silently
+    // cycled the permission mode toward BYPASS. Onboarding is the first thing
+    // a new user sees, and it has no mouse handler at all.
     if state.show_permission_modal {
         FocusState::Permission
+    } else if state.onboarding.is_some() {
+        // Onboarding is keyboard-only; every mouse press is swallowed so it
+        // cannot reach the surface underneath.
+        FocusState::Onboarding
+    } else if state.modal.is_some() {
+        FocusState::Modal
     } else if state.show_command_palette {
         FocusState::CommandPalette
     } else if state.show_command_menu {
         FocusState::CommandMenu
+    } else if !state.sheets.is_empty() {
+        FocusState::Sheet
     } else {
         FocusState::Chat
     }
@@ -470,9 +487,19 @@ fn route_mouse(
 ) -> bool {
     let mut dirty = false;
     use ratatui::crossterm::event::{MouseButton, MouseEventKind};
-    // Clicking anywhere dismisses the help overlay.
-    if state.show_help {
+    // A *click* dismisses the help overlay. This ran for every mouse event,
+    // including `Moved`, and motion reporting is enabled outside tmux/screen
+    // (DEC 1003, `mouse.rs:42-48`) — so nudging the mouse made the keybindings
+    // screen vanish. On a first run, where `?` is the only way to learn the
+    // app, that is the first thing a new user breaks without noticing.
+    let clicking_help = state.show_help && matches!(mouse.kind, MouseEventKind::Down(..));
+    if clicking_help {
         state.show_help = false;
+        return true;
+    }
+    // While the overlay is up, motion and wheel must not reach the page behind
+    // it either.
+    if state.show_help {
         return true;
     }
     // Hover (move/drag) moves the highlight; a left press activates.
@@ -579,6 +606,12 @@ fn route_mouse(
                 dirty = true;
             }
         }
+        // The three overlays `active_focus` learned about. They have no mouse
+        // behaviour of their own, so the press is consumed rather than passed
+        // to the surface behind them. A click on the status bar during
+        // onboarding previously cycled the permission mode toward BYPASS
+        // through a modal the user could not see was there.
+        FocusState::Onboarding | FocusState::Modal | FocusState::Sheet => {}
         FocusState::Chat => {
             // Open tool-detail modal owns left-clicks (TUI-013):
             // inside is consumed, outside dismisses. The wheel
@@ -1434,9 +1467,24 @@ pub fn run_chat(
                     ratatui::crossterm::terminal::BeginSynchronizedUpdate
                 );
             }
-            terminal
-                .draw(|f| render(f, &state, &router, &command_palette))
-                .ok();
+            // A draw error is not swallowed.
+            //
+            // `.ok()` discarded the `io::Error`, and the loop then set
+            // `needs_render = false` and kept polling. Once drawing started
+            // failing — stdout pipe broken, a resize race leaving the terminal
+            // in a bad state — the app kept consuming keystrokes against a
+            // frozen last frame, with no error, no exit and no notice. The
+            // user typed and nothing happened, indefinitely. `run_tui` already
+            // breaks on a draw error; the chat surface, which is the one every
+            // user lands on, had the weaker loop.
+            let drew = terminal.draw(|f| render(f, &state, &router, &command_palette));
+            if let Err(e) = drew {
+                // `RestoreGuard` releases raw mode, the alternate screen, the
+                // mouse and bracketed paste when this function returns, so
+                // breaking out of the loop is all the restoration needed.
+                eprintln!("niki: the terminal could not be drawn ({e}); restoring and exiting.");
+                break;
+            }
             if sync_capable {
                 let _ = execute!(
                     io::stdout(),
@@ -2677,5 +2725,81 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Every overlay that is painted must be one the mouse cannot reach past.
+    ///
+    /// `active_focus` knew about three and four are drawn. The keyboard ladder
+    /// checks all of them, so keys were blocked while the mouse was not: a
+    /// click landed on the page *behind* the modal, and a click on the status
+    /// bar during onboarding cycled the permission mode toward BYPASS.
+    /// Onboarding is the first thing a new user sees and has no mouse handler
+    /// of its own.
+    #[test]
+    fn every_overlay_the_keyboard_blocks_is_one_the_mouse_blocks() {
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("test".into(), config, ".".into());
+        assert_eq!(active_focus(&state), FocusState::Chat);
+
+        state.onboarding = Some(crate::display::onboarding::OnboardingModal::new());
+        assert_eq!(active_focus(&state), FocusState::Onboarding);
+
+        state.onboarding = None;
+        state.show_permission_modal = true;
+        state.modal = Some(crate::display::state::Modal::Confirm {
+            title: "Quit NIKI?".to_string(),
+            message: "leave?".to_string(),
+        });
+        assert_eq!(
+            active_focus(&state),
+            FocusState::Permission,
+            "the permission prompt outranks every other overlay"
+        );
+        state.show_permission_modal = false;
+        assert_eq!(active_focus(&state), FocusState::Modal);
+
+        state.modal = None;
+        state
+            .sheets
+            .push(crate::display::sheets::Sheet::Mcp(Default::default()));
+        assert_eq!(active_focus(&state), FocusState::Sheet);
+    }
+
+    /// Moving the mouse must not dismiss the help overlay.
+    ///
+    /// The dismissal ran for every mouse event including `Moved`, and motion
+    /// reporting is enabled outside tmux and screen (DEC 1003,
+    /// `mouse.rs:42-48`). So nudging the mouse made the keybindings screen
+    /// vanish — and `?` is the only way a first-time user learns the app.
+    #[test]
+    fn moving_the_mouse_does_not_dismiss_help() {
+        use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("test".into(), config, ".".into());
+        state.chat_width.set(80);
+        state.show_help = true;
+
+        let moved = MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 10,
+            row: 5,
+            modifiers: ratatui::crossterm::event::KeyModifiers::NONE,
+        };
+        let mut router = crate::display::pages::PageRouter::new();
+        let mut palette = CommandPalette::new();
+        let _ = route_mouse(&mut state, &mut router, &mut palette, moved, None);
+        assert!(
+            state.show_help,
+            "nudging the mouse closed the keybindings screen"
+        );
+
+        let clicked = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 10,
+            row: 5,
+            modifiers: ratatui::crossterm::event::KeyModifiers::NONE,
+        };
+        let _ = route_mouse(&mut state, &mut router, &mut palette, clicked, None);
+        assert!(!state.show_help, "a real click should dismiss it");
     }
 }
