@@ -521,3 +521,66 @@ ok       Visual regression (VHS)
 ok       Windows (build + smoke)
 ```
 
+## Live-provider observations
+
+Hand-recorded, not generated. Every number here came from a real request to a
+real model. The key lives in the environment only and is never written to disk;
+G5's secret scan is what proves it stayed there.
+
+### The catalogue works
+
+`niki providers models` against NVIDIA's OpenAI-compatible catalogue returns 81
+models, and a real chat turn through `z-ai/glm-5.3-flash` returned `HARNESS OK`
+with exit 0. The provider path, the model catalogue and the keyring are all
+working against a live endpoint.
+
+### The Planner completes; the Coder is the long pole
+
+Real run, `z-ai/glm-5.3-flash`, `RUST_LOG=info`:
+
+```
+15:49:40Z [Planner] Done (165s, in 1146 / out 1640) — Spec: 1 files to modify
+15:51:51Z [Coder] Starting...
+```
+
+The Planner produces a schema-conformant TaskSpec in 165–235s. The Coder never
+finished. Four real defects came out of that one run and are now fixed:
+`status: "Running"` left behind by a killed run (B2-08), a 120s read timeout
+multiplied by 4 steps × 3 attempts so a stage could burn 12+ minutes without
+starting (B2-06, B2-09), two minutes and eleven seconds of silence after the
+Planner (B2-11), and a tool-loop error erased by `.ok()?` (B2-12).
+
+### The failure is the provider, not the payload — hypothesis refuted
+
+The tool loop ended with a connect timeout:
+
+```
+error sending request for url (https://integrate.api.nvidia.com/v1/chat/completions):
+client error (SendRequest): connection error: Connection timed out (os error 110)
+```
+
+`os error 110` is ETIMEDOUT on **connect**, and the obvious hypothesis was that
+the Coder's 22 tool specs (versus the Planner's zero) made the request body too
+large to establish a connection. Measured directly against the live endpoint
+with synthetic tool specs at the same shape as NIKI's:
+
+```
+  0 tools:      97 bytes  OK in 45.3s
+  6 tools:    4500 bytes  OK in 33.4s
+ 12 tools:    8894 bytes  OK in 22.8s
+ 22 tools:   16224 bytes  OK in 28.0s
+```
+
+**Refuted.** 22 tools / 16 KB succeeds, and the largest payload came back
+*faster* than a 97-byte one — the spread is latency noise on a free tier, not a
+size threshold. So no tool-spec trimming was done: it would have been a
+plausible change with no evidence behind it. The fault is the free tier
+dropping connections, and what NIKI owes the user there is a bounded stage and
+a visible error, which is what B2-06, B2-09 and B2-12 deliver.
+
+Note also that every one of those four calls took 22–45s to return eight tokens.
+A "flash" model on a metered endpoint would not behave this way; the free
+tier's latency and connection stability are the constraint on any live-model
+evidence from this box, and it is why G4's real-model leg is not a gate.
+
+

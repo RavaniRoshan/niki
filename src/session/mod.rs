@@ -564,6 +564,8 @@ pub fn current_git_commit(project_path: &Path) -> Option<String> {
         })
 }
 
+pub mod branch;
+
 #[cfg(test)]
 mod tests {
     use super::*;

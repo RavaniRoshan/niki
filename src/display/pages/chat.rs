@@ -115,6 +115,7 @@ pub const HELP_TEXT: &str = concat!(
     "  /theme           Pick a colour theme (with live preview)\n",
     "  /skills          List the skills available to agents\n",
     "  /model <name>    Switch the model for this session\n",
+    "  /branch <name>   Switch branch (no argument: show the current one)\n",
     "  /status          Session status and model information\n",
     "  /doctor          Check providers, keys, sandbox health\n",
     "  /review          Trigger a code review audit on the workspace\n",
@@ -898,19 +899,38 @@ impl Page for ChatPage {
                             .trim()
                             .to_string();
                         if name.is_empty() {
-                            state.chat_log.push((
-                                "system".to_string(),
-                                format!("Current branch: {}", state.branch_name),
-                            ));
+                            // Read the real HEAD, not the run's remembered
+                            // branch: after a checkout the two differ, and
+                            // showing the run's value here is a small lie
+                            // about where the user is standing.
+                            let msg =
+                                match crate::session::branch::current_branch(&state.project_path) {
+                                    Some(b) => format!("Current branch: {b}"),
+                                    None => "HEAD is detached — no branch is checked out. \
+                                         Use `/branch <name>` to switch."
+                                        .to_string(),
+                                };
+                            state.chat_log.push(("system".to_string(), msg));
                         } else {
-                            state.chat_log.push((
-                                "system".to_string(),
-                                format!(
-                                    "Switching branches from the TUI {NOT_WIRED}. The name is \
-                                     recorded for display only; no git command was run. \
-                                     Use `git checkout {name}` in a shell."
-                                ),
-                            ));
+                            // The run's whole deliverable is a `niki/<id>`
+                            // branch. It used to be reachable only by leaving
+                            // the TUI for a shell, which made the product's
+                            // central handoff the one thing it would not do.
+                            match crate::session::branch::checkout(&state.project_path, &name) {
+                                Ok(after) => {
+                                    // Keep the status bar honest about where
+                                    // the user is now standing.
+                                    state.branch_name = after.clone();
+                                    state.chat_log.push((
+                                        "system".to_string(),
+                                        format!("Switched to branch: {after}"),
+                                    ));
+                                }
+                                Err(e) => state.chat_log.push((
+                                    "error".to_string(),
+                                    format!("Could not switch branch: {e}"),
+                                )),
+                            }
                         }
                     } else if trimmed == "/usage" {
                         let (in_t, out_t, cost, _) = state.totals();

@@ -84,3 +84,10 @@ first-run-answers | a first run answers instead of hanging | a first session tha
 # B2-12 · a failed tool loop is visible, not a silent fallback (found by a real model run)
 failed-tool-loop-is-not-empty | a_failed_tool_loop_is_not_silently_empty | `.ok()?` making a network failure look like a declined tool loop
 tool-loop-failure-is-actionable | tool_loop_failure_names_the_cause_and_the_cost | "fell back" with no cause and no warning that the fallback is worse
+# B2-13 · the run's branch is reachable from the TUI
+run-branch-is-reachable | a_run_branch_is_reachable_from_the_tui | the TUI's central handoff only available in a shell
+leading-dash-never-reaches-git | a_leading_dash_never_reaches_git | `/branch -f` discarding uncommitted work and exiting 0
+file-name-is-not-a-switch | a_name_that_is_a_file_is_not_a_successful_switch | `git checkout a.txt` exiting 0 having switched nothing
+name-is-validated-first | the_name_is_validated_before_it_is_an_argument | the guard unpinned where git is not in the loop
+branch-command-is-listed | the_tui_branch_command_is_wired_and_listed | a working command absent from /help
+detached-head-is-said | a_detached_head_is_reported_rather_than_called_a_branch | reporting a hash as though it were a branch
