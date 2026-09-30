@@ -56,6 +56,17 @@ pub fn render_chat(frame: &mut Frame, area: Rect, state: &AppState) {
 
     // Render messages using the existing build_chat_lines (handles stages,
     // progressive disclosure, chat log). Skip inline input — rendered below.
+    // Record the width the transcript is actually being drawn at.
+    //
+    // The only writer of `state.chat_width` lives inside `ChatPage::render`,
+    // and `render()` intercepts `PageId::Chat` *before* the router, so that
+    // function is unreachable in production and the cell kept its initialiser
+    // of 80. Every mouse hit-test, copy, hover, drag-select and Ctrl+F search
+    // read that 80-column map while the screen drew at the real width: in a
+    // 120-column terminal, clicking a message copied a different one and
+    // reported "copied selection". `persistence.rs:90` does `.max(80)`, which
+    // is the same knowledge written down in the wrong place.
+    state.chat_width.set(msg_area.width as usize);
     let lines = chat::build_chat_lines(state, msg_area.width as usize, false);
     let visible = msg_chunk.height as usize;
     state.chat_viewport_h.set(visible);

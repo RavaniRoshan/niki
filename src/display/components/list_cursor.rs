@@ -30,6 +30,13 @@ pub enum FocusState {
     CommandPalette,
     /// The permission request modal is active.
     Permission,
+    /// The first-run onboarding modal is active. Keyboard-only: every mouse
+    /// press is swallowed so a click cannot reach the surface behind it.
+    Onboarding,
+    /// A confirm/error modal is active.
+    Modal,
+    /// A bottom sheet (settings, theme, providers, MCP) is active.
+    Sheet,
 }
 
 impl FocusState {

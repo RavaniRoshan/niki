@@ -440,7 +440,20 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
 
     // Keep the sender alive so the TUI thread doesn't see Disconnect.
     // The TUI exits when the user presses Ctrl+C or quit.
-    let _ = handle.join();
+    // A panic in the TUI thread must not exit 0.
+    //
+    // `let _ = handle.join()` discarded the `JoinError`, and `handle()` ended
+    // `Ok(())`. `RestoreGuard` correctly restored raw mode and the alternate
+    // screen on the way out, so the user got their terminal back — and a
+    // script wrapping `niki` recorded success for a run that produced nothing.
+    // The only way a panic reaches here is the render loop or a key handler,
+    // which is exactly where the latent slicing and index defects live.
+    if handle.join().is_err() {
+        anyhow::bail!(
+            "the chat interface stopped unexpectedly. \
+             Your terminal has been restored; nothing was sent to the provider."
+        );
+    }
 
     Ok(())
 }
