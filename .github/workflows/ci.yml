@@ -535,7 +535,7 @@ jobs:
       - name: Build release binary
         run: cargo build --release
       - name: Run headless PTY suite
-        # One invocation, and the vacuity check reads the SAME run.
+        # One invocation, and BOTH checks read the SAME run.
         #
         # This ran the whole suite twice per job — once with -v for the log and
         # once with -q into /tmp/tui.txt purely to grep it for "N passed". The
@@ -544,26 +544,37 @@ jobs:
         # second run doubled the load on the one job whose failures are hardest
         # to tell from flakiness. Two full runs, four jobs, for a string match.
         #
-        # `tee` keeps the verbose output in the log and the summary on disk;
-        # `|| true` so the vacuity check below — not the pipeline's exit status —
-        # is what decides, which is what it was for.
+        # `|| true` used to sit after the `tee`, on the reasoning that the
+        # vacuity check below was the decider. It meant the suite's actual
+        # result was discarded: `3 passed, 17 failed` matches `[0-9]+ passed`,
+        # so the job went GREEN with 17 failures. There is no floor in that
+        # regex and no failure check anywhere in the job. A gate that reads
+        # "did anything run" and not "did it pass" is a smoke alarm.
+        #
+        # So: capture pytest's exit status and assert on it. `set -uo pipefail`
+        # (deliberately no `-e`) so the failing pipeline does not abort before
+        # the output is printed, and `pipefail` so `$?` is pytest's status
+        # rather than tee's. The vacuity check is kept and runs FIRST, because
+        # a missing tuiwright turns the file into a skip and pytest exits 0 —
+        # a green exit code there means nothing ran, and must not be trusted.
         run: |
-          set -euo pipefail
+          set -uo pipefail
           if [ "$FORCE_NO_COLOR" = "true" ]; then
-            NO_COLOR=1 python3 -m pytest -c pytest_headless.ini -v 2>&1 | tee /tmp/tui.txt || true
+            NO_COLOR=1 python3 -m pytest -c pytest_headless.ini -v 2>&1 | tee /tmp/tui.txt
           else
-            env -u NO_COLOR python3 -m pytest -c pytest_headless.ini -v 2>&1 | tee /tmp/tui.txt || true
+            env -u NO_COLOR python3 -m pytest -c pytest_headless.ini -v 2>&1 | tee /tmp/tui.txt
           fi
-      - name: Fail if the whole suite was skipped
-        # A dependency problem must not present as a green TUI gate. This reads
-        # the run the previous step already performed.
-        run: |
-          set -euo pipefail
-          grep -qE '[0-9]+ passed' /tmp/tui.txt || {
+          pytest_status=$?
+          if ! grep -qE '[0-9]+ passed' /tmp/tui.txt; then
             echo "FAIL: no headless TUI test passed — the gate must not pass vacuously"
             tail -30 /tmp/tui.txt
             exit 1
-          }
+          fi
+          if [ "$pytest_status" -ne 0 ]; then
+            echo "::error::headless PTY suite reported failures (pytest exit $pytest_status)"
+            grep -E '^(FAILED|ERROR)' /tmp/tui.txt | head -30 || true
+            exit 1
+          fi
 
   # ── Consumer journeys ────────────────────────────────────────────────
   # The other suites test modules. This runs the real binary the way a person
@@ -626,28 +637,35 @@ jobs:
       - name: Build release binary
         run: cargo build --release
       - name: Drive the real TUI under a PTY
-        # One run, `tee`d, and the vacuity check below reads it. This used to
-        # invoke the suite twice — once with `-v` for the log and once with
-        # `-q` into a file purely to grep it — on a suite that fails when the
-        # machine is loaded.
+        # One run, `tee`d, and BOTH checks read it. This used to invoke the
+        # suite twice — once with `-v` for the log and once with `-q` into a
+        # file purely to grep it — on a suite that fails when the machine is
+        # loaded.
+        #
+        # `|| true` used to sit after the `tee` so the vacuity check below was
+        # the decider. It discarded the result: `3 passed, 17 failed` matches
+        # `[0-9]+ passed`, so the job went green with 17 failures and no floor
+        # anywhere. Same defect, same fix as the `tui-headless` job — capture
+        # pytest's exit status and assert on it. The vacuity check is kept and
+        # runs FIRST, because tuiwright is imported with importorskip: a missing
+        # dependency turns the file into a skip and pytest exits 0, so a green
+        # exit code there means nothing ran.
         env:
           NIKI_BIN: ${{ github.workspace }}/target/release/niki
-        run: python3 -m pytest -c pytest_headless.ini -v 2>&1 | tee /tmp/pty.txt || true
-      - name: Fail if the suite collected nothing
-        # tuiwright is imported with importorskip, so a missing dependency
-        # turns the whole file into a skip and the job goes green having
-        # tested nothing — the same trap this repo has hit twice.
-        #
-        # The pattern is unanchored on purpose: `-v` wraps its summary in a
-        # `====` rule, so `^[0-9]+ passed` matches nothing and would fail a
-        # suite with 17 passing tests. tests/ci_contracts.rs pins this.
         run: |
-          set -euo pipefail
-          grep -qE '[0-9]+ passed' /tmp/pty.txt || {
+          set -uo pipefail
+          python3 -m pytest -c pytest_headless.ini -v 2>&1 | tee /tmp/pty.txt
+          pytest_status=$?
+          if ! grep -qE '[0-9]+ passed' /tmp/pty.txt; then
             echo "FAIL: no PTY test passed — tuiwright is probably missing"
             tail -30 /tmp/pty.txt
             exit 1
-          }
+          fi
+          if [ "$pytest_status" -ne 0 ]; then
+            echo "::error::Real PTY TUI suite reported failures (pytest exit $pytest_status)"
+            grep -E '^(FAILED|ERROR)' /tmp/pty.txt | head -30 || true
+            exit 1
+          fi
 
   # ── The demo a stranger will actually run ──────────────────────────────
   # `scripts/demo.sh` is the first-run experience: no API key, no container
