@@ -91,6 +91,68 @@ fn the_tui_vacuity_check_matches_both_pytest_output_formats() {
     );
 }
 
+/// The TUI gates must decide on the suite's RESULT, not only on whether it ran.
+///
+/// Both jobs piped pytest into `tee` and then appended `|| true`, on the
+/// reasoning that the vacuity grep was the decider. It was not: `|| true`
+/// discarded pytest's exit status, and the only remaining check was
+/// `grep -qE '[0-9]+ passed'`, which has no floor. A run reporting
+/// `3 passed, 17 failed` matches that regex, so the job went green with
+/// seventeen failures — on the one layer in this repo that can catch a key
+/// bound in the table but never dispatched.
+///
+/// The vacuity check is kept and is genuinely load-bearing (tuiwright is
+/// imported with `importorskip`, so a missing dependency turns the file into
+/// a skip and pytest exits 0 — a green exit code there means nothing ran). It
+/// just has to be the *first* check, not the only one.
+///
+/// This test exists because the existing contract test above pins the regex's
+/// FORM. Pinning the form while the result is discarded is how the weakness got
+/// ratified in the first place.
+#[test]
+fn the_tui_gates_decide_on_the_suites_result() {
+    let ci = ci_yml();
+    for job_name in ["tui-headless", "tui-pty"] {
+        let job = ci
+            .split(&format!("\n  {job_name}:"))
+            .nth(1)
+            .and_then(|rest| rest.split("\n  # ──").next())
+            .unwrap_or_else(|| panic!("job {job_name} exists in ci.yml"));
+
+        for line in job.lines() {
+            assert!(
+                !(line.contains("pytest") && line.contains("|| true")),
+                "job {job_name} runs pytest with `|| true`, which discards the suite's \
+                 result. A run reporting `3 passed, 17 failed` matches `[0-9]+ passed`, \
+                 so the vacuity grep alone lets the job go green with 17 failures. \
+                 Found: {line}"
+            );
+            assert!(
+                !(line.contains("tee /tmp/tui.txt") || line.contains("tee /tmp/pty.txt"))
+                    || !line.contains("|| true"),
+                "job {job_name} pipes pytest through tee with `|| true`; the suite's \
+                 exit status must survive. Found: {line}"
+            );
+        }
+
+        assert!(
+            job.contains("pytest_status=$?"),
+            "job {job_name} must capture pytest's exit status. Without it the only \
+             signal is the vacuity grep, which has no failure floor."
+        );
+        assert!(
+            job.contains(r#"if [ "$pytest_status" -ne 0 ]"#),
+            "job {job_name} must fail when pytest reports failures."
+        );
+        assert!(
+            job.contains("[0-9]+ passed"),
+            "job {job_name} must keep the vacuity check: tuiwright is imported with \
+             `importorskip`, so a missing dependency skips the whole file and pytest \
+             exits 0. Vacuity is checked first, and is not a substitute for the result."
+        );
+    }
+}
+
 /// The headless-TUI suite must run once per job, not twice.
 ///
 /// It used to run once with `-v` for the log and again with `-q` purely to grep
