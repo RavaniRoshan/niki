@@ -1387,6 +1387,47 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
             _ => ("●", theme::fg_bright()),
         };
 
+        // Assistant turns go through the markdown engine.
+        //
+        // `src/display/chat/` is 1,367 lines of pulldown-cmark rendering —
+        // fenced code with language hints, tables, lists, inline styles — and
+        // none of it rendered the conversation. `build_chat_lines` used
+        // `text.lines()`, so a reply containing ```rust or **bold** or a table
+        // appeared literally, unstyled and unhighlighted, on the one surface
+        // where a coding assistant's output is read. The engine was reachable
+        // only for *stage bodies*, and stages are empty in chat.
+        //
+        // Errors stay plain: their text is a diagnostic, not prose, and it must
+        // survive verbatim into a copy or a bug report.
+        if role == "assistant" {
+            let rows = markdown_rows(text, width, false);
+            if !rows.is_empty() {
+                push_line(
+                    &mut lines,
+                    format!("{icon} assistant:"),
+                    usize::MAX,
+                    0,
+                    false,
+                    Some(Line::from(vec![
+                        Span::styled(format!("{icon} "), Style::default().fg(color)),
+                        Span::styled(
+                            "assistant:".to_string(),
+                            Style::default().fg(color).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled("", Style::default()), // SEGMENT_RESET
+                    ])),
+                    None,
+                );
+                for mut row in rows {
+                    // Keep the row addressable by the click/copy hit-test.
+                    row.msg_index = i;
+                    lines.push(row);
+                }
+                push_line(&mut lines, String::new(), usize::MAX, 0, false, None, None);
+                continue;
+            }
+        }
+
         for (l_idx, line_str) in text.lines().enumerate() {
             if l_idx == 0 {
                 let rich_line = Line::from(vec![
@@ -1438,46 +1479,26 @@ pub fn build_chat_lines(state: &AppState, width: usize, include_input: bool) -> 
     // committed assistant turn so it does not visibly restyle itself when it
     // lands.
     if !state.chat_stream.is_empty() {
+        // Same renderer as a committed turn, in its streaming form, so a reply
+        // does not restyle itself the moment it lands.
         let i = state.chat_log.len();
-        for (l_idx, line_str) in state.chat_stream.lines().enumerate() {
-            let rich_line = if l_idx == 0 {
-                Line::from(vec![
-                    Span::styled("⟠ ", Style::default().fg(theme::sand())),
-                    Span::styled(
-                        "assistant: ",
-                        Style::default()
-                            .fg(theme::sand())
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        line_str.to_string(),
-                        Style::default().fg(theme::fg_bright()),
-                    ),
-                    Span::styled("", Style::default()), // SEGMENT_RESET
-                ])
-            } else {
-                Line::from(vec![
-                    Span::raw("   "),
-                    Span::styled(
-                        line_str.to_string(),
-                        Style::default().fg(theme::fg_bright()),
-                    ),
-                    Span::styled("", Style::default()), // SEGMENT_RESET
-                ])
-            };
+        let rows = markdown_rows(&state.chat_stream, width, true);
+        if rows.is_empty() {
+            // A stream that has produced only whitespace still has to show that
+            // something is arriving.
             push_line(
                 &mut lines,
-                if l_idx == 0 {
-                    format!("⟠ assistant: {}", line_str)
-                } else {
-                    format!("   {}", line_str)
-                },
-                i,
+                "⟠ assistant: …".to_string(),
+                usize::MAX,
                 0,
                 false,
-                Some(rich_line),
+                None,
                 None,
             );
+        }
+        for mut row in rows {
+            row.msg_index = i;
+            lines.push(row);
         }
     }
 
@@ -1920,6 +1941,25 @@ fn chat_content_hash(state: &AppState) -> u64 {
     }
     // Hash chat_log length
     state.chat_log.len().hash(&mut hasher);
+    // Hash the in-flight turn.
+    //
+    // Without this, `build_chat_lines_into` early-returns on every delta
+    // because the hash has not changed, `state.chat_lines` is never rebuilt,
+    // and the streamed reply never appears — the surface would sit on a frozen
+    // frame for the whole request and then jump straight to the finished turn.
+    // A feature that works in the state machine and not on screen is the exact
+    // shape of bug this slice is removing, so it does not get to ship.
+    state.chat_stream.len().hash(&mut hasher);
+    state.chat_stream.hash(&mut hasher);
+    state.chat_pending.hash(&mut hasher);
+    state.chat_truncated.hash(&mut hasher);
+    // Content, not just count: a turn that is replaced in place (the streamed
+    // text committing into the log) keeps the length identical at the moment
+    // it matters.
+    for (role, text) in &state.chat_log {
+        role.hash(&mut hasher);
+        text.len().hash(&mut hasher);
+    }
     // Hash expanded stages
     let mut expanded: Vec<_> = state.expanded_stages.iter().copied().collect();
     expanded.sort();
@@ -2484,5 +2524,94 @@ mod tests {
         let key = KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE);
         assert!(page.handle_key(key, &mut state));
         assert_ne!(state.show_thinking, initial);
+    }
+
+    /// The cached line map must track the turn in flight.
+    ///
+    /// `build_chat_lines_into` early-returns unless `chat_content_hash`
+    /// changes. The hash covered `chat_log.len()` but not `chat_stream`, so
+    /// every streamed delta was discarded before it could be drawn: the
+    /// surface held a frozen frame for the whole request and then jumped
+    /// straight to the finished turn. The state machine was correct and the
+    /// screen was not — which is the shape of bug this slice exists to remove,
+    /// so it does not get to ship.
+    #[test]
+    fn the_line_map_rebuilds_as_a_turn_streams_in() {
+        use crate::display::state::AppState;
+        use crate::display::tui::DisplayEvent;
+
+        let mut state = AppState::new(
+            "chat".to_string(),
+            crate::config::NikiConfig::default(),
+            std::path::PathBuf::from("."),
+        );
+        state.chat_width.set(80);
+        state.apply_display_event(DisplayEvent::ChatMessage {
+            role: "user".to_string(),
+            text: "hello".to_string(),
+        });
+        build_chat_lines_into(&mut state);
+        let after_user = state.chat_lines.len();
+        assert!(after_user > 0, "the user turn must be on the line map");
+
+        // Nothing has arrived yet.
+        let before_delta = chat_content_hash(&state);
+        state.apply_display_event(DisplayEvent::ChatDelta {
+            text: "Hi there".to_string(),
+        });
+        assert_ne!(
+            chat_content_hash(&state),
+            before_delta,
+            "a streamed delta must invalidate the cached line map"
+        );
+        build_chat_lines_into(&mut state);
+        let drawn: Vec<String> = state.chat_lines.iter().map(|l| l.text.clone()).collect();
+        assert!(
+            drawn.iter().any(|l| l.contains("Hi there")),
+            "the streamed text must reach the drawn rows:\n{drawn:#?}"
+        );
+
+        // And it must keep up as more arrives.
+        let after_first = chat_content_hash(&state);
+        state.apply_display_event(DisplayEvent::ChatDelta {
+            text: ", here to help".to_string(),
+        });
+        assert_ne!(
+            chat_content_hash(&state),
+            after_first,
+            "a second delta must invalidate it again"
+        );
+        build_chat_lines_into(&mut state);
+        let drawn: Vec<String> = state.chat_lines.iter().map(|l| l.text.clone()).collect();
+        assert!(
+            drawn.iter().any(|l| l.contains("here to help")),
+            "the stream must accumulate, not replace:\n{drawn:#?}"
+        );
+    }
+
+    /// Pending and truncated are screen state, so they belong in the hash.
+    #[test]
+    fn the_line_map_tracks_pending_and_truncation() {
+        use crate::display::state::AppState;
+        use crate::display::tui::DisplayEvent;
+
+        let mut state = AppState::new(
+            "chat".to_string(),
+            crate::config::NikiConfig::default(),
+            std::path::PathBuf::from("."),
+        );
+        let before = chat_content_hash(&state);
+        state.apply_display_event(DisplayEvent::ChatPending);
+        assert_ne!(chat_content_hash(&state), before, "pending must invalidate");
+
+        let after_pending = chat_content_hash(&state);
+        state.apply_display_event(DisplayEvent::ChatFinished {
+            finish_reason: Some("max_tokens".to_string()),
+        });
+        assert_ne!(
+            chat_content_hash(&state),
+            after_pending,
+            "a truncated finish must invalidate"
+        );
     }
 }
