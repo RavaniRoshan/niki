@@ -940,8 +940,16 @@ fn run_tui(
     engine.end_frame();
     engine.mark_clean_for_render();
 
-    let config =
-        crate::config::types::NikiConfig::load(std::path::Path::new(".")).unwrap_or_default();
+    // **This project's** config, not the current directory's.
+    //
+    // It read `Path::new(".")` while `project_path` sat unused in the
+    // signature, so `niki run --project X --tui` rendered against whatever
+    // `niki.toml` happened to be in the *shell's* working directory. The
+    // pipeline loaded X's config; the TUI drew someone else's theme. The two
+    // halves of one run disagreeing about one project is the defect this
+    // branch has been removing everywhere else, and it was two characters of
+    // path.
+    let config = crate::config::types::NikiConfig::load(&project_path).unwrap_or_default();
 
     // Initialize theme mode from config
     {

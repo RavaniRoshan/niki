@@ -282,3 +282,7 @@ dashboard-picks-most-recent | the_most_recent_run_is_the_one_dashboarded | the s
 dashboard-path-only-writes-nothing | path_only_prints_and_writes_nothing | a flag that generates anyway
 dashboard-missing-task-names-it | a_missing_task_fails_by_name | failing without saying what it could not find
 dashboard-escapes-what-it-embeds | the_dashboard_escapes_what_it_embeds | a run's own text embedded raw into an HTML file
+# B5-10 · both surfaces of one run read the same project's config (§3)
+run-tui-loads-its-project | run_tui_loads_its_own_project_config | `niki run --project X --tui` rendering with the shell cwd's niki.toml
+both-surfaces-agree | both_surfaces_load_the_project_they_were_given | one surface fixed while the other keeps its own path
+tui-spawnable-without-a-pipeline | the_tui_can_be_spawned_without_a_pipeline | losing the way to observe the divergence
