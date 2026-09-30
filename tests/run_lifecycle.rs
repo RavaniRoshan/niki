@@ -942,3 +942,172 @@ async fn a_dry_run_exits_zero_even_though_it_creates_no_branch() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// The product's central promise, asserted against the branch itself.
+///
+/// The README sells one thing: describe a change, get back a `niki/<id>` branch
+/// that contains it. Until this test, nothing in `cargo test` checked that.
+///
+/// What the suite actually did was verify the branch by *name*
+/// (`branch.starts_with("niki/")`, and a `rev-parse --verify` that the ref
+/// exists) and verify the code change by **string-matching a sidecar file** —
+/// `changes.patch` contains `diff --git` and contains `src/list.rs`. Those are
+/// independent claims. A run could write a correct `changes.patch`, create a
+/// correctly-named branch, commit nothing to it, and pass every assertion
+/// above: the patch file is a description of a diff, not the diff, and nothing
+/// correlated the two.
+///
+/// So this reads the committed blob with `git show <branch>:src/list.rs`. That
+/// cannot be satisfied by the working tree — which the worktree backend
+/// deliberately mutates, by design, so the user can review the change in place —
+/// and it cannot be satisfied by a sidecar file. It is the branch.
+///
+/// It also pins the other two deliverables the README names in the same
+/// sentence, which had no success-path assertion at all: `report.md` and
+/// `artifacts/*.json`. The one test that mentioned `report.md` did so in a
+/// *failure* path.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_code_change_is_on_the_branch_not_only_in_a_sidecar_file() {
+    let repo = create_fixture_repo();
+    let project = repo.dir.path().to_path_buf();
+    let script_path = project.join(".niki-mock-script.json");
+    successful_script(&script_path);
+
+    std::fs::write(
+        project.join("niki.toml"),
+        multiagent_mock_toml(&script_path, Some("true")),
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_niki"))
+        .args([
+            "run",
+            "--backend",
+            "worktree",
+            "--output-format",
+            "json",
+            "--bare",
+            "--project",
+            project.to_str().unwrap(),
+            "fix pagination",
+        ])
+        .output()
+        .expect("niki executable must run");
+
+    assert!(
+        output.status.success(),
+        "run must succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout must be a JSON envelope");
+    assert_eq!(envelope["status"], "completed", "{envelope}");
+    let branch = envelope["branch"]
+        .as_str()
+        .expect("a completed run must report a branch")
+        .to_string();
+    let task_id = envelope["task_id"].as_str().expect("task_id").to_string();
+
+    // Topology is pinned to the multi-agent chain, not left to the default,
+    // and the reason is the same one the JSON-envelope test above records: the
+    // deliverable being asserted is `artifacts/*.json` for *every agent that
+    // ran*, and under `singleagent` the Reviewer does not run — so its artifact
+    // is legitimately absent, and asserting on it would be asserting a topology
+    // rather than a contract. Pinning the chain makes "a reviewed run persists
+    // the reviewer's decision" a statement this test is entitled to make.
+    assert_eq!(
+        envelope["independently_reviewed"],
+        serde_json::json!(true),
+        "this test asserts reviewer artifacts, so the Reviewer must have run: {envelope}"
+    );
+
+    // ── The change is on the branch, read from the committed blob ──────
+    //
+    // The fixture's Coder response replaces `let end = start + size - 1;`
+    // with `let end = start + size;` in `src/list.rs`
+    // (`successful_script`, above). `git show <ref>:<path>` prints the blob as
+    // committed, so this is the branch and nothing else.
+    let on_branch = git(&project, &["show", &format!("{branch}:src/list.rs")]);
+    assert!(
+        on_branch.contains("let end = start + size;"),
+        "the Coder's change must be committed on {branch}, but `git show` returned:\n{on_branch}"
+    );
+    assert!(
+        !on_branch.contains("size - 1"),
+        "{branch} still carries the pre-change line:\n{on_branch}"
+    );
+
+    // The commit is real, not an empty tree that happens to be named right.
+    let stat = git(&project, &["show", "--stat", "--oneline", &branch]);
+    assert!(
+        stat.contains("src/list.rs"),
+        "{branch} must have a commit touching the changed file:\n{stat}"
+    );
+
+    // ── `changes.patch` and the branch must agree ──────────────────────
+    //
+    // The sidecar file is the thing the old suite trusted. It has to describe
+    // *this* branch, not a diff nobody committed.
+    let patch = std::fs::read_to_string(
+        project
+            .join(".niki")
+            .join("tasks")
+            .join(&task_id)
+            .join("changes.patch"),
+    )
+    .expect("changes.patch is written");
+    let branch_diff = git(&project, &["show", branch.as_str(), "--", "src/list.rs"]);
+    for line in patch
+        .lines()
+        .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+    {
+        let content = &line[1..];
+        assert!(
+            branch_diff.contains(content),
+            "changes.patch claims +{content:?} but the branch commit does not contain it"
+        );
+    }
+
+    // ── report.md, on a success path, for the first time ───────────────
+    let report = project
+        .join(".niki")
+        .join("tasks")
+        .join(&task_id)
+        .join("report.md");
+    let report_text = std::fs::read_to_string(&report)
+        .unwrap_or_else(|e| panic!("report.md must exist after a successful run: {e}"));
+    assert!(
+        !report_text.trim().is_empty(),
+        "report.md exists but is empty"
+    );
+
+    // ── artifacts/*.json, the third deliverable in the same sentence ────
+    //
+    // `tests/artifact_contracts.rs` validates artifact *schemas* in isolation.
+    // Nothing asserted that a run actually *produced* any, so the README's
+    // "per-agent JSON artifacts — the entire decision trail is inspectable"
+    // had no test standing behind it.
+    let artifacts_dir = project
+        .join(".niki")
+        .join("tasks")
+        .join(&task_id)
+        .join("artifacts");
+    let artifacts: Vec<_> = std::fs::read_dir(&artifacts_dir)
+        .unwrap_or_else(|e| panic!("artifacts/ must exist after a run: {e}"))
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        artifacts.iter().any(|f| f == "reviewer.json"),
+        "a reviewed run must persist the reviewer's artifact, found: {artifacts:?}"
+    );
+    for name in &artifacts {
+        if !name.ends_with(".json") {
+            continue;
+        }
+        let body = std::fs::read_to_string(artifacts_dir.join(name)).expect("artifact readable");
+        serde_json::from_str::<serde_json::Value>(&body)
+            .unwrap_or_else(|e| panic!("artifact {name} must be valid JSON: {e}"));
+    }
+}

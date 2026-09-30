@@ -78,6 +78,7 @@ pub fn handle(args: &DoctorArgs) -> Result<()> {
         // they were told to run first.
         if cfg.docker.backend == SandboxBackend::Docker {
             checks.push(check_sandbox_image(&cfg.docker.base_image));
+            checks.push(check_container_can_start(&cfg.docker.base_image));
         }
         checks.push(check_backend_vs_runtime(&cfg));
     }
@@ -480,6 +481,99 @@ fn check_sandbox_image(base_image: &str) -> Check {
     }
 }
 
+/// Can this machine actually *start* a container?
+///
+/// The presence checks above answer two narrow questions: is there a binary on
+/// the `PATH`, and is the image in the local store. Both can be true while
+/// every container run fails — and on a stock WSL2 install they are.
+///
+/// Podman's `crun` cannot write `cpu.max` without cgroup delegation, so a run
+/// against the configured image fails with:
+///
+///     Docker responded with status code 500: crun: writing file `cpu.max`:
+///     Invalid argument: OCI runtime error
+///
+/// `niki doctor` reported `container runtime: pass`, `sandbox image: pass`,
+/// `sandbox backend matches this machine: pass`, and exited 0 — and then the
+/// very next command died eleven seconds into the run with an OCI message that
+/// names nothing a user can act on. The command whose entire job is "can I run
+/// this?" was answering a different question, and answering it correctly.
+///
+/// So: start a container. It costs one short run of an image that is already
+/// present, and it is the only probe that answers the question the user is
+/// actually asking. The output is surfaced verbatim, because an OCI error is
+/// only actionable if the user can see it.
+fn check_container_can_start(base_image: &str) -> Check {
+    let name = "container can start".to_string();
+    if base_image.is_empty() {
+        return Check {
+            category: "sandbox",
+            name,
+            result: CheckResult::Warn(
+                "no base_image configured, so there is nothing to start".to_string(),
+            ),
+        };
+    }
+    let (bin, args): (&str, Vec<&str>) = if which("docker").is_some() {
+        (
+            "docker",
+            vec!["run", "--rm", "--entrypoint", "true", base_image],
+        )
+    } else {
+        (
+            "podman",
+            vec!["run", "--rm", "--entrypoint", "true", base_image],
+        )
+    };
+    if which(bin).is_none() {
+        return Check {
+            category: "sandbox",
+            name,
+            result: CheckResult::Warn(format!("{bin} is not on PATH, so this was not attempted")),
+        };
+    }
+
+    match Command::new(bin).args(&args).output() {
+        Ok(o) if o.status.success() => Check {
+            category: "sandbox",
+            name,
+            result: CheckResult::Pass(format!("{bin} started {base_image} successfully")),
+        },
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            let detail = stderr
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or("(no error output)")
+                .to_string();
+            let remedy = container_start_remedy(&detail);
+            Check {
+                category: "sandbox",
+                name,
+                result: CheckResult::Fail(format!(
+                    "{bin} is installed and the image is in the local store, but a \
+                     container cannot start. Every run on the default backend will \
+                     fail:\n  {detail}\n\n{remedy}"
+                )),
+            }
+        }
+        Err(e) => Check {
+            category: "sandbox",
+            name,
+            result: CheckResult::Warn(format!("could not attempt a container run: {e}")),
+        },
+    }
+}
+
+/// Is `bin` on the `PATH`?
+fn which(bin: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|d| d.join(bin))
+        .find(|p| p.is_file())
+}
+
 fn check_sandbox() -> Vec<Check> {
     // One probe, shared with the setup wizard and `niki init` — see
     // `sandbox::detect_container_runtime`. Three copies of this question is how
@@ -713,6 +807,35 @@ fn cfg_for_measure() -> NikiConfig {
     NikiConfig::load(&std::env::current_dir().unwrap_or_default()).unwrap_or_default()
 }
 
+/// The remedy text for a container that will not start.
+///
+/// Split out and pure because this is the part that is easy to get wrong, and
+/// it *was*. The first version hardcoded the cgroup fix, because that was the
+/// failure I happened to hit — so on the machine that motivated the check it
+/// named a cause the reader did not have. The second version suggested
+/// prefixing the image with `localhost/`, which reads as a *registry* named
+/// localhost; podman then tries to pull from it, and the fix makes things
+/// worse.
+///
+/// Advice that has not been run is a guess with a confident tone. So the remedy
+/// is selected from the error text, and every branch is asserted below.
+fn container_start_remedy(detail: &str) -> &'static str {
+    if detail.contains("cpu.max") || detail.contains("cgroup") {
+        "This is a cgroup problem, which is what a stock WSL2 install gives you: \
+         `sudo sh -c 'echo 1 > /sys/fs/cgroup/cgroup.controllers'`, then reboot. \
+         Or set `[docker] backend = \"worktree\"` to run without a container."
+    } else if detail.contains("did not resolve") || detail.contains("short-name") {
+        "Podman cannot resolve the short image name. Set \
+         `unqualified-search-registries = [\"docker.io\"]` (or whatever registry \
+         hosts your image) in /etc/containers/registries.conf, or name the image \
+         with the registry it is actually stored under. Or set `[docker] backend = \
+         \"worktree\"` to run without a container."
+    } else {
+        "Set `[docker] backend = \"worktree\"` in niki.toml to run without a \
+         container — that path needs no runtime and no image. The full error is above."
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -796,6 +919,60 @@ mod tests {
         );
         cfg.docker.backend = SandboxBackend::Docker;
         assert_eq!(cfg.docker.backend, SandboxBackend::Docker);
+    }
+
+    /// The remedy is chosen from the error, never guessed.
+    ///
+    /// Both of the earlier versions of this message were wrong in exactly the
+    /// way a hardcoded remedy always is: the first named a cgroup problem
+    /// regardless of the error, so on the machine that prompted the check it
+    /// confidently diagnosed something else; the second suggested prefixing the
+    /// image with `localhost/`, which podman reads as a registry and then tries
+    /// to *pull* from — a fix that makes the failure worse.
+    ///
+    /// So: one branch per known cause, one fallback, and no advice that is not
+    /// reachable from the error text.
+    #[test]
+    fn a_container_that_will_not_start_gets_the_remedy_for_its_actual_cause() {
+        let cgroup = container_start_remedy(
+            "crun: writing file `cpu.max`: Invalid argument: OCI runtime error",
+        );
+        assert!(
+            cgroup.contains("cgroup") && cgroup.contains("cgroup.controllers"),
+            "a cpu.max failure is a cgroup problem and must say so: {cgroup}"
+        );
+
+        let short_name = container_start_remedy(
+            "short-name \"niki-sandbox:24.04\" did not resolve to an alias and no \
+             unqualified-search registries are defined",
+        );
+        assert!(
+            short_name.contains("unqualified-search-registries"),
+            "a short-name failure is fixed in registries.conf: {short_name}"
+        );
+        assert!(
+            !short_name.contains("localhost/niki-sandbox"),
+            "the localhost/ prefix is NOT the fix: podman reads it as a registry \
+             and tries to pull from it, which is worse than the original failure. \
+             This was shipped by mistake once."
+        );
+
+        let unknown = container_start_remedy("Error: something nobody has seen before");
+        assert!(
+            unknown.contains("worktree"),
+            "an unrecognised error must still offer the path that always works: \
+             {unknown}"
+        );
+
+        // Every branch has to be reachable, and every branch has to name the
+        // escape hatch, because a container backend that cannot start has
+        // exactly one other way to run this product.
+        for remedy in [cgroup, short_name, unknown] {
+            assert!(
+                remedy.contains("worktree"),
+                "every remedy must name the backend that needs no container: {remedy}"
+            );
+        }
     }
 
     #[test]
