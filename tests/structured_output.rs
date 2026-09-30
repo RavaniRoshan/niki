@@ -80,6 +80,8 @@ fn test_request_structured_default_fallback() {
         json_schema: None,
         tools: None,
         reasoning_effort: None,
+
+        history: Vec::new(),
     };
 
     // Just verify the method compiles and has the right type

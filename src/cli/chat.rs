@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use crate::config::NikiConfig;
-use crate::display::tui::DisplayEvent;
+use crate::display::tui::{ChatSubmit, DisplayEvent};
 use crate::llm::provider::{LlmProvider, create_provider};
 
 #[derive(Args, Clone, Default)]
@@ -141,57 +141,164 @@ fn build_provider(config: &NikiConfig) -> Option<(Box<dyn LlmProvider>, String)>
     None
 }
 
-/// Process a submitted user message: ask the LLM and stream the reply back into
-/// the chat session as an assistant turn (Phase 6 — user messages mid-session).
-fn process_message(tx: &mpsc::Sender<DisplayEvent>, config: &NikiConfig, user_text: &str) {
-    // TUI mode runs on a plain thread: bridge into async with a fresh
-    // runtime. (The headless `--message` path awaits `reply_text` directly
-    // on the caller's runtime instead — never nest runtimes here.)
-    let text = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt.block_on(reply_text(config, user_text)),
-        Err(_) => "(offline) could not start async runtime".to_string(),
+/// The system prompt for a chat turn.
+///
+/// It used to end with a literal `__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__` marker
+/// that nothing in the repository substitutes, so every request carried that
+/// string to the provider as part of its instructions.
+///
+/// The two tool rules it carries are also removed here rather than left for
+/// the tool slice: this surface sends `tools: None`, so the model is being
+/// told about "dedicated native tools" it was never given, and about reading
+/// files it cannot read. It narrates doing both. The rules come back with the
+/// tools.
+const CHAT_SYSTEM_PROMPT: &str = "You are NIKI, a concise and high-precision coding assistant \
+embedded in a terminal chat. Answer the user's question directly, and say plainly when you \
+do not know something rather than guessing.";
+
+/// Stream one assistant turn into the chat session.
+///
+/// Streams rather than waiting for a whole reply: `complete()` is a single
+/// non-streaming POST, so a twenty-second answer used to be twenty seconds of
+/// a completely static screen on the one surface a person is most likely to be
+/// waiting on. The provider's `stream()` already existed and `niki run`
+/// already consumed it.
+///
+/// Returns `Err` with a human-readable message. The caller renders it as an
+/// error — see `DisplayEvent::ChatError` for why that is not the same thing
+/// as an assistant turn.
+async fn stream_reply(
+    tx: &mpsc::Sender<DisplayEvent>,
+    config: &NikiConfig,
+    submit: &ChatSubmit,
+) -> Result<String, String> {
+    use futures::StreamExt;
+
+    let (provider, model) =
+        build_provider(config).ok_or_else(|| NO_PROVIDER_MESSAGE.to_string())?;
+
+    let req = crate::llm::provider::CompletionRequest {
+        model,
+        system_prompt: CHAT_SYSTEM_PROMPT.to_string(),
+        user_message: submit.text.clone(),
+        max_tokens: 4096,
+        temperature: 0.7,
+        json_schema: None,
+        tools: None,
+        reasoning_effort: None,
+        // The whole point: the model sees the conversation it is in.
+        history: submit.history.clone(),
     };
-    send_assistant(tx, text);
+
+    let mut stream = match provider.stream(req).await {
+        Ok(s) => s,
+        Err(e) => return Err(describe_error(&e)),
+    };
+
+    let mut full = String::new();
+    let mut finish_reason: Option<String> = None;
+    while let Some(chunk) = stream.next().await {
+        if submit.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = tx.send(DisplayEvent::ChatError {
+                message: "Cancelled — the request was stopped before it finished.".to_string(),
+                cancelled: true,
+            });
+            return Ok(full);
+        }
+        match chunk {
+            Ok(crate::llm::provider::StreamChunk::Text(t)) => {
+                full.push_str(&t);
+                let _ = tx.send(DisplayEvent::ChatDelta { text: t });
+            }
+            Ok(crate::llm::provider::StreamChunk::Finish { reason }) => {
+                finish_reason = Some(reason);
+            }
+            Ok(crate::llm::provider::StreamChunk::Usage(_)) => {}
+            Err(e) => return Err(describe_error(&e)),
+        }
+    }
+    let _ = tx.send(DisplayEvent::ChatFinished { finish_reason });
+    Ok(full)
 }
 
-/// Core single-turn completion. Async so both the TUI bridge above and the
-/// headless `--message` path share one implementation.
-async fn reply_text(config: &NikiConfig, user_text: &str) -> String {
-    match build_provider(config) {
-        Some((provider, model)) => {
-            let req = crate::llm::provider::CompletionRequest {
-                model,
-                system_prompt: concat!(
-                    "You are NIKI, a concise and high-precision coding assistant embedded in a terminal chat.\n",
-                    "Rule: Never run shell shims (cat, grep, sed, head, tail) when dedicated native tools are available.\n",
-                    "Rule: Always read files before modifying them.\n",
-                    "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__\n"
-                )
-                .to_string(),
-                user_message: user_text.to_string(),
-                max_tokens: 1024,
-                temperature: 0.7,
-                json_schema: None,
-                tools: None,
-                ..Default::default()
-            };
-            match provider.complete(req).await {
-                Ok(resp) => resp.content,
-                Err(e) => format!("(offline) LLM error: {}", e),
-            }
-        }
-        None => {
-            "Hello! I am NIKI, your autonomous coding assistant. No LLM provider is configured yet. Run `niki init` (or `niki auth login`) to set one up — Ollama works fully offline."
-                .to_string()
-        }
+/// Name the failure, not the transport.
+///
+/// Every error used to be rendered as `(offline) LLM error: …` inside an
+/// assistant bubble. A 401 is a wrong key, a 404 on Ollama is a model that was
+/// never pulled, and a timeout is neither — and all three told the user to go
+/// look at their network.
+fn describe_error(e: &anyhow::Error) -> String {
+    let raw = e.to_string();
+    if raw.contains("401") || raw.to_lowercase().contains("authentication") {
+        format!(
+            "Authentication failed. Your API key was rejected. Check it with `niki auth status`, or set the provider's key environment variable. ({raw})"
+        )
+    } else if raw.contains("404") {
+        format!(
+            "The provider does not recognise that model. Check the model name in your config, or pull it if you are using Ollama. ({raw})"
+        )
+    } else if raw.contains("429") {
+        format!("Rate limited by the provider. Wait a moment and try again. ({raw})")
+    } else if raw.contains("timed out") || raw.contains("timeout") {
+        format!(
+            "The request timed out. The model may be too slow for this machine, or the network stalled. ({raw})"
+        )
+    } else if raw.contains("body error") {
+        format!(
+            "The connection dropped part-way through the reply — the provider stopped sending before the response was complete. ({raw})"
+        )
+    } else {
+        format!("LLM error: {raw}")
     }
 }
 
-fn send_assistant(tx: &mpsc::Sender<DisplayEvent>, text: String) {
-    let _ = tx.send(DisplayEvent::ChatMessage {
-        role: "assistant".to_string(),
-        text,
-    });
+const NO_PROVIDER_MESSAGE: &str = "No LLM provider is configured yet. Run `niki init` (or `niki auth login`) to set one up — Ollama works fully offline.";
+
+/// Process a submitted user message: stream the reply back into the chat
+/// session as an assistant turn.
+fn process_message(tx: &mpsc::Sender<DisplayEvent>, config: &NikiConfig, submit: ChatSubmit) {
+    // TUI mode runs on a plain thread: bridge into async with a fresh
+    // runtime. (The headless `--message` path awaits directly on the caller's
+    // runtime instead — never nest runtimes here.)
+    let result = match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt.block_on(stream_reply(tx, config, &submit)),
+        Err(e) => Err(format!("Could not start the async runtime: {e}")),
+    };
+    if let Err(message) = result {
+        let _ = tx.send(DisplayEvent::ChatError {
+            message,
+            cancelled: false,
+        });
+    }
+}
+
+/// One-shot completion for the headless `--message` path.
+///
+/// No streaming: stdout is a pipe and the consumer wants the whole reply on
+/// one line. History is still threaded through, so `--message` and the TUI
+/// cannot disagree about what the model sees.
+async fn reply_text(config: &NikiConfig, user_text: &str) -> String {
+    let Some((provider, model)) = build_provider(config) else {
+        return NO_PROVIDER_MESSAGE.to_string();
+    };
+    let req = crate::llm::provider::CompletionRequest {
+        model,
+        system_prompt: CHAT_SYSTEM_PROMPT.to_string(),
+        user_message: user_text.to_string(),
+        max_tokens: 4096,
+        temperature: 0.7,
+        json_schema: None,
+        tools: None,
+        reasoning_effort: None,
+        history: Vec::new(),
+    };
+    match provider.complete(req).await {
+        Ok(resp) if resp.content.trim().is_empty() => {
+            "(the model returned an empty response)".to_string()
+        }
+        Ok(resp) => resp.content,
+        Err(e) => describe_error(&e),
+    }
 }
 
 pub async fn handle(args: &ChatArgs) -> Result<()> {
@@ -252,7 +359,12 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
     let (tx, rx) = mpsc::channel::<DisplayEvent>();
 
     // Channel for submitted user messages, consumed by the session processor.
-    let (on_submit_tx, on_submit_rx) = mpsc::channel::<String>();
+    let (on_submit_tx, on_submit_rx) = mpsc::channel::<ChatSubmit>();
+
+    // One cancel handle, shared by the TUI and the processor thread. Esc sets
+    // it in the TUI; the streaming loop reads it. Two separate flags is how Esc
+    // came to say "Stopping…" and stop nothing.
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     // Spawn the TUI in a background thread.
     let desc = args
@@ -261,17 +373,22 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
         .unwrap_or_else(|| "chat session".to_string());
     let tui_tx = tx.clone();
     let tui_on_submit = on_submit_tx.clone();
+    let tui_cancel = cancel.clone();
     let handle = std::thread::spawn(move || {
-        crate::display::tui::run_chat(rx, desc, project_path, Some(tui_on_submit));
+        crate::display::tui::run_chat(rx, desc, project_path, Some(tui_on_submit), tui_cancel)
     });
 
-    // Spawn the message processor: each submitted user message gets an LLM reply
-    // streamed back as an assistant turn.
+    // Spawn the message processor: each submitted user message gets a streamed
+    // LLM reply.
     let proc_tx = tui_tx.clone();
     let proc_config = config.clone();
     std::thread::spawn(move || {
-        while let Ok(user_text) = on_submit_rx.recv() {
-            process_message(&proc_tx, &proc_config, &user_text);
+        while let Ok(submit) = on_submit_rx.recv() {
+            // A new turn supersedes a cancelled previous one.
+            submit
+                .cancel
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            process_message(&proc_tx, &proc_config, submit);
         }
     });
 
@@ -281,11 +398,16 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
             role: "user".to_string(),
             text: msg.clone(),
         });
-        let _ = tui_tx.send(DisplayEvent::ChatMessage {
-            role: "assistant".to_string(),
-            text: "(thinking…)".to_string(),
+        // `chat_pending` is what draws the "thinking" line. The literal
+        // "(thinking…)" bubble this replaces was an assistant turn, so it
+        // stayed in the transcript forever and read as something the model had
+        // said.
+        let _ = tui_tx.send(DisplayEvent::ChatPending);
+        let _ = on_submit_tx.send(ChatSubmit {
+            text: msg.clone(),
+            history: Vec::new(),
+            cancel: cancel.clone(),
         });
-        let _ = on_submit_tx.send(msg.clone());
     }
 
     // Keep the sender alive so the TUI thread doesn't see Disconnect.

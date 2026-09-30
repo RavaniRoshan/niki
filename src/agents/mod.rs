@@ -97,6 +97,10 @@ pub async fn run_agent(
         json_schema: None,
         tools: None,
         reasoning_effort: reasoning_effort.map(str::to_string),
+        // An agent stage is single-shot by design. History here would let a
+        // Planner see what the Coder later did, which is the independence the
+        // whole pipeline rests on. Only the chat surface carries history.
+        history: Vec::new(),
     };
 
     display.agent_start(role);

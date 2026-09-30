@@ -945,6 +945,24 @@ pub struct AppState {
     pub click_flash: Option<((u16, u16), std::time::Instant)>,
     /// Chat log — (role, text) pairs.
     pub chat_log: Vec<(String, String)>,
+    /// The assistant turn currently streaming in, appended to as deltas arrive.
+    ///
+    /// Held apart from `chat_log` so a partial reply is never mistaken for a
+    /// completed one: nothing in the transcript is touched until the turn
+    /// finishes. It used to be impossible to tell the two apart at all, because
+    /// the whole reply arrived in one `ChatMessage` after a long silence.
+    pub chat_stream: String,
+    /// A chat turn is in flight — submitted, no final message or error yet.
+    ///
+    /// Drives the "thinking" indicator. The existing stage spinner could not
+    /// be reused for this: it is gated on `has_running_stage()`, and in chat
+    /// `state.stages` is always empty, so it never drew and the user got a
+    /// frozen screen for the length of the request.
+    pub chat_pending: bool,
+    /// Set when the last turn ended on the token limit rather than a real stop,
+    /// so the transcript can say the reply was cut off instead of presenting a
+    /// truncated answer as a finished one.
+    pub chat_truncated: bool,
     /// Stages expanded in chat view (by index). Collapsed by default.
     pub expanded_stages: std::collections::HashSet<usize>,
     /// Last rendered content width for the chat view (kept in sync by render()).
@@ -1164,6 +1182,9 @@ impl AppState {
             last_click_pos: None,
             click_flash: None,
             chat_log: Vec::new(),
+            chat_stream: String::new(),
+            chat_pending: false,
+            chat_truncated: false,
             expanded_stages: std::collections::HashSet::new(),
             chat_width: std::cell::Cell::new(80),
             config,
@@ -1469,8 +1490,48 @@ impl AppState {
             DisplayEvent::BranchName(name) => {
                 self.branch_name = name;
             }
+            DisplayEvent::ChatPending => {
+                self.chat_pending = true;
+            }
             DisplayEvent::ChatMessage { role, text } => {
+                self.chat_pending = false;
+                self.chat_stream.clear();
+                // An empty assistant turn used to be pushed as-is. The renderer
+                // then emitted no header for it, because `"".lines()` yields
+                // nothing, so the user saw a blank gap and could not tell "no
+                // reply yet" from "the reply was empty".
+                let text = if text.trim().is_empty() {
+                    "(the model returned an empty response)".to_string()
+                } else {
+                    text
+                };
                 self.chat_log.push((role, text));
+            }
+            DisplayEvent::ChatDelta { text } => {
+                self.chat_stream.push_str(&text);
+            }
+            DisplayEvent::ChatError { message, cancelled } => {
+                self.chat_pending = false;
+                self.chat_stream.clear();
+                // Kept out of `chat_log`: a failure is not a thing the model
+                // said, and rendering it in the assistant's style is what made
+                // a 401 read as "the assistant is offline".
+                self.chat_log.push((
+                    if cancelled { "cancelled" } else { "error" }.to_string(),
+                    message,
+                ));
+            }
+            DisplayEvent::ChatFinished { finish_reason } => {
+                self.chat_pending = false;
+                let reason = finish_reason.as_deref().unwrap_or("");
+                self.chat_truncated = matches!(reason, "length" | "max_tokens" | "MAX_TOKENS");
+                // Commit the streamed text as a real turn.
+                if !self.chat_stream.is_empty() {
+                    self.chat_log.push((
+                        "assistant".to_string(),
+                        std::mem::take(&mut self.chat_stream),
+                    ));
+                }
             }
             DisplayEvent::StageTotals {
                 input_tokens,

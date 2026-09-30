@@ -136,6 +136,62 @@ pub(crate) fn is_retryable_status(status: reqwest::StatusCode) -> bool {
     status.as_u16() == 429 || status.is_server_error()
 }
 
+/// One prior conversation turn, oldest first.
+///
+/// The chat surface is the only caller that carries these. Every agent stage
+/// is a single-shot call by design — a Planner that could see the Coder's
+/// output would no longer be an independent Planner, which is the property the
+/// whole pipeline rests on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatTurn {
+    /// `"user"` or `"assistant"`. Anything else is coerced to `"user"`.
+    pub role: String,
+    pub content: String,
+}
+
+impl ChatTurn {
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: "user".to_string(),
+            content: content.into(),
+        }
+    }
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self {
+            role: "assistant".to_string(),
+            content: content.into(),
+        }
+    }
+}
+
+/// The full message chain a provider should send: prior turns oldest-first,
+/// then `user_message` as the final turn.
+///
+/// One implementation, four call sites. Every provider used to hand-write a
+/// single-element `messages` array, which is why a chat that *displayed* a
+/// conversation sent a single message: the transport had nowhere to put the
+/// rest of it. Providers differ only in how they name the assistant role
+/// (Anthropic/OpenAI/Ollama use `"assistant"`, Google uses `"model"`), so that
+/// difference lives in each provider's mapper rather than here.
+///
+/// Leading assistant turns are dropped. Anthropic rejects a conversation whose
+/// first message is not from the user, and a resumed chat whose history was
+/// truncated mid-turn can begin with one. Dropping is the conservative fix: the
+/// alternative is a 400 from the provider on the first turn after a resume.
+pub fn message_chain(request: &CompletionRequest) -> Vec<ChatTurn> {
+    let mut chain: Vec<ChatTurn> = request
+        .history
+        .iter()
+        .filter(|t| !t.content.trim().is_empty())
+        .cloned()
+        .collect();
+    while chain.first().is_some_and(|t| t.role != "user") {
+        chain.remove(0);
+    }
+    chain.push(ChatTurn::user(request.user_message.clone()));
+    chain
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CompletionRequest {
     pub model: String,
@@ -143,6 +199,15 @@ pub struct CompletionRequest {
     pub user_message: String,
     pub max_tokens: u32,
     pub temperature: f32,
+    /// Prior conversation turns, oldest first. Empty for every agent stage.
+    ///
+    /// This field is the reason the chat surface is a chat. Without it the
+    /// only thing a provider could receive was `user_message`, so turn 3 was
+    /// sent with turns 1 and 2 erased — while the transcript scrolled, and
+    /// persisted, and resumed, showing a conversation the model had never seen.
+    /// A user testing recall gets a confidently wrong answer, and nothing on
+    /// screen says the context was dropped.
+    pub history: Vec<ChatTurn>,
     /// Optional JSON schema for structured output. When present, providers that
     /// support structured output will use constrained decoding to guarantee the
     /// response matches the schema exactly.

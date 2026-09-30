@@ -3199,6 +3199,10 @@ pub async fn run_tool_loop_with(
             // conversation the model is deepening, and the dial belongs to the
             // stage rather than to any single turn of it.
             reasoning_effort: opts.reasoning_effort.clone(),
+            // The loop keeps its own transcript and flattens it into
+            // `user_message` above, because each step interleaves tool results
+            // that do not fit the user/assistant alternation `history` models.
+            history: Vec::new(),
         };
 
         let response = provider.complete(request).await?;

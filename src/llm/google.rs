@@ -32,6 +32,34 @@ impl GoogleProvider {
     }
 }
 
+/// Resolve a base URL to a Google generative-language method endpoint.
+///
+/// `base_url` was ignored entirely until now: the URL was built from a
+/// hardcoded `https://generativelanguage.googleapis.com`, so a user behind a
+/// corporate egress proxy or an AI gateway could not reach Google at all, and
+/// — the reason this surfaced — the provider was the one shipped implementation
+/// whose wire format no test could exercise. Every other provider honours
+/// `base_url`, and matching them is what makes this testable.
+///
+/// A `base_url` that already names a method (or a `models/…` segment) is left
+/// alone, so an explicit endpoint is never double-suffixed.
+fn google_endpoint(base: Option<&str>, model: &str, method: &str) -> String {
+    let Some(base) = base else {
+        return format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:{method}");
+    };
+    let b = base.trim_end_matches('/');
+    if b.contains(":generateContent") || b.contains(":streamGenerateContent") {
+        return b.to_string();
+    }
+    // `…/v1beta` and `…/v1beta/models` are both reasonable things to configure.
+    let stem = b.strip_suffix("/models").unwrap_or(b);
+    if stem.ends_with("/v1beta") || stem.ends_with("/v1") {
+        format!("{stem}/models/{model}:{method}")
+    } else {
+        format!("{stem}/v1beta/models/{model}:{method}")
+    }
+}
+
 #[async_trait]
 impl LlmProvider for GoogleProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse> {
@@ -41,15 +69,21 @@ impl LlmProvider for GoogleProvider {
             .as_ref()
             .ok_or_else(|| super::provider::missing_key_error("google"))?;
 
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            request.model
+        let url = google_endpoint(
+            self.config.base_url.as_deref(),
+            &request.model,
+            "generateContent",
         );
 
         let payload = json!({
-            "contents": [{
-                "parts": [{"text": request.user_message}]
-            }],
+            "contents": super::provider::message_chain(&request)
+                .iter()
+                .map(|t| json!({
+                    // Google names the assistant role "model", not "assistant".
+                    "role": if t.role == "assistant" { "model" } else { "user" },
+                    "parts": [{"text": t.content}]
+                }))
+                .collect::<Vec<serde_json::Value>>(),
             "systemInstruction": {
                 "parts": [{"text": request.system_prompt}]
             },
@@ -123,15 +157,22 @@ impl LlmProvider for GoogleProvider {
             .as_ref()
             .ok_or_else(|| super::provider::missing_key_error("google"))?;
 
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse",
-            request.model
+        let mut url = google_endpoint(
+            self.config.base_url.as_deref(),
+            &request.model,
+            "streamGenerateContent",
         );
+        url.push_str("?alt=sse");
 
         let payload = json!({
-            "contents": [{
-                "parts": [{"text": request.user_message}]
-            }],
+            "contents": super::provider::message_chain(&request)
+                .iter()
+                .map(|t| json!({
+                    // Google names the assistant role "model", not "assistant".
+                    "role": if t.role == "assistant" { "model" } else { "user" },
+                    "parts": [{"text": t.content}]
+                }))
+                .collect::<Vec<serde_json::Value>>(),
             "systemInstruction": {
                 "parts": [{"text": request.system_prompt}]
             },

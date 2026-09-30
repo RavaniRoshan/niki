@@ -56,6 +56,8 @@ fn make_request() -> CompletionRequest {
         json_schema: None,
         tools: None,
         reasoning_effort: None,
+
+        history: Vec::new(),
     }
 }
 
@@ -161,6 +163,8 @@ async fn mock_provider_returns_error_on_unknown_model() {
         json_schema: None,
         tools: None,
         reasoning_effort: None,
+
+        history: Vec::new(),
     };
     let result = provider.complete(req).await;
     assert!(result.is_err());
@@ -245,6 +249,8 @@ async fn nvidia_nim_live_chat() {
         json_schema: None,
         tools: None,
         reasoning_effort: None,
+
+        history: Vec::new(),
     };
     let resp = provider.complete(req).await.expect("LLM call");
     assert!(resp.usage.output_tokens > 0, "should produce output tokens");
