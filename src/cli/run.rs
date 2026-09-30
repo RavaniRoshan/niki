@@ -957,6 +957,16 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
                 .downcast_ref::<crate::NikiError>()
                 .map(|ne| matches!(ne, crate::NikiError::Cancelled))
                 .unwrap_or(false);
+
+            // Salvage, before the sandbox is dropped. See `salvage_partial_run`.
+            let salvaged = salvage_partial_run(&project_dir, &task_dir, &task.id);
+            match &salvaged {
+                Ok(note) => eprintln!("{note}"),
+                Err(why) => eprintln!(
+                    "niki: the run failed and its partial work could not be salvaged ({why}).                      Nothing of this run was committed."
+                ),
+            }
+
             if is_cancelled {
                 rec.status = TaskStatus::Cancelled;
                 let _ = rec.save_to_disk(&task_dir);
@@ -1229,6 +1239,119 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Recover what a failed run had already produced.
+///
+/// Every deliverable is assembled *after* `execute_pipeline` returns `Ok`, so an
+/// `Err` skipped the branch, the artifacts, the report and the patch — and
+/// `Drop for WorktreeSandbox` then ran `git worktree remove --force` and
+/// `remove_dir_all` on a directory holding the Coder's edits. A Tester OOM or a
+/// Reviewer timeout destroyed finished work and left the user with an error
+/// message and nothing else.
+///
+/// What is salvaged is **evidence, not an edit to the host repository**:
+///
+/// * the per-stage checkpoint (`runtime/mod.rs` saves after every stage)
+///   carries `produced_artifacts`, which by the time the Tester runs includes
+///   the Coder's `CodeDiff` — the change itself, as data;
+/// * those artifacts are written to `artifacts/`, where `niki report` and the
+///   TUI's History page already look for them;
+/// * a `SALVAGED.md` records what survived, what did not, and that nothing was
+///   committed or verified.
+///
+/// Deliberately **no branch and no working-tree mutation.** A failed run must
+/// not leave a branch that reads as a deliverable, and quietly applying an
+/// unreviewed diff to someone's repository is a larger semantic change than a
+/// hardening pass should make on its own. The user gets the Coder's actual
+/// `CodeDiff` and decides what to do with it.
+fn salvage_partial_run(
+    project_dir: &std::path::Path,
+    task_dir: &std::path::Path,
+    task_id: &uuid::Uuid,
+) -> Result<String, String> {
+    use crate::runtime::checkpoint::SessionCheckpoint;
+
+    // Newest checkpoint belonging to *this* task. Session directories are not
+    // named by task, so the id is the only thing that ties them together.
+    let sessions = project_dir.join(".niki").join("sessions");
+    let mut best: Option<(std::time::SystemTime, SessionCheckpoint)> = None;
+    for entry in std::fs::read_dir(&sessions)
+        .map_err(|e| e.to_string())?
+        .flatten()
+    {
+        let path = entry.path().join("checkpoint.json");
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(cp) = serde_json::from_slice::<SessionCheckpoint>(&bytes) else {
+            continue;
+        };
+        if cp.task_id != *task_id {
+            continue;
+        }
+        let mtime = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        if best.as_ref().is_none_or(|(t, _)| mtime > *t) {
+            best = Some((mtime, cp));
+        }
+    }
+    let Some((_, cp)) = best else {
+        return Err("no checkpoint for this task was on disk".to_string());
+    };
+    if cp.produced_artifacts.is_empty() {
+        return Err("the checkpoint held no artifacts".to_string());
+    }
+
+    let artifacts_dir = task_dir.join("artifacts");
+    std::fs::create_dir_all(&artifacts_dir).map_err(|e| e.to_string())?;
+    let mut names: Vec<String> = Vec::new();
+    for (role, json) in &cp.produced_artifacts {
+        let name = format!(
+            "{}.json",
+            crate::orchestrator::deliver::role_filename(*role)
+        );
+        crate::util::write_restricted(&artifacts_dir.join(&name), json)
+            .map_err(|e| e.to_string())?;
+        names.push(name);
+    }
+
+    let coder_survived = names.iter().any(|n| n.starts_with("coder"));
+    let note = format!(
+        "# This run failed, and its partial work was recovered.\n\n\
+         The pipeline stopped at `{}` after {}. Everything listed below was \
+         written by an agent **before** the failure and is preserved verbatim.\n\n\
+         **No branch was created, and nothing was committed.** This work has NOT \
+         been reviewed or verified — a Reviewer never approved it, and the gates \
+         that decide whether a branch is cut never ran.\n\n\
+         Recovered artifacts:\n{}\n\n\
+         The full transcript and the stage-by-stage record are in \
+         `events.jsonl` and `manifest.json` in this directory.\n\
+         Re-run with `/run <task>` from the chat, or `niki run \"<task>\"`, to \
+         get a reviewed result.\n",
+        crate::display::theme::role_name(cp.current_role),
+        cp.produced_artifacts.len(),
+        names
+            .iter()
+            .map(|n| format!("  - `artifacts/{n}`"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    crate::util::write_restricted(&task_dir.join("SALVAGED.md"), &note)
+        .map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "niki: the run failed, but {} artifact(s) were recovered to {}{}",
+        names.len(),
+        artifacts_dir.display(),
+        if coder_survived {
+            " — including the Coder's change, as a CodeDiff. No branch was created and \
+             nothing was committed; see SALVAGED.md."
+        } else {
+            ". No branch was created and nothing was committed; see SALVAGED.md."
+        }
+    ))
 }
 
 #[cfg(test)]
