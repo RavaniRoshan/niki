@@ -71,8 +71,26 @@ built on a stable router (§1).
   `DisplayEvent::PermissionRequest` (`sandbox/worktree.rs:453`,
   `sandbox/docker.rs:606`) and `state.rs:1702` handles it. There is nothing to
   fix unless chat is to run tools, which is a product decision, not a repair.
-- ~~`ask_user` / `approval` return "cannot ask" in any TUI run, because `TUI_OWNS_STDIN` makes `is_interactive_stdin()` false.~~ **The first half of this was never a defect and the record said it was.** Failing closed there is deliberate, and `runtime/tools.rs` documents why at length: the TUI holds stdin in raw mode and runs its own `event::read()`, so `read_line` would race it and could take a stray `y` — typed at the *interface*, for something it never showed the user — as consent to a command. **DONE in batch 6**: what was missing is that both descriptions said "when stdin is not interactive", a condition the model cannot check, so it had to guess. They now name the situation, say what to do instead, and say that `approval` is a denial rather than a question. **What remains is a capability gap, not a correctness one:** in a TUI run there is no way to ask the user anything. Closing it means a modal the TUI owns, fed by a channel from the tool loop — a feature, and the next slice that wants it. `nothing_in_the_product_relies_on_them_working` fails the day something does. |
-  `TUI_OWNS_STDIN` makes `is_interactive_stdin()` false. No modal exists.
+- ~~`ask_user` / `approval` return "cannot ask" in any TUI run, because `TUI_OWNS_STDIN` makes `is_interactive_stdin()` false.~~ **The first half of this was never a defect and the record said it was.** Failing closed there is deliberate, and `runtime/tools.rs` documents why at length: the TUI holds stdin in raw mode and runs its own `event::read()`, so `read_line` would race it and could take a stray `y` — typed at the *interface*, for something it never showed the user — as consent to a command. **DONE in batch 6**: what was missing is that both descriptions said "when stdin is not interactive", a condition the model cannot check, so it had to guess. They now name the situation, say what to do instead, and say that `approval` is a denial rather than a question. **What remains is a capability gap, not a correctness one:** in a TUI run there is no way to ask the user anything. `approval` no longer fails there (below); `ask_user` still does. `nothing_in_the_product_relies_on_them_working` fails the day something does. |
+- ~~**`approval` cannot reach the user in a TUI run.**~~ **DONE in batch 6.**
+  The gap the previous bullet described — "a modal the TUI owns, fed by a
+  channel from the tool loop" — is now half closed, and it is the half that
+  mattered. The interface already collected an answer for the sandbox's
+  `PermissionRequest`; all it lacked was someone to send the question to it.
+  `ToolContext` now carries an optional `HumanInput` (that channel plus
+  `[permissions] prompt_timeout_seconds`), the pipeline builds it from
+  `display.tui_tx()`, and `approval` puts the command to the interface and
+  waits. No new UI: it renders the same modal the sandbox's own prompts use,
+  so a command approved through the tool and one approved through the sandbox
+  take one path.
+  The three outcomes stay three. An explicit refusal says the *user* refused;
+  an unanswered question says it is a timeout and not a refusal; a run with no
+  interface says **nobody was asked**, and never says "denied by user" — which
+  would attribute a decision to a human who was never consulted.
+  **`ask_user` still fails closed.** It needs free text and a choice list,
+  which the Allow/Deny modal cannot express, so it needs a modal of its own.
+  That is the next slice; until it lands, `ask_user`'s description is honest
+  about it.
 - ~~The permission badge is still cosmetic.~~ **DONE in batch 3** (`6c8a3be`).
   The posture travels with `ChatSubmit` and lands on every stage that has not
   started, because `ToolContext` reads `config.permissions.mode` per stage.

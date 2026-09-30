@@ -98,6 +98,7 @@ fn ctx(dir: &std::path::Path) -> niki::runtime::ToolContext {
         // Empty = block-all, the shipped default.
         network_allowlist: Vec::new(),
         task_store: None,
+        human_input: None,
     }
 }
 
@@ -1805,4 +1806,245 @@ async fn the_tool_loop_puts_the_reasoning_effort_on_the_wire() {
         "every request in the loop belongs to this stage and must carry the \
          effort; it sent {sent:?}"
     );
+}
+
+/// An agent that asks for approval must reach the interface, and the run must
+/// carry on afterwards.
+///
+/// This is the wiring test. Every other test of this feature drives
+/// `HumanInput` directly, so all of them pass on a build where nobody ever
+/// hands a channel to the tools — which is precisely the bug. Here a *scripted
+/// model* calls `approval`, so the only way the assertion can hold is if the
+/// loop's own `ToolContext` carries the interface.
+///
+/// And the count, not just "something arrived": exactly one question, and the
+/// command in it is the one the model asked about. A loop that asked twice
+/// would nag a human mid-run, and one that asked about the wrong command would
+/// get consent for something else.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_agents_approval_request_reaches_the_interface_and_the_run_continues() {
+    use niki::display::tui::DisplayEvent;
+    use niki::permissions::PermissionAction;
+    use niki::runtime::tools::HumanInput;
+    use std::time::Duration;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+    std::fs::write(dir.path().join("src/lib.rs"), "old\n").expect("write");
+
+    // The interface: a stand-in for the TUI's permission modal. It is at a real
+    // external boundary — a human — so it is scripted, and it is labelled.
+    let (iface_tx, iface_rx) = std::sync::mpsc::channel::<DisplayEvent>();
+    let interface = std::thread::spawn(move || {
+        let mut asked: Vec<String> = Vec::new();
+        // Blocks until every sender is dropped (the test does that), rather
+        // than giving up on a timer: under load a deadline here would end the
+        // wait early and the "asked exactly once" count would be a race.
+        while let Ok(event) = iface_rx.recv() {
+            // Everything else this loop emits is none of the interface's
+            // business, and must not be counted as a question.
+            if let DisplayEvent::PermissionRequest {
+                command,
+                response_tx,
+            } = event
+            {
+                asked.push(command);
+                let _ = response_tx.send(PermissionAction::Allow);
+            }
+        }
+        asked
+    });
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let agent = ScriptedAgent {
+        script: vec![
+            Some((
+                "approval".into(),
+                serde_json::json!({"command": "cargo publish"}),
+            )),
+            Some(("submit_artifact".into(), artifact())),
+        ],
+        turn: AtomicUsize::new(0),
+        seen_prompts: seen.clone(),
+    };
+
+    let mut c = ctx(dir.path());
+    // The same channel the pipeline builds from `display.tui_tx()`: the tools
+    // get it on the context, and the loop gets it as its display.
+    let (display_tx, held) = (iface_tx.clone(), iface_tx.clone());
+    c.human_input = Some(HumanInput::new(held, Duration::from_secs(10)));
+
+    let out = run_tool_loop_with(
+        LoopOptions {
+            reasoning_effort: None,
+            cost_ceiling_usd: None,
+            submit_artifact: Some(submit_artifact_spec(serde_json::json!({
+                "type": "object",
+                "properties": artifact(),
+                "required": ["edits", "files_changed"],
+            }))),
+            validate_artifact: None,
+        },
+        &agent,
+        "m",
+        &build_baseline_registry(),
+        &c,
+        vec![LoopMessage::User("publish the crate".into())],
+        None,
+        8,
+        Some(display_tx),
+        None,
+    )
+    .await
+    .expect("the loop runs");
+
+    // Let go of the senders so the interface's wait ends at once, rather than
+    // sitting out its full timeout on a channel nobody will ever write to.
+    drop(c);
+    drop(iface_tx);
+    let asked = interface.join().expect("the interface must not panic");
+
+    assert_eq!(
+        asked,
+        vec!["cargo publish".to_string()],
+        "the interface must be asked exactly once, about the command the \
+         model named — one question per approval, and about that command"
+    );
+    // The answer has to reach the model, or the run stalls on a question that
+    // was in fact answered.
+    let prompts = seen.lock().expect("lock").clone();
+    assert!(
+        prompts
+            .iter()
+            .any(|p| p.contains("approved") && p.contains("cargo publish")),
+        "the tool result must tell the model the command was approved; the \
+         turns were {prompts:?}"
+    );
+    assert!(
+        out.artifact.is_some(),
+        "and the loop must have carried on to its artifact — an approved \
+         approval that stops the run is not an approval"
+    );
+}
+
+/// The inverse, and the reason the test above is not "always asks".
+///
+/// With no interface there is nobody to ask. The tool must say so and let the
+/// run continue — a headless run that *hangs* on a question, or that treats
+/// its own denial as a user's refusal, is worse than one that reports the
+/// gap.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn without_an_interface_the_approval_is_reported_as_unanswerable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+    std::fs::write(dir.path().join("src/lib.rs"), "old\n").expect("write");
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let agent = ScriptedAgent {
+        script: vec![
+            Some((
+                "approval".into(),
+                serde_json::json!({"command": "cargo publish"}),
+            )),
+            Some(("submit_artifact".into(), artifact())),
+        ],
+        turn: AtomicUsize::new(0),
+        seen_prompts: seen.clone(),
+    };
+
+    let out = run_tool_loop_with(
+        LoopOptions {
+            reasoning_effort: None,
+            cost_ceiling_usd: None,
+            submit_artifact: Some(submit_artifact_spec(serde_json::json!({
+                "type": "object",
+                "properties": artifact(),
+                "required": ["edits", "files_changed"],
+            }))),
+            validate_artifact: None,
+        },
+        &agent,
+        "m",
+        &build_baseline_registry(),
+        &ctx(dir.path()),
+        vec![LoopMessage::User("publish the crate".into())],
+        None,
+        8,
+        None,
+        None,
+    )
+    .await
+    .expect("the loop runs");
+
+    let prompts = seen.lock().expect("lock").clone();
+    let result = prompts
+        .iter()
+        .find(|p| p.contains("no interface is attached"))
+        .unwrap_or_else(|| {
+            panic!("the model must be told nobody was there to ask; turns were {prompts:?}")
+        });
+    assert!(
+        !result.to_lowercase().contains("denied by user"),
+        "and it must not blame a user who was never asked: {result}"
+    );
+    assert!(
+        out.artifact.is_some(),
+        "the run must continue — an unanswerable question is a fact to report, \
+         not a reason to stop"
+    );
+}
+
+/// Both production tool-loop contexts must be built *with* the interface.
+///
+/// The scripted test above proves the loop carries `ctx.human_input` to the
+/// tool, and it builds its own context — so every one of its assertions holds
+/// on a build where the pipeline never hands a channel to anything. This is the
+/// half only the source can show, and it is checked as a **count over a named
+/// region** rather than a search: a grep for `tui_tx` would be satisfied by
+/// the sandbox's own use of it, which has nothing to do with the tools.
+#[test]
+fn the_production_tool_contexts_carry_the_interface() {
+    let pipeline = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/orchestrator/pipeline.rs"
+    ))
+    .expect("pipeline.rs must be readable");
+
+    // Name the two functions that build a `ToolContext` for a tool loop.
+    let regions: [(&str, &str); 2] = [
+        (
+            "the research tool loop",
+            "async fn run_experimental_research",
+        ),
+        ("the Coder's tool loop", "async fn run_coder_tool_loop"),
+    ];
+
+    for (what, marker) in regions {
+        let start = pipeline
+            .find(marker)
+            .unwrap_or_else(|| panic!("{what}: `{marker}` is gone from pipeline.rs"));
+        // A generous window: the literal is a few lines below the marker, and
+        // a tight one would silently check a region that does not contain the
+        // thing it claims to.
+        let region: String = pipeline[start..].chars().take(6000).collect();
+
+        let assignments = region
+            .match_indices("human_input:")
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            assignments.len(),
+            1,
+            "{what} must build exactly one `ToolContext`, and say where its \
+             human input comes from. Saw {assignments:?}"
+        );
+        let value: String = region[assignments[0]..].chars().take(200).collect();
+        assert!(
+            value.contains("tui_tx()"),
+            "{what} must take its human input from the interface that is \
+             driving the run (`display.tui_tx()`), so `ask_user` and \
+             `approval` can ask. It reads: {}",
+            value.lines().next().unwrap_or_default()
+        );
+    }
 }

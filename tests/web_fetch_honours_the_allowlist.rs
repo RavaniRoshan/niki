@@ -87,6 +87,7 @@ fn the_tool_context_carries_the_configured_allowlist() {
         fail_closed_headless: false,
         network_allowlist: config.docker.network_allowlist.clone(),
         task_store: None,
+        human_input: None,
     };
     assert_eq!(
         planner.network_allowlist,
