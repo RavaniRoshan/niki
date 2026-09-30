@@ -3246,6 +3246,21 @@ pub async fn run_tool_loop_with(
         }
         steps += 1;
 
+        // Say which step this is, before the request goes out.
+        //
+        // The loop is the one place a run can spend minutes inside a single
+        // stage, and it was silent throughout. Measured against a live
+        // provider, the log stopped dead after `[Planner] Done` and gave the
+        // user nothing for the whole Coder — no stage name, no step, no
+        // spinner. A step line is cheap, and it is the difference between "this
+        // is working" and "this has hung".
+        if let Some(tx) = &display_tx {
+            let _ = tx.send(crate::display::tui::DisplayEvent::StageToken {
+                role: crate::artifacts::types::AgentRole::Coder,
+                token: format!("step {}/{}", steps, max_steps),
+            });
+        }
+
         let request = CompletionRequest {
             model: model.to_string(),
             system_prompt: system_prompt.clone(),
@@ -4117,18 +4132,42 @@ mod tests {
         .unwrap();
         assert_eq!(out.tool_calls.len(), 1);
         let events: Vec<_> = rx.try_iter().collect();
+        // The loop also reports `step N/max` on the same channel, so this
+        // counts the *tool* events. It used to count every event, which meant
+        // any new progress signal broke a test about tool delivery — the wrong
+        // coupling, and a good reason not to assert on a count when the claim
+        // is about which events and in what order.
+        let tool_events: Vec<_> = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    crate::display::tui::DisplayEvent::ToolCall { .. }
+                        | crate::display::tui::DisplayEvent::ToolResult { .. }
+                )
+            })
+            .collect();
         assert_eq!(
-            events.len(),
+            tool_events.len(),
             2,
             "expected ToolCall + ToolResult, got {events:?}"
         );
-        match &events[0] {
+        // And the step progress is there too, so a long loop is watchable.
+        let steps = events
+            .iter()
+            .filter(|e| matches!(e, crate::display::tui::DisplayEvent::StageToken { .. }))
+            .count();
+        assert!(
+            steps >= 1,
+            "the loop must report which step it is on; got {events:?}"
+        );
+        match &tool_events[0] {
             crate::display::tui::DisplayEvent::ToolCall { tool_name, .. } => {
                 assert_eq!(tool_name, "bash")
             }
             other => panic!("expected ToolCall first, got {other:?}"),
         }
-        match &events[1] {
+        match &tool_events[1] {
             crate::display::tui::DisplayEvent::ToolResult {
                 tool_name, success, ..
             } => {
