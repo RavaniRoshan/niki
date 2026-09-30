@@ -43,9 +43,11 @@ impl Page for TestLogPage {
             ])
             .split(area);
 
+        // The declared title, not a hand-typed spelling of it. The header
+        // said "test log" and `title()` said "test_log", and nothing         // compared them — so `page_router_render_current_all_pages` was         // drawing every page and asserting nothing, which is how a page and         // its own title drifted apart unnoticed.
         let header = Line::from(vec![
             Span::styled(
-                " test log",
+                format!(" {}", self.title()),
                 Style::default()
                     .fg(theme::fg_color())
                     .add_modifier(Modifier::BOLD),

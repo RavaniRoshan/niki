@@ -202,3 +202,6 @@ base-url-overrides-default | a_configured_base_url_overrides_every_providers_def
 omitted-base-url-uses-default | an_omitted_base_url_falls_back_to_the_providers_own_host | no default host, and no test that would notice
 openrouter-endpoint-resolves | openrouter_endpoint_resolves_correctly | a test named for the endpoint that never read it
 nvidia-endpoint-resolves | nvidia_endpoint_resolves_correctly | a test named for the endpoint that never read it
+# B4-06 · the page-render tests assert what is drawn, not that nothing panics
+every-page-draws-itself | page_router_render_current_all_pages | fourteen pages drawn and nothing asserted
+every-page-draws-itself-empty | page_router_render_current_empty_state | the same, with no data — a blank page is the failure
