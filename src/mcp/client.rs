@@ -85,6 +85,17 @@ impl McpConnection {
         }
 
         let mut child = cmd
+            // **Kill on drop.** Without this, dropping a `tokio::process::Child`
+            // leaves the process running: tokio does not reap on drop, and
+            // `McpManager::shutdown` has no production caller. The manager is
+            // a local in the pipeline's connect block, so every configured
+            // stdio server outlived the run that spawned it, and a long session
+            // accumulated one process per `[mcp] server`.
+            //
+            // `shutdown()` still sends the graceful `shutdown`/`exit`
+            // sequence first when it runs; this is the backstop for the paths
+            // where it does not.
+            .kill_on_drop(true)
             .spawn()
             .with_context(|| format!("Failed to spawn MCP server '{name}': {command}"))?;
 

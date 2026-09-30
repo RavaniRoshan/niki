@@ -2665,10 +2665,23 @@ pub async fn execute_pipeline(
     let mut isolation: Vec<IsolationRecord> = Vec::new();
 
     // --- MCP tool discovery (optional, launch-plan C1) ---
-    // When `[mcp] enabled = true`, connect configured servers now and surface their
-    // tools to every agent via the prompt context. Skipped entirely when bare:
-    // external servers are ambient inputs. The manager is wired into the
-    // runtime here; the agent→server tool-call execution loop remains a follow-up.
+    // Connect configured servers and report what they offered.
+    //
+    // It used to say, in the agent's own prompt: *"Use these tools via the
+    // standard MCP tool call format."* The agent→server execution loop does
+    // not exist — `McpManager::call_tool` has no production caller, which is
+    // the follow-up this comment used to name — so that was an instruction the
+    // runtime could not honour, and the likeliest result was a model
+    // inventing a call and an answer. The same failure as `web_search`
+    // returning `Success` with nothing in it, aimed at the model.
+    //
+    // So the block now states the fact instead. The `mcp_tools` parameter is
+    // kept and the plumbing stays, so wiring the call loop is a change to
+    // `tools_summary` rather than a change to four signatures.
+    //
+    // The manager is a local, so it drops at the end of this block; the stdio
+    // children go with it via `kill_on_drop` in the client, because
+    // `shutdown()` has no production caller either.
     let mcp_tools: String = if bare {
         String::new()
     } else if config.mcp.enabled {
@@ -2676,7 +2689,11 @@ pub async fn execute_pipeline(
         if let Err(e) = mgr.connect_all().await {
             eprintln!("Warning: MCP connect failed: {}", e);
         }
-        mgr.tools_for_prompt()
+        let summary = mgr.tools_summary();
+        if !summary.is_empty() {
+            display.notice(summary.clone(), true);
+        }
+        summary
     } else {
         String::new()
     };
