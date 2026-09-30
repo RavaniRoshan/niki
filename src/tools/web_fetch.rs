@@ -35,7 +35,13 @@ impl WebFetchTool {
     }
 
     /// Check if a URL is allowed by the domain allowlist.
-    fn is_allowed(&self, url: &str) -> bool {
+    /// Whether `url` is permitted, without fetching it.
+    ///
+    /// Public so the rule can be asserted directly. Deciding permission is the
+    /// whole of the defect this closes — the tool was constructed with an
+    /// empty allowlist, and empty means block-all — and a test that made a
+    /// real request would prove less about it, more slowly.
+    pub fn is_allowed(&self, url: &str) -> bool {
         if self.domain_allowlist.is_empty() {
             return false; // Empty allowlist = block all
         }

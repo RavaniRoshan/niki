@@ -324,6 +324,8 @@ async fn the_git_tool_itself_refuses_a_denied_subcommand() {
         // deny-list is not consulted, the command runs.
         permission_mode: "bypass".into(),
         fail_closed_headless: false,
+        // Empty = block-all, the shipped default.
+        network_allowlist: Vec::new(),
         task_store: None,
     };
 
@@ -366,6 +368,8 @@ async fn the_git_tool_cannot_be_reached_by_a_sneaky_subcommand() {
         permissions: std::collections::HashMap::new(),
         permission_mode: "bypass".into(),
         fail_closed_headless: false,
+        // Empty = block-all, the shipped default.
+        network_allowlist: Vec::new(),
         task_store: None,
     };
 

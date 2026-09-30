@@ -569,6 +569,16 @@ pub struct ToolContext {
     /// Permission mode governing `Ask` tools (`manual`/`auto`/`dontask`/`bypass`,
     /// mirroring `[permissions] mode`; default `manual`).
     pub permission_mode: String,
+    /// Domains this run may fetch from, from `[network] domain_allowlist`.
+    ///
+    /// `WebFetchTool` was constructed with `vec![]` and its `is_allowed` treats
+    /// an empty allowlist as **block all**, so the tool could never fetch
+    /// anything — while being offered to every role and described as
+    /// "Fetch a web page". A configured allowlist existed and was never read.
+    ///
+    /// The default stays empty, because empty means block-all: the safe answer
+    /// is still no.
+    pub network_allowlist: Vec<String>,
     /// What `manual` does when there is no approval UI listening, which is
     /// always: the tool loop has none. Mirrors
     /// `[permissions] fail_closed_headless`, default `false`.
@@ -1909,7 +1919,11 @@ impl Tool for WebFetchTool {
         };
         // Route through the allowlisted implementation (src/tools/web_fetch.rs)
         // which enforces domain allowlist + 30s timeout + 50k truncation.
-        let tool = crate::tools::web_fetch::WebFetchTool::new(vec![]);
+        //
+        // The allowlist comes from `[network] domain_allowlist`. It was
+        // `vec![]` here, and an empty allowlist means block-all, so this tool
+        // could never fetch anything.
+        let tool = crate::tools::web_fetch::WebFetchTool::new(_ctx.network_allowlist.clone());
         match tool.fetch(url).await {
             Ok(result) => {
                 if result.status >= 400 {
@@ -3761,6 +3775,8 @@ mod tests {
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         };
         let messages = vec![
@@ -3795,6 +3811,8 @@ mod tests {
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         };
         let messages = vec![LoopMessage::User("run echo hi".into())];
@@ -3901,6 +3919,8 @@ mod tests {
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         };
 
@@ -3955,6 +3975,8 @@ mod tests {
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         };
         run_tool_loop_with(
@@ -3995,6 +4017,8 @@ mod tests {
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         };
         let messages = vec![LoopMessage::User("hi".into())];
@@ -4093,6 +4117,8 @@ mod tests {
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         };
         let messages = vec![LoopMessage::User("read the note".into())];
@@ -4134,6 +4160,8 @@ mod tests {
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         };
         let (tx, rx) = std::sync::mpsc::channel();
@@ -4230,6 +4258,8 @@ mod tests {
             permissions: HashMap::new(),
             permission_mode: "manual".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         }
     }
@@ -4665,6 +4695,8 @@ mod tests {
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the shipped default.
+            network_allowlist: Vec::new(),
             task_store: Some(std::sync::Arc::new(TaskStore::new())),
         }
     }
@@ -4678,6 +4710,8 @@ mod tests {
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         }
     }
@@ -4821,6 +4855,8 @@ mod tests {
             permissions: HashMap::new(),
             permission_mode: "auto".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         }
     }
@@ -4881,6 +4917,8 @@ mod network_egress_permission_tests {
             permissions: HashMap::new(),
             permission_mode: mode.to_string(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         }
     }
@@ -5116,6 +5154,8 @@ mod network_egress_permission_tests {
             permissions: HashMap::new(),
             permission_mode: "bypass".into(),
             fail_closed_headless: false,
+            // Empty = block-all, the same default the product ships.
+            network_allowlist: Vec::new(),
             task_store: None,
         };
         let input = ToolInput {
