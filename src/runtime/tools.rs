@@ -2558,7 +2558,7 @@ impl Tool for SkillListTool {
         };
         // Phase 4.4: promoted project skills are served alongside the shared
         // layer (project wins on name collision: more specific first).
-        for name in crate::skills::list_project_skills_default_dir(&ctx.project_path) {
+        for name in crate::skills::list_project_skills_for(&ctx.project_path) {
             if !skills.contains(&name) {
                 skills.push(name);
             }
@@ -2598,23 +2598,23 @@ impl Tool for SkillLoadTool {
     async fn execute(&self, input: ToolInput, ctx: &ToolContext) -> ToolResult {
         let name = input.str("name").unwrap_or("unknown");
         // Phase 4.4: project skills first (more specific), then the shared layer.
-        let (content, source) =
-            match crate::skills::load_project_skill_default_dir(&ctx.project_path, name) {
-                Some(found) => found,
-                None => match skills_dir() {
-                    Some(dir) => {
-                        let path = dir.join(name).join("SKILL.md");
-                        match fs::read_to_string(&path) {
-                            Ok(c) => (c, path.display().to_string()),
-                            Err(_) => (
-                                format!("skill '{}' not found in {}", name, dir.display()),
-                                dir.display().to_string(),
-                            ),
-                        }
+        let (content, source) = match crate::skills::load_project_skill_for(&ctx.project_path, name)
+        {
+            Some(found) => found,
+            None => match skills_dir() {
+                Some(dir) => {
+                    let path = dir.join(name).join("SKILL.md");
+                    match fs::read_to_string(&path) {
+                        Ok(c) => (c, path.display().to_string()),
+                        Err(_) => (
+                            format!("skill '{}' not found in {}", name, dir.display()),
+                            dir.display().to_string(),
+                        ),
                     }
-                    None => ("shared skills dir unavailable".to_string(), String::new()),
-                },
-            };
+                }
+                None => ("shared skills dir unavailable".to_string(), String::new()),
+            },
+        };
         ToolResult {
             tool_id: ToolId::generate(),
             tool_name: "skill_load".into(),
