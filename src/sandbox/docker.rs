@@ -86,6 +86,62 @@ fn allowlist_allows_all(config: &DockerConfig) -> bool {
         .any(|s| s == "*" || s == "all")
 }
 
+/// Build the container's `HostConfig`.
+///
+/// Extracted from the create path so the four hardening settings can be
+/// asserted on the value that is actually sent to Docker.
+///
+/// They were all built inline inside a function that also creates the
+/// container, so `tests/docker_resource_caps.rs` — *named* after container
+/// resource caps — had eight tests, six of them on `parse_memory_limit`, and
+/// **zero** on `cap_drop`, `pids_limit`, `network_mode` or `readonly_rootfs`.
+/// A file whose name is its subject, testing something else.
+pub fn build_host_config(
+    config: &DockerConfig,
+    binds: Vec<String>,
+    memory_bytes: i64,
+    nanocpus: i64,
+) -> bollard::models::HostConfig {
+    bollard::models::HostConfig {
+        binds: Some(binds),
+        memory: if memory_bytes > 0 {
+            Some(memory_bytes)
+        } else {
+            None
+        },
+        nano_cpus: if nanocpus > 0 { Some(nanocpus) } else { None },
+        // Defense-in-depth for the sandbox (research report S2):
+        // - Drop ALL Linux capabilities: the agent runtime needs none of them.
+        cap_drop: if config.cap_drop_all {
+            Some(vec!["ALL".to_string()])
+        } else {
+            None
+        },
+        // Bound the process count to contain fork-bombs / runaway recursion.
+        pids_limit: if config.pids_limit > 0 {
+            Some(config.pids_limit as i64)
+        } else {
+            None
+        },
+        // Egress is blocked by default (network_disabled defaults to true) — the
+        // container gets network_mode "none". Open it with `network_disabled =
+        // false` (or `network_allowlist = ["*"]`) when a task must fetch
+        // dependencies such as `cargo fetch` / `npm install` / `pip install`.
+        network_mode: if config.network_disabled && !allowlist_allows_all(config) {
+            Some("none".to_string())
+        } else {
+            None
+        },
+        // Read-only rootfs; the bind-mounted /workspace stays writable.
+        readonly_rootfs: if config.readonly_rootfs {
+            Some(true)
+        } else {
+            None
+        },
+        ..Default::default()
+    }
+}
+
 impl DockerSandbox {
     pub async fn create(
         docker: &Docker,
@@ -140,44 +196,7 @@ impl DockerSandbox {
         let memory_bytes = Self::parse_memory_limit(&config.memory_limit);
         let nanocpus = (config.cpu_limit * 1_000_000.0) as i64;
 
-        let host_config = bollard::models::HostConfig {
-            binds: Some(binds),
-            memory: if memory_bytes > 0 {
-                Some(memory_bytes)
-            } else {
-                None
-            },
-            nano_cpus: if nanocpus > 0 { Some(nanocpus) } else { None },
-            // Defense-in-depth for the sandbox (research report S2):
-            // - Drop ALL Linux capabilities: the agent runtime needs none of them.
-            cap_drop: if config.cap_drop_all {
-                Some(vec!["ALL".to_string()])
-            } else {
-                None
-            },
-            // Bound the process count to contain fork-bombs / runaway recursion.
-            pids_limit: if config.pids_limit > 0 {
-                Some(config.pids_limit as i64)
-            } else {
-                None
-            },
-            // Egress is blocked by default (network_disabled defaults to true) — the
-            // container gets network_mode "none". Open it with `network_disabled =
-            // false` (or `network_allowlist = ["*"]`) when a task must fetch
-            // dependencies such as `cargo fetch` / `npm install` / `pip install`.
-            network_mode: if config.network_disabled && !allowlist_allows_all(config) {
-                Some("none".to_string())
-            } else {
-                None
-            },
-            // Read-only rootfs; the bind-mounted /workspace stays writable.
-            readonly_rootfs: if config.readonly_rootfs {
-                Some(true)
-            } else {
-                None
-            },
-            ..Default::default()
-        };
+        let host_config = build_host_config(config, binds, memory_bytes, nanocpus);
 
         let container_config = Config {
             image: Some(config.base_image.clone()),
