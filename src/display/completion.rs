@@ -127,8 +127,9 @@ pub fn render_completion(
 
     let _ = term.write_line("");
     let _ = term.write_line(&format!(
-        "   {} git checkout {}",
+        "   {} /branch {}   (in the TUI)  ·  git checkout {}",
         theme.subtext.apply_to("Next:"),
+        branch,
         branch
     ));
     let _ = term.write_line("");
