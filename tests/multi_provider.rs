@@ -21,6 +21,21 @@ fn create_provider_anthropic() {
     };
     let p = create_provider("anthropic", &config).unwrap();
     assert_eq!(p.provider_name(), "anthropic");
+    // The endpoint, which this assertion never read. Comparing a struct
+    // field to the string the provider was constructed from is true of
+    // *any* implementation, so a provider named `anthropic` pointed at
+    // the wrong host — or one that double-suffixed `/v1/messages` —
+    // passed. The URL is now asserted, through the same resolver the
+    // request path uses.
+    let endpoint = p.endpoint();
+    assert!(
+        endpoint.contains("api.anthropic.com"),
+        "anthropic must resolve to a api.anthropic.com URL, got {endpoint}"
+    );
+    assert!(
+        endpoint.starts_with("http"),
+        "anthropic reports {endpoint}, which is not a URL"
+    );
 }
 
 #[test]
@@ -32,6 +47,21 @@ fn create_provider_openai() {
     };
     let p = create_provider("openai", &config).unwrap();
     assert_eq!(p.provider_name(), "openai");
+    // The endpoint, which this assertion never read. Comparing a struct
+    // field to the string the provider was constructed from is true of
+    // *any* implementation, so a provider named `openai` pointed at
+    // the wrong host — or one that double-suffixed `/v1/messages` —
+    // passed. The URL is now asserted, through the same resolver the
+    // request path uses.
+    let endpoint = p.endpoint();
+    assert!(
+        endpoint.contains("api.openai.com"),
+        "openai must resolve to a api.openai.com URL, got {endpoint}"
+    );
+    assert!(
+        endpoint.starts_with("http"),
+        "openai reports {endpoint}, which is not a URL"
+    );
 }
 
 #[test]
@@ -43,6 +73,21 @@ fn create_provider_openrouter() {
     };
     let p = create_provider("openrouter", &config).unwrap();
     assert_eq!(p.provider_name(), "openrouter");
+    // The endpoint, which this assertion never read. Comparing a struct
+    // field to the string the provider was constructed from is true of
+    // *any* implementation, so a provider named `openrouter` pointed at
+    // the wrong host — or one that double-suffixed `/v1/messages` —
+    // passed. The URL is now asserted, through the same resolver the
+    // request path uses.
+    let endpoint = p.endpoint();
+    assert!(
+        endpoint.contains("openrouter.ai"),
+        "openrouter must resolve to a openrouter.ai URL, got {endpoint}"
+    );
+    assert!(
+        endpoint.starts_with("http"),
+        "openrouter reports {endpoint}, which is not a URL"
+    );
 }
 
 #[test]
@@ -54,6 +99,21 @@ fn create_provider_nvidia() {
     };
     let p = create_provider("nvidia", &config).unwrap();
     assert_eq!(p.provider_name(), "nvidia");
+    // The endpoint, which this assertion never read. Comparing a struct
+    // field to the string the provider was constructed from is true of
+    // *any* implementation, so a provider named `nvidia` pointed at
+    // the wrong host — or one that double-suffixed `/v1/messages` —
+    // passed. The URL is now asserted, through the same resolver the
+    // request path uses.
+    let endpoint = p.endpoint();
+    assert!(
+        endpoint.contains("integrate.api.nvidia.com"),
+        "nvidia must resolve to a integrate.api.nvidia.com URL, got {endpoint}"
+    );
+    assert!(
+        endpoint.starts_with("http"),
+        "nvidia reports {endpoint}, which is not a URL"
+    );
 }
 
 #[test]
@@ -65,6 +125,21 @@ fn create_provider_together() {
     };
     let p = create_provider("together", &config).unwrap();
     assert_eq!(p.provider_name(), "together");
+    // The endpoint, which this assertion never read. Comparing a struct
+    // field to the string the provider was constructed from is true of
+    // *any* implementation, so a provider named `together` pointed at
+    // the wrong host — or one that double-suffixed `/v1/messages` —
+    // passed. The URL is now asserted, through the same resolver the
+    // request path uses.
+    let endpoint = p.endpoint();
+    assert!(
+        endpoint.contains("api.together.xyz"),
+        "together must resolve to a api.together.xyz URL, got {endpoint}"
+    );
+    assert!(
+        endpoint.starts_with("http"),
+        "together reports {endpoint}, which is not a URL"
+    );
 }
 
 #[test]
@@ -76,6 +151,21 @@ fn create_provider_groq() {
     };
     let p = create_provider("groq", &config).unwrap();
     assert_eq!(p.provider_name(), "groq");
+    // The endpoint, which this assertion never read. Comparing a struct
+    // field to the string the provider was constructed from is true of
+    // *any* implementation, so a provider named `groq` pointed at
+    // the wrong host — or one that double-suffixed `/v1/messages` —
+    // passed. The URL is now asserted, through the same resolver the
+    // request path uses.
+    let endpoint = p.endpoint();
+    assert!(
+        endpoint.contains("api.groq.com"),
+        "groq must resolve to a api.groq.com URL, got {endpoint}"
+    );
+    assert!(
+        endpoint.starts_with("http"),
+        "groq reports {endpoint}, which is not a URL"
+    );
 }
 
 #[test]
@@ -87,6 +177,21 @@ fn create_provider_deepseek() {
     };
     let p = create_provider("deepseek", &config).unwrap();
     assert_eq!(p.provider_name(), "deepseek");
+    // The endpoint, which this assertion never read. Comparing a struct
+    // field to the string the provider was constructed from is true of
+    // *any* implementation, so a provider named `deepseek` pointed at
+    // the wrong host — or one that double-suffixed `/v1/messages` —
+    // passed. The URL is now asserted, through the same resolver the
+    // request path uses.
+    let endpoint = p.endpoint();
+    assert!(
+        endpoint.contains("api.deepseek.com"),
+        "deepseek must resolve to a api.deepseek.com URL, got {endpoint}"
+    );
+    assert!(
+        endpoint.starts_with("http"),
+        "deepseek reports {endpoint}, which is not a URL"
+    );
 }
 
 #[test]
@@ -98,6 +203,21 @@ fn create_provider_google() {
     };
     let p = create_provider("google", &config).unwrap();
     assert_eq!(p.provider_name(), "google");
+    // The endpoint, which this assertion never read. Comparing a struct
+    // field to the string the provider was constructed from is true of
+    // *any* implementation, so a provider named `google` pointed at
+    // the wrong host — or one that double-suffixed `/v1/messages` —
+    // passed. The URL is now asserted, through the same resolver the
+    // request path uses.
+    let endpoint = p.endpoint();
+    assert!(
+        endpoint.contains("generativelanguage.googleapis.com"),
+        "google must resolve to a generativelanguage.googleapis.com URL, got {endpoint}"
+    );
+    assert!(
+        endpoint.starts_with("http"),
+        "google reports {endpoint}, which is not a URL"
+    );
 }
 
 #[test]
@@ -109,6 +229,21 @@ fn create_provider_ollama() {
     };
     let p = create_provider("ollama", &config).unwrap();
     assert_eq!(p.provider_name(), "ollama");
+    // The endpoint, which this assertion never read. Comparing a struct
+    // field to the string the provider was constructed from is true of
+    // *any* implementation, so a provider named `ollama` pointed at
+    // the wrong host — or one that double-suffixed `/v1/messages` —
+    // passed. The URL is now asserted, through the same resolver the
+    // request path uses.
+    let endpoint = p.endpoint();
+    assert!(
+        endpoint.contains("localhost:11434"),
+        "ollama must resolve to a localhost:11434 URL, got {endpoint}"
+    );
+    assert!(
+        endpoint.starts_with("http"),
+        "ollama reports {endpoint}, which is not a URL"
+    );
 }
 
 #[test]
@@ -269,6 +404,15 @@ model = "llama-3.1-70b-versatile"
 
 // ── OpenAiProvider Endpoint Tests ──────────────────────────────────────
 
+/// The two tests below were *named* `*_endpoint_resolves_correctly`, set a
+/// `base_url`, and then asserted `provider_name()`. Neither read the endpoint,
+/// which was the entire claim in the name. A provider pointed at the wrong
+/// host, or one that appended a path to a `base_url` that already had it, both
+/// passed.
+///
+/// Each now asserts three things: the configured `base_url` is honoured, the
+/// provider's *default* host is not used when one is given, and the resolved
+/// URL does not gain a duplicated path segment.
 #[test]
 fn openrouter_endpoint_resolves_correctly() {
     let config = ProviderConfig {
@@ -277,7 +421,15 @@ fn openrouter_endpoint_resolves_correctly() {
         default_model: "anthropic/claude-sonnet-4".into(),
     };
     let p = create_provider("openrouter", &config).unwrap();
-    assert_eq!(p.provider_name(), "openrouter");
+    let endpoint = p.endpoint();
+    assert_eq!(
+        endpoint, "https://openrouter.ai/api/v1",
+        "an explicit base_url must be used as given"
+    );
+    assert!(
+        !endpoint.contains("/v1/v1") && !endpoint.ends_with("/v1/"),
+        "the path must not be suffixed twice: {endpoint}"
+    );
 }
 
 #[test]
@@ -288,7 +440,80 @@ fn nvidia_endpoint_resolves_correctly() {
         default_model: "meta/llama-3.1-405b-instruct".into(),
     };
     let p = create_provider("nvidia", &config).unwrap();
-    assert_eq!(p.provider_name(), "nvidia");
+    let endpoint = p.endpoint();
+    assert_eq!(
+        endpoint, "https://integrate.api.nvidia.com/v1",
+        "an explicit base_url must be used as given"
+    );
+    assert!(
+        !endpoint.contains("/v1/v1"),
+        "the path must not be suffixed twice: {endpoint}"
+    );
+}
+
+/// **A configured `base_url` overrides the default, for every provider.**
+///
+/// Written after a can-fail probe that did not fail: `anthropic::endpoint()`
+/// was sabotaged to ignore its config and return a hardcoded default, and all
+/// 27 tests stayed green — the nine constructor tests use `base_url: None`,
+/// and the two endpoint tests covered OpenRouter and NVIDIA only. So the
+/// override path was untested for every other provider, which is the half that
+/// matters to anyone pointing NIKI at a proxy.
+#[test]
+fn a_configured_base_url_overrides_every_providers_default() {
+    for provider in [
+        "anthropic",
+        "openai",
+        "openrouter",
+        "nvidia",
+        "google",
+        "ollama",
+    ] {
+        let config = ProviderConfig {
+            api_key: Some("test-key".into()),
+            base_url: Some("https://proxy.internal/v1".into()),
+            default_model: "some-model".into(),
+        };
+        let p = create_provider(provider, &config)
+            .unwrap_or_else(|e| panic!("{provider} must construct: {e}"));
+        assert!(
+            p.endpoint().contains("proxy.internal"),
+            "{provider} ignored the configured base_url and would send to {}",
+            p.endpoint()
+        );
+        assert!(
+            !p.endpoint().is_empty(),
+            "{provider} reports no endpoint, so this assertion would pass on a \
+             provider that sends nowhere"
+        );
+    }
+}
+
+/// And with no `base_url`, the provider's own default is used — the half the
+/// nine constructor tests above now check.
+#[test]
+fn an_omitted_base_url_falls_back_to_the_providers_own_host() {
+    for (provider, host) in [
+        ("anthropic", "api.anthropic.com"),
+        ("openai", "api.openai.com"),
+        ("openrouter", "openrouter.ai"),
+        ("nvidia", "integrate.api.nvidia.com"),
+        ("google", "generativelanguage.googleapis.com"),
+        ("ollama", "localhost:11434"),
+    ] {
+        let config = ProviderConfig {
+            api_key: Some("test-key".into()),
+            base_url: None,
+            default_model: "some-model".into(),
+        };
+        let p = create_provider(provider, &config)
+            .unwrap_or_else(|e| panic!("{provider} must construct: {e}"));
+        assert!(
+            p.endpoint().contains(host),
+            "{provider} with no base_url must use {host}, got {}",
+            p.endpoint()
+        );
+    }
 }
 
 // ── Provider Config Default Tests ──────────────────────────────────────

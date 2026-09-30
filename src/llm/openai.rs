@@ -379,6 +379,10 @@ impl LlmProvider for OpenAiProvider {
         ))
     }
 
+    fn endpoint(&self) -> String {
+        self.base_url().to_string()
+    }
+
     fn provider_name(&self) -> &str {
         &self.provider_name
     }

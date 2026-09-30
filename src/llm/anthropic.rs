@@ -325,6 +325,17 @@ impl LlmProvider for AnthropicProvider {
         ))
     }
 
+    /// The same resolution the request path uses, so this cannot report a URL
+    /// the provider would not send to.
+    fn endpoint(&self) -> String {
+        anthropic_endpoint(
+            self.config
+                .base_url
+                .as_deref()
+                .unwrap_or("https://api.anthropic.com"),
+        )
+    }
+
     fn provider_name(&self) -> &str {
         "anthropic"
     }

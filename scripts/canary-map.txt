@@ -197,3 +197,8 @@ this-repo-ignores-sandboxes | this_repository_ignores_its_own_sandboxes | NIKI r
 resume-does-not-claim-continuation | resume_does_not_claim_it_continued | "Ready for continuation" with nothing re-entered
 resume-still-reports | resume_still_reports_the_checkpoint | the useful half of the command removed with the lie
 resume-missing-still-fails | a_missing_checkpoint_still_fails_loudly | a table of zeroes and exit 0
+# B4-05 · the provider tests assert an endpoint, not a name it was built from
+base-url-overrides-default | a_configured_base_url_overrides_every_providers_default | a provider ignoring the proxy the user pointed it at
+omitted-base-url-uses-default | an_omitted_base_url_falls_back_to_the_providers_own_host | no default host, and no test that would notice
+openrouter-endpoint-resolves | openrouter_endpoint_resolves_correctly | a test named for the endpoint that never read it
+nvidia-endpoint-resolves | nvidia_endpoint_resolves_correctly | a test named for the endpoint that never read it
