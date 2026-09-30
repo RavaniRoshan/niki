@@ -11,18 +11,18 @@ without it, or if it makes another slice provable. Everything else is here.
 
 ## 1 · Navigation and the dead controls (P2)
 
-**The largest quality-of-life cluster, and the one left undone.** Not deferred
-for risk — deferred because nothing was blocked on it and the router order is
-where regressions bite.
+**The largest quality-of-life cluster, and the one being worked now.** Not
+deferred for risk — deferred because nothing was blocked on it and the router
+order is where regressions bite. Three items closed in batch 3.
 
 | # | Defect | Evidence |
 |---|---|---|
-| 1.1 | `↑ ↓ j k` move `state.page_selection`, which **no renderer reads**. Every list page keeps its own private cursor, so their `j/k` arms are unreachable. **Dead on 10 of 14 pages** while six page footers advertise `[j/k]` and the status bar says `↑↓ select`. | `nav.rs:149-158`, `tui.rs:1141-1152`; grep shows only declaration, writes and tests |
+| 1.1 | ~~`↑ ↓ j k` move `state.page_selection`, which **no renderer reads**. Every list page keeps its own private cursor, so their `j/k` arms are unreachable. **Dead on 10 of 14 pages** while six page footers advertise `[j/k]`.~~ **DONE in batch 3.** Both event loops now defer to the focused page on `q`, `j` and `k` through one named predicate, `sub_page_owns`. | `nav.rs:149-158`; `tui.rs` (two call sites) | The **up arrows/arrows-down** case is untouched: they still write the unread `page_selection`. They are the same defect with a different key, and folding them in is a follow-up. `page_selection` itself is now written by nothing a user can see, so deleting the field is the honest finish — it touches `AppState`, `nav.rs` and their tests. |
 | 1.2 | `h` and `l` mean prev/next page on every sub-page, shadowing History and TestLog. `[`/`]` on Diff navigate pages instead of hunks. | `nav.rs:80-85` before `global_page_jump` |
 | 1.3 | `Tab` is claimed by three controls; the status bar wins, so Config's "next field" and Agents' "next tab" are both dead. | `tui.rs:1036/1418` vs `pages/config.rs:327`, `pages/agents.rs:307` |
-| 1.4 | `q` quits the app from every sub-page, before the router, so all 11 pages' own `q → Run` handlers are unreachable. | `nav.rs:88`; `tui.rs:1159, 1467` |
+| 1.4 | ~~`q` quits the app from every sub-page, before the router, so all 11 pages' own `q → Run` handlers are unreachable.~~ **DONE in batch 2** (`71ba200`). The page's handler runs first; a page that declines `q` falls back to the confirm-quit modal, which had been unreachable dead code. Fleet and Session answer `q` for themselves and `continue` before the router, so they got their own arm. Proven by a real pty — `cases/13_subpage_q_goes_back.sh`, which asserts the tmux session still exists, because asserting only that "Run" rendered would pass against an app about to exit. | as cited |
 | 1.5 | Fleet's footer advertises `P R K V`; **3 of 7 controls do nothing**. Session advertises `P` and `R`; both dead. | `pages/fleet.rs:150` vs `tui.rs:1843-1858` |
-| 1.6 | `?` never reaches the Help page — it is consumed as `ToggleHelp` first. The only route is `Ctrl+P → help`, and *that* lands on a second, stale help page that says `[t] theme` when the key is `ctrl+t`. | `tui.rs:257-259`, `command_palette.rs:98-102`, `pages/help.rs:54` |
+| 1.6 | ~~`?` never reaches the Help page — it is consumed as `ToggleHelp` first. The only route is `Ctrl+P → help`, and *that* lands on a second, stale help page that says `[t] theme` when the key is `ctrl+t`.~~ **DONE in batch 3** (`a50a1b1`) — but by making the two surfaces honest rather than by merging them. | as cited | The Help page's GLOBAL rows are now generated from `BINDING_TABLE`, so the page and the which-key overlay cannot disagree again, and a user's overrides show up in the page. The palette no longer claims `?` reaches Help, because `ToggleHelp` consumes it first. **Merging the two surfaces is the remaining option and it is not done**: `?` stays the quick global reference because that is what the status bar advertises it as, and consolidating would retire `show_help`, which the mouse handlers and their tests depend on. That is a real piece of work, not a five-line edit. |
 | 1.7 | Digit jumps cover 9 of 14 pages. | `nav.rs:91-94` |
 | 1.8 | Session is 4/7 placeholder tabs with a permanently empty Conversation — the live conversation is in `state.chat_log`, which the page never reads. | `pages/session.rs:12-20, 59, 71, 145-149` |
 | 1.9 | `docs/tui/key-matrix.md:28-33` tells a maintainer *not to fix* the theme-key divergence that `tui.rs:1522-1527` already fixed. | as cited |

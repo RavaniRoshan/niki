@@ -242,12 +242,26 @@ fn both_event_loops_gate_the_nav_block() {
         s.contains("fn sub_page_owns("),
         "the rule the two loops share is gone"
     );
-    // Two guards, because there are two event loops.
-    let guards = s.matches("!sub_page_owns(key, &state)").count();
+    // The nav-block guards specifically, not every `sub_page_owns` in the
+    // file. B3-03 added two more on the `ToggleChatPage` arms, and a plain
+    // count of 2 then failed on a correct file; "at least 2" would not have
+    // caught a removed one. So: a guard is a *nav-block* guard unless it sits
+    // on a line whose preceding line is a `ToggleChatPage` check.
+    let lines: Vec<&str> = s.lines().collect();
+    let nav_guards = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.contains("!sub_page_owns(key, &state)"))
+        .filter(|(i, _)| {
+            !lines[i.saturating_sub(1)..]
+                .first()
+                .is_some_and(|p| p.contains("ToggleChatPage"))
+        })
+        .count();
     assert_eq!(
-        guards, 2,
+        nav_guards, 2,
         "expected both event loops to gate the nav block on `sub_page_owns`; \
-         found {guards}. One of them is taking the key before the page can, \
+         found {nav_guards}. One of them is taking the key before the page can, \
          which is the whole defect: the page handlers were always correct and \
          were simply never called."
     );
