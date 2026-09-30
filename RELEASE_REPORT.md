@@ -18,8 +18,8 @@ Run of 2026-09-30, after batch 2's last commit. Raw output in `EVIDENCE.md`.
 |---|---|---|
 | **G1** clean clone, install, README quick start | **PASS** | all scripts parse; every published download URL resolves; `niki 0.9.0 — README quick start commands accepted` |
 | **G2** build, lint | **PASS** | `cargo fmt --check`; `cargo clippy --all-targets -D warnings` warning-free; debug and release both build |
-| **G3** tests + can-fail map | **PASS** | lib **953**; `run_lifecycle` **14**; **65 can-fail entries** all resolve to a real test |
-| **G4** the core flow, for real | **PASS** | `run_lifecycle` 14; `chat_runs_the_pipeline`; `scripts/demo.sh`; the tmux suite **13/13** |
+| **G3** tests + can-fail map | **PASS** | lib **953**; `run_lifecycle` **14**; **122 can-fail entries** all resolve to a real test |
+| **G4** the core flow, for real | **PASS** | `run_lifecycle` 14; `chat_runs_the_pipeline`; `scripts/demo.sh`; the tmux suite **14/14** |
 | **G5** security | **PASS** | `cargo deny check` ok; `cargo audit` ok (11 pre-existing allowed warnings); **no credentials in the tree or in history** |
 | **G6** failure paths | **PASS** | every failure path exits non-zero *and* says something a person can act on |
 | **G7** docs match reality | **PASS** | the audit's counts are re-derived from the tree; every README command parses against the real binary |
@@ -29,6 +29,14 @@ Run of 2026-09-30, after batch 2's last commit. Raw output in `EVIDENCE.md`.
 **Eight of nine pass locally. G8 is red because the branch has not been pushed**,
 and that is the honest state rather than a workaround: it is the one gate this
 programme cannot satisfy without the owner.
+
+### The gate caught the batches' own drift, twice
+
+`G7` failed on the full run with `docs/launch-audit.md disagrees with the
+repository it describes: Rust source files: audit says 195, the tree has
+196` — batch 2 added `src/session/branch.rs` and the audit's measurement was
+not re-derived. Fixed, and the gate went green again. A count in a document is
+a measurement, and this one re-derives itself.
 
 ### The gate caught batch 2's own drift
 
@@ -153,7 +161,7 @@ of its own options, and the trailing `--` that makes branch-vs-path safe does
 
 ## 2c · Batch 3 — the terminal UI, finished
 
-Eleven commits, `4e57fdb`…`0599708`. The canary map grew 65 → 116.
+Twelve commits, `4e57fdb`…`6c8a3be`. The canary map grew 65 → 122.
 **`ROADMAP.md` §1 — "navigation and the dead controls" — is closed: all ten
 items.** It was called "the largest quality-of-life cluster, and the one left
 undone", and for a product whose front door is a full-screen chat it was the
@@ -175,6 +183,7 @@ cluster that mattered most.
 | History | `[Enter] open` | Loaded the run and navigated nowhere. |
 | Help page | `[t] theme` | The binding is `ctrl+t`. The same stale letter was in the command palette. |
 | `docs/tui/key-matrix.md` | 4 "do not fix" divergences | All four were already fixed. |
+| the permission badge | Shift+Tab cycles the posture | Six variants, **one reader**: the status bar. Cycling it changed a label and no tool call. |
 
 ### The pattern, which is the argument for testing behaviour
 
@@ -186,9 +195,34 @@ work and exiting 0. Reading the help text found the stale `ctrl+t` in a second
 place. Enumerating `BINDING_TABLE` — §1's own stated exit criterion — found
 `g` and `s`.
 
-**Eight of the eleven were found by writing the next slice's test, not by
+**Eight of the twelve were found by writing the next slice's test, not by
 reading the code the slice was about.** An audit of this cluster would have
 found roughly three of them.
+
+### The one place retraction was the wrong call
+
+The permission badge cycled a posture that governed nothing. Batch 1's default
+is "retracting the claim beats wiring something approximate", and by that rule
+the badge should have been deleted. It should not have been: the posture that
+*does* govern a stage, `config.permissions.mode`, is read **per stage** by
+`ToolContext`, so the value only had to travel with the submit. The control now
+works, the label is true, both notices say the change lands from the next stage
+(the one in flight keeps its posture), and the default is still `manual` —
+asserted, because a change that makes a badge real must not make the product
+less safe by accident.
+
+### And a claim in `ROADMAP.md` that was wrong
+
+> ~~The permission modal is structurally unreachable in chat: `cli/chat.rs`
+> creates a channel whose sender is never given to `create_sandbox`.~~
+
+A plain chat turn calls `stream_reply` — no tools, no sandbox, no
+`create_sandbox` at all. The modal is unreachable in chat because **chat does
+not run tools**, which is the owner's §0a decision (`/run <task>` starts the
+pipeline, plain messages stay conversation turns), not a wiring bug. The
+sandbox *does* emit `DisplayEvent::PermissionRequest`. There was nothing to
+fix, and "fixing" it would have meant making chat run tools — a product
+decision dressed as a repair.
 
 ### Four tests I wrote and then deleted or weakened on purpose
 
@@ -315,6 +349,8 @@ limitations stops being readable:
 - ~~The redaction Pass was a constant.~~ It is a 13-shape corpus, and two
   shapes it missed were leaking (`B2-14`).
 - ~~Every dead control in §1.~~ All ten items (`B3-01`…`B3-11`).
+- ~~The permission badge is cosmetic.~~ It governs every stage that has not
+  started (`B3-12`), with the default still `manual`.
 
 One batch-2 claim in this report was **wrong** and is corrected in place
 rather than dropped: "permission prompting is unreachable in chat (the event
