@@ -425,15 +425,120 @@ outside the project. It was deferred because it needs a judgement call about
 which backends may accept a path at all, and a schema change — not because it is
 small. **It is the first item of batch 2.**
 
+## Iteration 2 — 2026-09-30 · batch 2, twelve slices
+
+Twelve commits, `c0e5548`…`71ba200`. All can-fail proven. Canary map grew 49
+→ 65; PTY suite 12 → 13 cases.
+
+The batch is not the one the plan predicted. Five of the twelve are defects no
+audit found, because they were found by **running the product against a real
+model** and reading what it printed. That is the part of the batch worth
+noticing.
+
+### What a live run found that no audit found
+
+`z-ai/glm-5.3-flash` through NVIDIA's catalogue, with `RUST_LOG=info`:
+
+```
+15:49:40Z [Planner] Done (165s, in 1146 / out 1640) — Spec: 1 files to modify
+15:51:51Z [Coder] Starting...
+```
+
+The Planner is fine — a schema-conformant TaskSpec in 165–235s. The Coder
+never finished, and five real defects came out of that one run:
+
+| Slice | What the run showed |
+|---|---|
+| B2-06 / B2-09 | The 120s bound was a **total** deadline, so 4 steps × 3 attempts could burn **12+ minutes** before a stage even started |
+| B2-08 | A killed run left `status: "Running"` in the run record **forever** |
+| B2-11 | **2m11s of silence** after the Planner, and the `[Coder] Starting` that did appear came from the *fallback* — describing a stage that had already lost ten minutes |
+| B2-12 | The loop's error was erased by `.ok()?`, so a lost network and a declined tool loop were the same value |
+| B2-10 | The permission prompt's 5s window reported `denied by user` — blaming the user for a fuse nobody saw |
+
+**A hypothesis, tested and killed.** The Coder sends 22 tool specs; the Planner
+sends none. The obvious reading of `os error 110` (ETIMEDOUT on *connect*) was
+that the payload was too big to establish a connection. Measured against the
+live endpoint:
+
+```
+  0 tools:      97 bytes  OK in 45.3s
+ 12 tools:    8894 bytes  OK in 22.8s
+ 22 tools:   16224 bytes  OK in 28.0s
+```
+
+**Refuted** — and the largest payload came back *faster* than the smallest. No
+tool-spec trimming was done: it would have been a plausible change with nothing
+behind it. The fault is a free tier dropping connections, and what NIKI owes
+the user there is a bounded stage and a visible error. Recorded in
+`EVIDENCE.md` under *Live-provider observations*.
+
+### The twelve
+
+| # | Commit | Slice |
+|---|---|---|
+| B2-01 | `c0e5548` | A model-authored path cannot write outside the worktree |
+| B2-02 | `60a0230` | A signalled child is not a success |
+| B2-03 | `831bf84` | A diff that could not be produced is not a diff that is empty |
+| B2-04 | `bd62649` | The `git` tool honours the deny-list and is bounded |
+| B2-05 | `92130e7` | The default backend no longer auto-approves in silence |
+| B2-06 | `88694e1` | A deadline expiry is recognisable as one |
+| B2-07 | `96637ec` | A late failure preserves the Coder's work as evidence |
+| B2-08 | `970cfbb` | A killed run stops claiming to be running |
+| B2-09 | `4fdb964` | A stalled stage fails in bounded time |
+| B2-10 | `c94aaff` | A timeout is not a refusal, and 5s is not a decision |
+| B2-11 | `c6851c0` | The Coder announces itself, and says which step it is on |
+| B2-12 | `9a7ced4` | A failed tool loop is visible, not a silent fallback |
+| B2-13 | `aa1a244` | The branch is reachable from the TUI |
+| B2-14 | `1182110` | The doctor's redaction Pass is a real check |
+| B2-15 | `71ba200` | `q` on a sub-page goes back, instead of quitting |
+
+### Three of these found something the check itself could not see
+
+**B2-14.** `niki doctor` printed `Pass("always-on: provider keys redacted from
+logs, reports, artifacts")` — a constant. Running the real redactor over 13 key
+shapes found two leaks, one of them serious: the field patterns required an `=`,
+so they caught `api_key=…` and missed `{"api_key": "…"}`. Provider error bodies
+are JSON, and they are the one place `redact_secrets` is applied — so a key
+echoed back in an error response reached the log and `report.md` untouched. The
+check is now the same corpus the tests assert, and README, the security doc and
+`docs/claims-audit.md` were all carrying a broader claim than the code
+supported.
+
+**B2-15.** Eleven pages answer `q` with "back to Run". None could run: the nav
+layer sat above the router, read `q` as `NavIntent::Quit`, and broke the event
+loop. The same defect made the confirm-quit modal unreachable dead code. Found
+by reading the router while looking for something else.
+
+**B2-13.** Wiring `/branch` to a real `git checkout` surfaced a data-loss
+hazard that had nothing to do with the TUI, and it is now pinned by a test:
+
+```
+$ git checkout -f --      # repo with an uncommitted edit
+$ echo $?; cat a.txt
+0
+committed                 # the edit is gone
+```
+
+`Command::args` is not shell injection — it is git reading our argument as one
+of its own options, and the trailing `--` that makes branch-vs-path safe does
+not help, because the flag is parsed first.
+
 ### Next
 
-Batch 1 is complete. 8 of 9 gates green; **G8 is unverified because the branch
-has not been pushed**, per the owner's decision.
+Batch 2 is complete: 15 commits, 65 can-fail entries, 13 PTY cases.
 
-Batch 2 starts at `ROADMAP.md` §4.1 — the path escape — then §1 (navigation and
-the dead controls), §2 (chat ↔ pipeline depth), §4.2–4.4 (redaction, the `git`
-tool's missing policy, silent auto-approve), and §5 (signal-as-success, the
-total-deadline timeout, mid-pipeline salvage).
+Batch 3 is drawn from `ROADMAP.md` §1 (the remaining dead controls: `j/k` dead
+on 10 of 14 pages, `Tab` claimed by three, `?` never reaching Help, the Fleet
+and Session footer keys), then §2 (chat ↔ pipeline depth), §5 (the remaining
+reliability items), and §6 (coverage and hygiene).
+
+### Known cosmetic defect, not fixed
+
+`88694e1` and `e563da2` share a commit subject. The second is the ROADMAP
+completion note for the first, and the subject was copy-pasted — so `git log`
+shows the deadline fix twice. Correcting it means rewriting history, which is a
+stop-and-ask item, and the branch has not been pushed. The *content* of both is
+correct; only the second subject is wrong.
 
 ### Blockers
 
@@ -446,3 +551,8 @@ None.
 - For the 12 slash commands that lie, **retracting the claim is the default**.
 - A plain chat message stays a conversation turn; `/run <task>` starts the pipeline. Inferring
   "this is a task" from every message would be magic, and the product's ethos is honesty.
+- The NVIDIA key lives in the environment only and is never written to a file. G5's secret
+  scan is what proves it stayed there, so it runs before every commit.
+- The free tier's connection stability, not NIKI, bounds what a live-model run on this box
+  can evidence. G4's real-model leg is therefore not a gate.
+
