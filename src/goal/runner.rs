@@ -55,7 +55,7 @@ impl GoalRunner {
 
             let pipeline_task = Task {
                 id: Uuid::new_v4(),
-                description: task_desc.clone(),
+                description: Self::description_with_prior_knowledge(state, &task_desc),
                 project_path: PathBuf::from(&state.scope),
             };
 
@@ -149,6 +149,78 @@ impl GoalRunner {
 
         state.save()?;
         Ok(())
+    }
+
+    /// The task description, plus everything previous iterations learned.
+    ///
+    /// The goal loop was accumulating `context_summary` and `negative_knowledge`
+    /// faithfully — appending to them, persisting them, and then handing the
+    /// pipeline a `Task` built from `task_desc` and `project_path` alone. The
+    /// agents were given no memory of what the previous iterations had already
+    /// tried and failed at, which is the single thing a multi-iteration runner
+    /// exists to prevent: iteration 2 repeating iteration 1's mistake, for want
+    /// of any record that it was a mistake.
+    ///
+    /// So the knowledge is carried on the one field the pipeline already reads.
+    /// Nothing is stored that is not used, and the accumulated state and what
+    /// the agents see are the same string.
+    ///
+    /// Iteration 1 gets the description unchanged. A runner that opens with
+    /// "nothing has been tried yet" is noise, and noise in a prompt is
+    /// expensive.
+    fn description_with_prior_knowledge(state: &GoalState, task_desc: &str) -> String {
+        if state.context_summary.trim().is_empty() && state.negative_knowledge.is_empty() {
+            return task_desc.to_string();
+        }
+
+        let mut out = String::new();
+        out.push_str(task_desc);
+
+        // The current iteration's own preamble was just pushed onto
+        // `context_summary`; echoing it back would list the task in the history
+        // of the task.
+        //
+        // Matching by line, not by trimming a suffix. The first attempt trimmed
+        // the trailing marker text, which cannot work when the marker is at the
+        // *start* of the last line rather than the end of the string — and the
+        // test written for exactly this case caught it.
+        let current_marker = format!("Iteration {}: working on task", state.iterations + 1);
+        let prior: String = state
+            .context_summary
+            .lines()
+            .filter(|l| !l.trim_start().starts_with(&current_marker))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string();
+
+        if !prior.is_empty() {
+            out.push_str(
+                "
+
+## What earlier iterations of this goal found
+
+",
+            );
+            out.push_str(&prior);
+        }
+
+        if !state.negative_knowledge.is_empty() {
+            out.push_str(
+                "
+
+## Approaches that already failed — do not repeat them
+
+",
+            );
+            for item in state.negative_knowledge.iter().rev().take(10).rev() {
+                out.push_str("- ");
+                out.push_str(item);
+                out.push('\n');
+            }
+        }
+
+        out
     }
 
     async fn staged_evidence_gates(result: &PipelineResult, _config: &NikiConfig) -> bool {
@@ -277,6 +349,85 @@ mod tests {
     use super::*;
     use crate::goal::TEST_CWD_LOCK;
     use crate::goal::state::{GoalCriterion, GoalTask};
+
+    /// A multi-iteration runner exists so that iteration 2 does not repeat
+    /// iteration 1's mistake. It could not do that: `context_summary` and
+    /// `negative_knowledge` were accumulated, persisted, and then never handed
+    /// to the pipeline, which received a `Task` built from the task description
+    /// and the project path alone.
+    ///
+    /// These three cases are the whole contract. If the first one ever comes
+    /// back — a first iteration that opens with a history of nothing — the
+    /// prompt is carrying a lie in the other direction, and the loop is now
+    /// spending tokens to say so.
+    #[test]
+    fn a_first_iteration_gets_the_description_unchanged() {
+        let state = make_active_state();
+        assert!(
+            state.context_summary.trim().is_empty(),
+            "the fixture is supposed to start with no history"
+        );
+        assert_eq!(
+            GoalRunner::description_with_prior_knowledge(&state, "Add /health"),
+            "Add /health",
+            "a runner that opens with 'nothing has been tried yet' is noise in a prompt"
+        );
+    }
+
+    #[test]
+    fn later_iterations_carry_what_earlier_ones_found() {
+        let mut state = make_active_state();
+        state.context_summary = "\nIteration 1: working on task t1: Add /health".to_string();
+        state.negative_knowledge = vec![
+            "Task t1 failed evidence gates".to_string(),
+            "Task t0 pipeline error: provider 401".to_string(),
+        ];
+        state.iterations = 1;
+
+        let desc = GoalRunner::description_with_prior_knowledge(&state, "Add /metrics");
+
+        assert!(
+            desc.starts_with("Add /metrics"),
+            "the actual task must be first and unchanged:
+{desc}"
+        );
+        assert!(
+            desc.contains("failed evidence gates"),
+            "what an earlier iteration learned is missing, so iteration 2 will              repeat iteration 1's failure:
+{desc}"
+        );
+        assert!(
+            desc.contains("provider 401"),
+            "recorded negative knowledge is missing from the prompt:
+{desc}"
+        );
+    }
+
+    /// The current iteration's own preamble is pushed onto `context_summary`
+    /// immediately before the task is built. Echoing it back would put the
+    /// task in the history of the task, which is worse than omitting it.
+    #[test]
+    fn the_current_iteration_is_not_reported_as_prior_knowledge() {
+        let mut state = make_active_state();
+        state.context_summary = "\nIteration 1: working on task t1: Add /health".to_string();
+        state.iterations = 1;
+
+        // The runner pushes this line, then builds the task.
+        state.context_summary.push_str(&format!(
+            "\nIteration {}: working on task {}: {}",
+            state.iterations + 1,
+            "t2",
+            "Add /metrics"
+        ));
+
+        let desc = GoalRunner::description_with_prior_knowledge(&state, "Add /metrics");
+        let occurrences = desc.matches("Iteration 2: working on task").count();
+        assert_eq!(
+            occurrences, 0,
+            "the current iteration appeared in its own prior-knowledge section:
+{desc}"
+        );
+    }
 
     fn make_active_state() -> GoalState {
         GoalState {

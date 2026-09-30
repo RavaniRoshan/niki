@@ -157,6 +157,70 @@ type ProviderEntry = (
 ///
 /// Each provider in the chain has its own circuit breaker. If the primary is
 /// open, we skip straight to the next available provider.
+/// What a provider error means for a fallback chain.
+///
+/// Two questions, kept apart on purpose because conflating them is what broke
+/// failover: *is this provider unusable for this run* (try the next one) versus
+/// *would a different provider do any better* (do not, fail loudly).
+///
+/// A 401 or 403 is the case that was wrong. An expired key on the primary is
+/// the most common reason a chain is ever configured — you add a fallback
+/// precisely because you do not trust one key — and the old behaviour aborted
+/// the whole chain on it. One stale key defeated a healthy fallback, which is
+/// the exact opposite of what the feature is for.
+///
+/// A 4xx that is not an auth failure is still fatal: an unknown model or a
+/// malformed request will fail identically everywhere, and retrying it just
+/// spends the user's money to produce the same error twice.
+fn classify_error(err_lower: &str) -> (bool, bool) {
+    let status_is_transient = ["http 500", "http 502", "http 503", "http 504", "http 408"]
+        .iter()
+        .any(|s| err_lower.contains(s));
+
+    // Both the status and the wording are checked, because providers differ:
+    // Anthropic says "authentication_error", OpenAI says "Incorrect API key
+    // provided", and neither reliably puts "401" in the part of the message
+    // that survives into `to_string()`. Matching only the status caught one
+    // provider and silently missed the other — which is how the original bug
+    // survived its first fix.
+    let auth_failure = [
+        "http 401",
+        "http 403",
+        "unauthorized",
+        "unauthenticated",
+        "forbidden",
+        "authentication_error",
+        "invalid api key",
+        "invalid_api_key",
+        "incorrect api key",
+        "incorrect_api_key",
+        "api key",
+        "permission denied",
+    ]
+    .iter()
+    .any(|s| err_lower.contains(s));
+
+    let transport = [
+        "timeout",
+        "timed out",
+        "rate limit",
+        "rate_limit",
+        "429",
+        "overloaded",
+        "connection",
+        "network",
+        "eof",
+        "reset by peer",
+    ]
+    .iter()
+    .any(|s| err_lower.contains(s));
+
+    (
+        status_is_transient || auth_failure || transport,
+        auth_failure,
+    )
+}
+
 pub struct FailoverProvider {
     chain: Vec<ProviderEntry>,
     /// Name of the entry that served the most recent successful call. Used to
@@ -265,16 +329,7 @@ impl LlmProvider for FailoverProvider {
                     // returned immediately, so a single upstream error defeated
                     // the entire failover chain — the feature silently did
                     // nothing for the most common server-side failure.
-                    let status_is_transient = ["http 500", "http 502", "http 503", "http 504"]
-                        .iter()
-                        .any(|s| err_str.contains(s));
-                    let is_transient = status_is_transient
-                        || err_str.contains("timeout")
-                        || err_str.contains("rate")
-                        || err_str.contains("429")
-                        || err_str.contains("overloaded")
-                        || err_str.contains("connection")
-                        || err_str.contains("network");
+                    let (is_transient, auth_failure) = classify_error(&err_str);
 
                     {
                         let mut b = breaker.lock().await;
@@ -285,12 +340,18 @@ impl LlmProvider for FailoverProvider {
                         tracing::warn!(
                             target: "niki::failover",
                             provider = name.as_str(),
+                            auth_failure,
                             error = %e,
-                            "Transient error — trying next provider"
+                            "Provider unusable for this run — trying the next one"
                         );
                         last_err = Some(e);
                         continue;
                     } else {
+                        // Genuinely not this provider's fault, and not
+                        // something a different provider would fix either — a
+                        // malformed request, an unknown model. Failing here is
+                        // correct: retrying it elsewhere just spends the user's
+                        // money to produce the same error.
                         return Err(e);
                     }
                 }
@@ -597,6 +658,64 @@ mod tests {
         std::thread::sleep(Duration::from_millis(150));
         assert!(cb.allows_request());
         assert_eq!(cb.state(), CircuitState::HalfOpen);
+    }
+
+    /// An expired key on the primary used to abort the whole chain, so a
+    /// fallback was never reached — which is the one situation a fallback
+    /// exists for, and the most common one.
+    #[test]
+    fn an_auth_failure_moves_to_the_next_provider_rather_than_aborting() {
+        for message in [
+            "HTTP 401 Unauthorized: Missing Authentication header",
+            "HTTP 403 Forbidden",
+            "authentication_error: invalid api key",
+            "Incorrect API key provided",
+        ] {
+            let (is_transient, auth) = classify_error(&message.to_lowercase());
+            assert!(
+                is_transient,
+                "`{message}` must move to the next provider, not abort the chain"
+            );
+            assert!(auth, "`{message}` should be recognised as an auth failure");
+        }
+    }
+
+    /// The other direction. A 404 for an unknown model will fail identically on
+    /// every provider, and retrying it just spends the user's money to produce
+    /// the same error twice.
+    #[test]
+    fn a_request_error_still_aborts_rather_than_burning_the_chain() {
+        for message in [
+            "HTTP 404 Not Found: model: gpt-nonexistent",
+            "HTTP 400 Bad Request: invalid_request_error",
+            "context length exceeded",
+        ] {
+            let (is_transient, auth) = classify_error(&message.to_lowercase());
+            assert!(
+                !is_transient,
+                "`{message}` will fail on every provider; retrying it is not a \
+                 failover, it is paying twice for the same error"
+            );
+            assert!(!auth);
+        }
+    }
+
+    /// The classification the feature already had must not have regressed.
+    #[test]
+    fn upstream_and_transport_failures_still_move_on() {
+        for message in [
+            "HTTP 500 Internal Server Error",
+            "HTTP 503 Service Unavailable",
+            "HTTP 529 overloaded",
+            "request timed out",
+            "connection reset by peer",
+            "rate limit exceeded (429)",
+        ] {
+            assert!(
+                classify_error(&message.to_lowercase()).0,
+                "`{message}` must try the next provider"
+            );
+        }
     }
 
     #[test]

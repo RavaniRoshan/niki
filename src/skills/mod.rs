@@ -457,10 +457,34 @@ pub fn load_project_skill(
     Some((body, dir.display().to_string()))
 }
 
-/// Project skills under the default output dir (for tool contexts that do not
-/// carry a full config — e.g. the runtime `skill_list`/`skill_load` tools).
-pub fn list_project_skills_default_dir(project_path: &Path) -> Vec<String> {
-    let root = project_path.join(".niki").join("skills");
+/// Where project skills live, resolved from the project's own configuration.
+///
+/// The runtime `skill_list`/`skill_load` tools used to read a hardcoded
+/// `.niki/skills` because `ToolContext` carries no `&NikiConfig`, while
+/// promotion wrote to `config.general.output_dir/skills`. The two never met for
+/// anyone who set a custom output dir: a skill would be promoted with a success
+/// message, appear in `niki skills list`, and then be invisible to the very
+/// agents it was distilled for.
+///
+/// Two functions that disagree about a path is the whole bug, so there is now
+/// one, and it asks the configuration rather than assuming. Loading the config
+/// is a file read, and it happens inside a bounded tool loop that is about to
+/// make an LLM call — the cost is not the reason to keep a second opinion about
+/// where the skills are.
+///
+/// Falls back to `.niki` when no config is readable, which is the documented
+/// default and the behaviour a project with no `niki.toml` has always had.
+pub fn project_skills_root(project_path: &Path) -> PathBuf {
+    let output_dir = match crate::config::NikiConfig::load(project_path) {
+        Ok(cfg) => cfg.general.output_dir,
+        Err(_) => ".niki".to_string(),
+    };
+    project_path.join(output_dir).join("skills")
+}
+
+/// Project skills, from wherever this project actually keeps them.
+pub fn list_project_skills_for(project_path: &Path) -> Vec<String> {
+    let root = project_skills_root(project_path);
     let Ok(rd) = std::fs::read_dir(&root) else {
         return Vec::new();
     };
@@ -474,10 +498,8 @@ pub fn list_project_skills_default_dir(project_path: &Path) -> Vec<String> {
     names
 }
 
-pub fn load_project_skill_default_dir(project_path: &Path, name: &str) -> Option<(String, String)> {
-    let path = project_path
-        .join(".niki")
-        .join("skills")
+pub fn load_project_skill_for(project_path: &Path, name: &str) -> Option<(String, String)> {
+    let path = project_skills_root(project_path)
         .join(name)
         .join("SKILL.md");
     let body = std::fs::read_to_string(&path).ok()?;
@@ -514,10 +536,13 @@ mod tests {
         NikiConfig::default()
     }
 
-    fn stage_sample(dir: &Path) -> String {
+    /// Stage a candidate under `config`'s own output dir, so promotion can find
+    /// it. The existing `stage_sample` hardcodes the default config, which is
+    /// fine for its callers and wrong for the custom-output-dir case below.
+    fn stage_sample_with(dir: &Path, config: &NikiConfig) -> String {
         stage_candidate(
             dir,
-            &test_config(),
+            config,
             "Add health endpoint",
             "planner spec, coder diff, tester report",
             "cargo test",
@@ -528,6 +553,10 @@ mod tests {
             "aaaaaaaa-1111",
         )
         .unwrap()
+    }
+
+    fn stage_sample(dir: &Path) -> String {
+        stage_sample_with(dir, &test_config())
     }
 
     #[test]
@@ -645,5 +674,76 @@ mod tests {
     fn retire_unpromoted_skill_errors() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(retire_skill(tmp.path(), &test_config(), "ghost", "reason").is_err());
+    }
+
+    /// A skill the agents can actually see is the entire point of promoting one.
+    ///
+    /// It did not work under a custom `[general] output_dir`. Promotion wrote
+    /// to `<output_dir>/skills` — the configured directory, correctly — while
+    /// the runtime `skill_list`/`skill_load` tools read a hardcoded
+    /// `.niki/skills`, because `ToolContext` carries no config. So the skill
+    /// was promoted with a success message, listed by `niki skills list`, and
+    /// then invisible to the agents it was distilled for. Nothing errored. The
+    /// user was told it worked.
+    ///
+    /// Two functions that disagree about a path is the entire bug, so this
+    /// pins that they now agree — for the default directory and for a custom
+    /// one, which is where it was broken.
+    #[test]
+    fn a_promoted_skill_is_visible_to_the_agents_that_should_load_it() {
+        for output_dir in [".niki", ".niki-custom"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = tmp.path();
+            std::fs::write(
+                root.join("niki.toml"),
+                format!("[general]\noutput_dir = \"{output_dir}\"\n"),
+            )
+            .unwrap();
+
+            // Promote, through the configured path — the real sequence: stage a
+            // candidate, then promote it, exactly as a run does.
+            let mut cfg = test_config();
+            cfg.general.output_dir = output_dir.to_string();
+            let staged = stage_sample_with(root, &cfg);
+            let name = promote_candidate(root, &cfg, &staged).expect("promotion succeeds");
+            assert!(
+                project_skills_dir(root, &cfg).join(&name).exists(),
+                "promotion did not write under the configured output_dir"
+            );
+
+            // …and the runtime path, which is a different function entirely.
+            let listed = list_project_skills_for(root);
+            assert!(
+                listed.contains(&name),
+                "with output_dir = {output_dir}, the promoted skill is invisible to \
+                 the tools that load it. Promotion reported success; listed: {listed:?}"
+            );
+
+            let loaded = load_project_skill_for(root, &name);
+            assert!(
+                loaded.is_some(),
+                "with output_dir = {output_dir}, the skill lists but will not load"
+            );
+        }
+    }
+
+    /// And the default stays the default: a project with no `niki.toml` at all
+    /// must still find skills in `.niki/skills`, which is where every existing
+    /// project's promoted skills already are.
+    #[test]
+    fn a_project_with_no_config_still_resolves_the_default_skills_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let dir = root.join(".niki").join("skills").join("legacy-skill");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), "body").unwrap();
+
+        assert_eq!(
+            project_skills_root(root),
+            root.join(".niki").join("skills"),
+            "a project with no niki.toml must keep resolving the documented default"
+        );
+        assert!(list_project_skills_for(root).contains(&"legacy-skill".to_string()));
+        assert!(load_project_skill_for(root, "legacy-skill").is_some());
     }
 }

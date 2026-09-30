@@ -100,27 +100,39 @@ Not "implemented" — exercised by a gate that has been shown to fail.
 
 ## What is thinner than the documentation implies
 
+Fixed in this release, and each fix has a test that fails if it regresses:
+
+- **The goal loop now carries what it learns.** It did not: it accumulated
+  `context_summary` and `negative_knowledge` faithfully and then handed the
+  pipeline a `Task` built from the description alone, so iteration 2 could
+  repeat iteration 1's mistake. It still does not *retry* a blocked task — that
+  changes the semantics of a persisted task list and is a separate decision.
+- **Promoted skills are visible to the agents that load them.** Under a custom
+  `[general] output_dir`, promotion wrote to the configured directory and the
+  runtime `skill_list`/`skill_load` tools read a hardcoded `.niki/skills`, so a
+  skill was promoted with a success message and then never loaded.
+- **An expired key no longer defeats a fallback chain.** A 401 from a stale
+  primary aborted the run before the fallback was tried — the most common
+  reason anyone configures one.
+
+Still true, and the reason each is stated rather than fixed:
+
 - **The tool loop is off by default.** `[tools] experimental_tool_loop`
   defaults to `false`, and the only production call site is
   `run_experimental_research` — a bounded pre-Planner research pass. In a
   default run the four agents receive a deterministic context pack and emit
-  schema-valid JSON; they do not use the twenty baseline tools. This is
+  schema-valid JSON; they do not use the twenty-two baseline tools. This is
   arguably the right design for a pipeline whose selling point is
   reproducibility, but `CONTRIBUTING.md`'s "add a tool" instructions and the
-  README's module map read as though a run is tool-driven. It is not.
-- **The goal loop is a single forward pass.** `src/goal/runner.rs:118-120`
-  advances past a `Blocked` task without retrying it, and each iteration
-  rebuilds a fresh `Task` without carrying `context_summary` or
-  `negative_knowledge` forward — so iteration 2 can repeat iteration 1's
-  mistakes, which is the specific thing the loop exists to prevent. The
-  orchestrator never drives a goal; it is reachable only through `niki goal`.
+  README's module map read as though a run is tool-driven. It is not. The
+  reasoning, and what would change it, is in
+  [`decisions/tool-loop.md`](decisions/tool-loop.md).
 - **Parts of the learning layer are written and never read.** `load_index` and
   `query_store` in `src/store/` have no production callers; the persisted
   index is built only by manual `niki index` and nothing in the agent path
   rebuilds or freshness-checks it. `record_memory_use` has no callers at all.
-- **Promoted skills are invisible under a custom output dir.** Promotion writes
-  to `config.general.output_dir/skills`; the runtime `skill_list`/`skill_load`
-  tools read a hardcoded `.niki/skills`.
+  Hierarchical memory and learned-pattern ranking *are* wired into the agent
+  path; the index beneath them is not.
 
 ## Known rough edges, deliberately left
 
