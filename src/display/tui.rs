@@ -1142,6 +1142,7 @@ fn run_tui(
                             }
                         }
                     } else if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleChatPage)
+                        && !sub_page_owns(key, &state)
                     {
                         // Toggle between the conversational chat view and the page view.
                         //
@@ -1584,7 +1585,9 @@ pub fn run_chat(
                     // user who rebound `toggle_chat` in `niki.toml` got a binding
                     // that did nothing in `niki chat` and worked everywhere else.
                     // The default is still Tab.
-                    if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleChatPage) {
+                    if state.keybindings.resolve(&key) == Some(GlobalAction::ToggleChatPage)
+                        && !sub_page_owns(key, &state)
+                    {
                         // Both `current_page` (what is rendered) and `view` (what
                         // the footer label reads) have to move together or the
                         // footer claims a toggle that did not happen.
@@ -2116,6 +2119,13 @@ fn render(
 /// `q` is here for the same reason and the same shape: eleven pages answer it
 /// with "back to Run", and the navigator used to quit the app before they could.
 ///
+/// `Tab` is here for a different reason and needs the page. Three things claim
+/// it — the global chat/page toggle, Config's "next field" and Agents' "next
+/// tab" — and the global is checked first, so both page meanings were dead
+/// while both footers advertised them. The page that documents a key gets it;
+/// everywhere else `Tab` still toggles chat and pages, which is where the
+/// muscle memory lives and where nothing else is being served.
+///
 /// The composer is exempt. When a text field has focus these are ordinary
 /// characters, and the nav layer already declines every key in that state
 /// (`text_focus_active`); excluding them here keeps that guarantee from being
@@ -2124,10 +2134,20 @@ fn sub_page_owns(key: KeyEvent, state: &crate::display::state::AppState) -> bool
     if crate::display::nav::text_focus_active(state) {
         return false;
     }
-    matches!(
+    if matches!(
         key.code,
         KeyCode::Char('q') | KeyCode::Char('j') | KeyCode::Char('k')
-    )
+    ) {
+        return true;
+    }
+    // Tab, only where a page both handles it and says so in its footer.
+    if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
+        return matches!(
+            state.current_page,
+            PageId::Config | PageId::Agents | PageId::Session
+        );
+    }
+    false
 }
 
 fn global_page_jump(key: KeyEvent) -> Option<PageId> {

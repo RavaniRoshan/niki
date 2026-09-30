@@ -116,3 +116,7 @@ palette-theme-names-the-chord | the_palette_theme_entry_names_the_bound_key | th
 palette-does-not-claim-a-dead-shortcut | the_palette_does_not_claim_question_mark_reaches_help | `?` advertised as a route it cannot be
 palette-shortcuts-are-page-letters | every_other_palette_shortcut_is_a_real_page_letter | an entry whose shortcut cannot reach its page
 help-page-can-be-left | the_help_page_can_be_left | a help page with no way out
+# B3-03 · Tab has one owner
+config-takes-tab | config_takes_tab_rather_than_the_global_toggle | the global toggle winning over a footer that advertises `[Tab] next field`
+agents-tab-moves | tab_moves_the_agents_tab | `[Tab/Shift+Tab] prev/next` doing nothing
+tab-owned-only-where-advertised | the_pages_that_claim_tab_are_the_only_ones | Tab claimed by three controls at once
