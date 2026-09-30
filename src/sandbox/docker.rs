@@ -615,13 +615,34 @@ impl Sandbox for DockerSandbox {
                             ));
                         }
                         // No TUI listening — fall back to Allow (headless mode).
-                        // Loud by design: silent auto-approval is how agents end
-                        // up running `curl | sh` in CI. Use --permission-mode to
-                        // make the posture explicit, or run attached to review.
+                        //
+                        // The comment here claimed "Loud by design", three lines
+                        // above a `tracing::warn!` — and `tracing` is off unless
+                        // `RUST_LOG` is set, while `main.rs:114` installs an
+                        // ERROR-only filter. So on the **default backend**, the
+                        // one case where the permission system is not actually
+                        // consulting anyone was completely silent. The worktree
+                        // backend was fixed for exactly this and carried the
+                        // reasoning with it; this one was left behind.
+                        //
+                        // The consequence is not academic: `tools.bash` defaults
+                        // to `Ask` (permissions/mod.rs:83-93), so **every
+                        // command in every default run** was auto-approved
+                        // without a word.
+                        //
+                        // Stderr, as in the worktree backend: it survives any log
+                        // configuration, and `--output-format json` already
+                        // reserves stdout for the envelope.
+                        eprintln!(
+                            "niki: auto-approved '{}' — the run is headless and \
+                             [permissions] fail_closed_headless is off, so a command that \
+                             needs approval was allowed without a prompt.",
+                            full
+                        );
                         tracing::warn!(
                             target: "niki::permissions",
                             command = full.as_str(),
-                            "no TUI listening — Ask fell back to Allow (headless). Pass --permission-mode explicitly to silence this per-run posture."
+                            "no TUI listening — Ask fell back to Allow (headless)"
                         );
                     } else {
                         let action = tokio::task::block_in_place(|| {

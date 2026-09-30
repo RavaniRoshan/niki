@@ -53,5 +53,8 @@ clean-repo-is-not-an-error | a_clean_repo_with_nothing_to_report_is_not_an_error
 # B2-04 · the git tool honours the deny-list and is bounded
 git-tool-honours-the-deny-list | the_git_tool_itself_refuses_a_denied_subcommand | `git push --force` passing from the Reviewer
 git-tool-allows-ordinary-work | ordinary_git_subcommands_are_still_allowed | a deny-list so broad git stops working
+# B2-05 · a permission decision nobody sees is not a decision
+auto-approval-is-reported-on-stderr | both_backends_report_a_headless_auto_approval_on_stderr | the default backend auto-approving in silence
+auto-approval-reads-the-same | the_two_backends_report_it_identically | the same event worded differently per backend
 # T10 · the surface is gated at all
 first-run-answers | a first run answers instead of hanging | a first session that is a hang
