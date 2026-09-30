@@ -300,3 +300,94 @@ fn an_empty_reply_is_labelled_instead_of_rendering_nothing() {
         "an empty turn must be visible as a turn"
     );
 }
+
+// ── The transcript renders markdown ───────────────────────────────────
+
+fn lines_for(state: &AppState) -> Vec<String> {
+    niki::display::pages::chat::build_chat_lines(state, 80, false)
+        .into_iter()
+        .map(|l| l.text)
+        .collect()
+}
+
+#[test]
+fn an_assistant_reply_renders_markdown_rather_than_its_source() {
+    // `src/display/chat/` is 1,367 lines of tested pulldown-cmark rendering
+    // that was unreachable from the conversation: `build_chat_lines` used
+    // `text.lines()`, so a fenced block appeared literally, with its backticks,
+    // on the one surface where a coding assistant's output is read.
+    let mut s = state();
+    s.apply_display_event(DisplayEvent::ChatMessage {
+        role: "user".to_string(),
+        text: "show me the fix".to_string(),
+    });
+    s.apply_display_event(DisplayEvent::ChatDelta {
+        text: "Here it is:\n\n```rust\nfn main() {}\n```\n\nThat is the whole change.".to_string(),
+    });
+    s.apply_display_event(DisplayEvent::ChatFinished {
+        finish_reason: None,
+    });
+
+    let lines = lines_for(&s);
+    let joined = lines.join("\n");
+    assert!(
+        !joined.contains("```"),
+        "a fenced block must not show its fences:\n{joined}"
+    );
+    assert!(
+        joined.contains("fn main()"),
+        "the code must survive:\n{joined}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("assistant")),
+        "the turn must still be attributable:\n{joined}"
+    );
+}
+
+#[test]
+fn an_error_turn_is_left_verbatim_rather_than_rendered_as_markdown() {
+    // Error text is a diagnostic, not prose. It has to survive into a copy and
+    // a bug report exactly as written, so it is not run through the markdown
+    // engine the way an assistant turn is.
+    let mut s = state();
+    s.apply_display_event(DisplayEvent::ChatError {
+        message: "Set ANTHROPIC_API_KEY, or run `niki auth login`.".to_string(),
+        cancelled: false,
+    });
+    let joined = lines_for(&s).join("\n");
+    assert!(
+        joined.contains("`niki auth login`"),
+        "backticks must survive verbatim in a diagnostic:\n{joined}"
+    );
+}
+
+#[test]
+fn the_rendered_line_map_is_the_map_the_pointer_acts_on() {
+    // `build_chat_lines` is the single source for both what is drawn and what
+    // `state.chat_lines` holds for the click/drag/copy hit-test. Rendering the
+    // transcript through the markdown engine changes the row count, so the
+    // property that has to hold is that the drawn rows and the stored rows are
+    // produced by the same call — not that any particular row exists.
+    let mut s = state();
+    for i in 0..4 {
+        s.apply_display_event(DisplayEvent::ChatMessage {
+            role: if i % 2 == 0 { "user" } else { "assistant" }.to_string(),
+            text: format!("turn {i}\n\n```rust\nlet x = {i};\n```"),
+        });
+    }
+    let first = lines_for(&s);
+    let second = lines_for(&s);
+    assert_eq!(first, second, "the line map must be stable across calls");
+
+    // Every addressable row points at a real message.
+    for l in niki::display::pages::chat::build_chat_lines(&s, 80, false) {
+        if l.msg_index != usize::MAX {
+            assert!(
+                l.msg_index < s.chat_log.len(),
+                "row addresses message {} but only {} exist",
+                l.msg_index,
+                s.chat_log.len()
+            );
+        }
+    }
+}

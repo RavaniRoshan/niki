@@ -146,6 +146,35 @@ not just the request struct. Restored: **12/12**.
 
 **Gate:** G3, G6. fmt clean, `clippy --all-targets -D warnings` clean.
 
+#### T2b · The transcript renders markdown, and a cache bug that would have hidden it
+
+`src/display/chat/` is 1,367 lines of tested pulldown-cmark rendering — fenced code with language
+hints, tables, lists, inline styles. None of it rendered the conversation: `build_chat_lines` used
+`text.lines()`, so a reply containing ` ```rust ` appeared literally, with its backticks, on the one
+surface where a coding assistant's output is read. The engine was reachable only for *stage bodies*,
+and stages are empty in chat. Assistant turns now render through it, in a streaming form while in
+flight so a reply does not restyle itself when it lands. Errors stay verbatim — a diagnostic has to
+survive into a copy and a bug report exactly as written.
+
+**Bug found while doing it, and fixed.** `chat_content_hash` — the guard that decides whether to
+rebuild the cached line map — hashed `chat_log.len()` but **not** `chat_stream`. So every streamed
+delta was discarded before it could be drawn: the surface would have held a frozen frame for the
+whole request and then jumped straight to the finished turn. The state machine would have been
+correct and the screen would not have been, which is the exact shape of defect this slice exists to
+remove. The hash now covers the stream, the pending flag, the truncation flag, and message content
+rather than count alone.
+
+**Can-fail proof** — hash reverted to its previous contents:
+
+```
+test display::pages::chat::tests::the_line_map_rebuilds_as_a_turn_streams_in ... FAILED
+test display::pages::chat::tests::the_line_map_tracks_pending_and_truncation ... FAILED
+test result: FAILED. 0 passed; 2 failed
+```
+
+**T2 total: 17 new tests** (15 in `tests/chat_conversation.rs`, 2 unit tests in
+`src/display/pages/chat.rs`), all can-fail proven.
+
 ### Next
 
 T3 · **A task typed in the TUI runs the pipeline.** The core promise (C-J2). `cli/chat.rs` contains
