@@ -269,7 +269,7 @@ impl Page for HistoryPage {
 
         // Footer
         let footer = Line::from(vec![Span::styled(
-            " [j/k] navigate   [Enter] open   [Esc] back",
+            " [j/k] navigate   [Enter] open (diff)   [f] artifacts   [Esc] back",
             Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[2]);
@@ -301,6 +301,14 @@ impl Page for HistoryPage {
                 // branch beside the *current* run's contents.
                 if let Some(entry) = entries.get(self.selected) {
                     state.open_task_from_history(&entry.dir, &entry.branch);
+                    // Go there. `open_task_from_history` loads the patch,
+                    // report and artifacts, and the user stayed on History —
+                    // so `[Enter] open` opened nothing they could see, and
+                    // the loaded run sat in state until they found a page that
+                    // happened to read it. The diff is the run's actual
+                    // output, so that is where "open" lands.
+                    state.current_page = PageId::Diff;
+                    state.view = crate::display::state::ViewMode::Page(PageId::Diff);
                 }
                 true
             }
