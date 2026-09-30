@@ -120,3 +120,7 @@ help-page-can-be-left | the_help_page_can_be_left | a help page with no way out
 config-takes-tab | config_takes_tab_rather_than_the_global_toggle | the global toggle winning over a footer that advertises `[Tab] next field`
 agents-tab-moves | tab_moves_the_agents_tab | `[Tab/Shift+Tab] prev/next` doing nothing
 tab-owned-only-where-advertised | the_pages_that_claim_tab_are_the_only_ones | Tab claimed by three controls at once
+# B3-04 · the Config cursor is visible, and its cycle has no dead stops
+config-cursor-is-visible | the_selected_field_is_visible | `[Tab] next field` moving a cursor that is never rendered
+config-cycle-has-no-dead-stops | the_tab_cycle_has_no_dead_stops | a hand-typed `% 15` over 13 fields: five presses, nothing
+config-count-is-derived | the_field_count_is_derived_not_typed | the count typed back in instead of taken from the form
