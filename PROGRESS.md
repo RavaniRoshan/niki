@@ -409,11 +409,31 @@ Four bugs in the gate itself, all found by running it: the canary-map loop never
 flagged the fixtures whose entire purpose is holding credential-shaped strings, and the README
 command extractor kept its backtick. All four are fixed, and three of them are the kind of false
 positive that gets a gate switched off.
+### T12 · RELEASE_REPORT.md + ROADMAP.md ✅
+
+`RELEASE_REPORT.md` carries the gate table, the four contract clauses before and
+after, a can-fail sample, the six defects the gate found, **seven honest known
+limitations**, and exactly what the owner must do to go live.
+
+`ROADMAP.md` carries everything consciously deferred, each with its evidence, in
+the order a user is most likely to hit it. Three things are marked **killed**
+with the reasoning, so the next person does not re-derive them.
+
+The most serious deferred item is named first in §7 of the report: the
+`apply_patch` path escape, where a model-authored absolute or `..` path writes
+outside the project. It was deferred because it needs a judgement call about
+which backends may accept a path at all, and a schema change — not because it is
+small. **It is the first item of batch 2.**
+
 ### Next
 
-T4 · The UI stops lying about outcomes. `DisplayEvent::Final` sets `AwaitingApproval`
-unconditionally and that renders **"A P P R O V E D" in pulsing green** — for failed and rejected
-runs too. `[r]etry` on a failure modal quits the app. `show_failure` has zero call sites.
+Batch 1 is complete. 8 of 9 gates green; **G8 is unverified because the branch
+has not been pushed**, per the owner's decision.
+
+Batch 2 starts at `ROADMAP.md` §4.1 — the path escape — then §1 (navigation and
+the dead controls), §2 (chat ↔ pipeline depth), §4.2–4.4 (redaction, the `git`
+tool's missing policy, silent auto-approve), and §5 (signal-as-success, the
+total-deadline timeout, mid-pipeline salvage).
 
 ### Blockers
 

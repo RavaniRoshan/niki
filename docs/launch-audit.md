@@ -1,12 +1,14 @@
 # NIKI Repository Audit — Launch Readiness
 
 > **Date:** 2026-09-30
-> **Crate version:** 0.8.0 · **MSRV:** 1.88 · **Edition:** 2024
+> **Crate version:** 0.9.0 (unreleased) · **MSRV:** 1.88 · **Edition:** 2024
 >
-> The working tree was 0.9.0 when this audit was written. It was repinned to
-> 0.8.0 because 0.9.0 was never cut, so every published download URL 404'd
-> while `Cargo.toml` claimed a version nobody could install. The count in the
-> table below is the tree as it stands.
+> 0.9.0 has not been cut. The installer manifests in `homebrew/`, `scoop/`
+> and `winget/` therefore point at **0.8.0**, the newest release that exists,
+> with 0.8.0's checksums — while `Cargo.toml` says 0.9.0, which is what the
+> source tree is. `docs_consistency.rs` asserts the two agree; it is the
+> *release*, not the docs, that closes the gap. The count in the table below
+> is the tree as it stands.
 > **Purpose:** State, without hedging, what this repository actually is.
 
 ---
