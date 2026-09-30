@@ -40,12 +40,21 @@ tui_require_tmux() {
 }
 
 # Start the binary in a detached tmux session with a known size.
+# Launch the chat.
+#
+# `HOME` points at the throwaway project unless `TUI_KEEP_HOME` is set. A real
+# first run has no `~/.config/niki/niki.toml`, and inheriting the developer's
+# means a "first run" case silently exercises their configured provider
+# instead — which is how `10_first_run_no_key` failed on a machine that has
+# one, reaching a real endpoint and reporting a 404.
 tui_new_session() {
   local proj="$1"
   SMOKE_SOCK="niki-tui-smoke-$$-$RANDOM"
   SMOKE_SESS="niki-smoke"
+  local home_env=()
+  [ "${TUI_KEEP_HOME:-0}" = "1" ] || home_env=( "HOME=$proj" "XDG_CONFIG_HOME=$proj/.config" )
   tmux -L "$SMOKE_SOCK" new-session -d -s "$SMOKE_SESS" -x "$TUI_COLS" -y "$TUI_ROWS" \
-    "env TERM=tmux-256color LANG=C.UTF-8 TZ=UTC '$NIKI_BIN' chat -p '$proj'"
+    "env TERM=tmux-256color LANG=C.UTF-8 TZ=UTC ${home_env[*]:-} '$NIKI_BIN' chat -p '$proj'"
   # Give the PTY a beat to attach, then dismiss the onboarding modal.
   sleep 1
   tmux -L "$SMOKE_SOCK" send-keys -t "$SMOKE_SESS" Escape

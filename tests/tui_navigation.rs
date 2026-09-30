@@ -91,6 +91,14 @@ fn page_id_titles() {
     assert_eq!(PageId::Config.title(), "config");
     assert_eq!(PageId::Help.title(), "help");
     assert_eq!(PageId::TestLog.title(), "test_log");
+    // Chat, Fleet and Session were missing here — and `Fleet` and `Session`
+    // appear *zero* times in this 1,664-line file. They are deliberately
+    // absent from `PageRouter`'s map (`pages/mod.rs:58-59` says so), which
+    // means a key routed to one is a silent no-op in the router. The tests
+    // that would have noticed were precisely the ones omitting them.
+    assert_eq!(PageId::Chat.title(), "chat");
+    assert_eq!(PageId::Fleet.title(), "fleet");
+    assert_eq!(PageId::Session.title(), "session");
 }
 
 #[test]
@@ -106,6 +114,9 @@ fn page_id_key_hints() {
     assert_eq!(PageId::Config.key_hint(), ",");
     assert_eq!(PageId::Help.key_hint(), "?");
     assert_eq!(PageId::TestLog.key_hint(), "l");
+    assert_eq!(PageId::Chat.key_hint(), "tab");
+    assert_eq!(PageId::Fleet.key_hint(), "g");
+    assert_eq!(PageId::Session.key_hint(), "s");
 }
 
 // ============================================================================
