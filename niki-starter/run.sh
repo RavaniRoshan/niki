@@ -37,6 +37,19 @@ done
 
 problems=0
 
+# A `--model` override has to land before the preflight reads niki.toml, not
+# after. The preflight checks that the model the config names is actually pulled
+# — and if the caller has already told us which model to use, the config still
+# naming the old one is not a problem to report, it is a line to rewrite.
+if [ -n "$MODEL" ] && [ -f niki.toml ]; then
+    tmp="$(mktemp)"
+    if sed "s/^model = \".*\"$/model = \"$MODEL\"/" niki.toml > "$tmp"; then
+        mv "$tmp" niki.toml
+    else
+        rm -f "$tmp"
+    fi
+fi
+
 # ── Preflight ───────────────────────────────────────────────────────────
 # NIKI's sandbox preflight requires git, node, npm and python3, on the host as
 # well as in the container. A stranger without Node gets a confusing first-run
@@ -70,13 +83,38 @@ fi
 # where a run can actually happen.
 if curl -s --max-time 2 http://localhost:11434/api/tags >/dev/null 2>&1; then
     pulled="$(curl -s --max-time 2 http://localhost:11434/api/tags 2>/dev/null \
-        | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//' | head -3 | tr '\n' ' ')"
+        | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//' | head -5 | tr '\n' ' ')"
     if [ -n "$pulled" ]; then
         grn "  ollama           running — models: $pulled"
     else
         red "  ollama is running but has no models."
         dim  "  pull one:        ollama pull qwen2.5-coder:7b"
         problems=1
+    fi
+
+    # The model niki.toml actually names has to be one of them.
+    #
+    # `niki.toml` ships a default model, and a student who pulled a different
+    # one gets `HTTP 404: model 'qwen2.5-coder:7b' not found` from the first
+    # stage. The error is accurate and the fix is one line in the file, but
+    # finding that file is the work — so it is checked here, against what is
+    # actually installed, and offered as a one-flag fix.
+    CONFIGURED="$(sed -n 's/^model = "\(.*\)"/\1/p' niki.toml 2>/dev/null | head -1)"
+    if [ -n "$CONFIGURED" ]; then
+        if printf '%s' "$pulled" | grep -q -- "$CONFIGURED"; then
+            grn "  configured model  $CONFIGURED"
+        else
+            red "  niki.toml names '$CONFIGURED', which is not pulled."
+            best="$(printf '%s' "$pulled" | tr ' ' '\n' | grep -i 'coder' | head -1)"
+            [ -n "$best" ] || best="$(printf '%s' "$pulled" | tr ' ' '\n' | head -1)"
+            if [ -n "$best" ]; then
+                dim  "  installed instead: $best"
+                dim  "  re-run as:        ./run.sh --model $best"
+            else
+                dim  "  pull it:         ollama pull $CONFIGURED"
+            fi
+            problems=1
+        fi
     fi
 else
     red "  ollama is not reachable on 127.0.0.1:11434."
@@ -126,8 +164,6 @@ fi
 if [ -n "$MODEL" ]; then
     echo
     dim "Using model '$MODEL' for every agent (niki.toml updated)."
-    tmp="$(mktemp)"
-    sed "s/^model = \".*\"$/model = \"$MODEL\"/" niki.toml > "$tmp" && mv "$tmp" niki.toml
 fi
 
 echo
@@ -137,9 +173,10 @@ echo
 dim "  $TASK"
 echo
 
-niki run "$TASK"
+RUN_LOG="$(mktemp)"
+niki run "$TASK" 2>&1 | tee "$RUN_LOG"
 
-status=$?
+status=${PIPESTATUS[0]}
 echo
 
 # ── Explain what happened ───────────────────────────────────────────────
@@ -156,17 +193,43 @@ if [ "$status" -eq 0 ]; then
     dim   "    node --test test/"
     echo
 else
-    red "The run did not finish. That is usually the model, not the setup."
-    echo
-    echo "  What to read:"
-    dim   "    niki report          the stage that stopped, and why"
-    dim   "    ls .niki/tasks/*/artifacts/   what the model actually returned"
-    echo
-    echo "  The most common cause, and the fix:"
-    dim   "    TROUBLESHOOTING.md   § 'The run stops at the Coder stage'"
-    dim   "    HONESTY.md           § 1, which models work and which do not"
-    echo
+    # Point at the section for the failure that actually happened.
+    #
+    # A single "something went wrong, see TROUBLESHOOTING.md" is a worse
+    # message than no message: the student opens a four-section document and
+    # has to work out which half is theirs. The run's own output says which,
+    # so read it.
+    if grep -q "Branch blocked" "$RUN_LOG"; then
+        red "The agents finished, but the test suite still failed."
+        echo
+        echo "  This is the product working. NIKI will not cut a branch whose tests"
+        echo "  do not pass, so nothing was created and your tree is untouched."
+        echo
+        echo "  Look at what it produced:"
+        dim   "    niki report"
+        echo
+        echo "  If you want the branch anyway, to read or finish it by hand:"
+        dim   "    niki run \"$TASK\" --force"
+        echo
+    elif grep -qi "model.*not found" "$RUN_LOG"; then
+        red "The model named in niki.toml is not pulled."
+        dim   "    ollama list              what you have"
+        dim   "    ./run.sh --model <name>  re-run with a different one"
+        echo
+    else
+        red "The run did not finish. That is usually the model, not the setup."
+        echo
+        echo "  What to read:"
+        dim   "    niki report          the stage that stopped, and why"
+        dim   "    ls .niki/tasks/*/artifacts/   what the model actually returned"
+        echo
+        echo "  The most common cause, and the fix:"
+        dim   "    TROUBLESHOOTING.md   § 'The run stops at the Coder stage'"
+        dim   "    HONESTY.md           § 1, which models work and which do not"
+        echo
+    fi
     dim "  Your working tree was not modified. Nothing to clean up."
 fi
+rm -f "$RUN_LOG"
 
 exit $status
