@@ -9,6 +9,27 @@ without it, or if it makes another slice provable. Everything else is here.
 
 ---
 
+## 0 · How to read this file
+
+**The record is re-measured, not appended to.** A bullet in this file is not
+evidence that a defect exists; it is a claim someone believed once. Four of
+the six slices in batch 6 turned out to be *record corrections* — bullets
+describing fixes that had shipped one or two batches earlier, because a commit
+that closed a defect in the code did not close the bullet that named it.
+
+So: **measure before working.** `grep` the thing the bullet says and read the
+code; do not open the file the bullet points at and assume the rest matches.
+A code comment is also not evidence — several of these claims had a comment
+beside them saying they were handled, and were.
+
+Every open claim that reduces to something checkable is registered in
+`tests/record_claims_are_pinned.rs` with the test that checks it, and that
+test must itself be in `scripts/canary-map.txt` so G3 can prove it can fail.
+A pin that fires *because the work landed* is the mechanism working: it is the
+signal to strike the bullet in the same commit. Claims that cannot be checked
+— a product decision, a paid account, an unverifiable external service — are
+not pinned, and say why where they live (§7, §8, `BLOCKERS.md`).
+
 ## 1 · Navigation and the dead controls (P2)
 
 **The largest quality-of-life cluster, and the one being worked now.** Not

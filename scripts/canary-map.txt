@@ -338,3 +338,5 @@ provider-400-is-not-transient | a_400_is_not_transient | a matcher that became "
 agent-loop-uses-shared-predicate | the_agent_loop_uses_the_shared_predicate | a shared retry helper nothing calls, the shape found three times already
 coder-loop-reports-its-failure | the_coder_loop_reports_its_failure | `.ok()?` again, so a network failure is a silent fallback
 git-temp-paths-are-run-scoped | no_temporary_path_in_git_output_is_shared_between_runs | a temp path shared by every run on the machine
+# B6-07 · the record gets teeth: an open claim is pinned, and the pin is real
+sandbox-files-still-have-no-unit-tests | the_two_sandbox_files_still_have_no_unit_tests | a §6 bullet left open after the work landed
