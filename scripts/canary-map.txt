@@ -163,3 +163,10 @@ advertised-nav-keys-are-bound | the_advertised_navigation_keys_are_bound | a pal
 history-enter-opens-the-run | enter_opens_the_run_it_selected | a run loaded and nowhere to see it
 history-footer-says-where | the_footer_says_where_enter_goes | a footer describing a destination it does not have
 history-esc-still-goes-back | escape_still_goes_back | no way out but the digits
+# B3-12 · the permission badge governs a run instead of describing one
+badge-maps-to-an-honoured-posture | every_badge_maps_to_a_posture_the_tool_loop_honours | a badge whose value the tool loop silently coerces
+badge-covers-exactly-the-postures | the_badges_cover_exactly_the_implemented_postures | a badge promising a policy nothing implements
+badge-travels-with-the-submit | the_badge_travels_with_the_submit | the posture stopping at the TUI
+badge-reaches-the-processor | the_processor_applies_the_badge | a label change and nothing else
+badge-notice-says-when-it-lands | the_notice_says_when_the_change_lands | a working control indistinguishable from a decorative one
+badge-default-is-manual | the_default_posture_is_still_manual | a real badge that made the product less safe

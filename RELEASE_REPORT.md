@@ -1,12 +1,12 @@
-# RELEASE REPORT — NIKI hardening programme, batches 1 and 2
+# RELEASE REPORT — NIKI hardening programme, batches 1–3
 
-Branch `niki/hardening` · base `c7e297d` · 30 commits.
+Branch `niki/hardening` · base `c7e297d` · 42 commits.
 
 Produced by executing `plans/namor-obsidian-jay-garrick.md`, with the four owner
 decisions in §0a. Every gate below was produced by `./scripts/verify.sh`; the raw
 output is in `EVIDENCE.md` and `.evidence/`.
 
-Batch 2 is written up in §2b. Batch 1 is §2.
+Batches 2 and 3 are §2b and §2c. Batch 1 is §2.
 
 ---
 
@@ -151,6 +151,62 @@ of its own options, and the trailing `--` that makes branch-vs-path safe does
 **not** help, because the flag is parsed first. A user-typed name starting with
 `-` is now refused, and the refusal says why.
 
+## 2c · Batch 3 — the terminal UI, finished
+
+Eleven commits, `4e57fdb`…`0599708`. The canary map grew 65 → 116.
+**`ROADMAP.md` §1 — "navigation and the dead controls" — is closed: all ten
+items.** It was called "the largest quality-of-life cluster, and the one left
+undone", and for a product whose front door is a full-screen chat it was the
+cluster that mattered most.
+
+### What was dead
+
+| Surface | The claim | The truth |
+|---|---|---|
+| 11 sub-pages | `q` goes back | The nav layer read `q` as *quit* and broke the event loop. The confirm-quit modal below it was unreachable dead code. |
+| 10 pages | `[j/k]` in the footer | Written into `state.page_selection`, which no renderer reads, above the router. |
+| 3 pages | `Tab` next field / next tab | The global chat toggle was checked first. Both meanings dead. |
+| Config | `[Tab] next field` | Moved a cursor that was **never rendered**, cycled by a hand-typed `% 15` over 13 fields — so two presses did nothing. |
+| 2 pages | `h` history, `l` test log | Claimed by the navigator as prev/next page. Both unreachable by their own key. |
+| 2 footers | 6 controls | **None handled.** `P R K V` on Fleet, `P R` on Session. |
+| any page | digits `1`–`9` | Covered 9 of 14 pages, and the numbering was the *internal order of a Rust enum*. |
+| Session | first tab | `SessionState::messages` has **no writer anywhere**, so the tab read "No messages yet" on every mission, forever. |
+| `niki chat` | `g`, `s` | `g` did nothing; `s` navigated to a **blank screen**. |
+| History | `[Enter] open` | Loaded the run and navigated nowhere. |
+| Help page | `[t] theme` | The binding is `ctrl+t`. The same stale letter was in the command palette. |
+| `docs/tui/key-matrix.md` | 4 "do not fix" divergences | All four were already fixed. |
+
+### The pattern, which is the argument for testing behaviour
+
+Fixing a dead key kept revealing the next one. `q` → the unreachable modal.
+`j`/`k` → an invisible Config cursor → a modulus that **could not have been
+right**, because one of the fields is pushed inside a loop. Wiring `/branch`
+to a real `git checkout` surfaced `git checkout -f --` discarding uncommitted
+work and exiting 0. Reading the help text found the stale `ctrl+t` in a second
+place. Enumerating `BINDING_TABLE` — §1's own stated exit criterion — found
+`g` and `s`.
+
+**Eight of the eleven were found by writing the next slice's test, not by
+reading the code the slice was about.** An audit of this cluster would have
+found roughly three of them.
+
+### Four tests I wrote and then deleted or weakened on purpose
+
+Recorded because a report that only accumulates wins is not a report:
+
+- one that **copied** two handlers and called the copies — a test of the copy,
+  which passes the moment the production arm is deleted;
+- one that checked a footer's *label* against its key's *action*, which is a
+  judgement call and would pass on the cases it happened to model;
+- a PTY case comparing panes across six `j` presses on a Diff page with no
+  diff — byte-identical, so green against a completely broken page;
+- a cycle test asserting all *n* presses differ from the start, which asserts
+  the cycle never wraps — the opposite of the truth.
+
+And one test that was **too narrow**: five stayed green when the Session tab
+was wired back to the field nothing writes, because they checked what the
+event loop *passed* and not what the page *used*.
+
 ## 3 · Can every one of these prove it can fail?
 
 Yes, and each was run. The proof is in the commit message for that slice and in
@@ -211,11 +267,13 @@ switched off. They are worth more than the six real defects.
    failure is the visual-regression job: `tests/visual/run.sh` documents that
    reference frames can only be blessed on the GitHub runner, and this branch
    changes chat rendering. If it goes red there and nowhere else, that is why.
-2. **The TUI is still not finished.** `ROADMAP.md` §1 remains the largest
-   cluster. **`q` no longer quits from a sub-page** (batch 2), but `↑ ↓ j k`
-   are still dead on 10 of 14 pages, `Tab` is still claimed by three controls
-   while the status bar wins, and `?` still does not reach the Help page.
-   None of it blocks the core promise and all of it is in a user's way.
+2. ~~**The TUI is not finished.**~~ **Closed in batch 3.** `ROADMAP.md` §1 is
+   done in full: `q` goes back, `j`/`k` reach the page, `Tab` has one owner,
+   Config shows its cursor with no dead stops, `h`/`l` reach History and
+   TestLog, the footers advertise only what works, digits reach ten pages and
+   the numbering is documented, the Session tab is live, `g`/`s` work in
+   `niki chat`, `[Enter] open` opens the run, and the help and key matrix
+   describe the codebase that exists. 116 can-fail entries behind it.
 3. **The base64 catch-all in the redactor is still too broad.**
    `[A-Za-z0-9+/]{40,}` blanks any unbroken 40+ character alphanumeric run, so
    a long identifier with no separators — a git SHA is 40 — is blanked in a
@@ -234,7 +292,7 @@ switched off. They are worth more than the six real defects.
    controls the router cannot deliver.
 6. **No push has happened.** Per the owner's decision this branch is local.
 
-**Fixed in batch 2**, and listed here because a report that only accrues
+**Fixed in batches 2 and 3**, listed here because a report that only accrues
 limitations stops being readable:
 
 - ~~Permission prompting is unreachable in chat (the event source is never
@@ -251,6 +309,18 @@ limitations stops being readable:
   now (`B2-02`).
 - ~~A failed `git` call reads as an empty diff.~~ It returns `Result`
   (`B2-03`).
+- ~~`q` quits from every sub-page.~~ 11 handlers work again (`B2-15`).
+- ~~The TUI cannot check out a branch.~~ `/branch` runs git, with the argument
+  validated first (`B2-13`).
+- ~~The redaction Pass was a constant.~~ It is a 13-shape corpus, and two
+  shapes it missed were leaking (`B2-14`).
+- ~~Every dead control in §1.~~ All ten items (`B3-01`…`B3-11`).
+
+One batch-2 claim in this report was **wrong** and is corrected in place
+rather than dropped: "permission prompting is unreachable in chat (the event
+source is never wired)". The sandbox has emitted `DisplayEvent::PermissionRequest`
+since the live-LLM work (`sandbox/worktree.rs:453`, `sandbox/docker.rs:606`).
+Only the 5s window was real.
 
 ## 6 · The roadmap
 
@@ -291,13 +361,30 @@ anywhere in the repository. It was held in the environment only. G5's secret
 scan is what proves it stayed there, and it runs before every commit; planting
 a contiguous key-shaped literal in `src/` was verified to fail the gate.
 
-## 8 · Where batch 2 leaves the plan
+## 8 · Where batch 3 leaves the plan
 
-Batch 3 is drawn from `ROADMAP.md` §1 first — `j/k` dead on 10 of 14 pages,
-`Tab` claimed by three controls, `?` never reaching Help, the Fleet and Session
-footer keys that do nothing — then §2 (chat ↔ pipeline depth), §5 (the
-remaining reliability items), and §6 (coverage and hygiene).
+`ROADMAP.md` §1 is closed. What remains, in the order it should be taken:
 
-The order is the same one produced batch 1 and batch 2: the contract clauses
+**§2 · Chat ↔ pipeline depth.** The largest item is a *feature*, not a fix:
+the tool cards are fully built (`components/tool_card.rs`, `tool_detail.rs`,
+the Enter hit-test) and unreachable, because the chat sends `tools: None`.
+Wiring that is real work and is a product decision about how much of the agent
+s loop belongs in a conversation.
+
+The honest candidates in §2 are the permission-wiring items, because they are
+claims about the product's *security posture* and not features:
+
+- the permission modal is structurally unreachable in chat — `cli/chat.rs`
+  creates a channel whose sender is never given to `create_sandbox`;
+- `ask_user` / `approval` return "cannot ask" in any TUI run;
+- the permission badge is still cosmetic: `state.permission_mode` is read to
+  pick a label and never reaches `ToolContext` or the sandbox.
+
+**§5 Reliability** and **§6 Coverage and hygiene** follow, then §4.5 (the
+three unsound advisories, which need a real dependency bump rather than a
+config flip) and §4.2b (the base64 catch-all, which needs entropy-based
+detection).
+
+The order is the same one that produced batches 1–3: the contract clauses
 first, then whatever unblocks the most downstream work, then the honesty and
 correctness defects a first-time user hits, then coverage and hygiene.

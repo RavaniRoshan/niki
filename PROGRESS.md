@@ -523,9 +523,100 @@ committed                 # the edit is gone
 of its own options, and the trailing `--` that makes branch-vs-path safe does
 not help, because the flag is parsed first.
 
+## Iteration 3 — 2026-09-30 · batch 3, eleven slices
+
+Commits `4e57fdb`…`0599708`. Canary map 65 → 116. **`ROADMAP.md` §1 — navigation
+and the dead controls — is closed: all ten items.**
+
+§1 was called "the largest quality-of-life cluster, and the one left undone".
+It is the one that mattered for the user's brief that the terminal UI be
+"fully ready end to end", and it took eleven slices rather than the ten items
+because the work kept finding things next to the thing being fixed.
+
+| # | Commit | Slice |
+|---|---|---|
+| B3-01 | `4e57fdb` | `j`/`k` reach the page whose footer advertises them |
+| B3-02 | `a50a1b1` | The help a user reaches describes the keys they press |
+| B3-03 | `0e40439` | `Tab` has one owner on each page, not three at once |
+| B3-04 | `43f60db` | The Config field cursor is visible, and its cycle has no dead stops |
+| B3-05 | `65619a1` | A page's own shortcut reaches that page |
+| B3-06 | `bbf1889` | A footer's claims are the ones the handlers back |
+| B3-07 | `d59a653` | The page numbers are bound, and the numbering is documented |
+| B3-08 | `f08185b` | The Session Conversation tab is not permanently empty |
+| B3-09 | `1fa2f7f` | The key matrix describes the codebase that exists |
+| B3-10 | `d22def0` | `g` and `s` work in `niki chat`, and `s` is not a blank page |
+| B3-11 | `0599708` | `[Enter] open` opens the run it selected |
+
+### The pattern: fixing a dead key reveals the next dead thing
+
+This is the shape of the whole batch, and it is the argument for testing
+*behaviour* rather than auditing code:
+
+- `q` was dead on 11 pages. Fixing it made the **confirm-quit modal** — written
+  below the nav layer, unreachable — live again.
+- `j`/`k` were dead on 10. Fixing them made the **Config field cursor**
+  visible-but-wrong: `selected_field` was never rendered, and its cycle was a
+  hand-typed `% 15` over 13 fields, so `Tab` had two dead stops.
+- The Config count came from a **push inside a loop**, which is why it could
+  never have been typed right.
+- Wiring `/branch` to a real `git checkout` surfaced **`git checkout -f --`**
+  discarding uncommitted work and exiting 0.
+- Writing a test that reads the help text found the same stale `ctrl+t` in the
+  **command palette** as a second copy.
+- Enumerating `BINDING_TABLE` — §1's own stated exit criterion — found `g` dead
+  in `niki chat` and `s` navigating to a **blank screen**.
+- Fixing `s` meant refusing Fleet and Session in `global_page_jump`, which is
+  the call that leaves a page with no state behind it.
+
+Eight of the eleven were found by writing the *next* slice's test, not by
+reading the code the slice was about.
+
+### Tests I wrote, and then deleted or weakened on purpose
+
+Four, and the reasons are in the commits because they are the point:
+
+- A test that **copied** two handlers and called the copies — a test of the
+  copy, which passes the moment the production arm is deleted.
+- A test that checked a footer's *label* matched its key's *action*. That is a
+  judgement call, not a static check, and a test that guessed at it would pass
+  on the cases it happened to model. Replaced by an explicit retraction list.
+- A PTY case comparing the pane before and after six `j` presses, on a Diff
+  page with no diff — byte-identical, so it would have passed against a
+  completely broken page.
+- A cycle test asserting all *n* presses differ from the start, which asserts
+  the cycle never wraps — the opposite of the truth.
+
+And one real gap caught by a test that was **too** narrow: five tests stayed
+green when the Session tab was wired back to the field nothing writes, because
+they checked what the event loop *passed* and not what the page *used*. Two
+wiring points, and they fail separately.
+
 ### Next
 
-Batch 2 is complete: 15 commits, 65 can-fail entries, 13 PTY cases.
+Batch 3 continues into `ROADMAP.md` §2 (chat ↔ pipeline depth). The largest
+items there are features rather than fixes — the tool cards are fully built
+and unreachable because the chat sends `tools: None` — so the honest
+candidates are the permission-wiring items, which are a claim about the
+product's security posture and not a feature.
+
+### Blockers
+
+None.
+
+### Assumptions in force
+
+- The 3 dirty files were an interrupted prior session; only the labelled sabotage was reverted.
+- `niki chat` is a **coding agent**, not a viewer (owner decision, §0a).
+- For the 12 slash commands that lie, **retracting the claim is the default**.
+- A plain chat message stays a conversation turn; `/run <task>` starts the pipeline. Inferring
+  "this is a task" from every message would be magic, and the product's ethos is honesty.
+- The NVIDIA key lives in the environment only and is never written to a file. G5's secret
+  scan is what proves it stayed there, so it runs before every commit.
+- The free tier's connection stability, not NIKI, bounds what a live-model run on this box
+  can evidence. G4's real-model leg is therefore not a gate.
+- When a footer or help page claims something, **retracting the claim beats wiring something
+  approximate** — a key that kills the wrong thing is worse than a key that is not there.
+
 
 Batch 3 is drawn from `ROADMAP.md` §1 (the remaining dead controls: `j/k` dead
 on 10 of 14 pages, `Tab` claimed by three, `?` never reaching Help, the Fleet

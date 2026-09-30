@@ -279,6 +279,7 @@ fn process_message(
             project_dir,
             task.to_string(),
             submit.cancel.clone(),
+            submit.permission_mode.clone(),
         );
         return;
     }
@@ -452,6 +453,8 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
             text: msg.clone(),
             history: Vec::new(),
             cancel: cancel.clone(),
+            // Headless: no badge, no TUI key press, so nothing to override.
+            permission_mode: None,
         });
     }
 
@@ -494,12 +497,28 @@ fn run_task_from_chat(
     project_dir: &std::path::Path,
     description: String,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    permission_mode: Option<String>,
 ) {
+    // The posture the TUI badge is showing, if the user moved it.
+    //
+    // The badge used to be decoration — `state.permission_mode` was read by
+    // the status bar and nothing else, so cycling it changed a label and not a
+    // run. The posture that governs a stage is `config.permissions.mode`,
+    // which `ToolContext` reads when it builds the stage's context, so
+    // overriding it here lands on the stages that have not started yet.
+    //
+    // The stage **in flight** keeps the posture it was built with. Saying so is
+    // the difference between a control that works and one that appears broken.
+    let mut effective = config.clone();
+    if let Some(mode) = permission_mode.as_deref() {
+        effective.permissions.mode = crate::runtime::ToolContext::parse_permission_mode(mode);
+    }
+    let effective = &effective;
     let outcome = tokio::runtime::Runtime::new()
         .map_err(|e| format!("Could not start the async runtime: {e}"))
         .and_then(|rt| {
             rt.block_on(async move {
-                run_task_to_sink(tx, config, project_dir, description, cancel).await
+                run_task_to_sink(tx, effective, project_dir, description, cancel).await
             })
         });
 
