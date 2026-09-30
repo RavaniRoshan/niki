@@ -101,7 +101,7 @@ impl std::fmt::Display for TaskStatus {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRecord {
     pub task_id: Uuid,
     pub description: String,
@@ -122,6 +122,17 @@ pub struct TaskRecord {
     #[serde(default)]
     pub outcome: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
+    /// When this record was last written.
+    ///
+    /// `save_to_disk` runs at every stage boundary, so this is a heartbeat. It
+    /// exists because a `Running` record with no heartbeat is indistinguishable
+    /// from a live run: measured against a real four-agent pipeline killed with
+    /// SIGKILL (which no handler can catch, so the SIGTERM path never wrote a
+    /// terminal state), `niki status` reported **Running** indefinitely, with no
+    /// way to tell the process was gone. `created_at` is not enough — a long run
+    /// looks old while it is working perfectly.
+    #[serde(default)]
+    pub last_update: Option<DateTime<Utc>>,
     /// Per-agent cost & latency, in execution order.
     pub agent_metrics: Vec<StageMetric>,
     pub total_input_tokens: u32,
@@ -159,6 +170,7 @@ impl TaskRecord {
             revision_rounds: 0,
             verdict_source: None,
             outcome: None,
+            last_update: None,
             created_at: Utc::now(),
             agent_metrics: Vec::new(),
             total_input_tokens: 0,
@@ -193,7 +205,34 @@ impl TaskRecord {
         // Atomic: `task.json` is polled by the TUI while the run writes it, and
         // a torn read there shows the user a half-written run record. It used
         // to be a plain `fs::write`, which truncates before it writes.
-        let json = serde_json::to_string_pretty(self)?;
+        // Stamp the heartbeat on the way out, so every write is also evidence
+        // that the process is alive and this is how far it got.
+        let mut stamped = self.clone();
+        stamped.last_update = Some(chrono::Utc::now());
+        let json = serde_json::to_string_pretty(&stamped)?;
         crate::knowledge::kb::write_atomic(&task_dir.join("task.json"), json.as_bytes())
+    }
+
+    /// Is this a `Running` record whose process is no longer writing?
+    ///
+    /// A run killed outright — SIGKILL, a killed container, a closed terminal
+    /// — never gets to write a terminal state, because there is no code left to
+    /// write it with. The record then says `Running` forever.
+    ///
+    /// Measured against a real four-agent pipeline: the SIGTERM handler never
+    /// ran, `task.json` said `Running` indefinitely, and `niki status` reported
+    /// a run that had not been alive for ten minutes as in progress.
+    ///
+    /// `created_at` is not enough — a long run legitimately looks old while it
+    /// is working perfectly. Ten minutes is generous enough that a slow model is
+    /// never misreported, and short enough that coming back after lunch is not.
+    pub fn is_stale_running(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
+        if !matches!(self.status, TaskStatus::Running) {
+            return false;
+        }
+        match self.last_update {
+            None => true, // no heartbeat: an older NIKI, or a lost write
+            Some(t) => (now - t).num_minutes() >= 10,
+        }
     }
 }

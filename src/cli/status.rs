@@ -58,19 +58,38 @@ pub async fn handle(args: &StatusArgs) -> Result<()> {
     // A status command that prints a failed run and exits 0 is a command a
     // script cannot use: `niki status && deploy` deploys after a failure.
     // This is the same defect `niki report` had, in the sibling command.
-    let failed_reason = latest.as_ref().and_then(|(_, r)| match &r.status {
-        crate::orchestrator::state::TaskStatus::Failed { error } => Some(error.clone()),
-        crate::orchestrator::state::TaskStatus::Cancelled => {
-            Some("the run was cancelled".to_string())
+    let now = chrono::Utc::now();
+    let failed_reason = latest.as_ref().and_then(|(_, r)| {
+        if r.is_stale_running(now) {
+            return Some(format!(
+                "the run stopped without recording an outcome (last progress: {}). \
+                 It was killed rather than finishing — nothing was committed.",
+                r.last_update
+                    .map(|t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            ));
         }
-        _ => None,
+        match &r.status {
+            crate::orchestrator::state::TaskStatus::Failed { error } => Some(error.clone()),
+            crate::orchestrator::state::TaskStatus::Cancelled => {
+                Some("the run was cancelled".to_string())
+            }
+            _ => None,
+        }
     });
 
     match latest {
         Some((dir, record)) => {
             println!("Task:       {}", record.task_id);
             println!("Description: {}", record.description);
-            println!("Status:     {}", record.status);
+            // A run whose process stopped writing is not running, however the
+            // record's own status field still reads.
+            let status_line = if record.is_stale_running(now) {
+                "interrupted — the process ended without recording an outcome".to_string()
+            } else {
+                record.status.to_string()
+            };
+            println!("Status:     {status_line}");
             if let Some(branch) = &record.branch {
                 println!("Branch:     {}", branch);
             }

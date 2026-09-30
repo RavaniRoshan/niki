@@ -52,7 +52,7 @@ fn load_history_entries(project_path: &std::path::Path) -> Vec<HistoryEntry> {
             let id = record.task_id.to_string();
             let id_short = &id[..id.len().min(8)];
             let task = record.description.clone();
-            let (verdict, verdict_color) = match record.status {
+            let (mut verdict, mut verdict_color) = match record.status {
                 crate::orchestrator::state::TaskStatus::Completed => {
                     ("approved".to_string(), theme::success())
                 }
@@ -66,6 +66,13 @@ fn load_history_entries(project_path: &std::path::Path) -> Vec<HistoryEntry> {
                     ("cancelled".to_string(), theme::fg_dim())
                 }
             };
+            // A record still saying `Running` whose process stopped writing is
+            // not running. It is shown as interrupted, so a killed run does not
+            // sit in the list looking alive forever.
+            if record.is_stale_running(chrono::Utc::now()) {
+                verdict = "interrupted".to_string();
+                verdict_color = theme::warning();
+            }
             let when = format_time_ago(record.created_at);
             let branch = record.branch.clone().unwrap_or_default();
 
