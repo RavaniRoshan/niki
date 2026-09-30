@@ -168,6 +168,12 @@ fn is_timeout_cause(err: &(dyn std::error::Error + 'static)) -> bool {
 
 const RETRY_MAX_ATTEMPTS: u32 = 4;
 
+/// Wall-clock ceiling for one logical call, across every attempt and back-off.
+///
+/// Longer than one read, so a slow model is allowed to finish; shorter than
+/// `RETRY_MAX_ATTEMPTS` reads, so a stalled upstream is abandoned.
+const TOTAL_REQUEST_BUDGET: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Retry an HTTP request on transient responses: 429 (rate limit) and 5xx server
 /// errors. Transport-level errors are not retried here — reqwest surfaces those
 /// via `build().send()` and the caller handles them. This keeps the LLM layer
@@ -184,8 +190,30 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = reqwest::Result<reqwest::Response>>,
 {
+    // A total budget for the whole call, retries and back-off included.
+    //
+    // The per-read timeout bounds one *read*, which is what lets a slow model
+    // finish a long answer — but it multiplies by the attempt count, and the
+    // agent layer retries on top of that. Measured against a live provider:
+    // after moving from a 120s total deadline to a 120s read deadline, a single
+    // stalled stage took over twelve minutes to give up — 4 transport attempts
+    // x 3 agent-level attempts, with back-off, and no overall bound anywhere.
+    // A stage that cannot finish should fail in a time a person will wait for.
+    //
+    // It is deliberately longer than one read, so a model that is slow but
+    // progressing is not cut off, and shorter than the full retry
+    // multiplication, so a stage that has genuinely stalled is.
+    let budget = tokio::time::Instant::now() + TOTAL_REQUEST_BUDGET;
     let mut last = None;
     for attempt in 0..RETRY_MAX_ATTEMPTS {
+        if tokio::time::Instant::now() >= budget {
+            tracing::warn!(
+                target: "niki::llm",
+                operation = operation_name,
+                "request budget exhausted; not attempting again"
+            );
+            break;
+        }
         match build().await {
             Ok(resp) if is_retryable_status(resp.status()) => {
                 last = Some(Ok(resp));
