@@ -6,7 +6,7 @@ All notable changes to NIKI are documented here. The format is based on
 
 ## [Unreleased]
 
-## [0.9.0] - 2026-09-27
+## [0.9.0] - 2026-09-30
 
 **Breaking.** A run's verdict now carries its provenance, and a verdict that
 nobody produced is no longer reported as an approval. See
@@ -96,6 +96,63 @@ should do, and several were defects the existing suite was passing over.
 - `permissions::resolve_tool` and its three tests are removed; the rule that
   made it worth keeping now lives in the path that runs.
 - `ModalAction::Skip` is removed — no code path ever produced it.
+
+### Fixed
+- **Three gates reported success without measuring anything.** The acceptance
+  suite printed `pass_test 'Git/worktree integrity'` with no assertion near it —
+  the product's headline promise, unchecked. The same script skipped the whole
+  product E2E and exited 0 when `mock_llm.py` was missing, so the gate could
+  vanish from CI and still read as a pass. The `Manifest parity` job called a
+  dead release URL `PENDING`, so seven manifest URLs pointed at an unpublished
+  `v0.9.0` while `brew install niki` — the README's primary install command —
+  returned 404, with the job green.
+- **The setup wizard wrote a config the machine could not run.** It recorded a
+  provider and a model and no backend, so on a machine with no container
+  runtime — the machine the README opens by describing — the wizard reported
+  success and the next command could not start. `niki doctor` then failed that
+  same machine for a missing container runtime, having no notion that a second
+  backend needs none, and `niki smoke` inherited the bug while its own help
+  text called the worktree path the zero-setup route.
+- **The goal loop forgot everything it had learned.** It accumulated
+  `context_summary` and `negative_knowledge`, persisted them, and handed the
+  pipeline a task built from the description alone — so iteration 2 could
+  repeat iteration 1's mistake, the specific thing a multi-iteration runner
+  exists to prevent.
+- **Promoted skills were invisible to the agents that load them.** Promotion
+  wrote to the configured `output_dir`; the runtime `skill_list`/`skill_load`
+  tools read a hardcoded `.niki/skills`. Under a custom output dir a skill was
+  promoted with a success message and never loaded.
+- **An expired key defeated the fallback chain.** Any non-5xx error returned
+  immediately, so a 401 from a stale primary — the most common reason anyone
+  configures a fallback — killed the run before the fallback was reached.
+- A test asserted the wrong value for the bash-timeout clamp, which is what
+  made `main` red. The production arithmetic was always correct; the assertion
+  claimed the ceiling where the floor was right, and the property it was
+  written to protect was not the one it checked.
+
+### Added
+- `niki-starter/` — a small project with a real failing test and one command,
+  plus the setup guide, a troubleshooting guide, an honesty page, and a guide
+  to reading `report.md`. Solving its task is a regression, and a test says so.
+- `tests/docs_consistency.rs` — a document may not state a version the crate
+  does not have, a stated MSRV must be the one Cargo pins, and the README's
+  numbers are re-derived rather than trusted.
+- Journeys J20–J25: the wizard, `doctor`, `smoke` and the first run, verified
+  on a keyless machine with no container runtime — including one that forces
+  the worktree backend so that path is exercised even where containers exist.
+- `sandbox::detect_container_runtime` — one probe, so the wizard, `doctor` and
+  the runner can no longer disagree about what a machine can run.
+
+### Changed
+- `tests/claims.rs` covers the documentation site, `niki.example.toml`, the
+  root documents and the handover starter, by walking declared roots rather
+  than listing three filenames. It is what stopped `docs/launch-audit.md`
+  describing version 0.4.0 for six weeks and five releases.
+- `docs/launch-audit.md` rewritten against the current tree, with its
+  version-shaped facts re-derived on every build.
+- The documentation site's quickstart leads with the no-key, no-container path
+  the README already described, instead of requiring Rust, Podman and an API
+  key for a product that needs none of the three.
 
 ### Upgrade notes
 

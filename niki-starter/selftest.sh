@@ -86,6 +86,31 @@ for f in README.md HONESTY.md TROUBLESHOOTING.md REPORT-GUIDE.md run.sh niki.tom
     fi
 done
 
+# ── 5 · …and present in the repository, not only on this disk ───────────
+#
+# `niki.toml` was missing from the repository for three commits. The
+# repository's root `.gitignore` excludes `niki.toml` everywhere — correctly,
+# so a developer's real configuration with their keys can never be committed —
+# and it caught the starter's own config too. Every check above still passed,
+# because the file was sitting right there on disk. It was only CI, on a clean
+# checkout, that reported "niki.toml is missing".
+#
+# A check that runs against the working tree cannot catch "this file was never
+# committed". So this one asks git, which is the only thing that can.
+for f in README.md HONESTY.md TROUBLESHOOTING.md REPORT-GUIDE.md run.sh selftest.sh niki.toml package.json src/server.js test/server.test.js; do
+    if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+        echo -e "[${GREEN}PASS${NC}] $f is tracked in git"
+    else
+        echo -e "[${RED}FAIL${NC}] $f exists on disk but is NOT in the repository"
+        echo "  Anyone who clones this project will not have it. This is exactly"
+        echo "  what happened to niki.toml: the root .gitignore excludes it"
+        echo "  everywhere so a developer's real config cannot be committed, and"
+        echo "  the starter's own config was caught by the same rule."
+        echo "  Add a negation to niki-starter/.gitignore and 'git add -f' it."
+        fail=1
+    fi
+done
+
 echo
 if [ "$fail" -ne 0 ]; then
     echo -e "[${RED}the starter is not in a shippable state${NC}]"
