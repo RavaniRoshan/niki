@@ -91,3 +91,9 @@ file-name-is-not-a-switch | a_name_that_is_a_file_is_not_a_successful_switch | `
 name-is-validated-first | the_name_is_validated_before_it_is_an_argument | the guard unpinned where git is not in the loop
 branch-command-is-listed | the_tui_branch_command_is_wired_and_listed | a working command absent from /help
 detached-head-is-said | a_detached_head_is_reported_rather_than_called_a_branch | reporting a hash as though it were a branch
+# B2-14 · the doctor's redaction Pass is a real check (two shapes were leaking)
+redaction-covers-every-shape | every_known_key_shape_is_redacted | a `Pass` constant where a measurement belongs
+redaction-corpus-is-not-hollow | the_corpus_is_not_empty_and_not_hollow | a check over a corpus of nothing
+json-key-shape-is-caught | the_json_shape_specifically_is_caught | a key in a provider error body reaching the log
+redaction-does-not-eat-evidence | ordinary_output_survives_redaction | a report with [REDACTED] where the evidence was
+doctor-check-uses-the-corpus | the_doctor_check_reads_the_same_corpus_the_tests_do | the check green while the redactor regresses

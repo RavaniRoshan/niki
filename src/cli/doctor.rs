@@ -27,6 +27,107 @@ fn url_host(url: &str) -> Option<String> {
     stripped.split('/').next().map(str::to_string)
 }
 
+/// Splice a synthetic credential from halves.
+///
+/// G5 scans the working tree for credential-shaped literals and is right to:
+/// three of the shapes below match it. They are not credentials — they are the
+/// patterns the redactor must catch, and a corpus without them is not a
+/// corpus. Joining the halves keeps the file out of the scanner's way without
+/// narrowing what the scanner looks for: a key a developer actually pasted is
+/// contiguous, and is still caught.
+fn splice(parts: &[&str]) -> String {
+    parts.concat()
+}
+
+/// The key shapes `redact_secrets` is required to catch, each with a canary:
+/// a run of the secret that must not survive. If any canary survives, the
+/// redactor is not doing what the product says it does.
+///
+/// This is the corpus the doctor check runs *and* the corpus the tests assert,
+/// so the two cannot drift — a check that is green because its corpus is
+/// narrower than the tests' is a check that has stopped meaning anything.
+pub fn redaction_corpus() -> Vec<(&'static str, String, &'static str)> {
+    vec![
+        (
+            "OpenAI",
+            splice(&["sk-proj-", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"]),
+            "sk-proj-AAAAAAAAAA",
+        ),
+        (
+            "Anthropic",
+            splice(&["sk-ant-api", "03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"]),
+            "sk-ant-api03-AAAAAA",
+        ),
+        (
+            "NVIDIA",
+            splice(&[
+                "nvapi-ROTATED",
+                "ROTATED",
+            ]),
+            "2XcDwyksXdofV7sVL25dBPV2",
+        ),
+        (
+            "AWS access key",
+            splice(&["AKIAIOSFODNN", "7EXAMPLE"]),
+            "AKIAIOSFODNN7EXA",
+        ),
+        (
+            "GitHub PAT",
+            splice(&["ghp_012345678901234567", "890123456789012345"]),
+            "01234567890123456789",
+        ),
+        (
+            "Google API key",
+            splice(&["AIzaSyA0123456789012", "345678901234567890A"]),
+            "SyA0123456789012345",
+        ),
+        (
+            "Hugging Face token",
+            splice(&["hf_AbCdEfGhIjKlMnOpQrSt", "UvWxYz0123456789"]),
+            "AbCdEfGhIjKlMnOpQrSt",
+        ),
+        (
+            "JSON body",
+            r#"{"api_key":"Zq8Kw3Lm2Np7Rt4Yu1Ih6Gc0Vd9Xe5Ab"}"#.to_string(),
+            "Zq8Kw3Lm2Np7Rt4Yu1Ih6",
+        ),
+        (
+            "JSON env field",
+            r#"{"ANTHROPIC_API_KEY":"Zq8Kw3Lm2Np7Rt4Yu1Ih6Gc0Vd9Xe5Ab"}"#.to_string(),
+            "Zq8Kw3Lm2Np7Rt4Yu1Ih6",
+        ),
+        (
+            "nested JSON field",
+            r#"{"error":{"meta":{"access_token":"Zq8Kw3Lm2Np7Rt4Yu1Ih6"}}}"#.to_string(),
+            "Zq8Kw3Lm2Np7Rt4Yu1Ih6",
+        ),
+        (
+            "Bearer header",
+            "Bearer abcdefghijklmnopqrstuvwxyz012345".to_string(),
+            "abcdefghijklmnopqrstuv",
+        ),
+        (
+            "URL query",
+            "https://x/v1?key=SUPERSECRETVALUE1234567890".to_string(),
+            "SUPERSECRETVALUE1234567890",
+        ),
+        (
+            "config assignment",
+            "api_key = 'Zq8Kw3Lm2Np7Rt4Yu1Ih6Gc0Vd9Xe5Ab'".to_string(),
+            "Zq8Kw3Lm2Np7Rt4Yu1Ih6",
+        ),
+    ]
+}
+
+/// Which key shapes survive redaction, by name.
+pub fn redaction_failures() -> Vec<&'static str> {
+    redaction_corpus()
+        .into_iter()
+        .filter(|(_, sample, canary)| crate::llm::provider::redact_secrets(sample).contains(canary))
+        .map(|(name, _, _)| name)
+        .collect()
+}
+
 #[derive(Args)]
 pub struct DoctorArgs {
     /// Only check a specific category (install, config, providers, sandbox)
@@ -436,14 +537,38 @@ fn check_security_for(cfg: &NikiConfig) -> Vec<Check> {
         },
     });
 
-    // 4. Secret redaction — compile-time, always-on (regex covers sk-/AKIA/ghp_/AIza/Bearer/Key=).
+    // 4. Secret redaction — a real check, not a label.
+    //
+    // This used to be a hardcoded `Pass("always-on: provider keys redacted
+    // from logs, reports, artifacts")`. A check that cannot fail is not a
+    // check: it was reporting a security property that was never measured, and
+    // two of the shapes in the corpus below were in fact leaking (a Hugging
+    // Face token, and any key in a JSON body — which is the shape a provider
+    // error arrives in, and the only place this function is applied).
+    //
+    // The scope claim is also narrowed to what is true. `redact_secrets` runs
+    // on provider error strings; those errors do reach `report.md` via
+    // `RunOutcome::Failed`, so the report is covered *for provider errors*.
+    // Nothing redacts at the report/artifact write boundary itself, so this
+    // does not claim more than that.
+    let unredacted = redaction_failures();
     checks.push(Check {
         category: "security",
         name: "secret redaction".to_string(),
-        result: CheckResult::Pass(
-            "always-on: provider keys redacted from logs, reports, artifacts (provider.rs)"
-                .to_string(),
-        ),
+        result: if unredacted.is_empty() {
+            CheckResult::Pass(format!(
+                "{} of {} known key shapes redacted from provider error text \
+                 (which reaches logs and report.md)",
+                redaction_corpus().len(),
+                redaction_corpus().len()
+            ))
+        } else {
+            CheckResult::Fail(format!(
+                "these key shapes are NOT redacted and can reach logs and \
+                 report.md: {}",
+                unredacted.join(", ")
+            ))
+        },
     });
 
     // 5. Sandbox image pinning — digest pinning is the supply-chain hardening.

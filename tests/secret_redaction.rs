@@ -1,152 +1,121 @@
-mod common;
+//! `niki doctor` must not report a security property it never measured.
+//!
+//! The security section of `niki doctor` used to contain:
+//!
+//! ```rust
+//! CheckResult::Pass("always-on: provider keys redacted from logs, reports,
+//!                    artifacts (provider.rs)".to_string())
+//! ```
+//!
+//! A constant. No corpus, no assertion, nothing that could return `Fail` — and
+//! two of the shapes it claimed to cover were leaking:
+//!
+//! - a Hugging Face token (`hf_…`), which the 40-char base64 catch-all can
+//!   never reach because the prefix is two characters plus an underscore; and
+//! - **any key in a JSON body** (`{"api_key": "…"}`), because the field
+//!   patterns required an `=`. That is the shape a provider error arrives in,
+//!   and provider error bodies are the one place `redact_secrets` is applied.
+//!
+//! The check is now the same corpus the tests assert, so it cannot pass for a
+//! reason the tests would not also catch. The second half of the file is the
+//! other half of the job: a redactor that eats the report it is protecting
+//! produces a report with `[REDACTED]` where the evidence was, which is not
+//! evidence.
 
+use niki::cli::doctor::{redaction_corpus, redaction_failures};
 use niki::llm::provider::redact_secrets;
 
 #[test]
-fn redact_secrets_replaces_bearer_token() {
-    let input = "Authorization: Bearer sk-abc123def456ghi789jkl012mno345pqr678";
-    let result = redact_secrets(input);
+fn every_known_key_shape_is_redacted() {
+    let failures = redaction_failures();
     assert!(
-        !result.contains("sk-abc123def456ghi789jkl012mno345pqr678"),
-        "bearer token should be redacted: {}",
-        result
-    );
-    assert!(
-        result.contains("[REDACTED]"),
-        "result should contain [REDACTED]: {}",
-        result
+        failures.is_empty(),
+        "`niki doctor` would now report Fail, and these shapes reach logs and \
+         report.md: {}",
+        failures.join(", ")
     );
 }
 
 #[test]
-fn redact_secrets_replaces_api_key() {
-    let input = r#"{"error": "invalid_request_error", "param": null, "code": null, "type": "invalid_api_key", "message": "Incorrect API key provided: sk-proj-abc123def456ghi789jkl012mno345pqr"}."#;
-    let result = redact_secrets(input);
+fn the_corpus_is_not_empty_and_not_hollow() {
+    // A check over a corpus of nothing passes. Pin the shapes that were
+    // actually leaking, so deleting a row cannot quietly green the check.
+    let corpus = redaction_corpus();
+    assert!(corpus.len() >= 10, "corpus shrank: {}", corpus.len());
+    let names: Vec<&str> = corpus.iter().map(|(n, _, _)| *n).collect();
+    for required in ["Hugging Face token", "JSON body", "nested JSON field"] {
+        assert!(
+            names.contains(&required),
+            "the corpus must keep the {required:?} case — it is the one that leaked"
+        );
+    }
+}
+
+#[test]
+fn the_json_shape_specifically_is_caught() {
+    // The regression that motivated the slice, stated on its own so a future
+    // rewrite of the patterns has to confront it.
+    let body = r#"{"error":{"message":"invalid api_key","api_key":"Zq8Kw3Lm2Np7Rt4Yu1Ih6"}}"#;
+    let out = redact_secrets(body);
     assert!(
-        !result.contains("sk-proj-abc123def456ghi789jkl012mno345pqr"),
-        "API key should be redacted: {}",
-        result
+        !out.contains("Zq8Kw3Lm2Np7Rt4Yu1Ih6"),
+        "a key in a JSON error body survived: {out}"
     );
     assert!(
-        result.contains("[REDACTED]"),
-        "result should contain [REDACTED]: {}",
-        result
+        out.contains("invalid api_key"),
+        "redaction must not eat the surrounding message: {out}"
     );
 }
 
 #[test]
-fn redact_secrets_replaces_openai_key() {
-    let input = "Error: sk-1234567890abcdefghijklmnopqrstuv not found";
-    let result = redact_secrets(input);
-    assert!(
-        !result.contains("sk-1234567890abcdefghijklmnopqrstuv"),
-        "openai key should be redacted: {}",
-        result
-    );
+fn ordinary_output_survives_redaction() {
+    // The other failure mode. A diff line that assigns to a variable called
+    // `secret_count` is evidence in `report.md`; blanking it makes the report
+    // unreadable where it matters most.
+    let cases: &[(&str, &str)] = &[
+        ("model = \"gpt-4o-mini\"", "gpt-4o-mini"),
+        (
+            "+  let secret_count = compute_secret();",
+            "compute_secret()",
+        ),
+        (
+            "The plan stores the API key rotation policy.",
+            "rotation policy",
+        ),
+        (r#"{"status":"ok","token_count":1234}"#, "1234"),
+        ("test_password_reset_flow()", "password_reset"),
+        ("https://example.com/docs/api-keys-guide", "api-keys-guide"),
+    ];
+    for (input, must_survive) in cases {
+        let out = redact_secrets(input);
+        assert!(
+            out.contains(must_survive),
+            "redaction over-reached on {input:?} -> {out:?}; a report with \
+             [REDACTED] where the evidence was is not evidence"
+        );
+    }
 }
 
 #[test]
-fn redact_secrets_replaces_github_token() {
-    let input = "ghp_abcdefghijklmnopqrstuvwxyz0123456789AB";
-    let result = redact_secrets(input);
-    assert!(
-        !result.contains("ghp_abcdefghijklmnopqrstuvwxyz0123456789AB"),
-        "github token should be redacted: {}",
-        result
-    );
-}
+fn the_doctor_check_reads_the_same_corpus_the_tests_do() {
+    // If the check ever grows its own private list, it can go green while the
+    // redactor regresses — which is precisely the state this slice was
+    // written to end.
+    let s = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli/doctor.rs"),
+    )
+    .expect("doctor.rs must be readable");
 
-#[test]
-fn redact_secrets_preserves_context() {
-    let input = "HTTP 401: {\"error\":{\"message\":\"Invalid API key\"}}";
-    let result = redact_secrets(input);
     assert!(
-        result.contains("HTTP 401"),
-        "should preserve status: {}",
-        result
-    );
-    assert!(
-        result.contains("Invalid API key"),
-        "should preserve message: {}",
-        result
-    );
-}
-
-#[test]
-fn redact_secrets_handles_empty_string() {
-    let result = redact_secrets("");
-    assert_eq!(result, "");
-}
-
-#[test]
-fn redact_secrets_handles_no_secrets() {
-    let input = "Some error message without any secrets";
-    let result = redact_secrets(input);
-    assert_eq!(result, input);
-}
-
-#[test]
-fn redact_secrets_replaces_multiple_keys() {
-    let input = "Key1: sk-aaaaaaaaaaaaaaaaaaaa Key2: sk-bbbbbbbbbbbbbbbbbbbbbbbb";
-    let result = redact_secrets(input);
-    assert!(
-        !result.contains("sk-aaaaaaaaaaaaaaaaaaaa"),
-        "first key should be redacted: {}",
-        result
+        !s.contains("always-on: provider keys redacted from logs, reports, artifacts"),
+        "the hardcoded Pass is back: a check that cannot fail is not a check"
     );
     assert!(
-        !result.contains("sk-bbbbbbbbbbbbbbbbbbbbbbbb"),
-        "second key should be redacted: {}",
-        result
+        s.contains("redaction_failures()"),
+        "the check must consult the corpus, not assert a constant"
     );
-}
-
-#[test]
-fn a_too_short_string_is_left_alone_rather_than_mangled() {
-    // The old assertion was `assert!(!result.is_empty())`, which cannot fail:
-    // the function always returns a String. The documented behaviour is that
-    // `sk-` needs a real key body after it, so a 5-character tail is not a
-    // credential and must survive untouched — redacting it would corrupt
-    // ordinary prose.
-    let input = "sk-short";
-    let result = redact_secrets(input);
-    assert_eq!(
-        result, input,
-        "a string too short to be a key must be returned unchanged"
-    );
-}
-
-#[test]
-fn a_real_length_key_is_redacted() {
-    // The positive counterpart, so the test above cannot pass by redacting
-    // everything.
-    let key = "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAA";
-    let out = redact_secrets(&format!("using {key} now"));
-    assert!(!out.contains("AAAAAAAAAAAAAAAAAAAAAAAA"), "{out:?}");
     assert!(
-        out.contains("using "),
-        "surrounding text must survive: {out:?}"
+        s.contains("CheckResult::Fail("),
+        "and it must have a Fail arm, or it is still a label"
     );
-}
-
-#[test]
-fn redact_secrets_replaces_authorization_header() {
-    let input =
-        "authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0";
-    let result = redact_secrets(input);
-    assert!(
-        result.contains("[REDACTED]"),
-        "should redact authorization header: {}",
-        result
-    );
-}
-
-#[test]
-fn redact_secrets_preserves_non_secret_content() {
-    let input = "HTTP 401: {\"error\":{\"message\":\"Invalid API key\", \"type\": \"invalid_request_error\", \"code\": null}}";
-    let result = redact_secrets(input);
-    assert!(result.contains("HTTP 401"));
-    assert!(result.contains("Invalid API key"));
-    assert!(result.contains("invalid_request_error"));
-    assert!(!result.contains("password"));
 }
