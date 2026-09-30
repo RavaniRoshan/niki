@@ -531,7 +531,10 @@ fn check_sandbox() -> Vec<Check> {
 /// well on Ollama plus the worktree backend was told, by the very command the
 /// README tells a new user to run, to install a container runtime.
 fn check_backend_vs_runtime(cfg: &NikiConfig) -> Check {
-    backend_vs_runtime(cfg.docker.backend, crate::sandbox::detect_container_runtime())
+    backend_vs_runtime(
+        cfg.docker.backend,
+        crate::sandbox::detect_container_runtime(),
+    )
 }
 
 /// The verdict, as a pure function of the two facts it depends on.

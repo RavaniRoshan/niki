@@ -1004,5 +1004,13 @@ jobs:
         # container — and it is the only thing standing between this job and a
         # green tick that means nothing.
         run: bash tests/product/runners/run_scenarios_selftest.sh
+      - name: Prove the documentation gate can fail
+        # Same argument, applied to the claims gate. docs/launch-audit.md
+        # described version 0.4.0 for six weeks and five releases while the
+        # claims gate covered three filenames and never read it. Widening the
+        # gate is the fix; this is what proves the fix works, by injecting each
+        # class of defect the gate exists to catch and requiring a failure every
+        # time. It mutates working-tree copies and restores them.
+        run: bash tests/docs_consistency_selftest.sh
       - name: Run Product Verification
         run: ./scripts/product-verify.sh

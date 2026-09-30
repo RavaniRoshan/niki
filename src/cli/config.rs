@@ -528,7 +528,8 @@ mod tests {
     /// three-step failure, so it is pinned here.
     #[test]
     fn wizard_writes_a_backend_the_machine_can_run() {
-        let template = format!("[docker]\nbase_image = \"niki-sandbox:24.04\"\n{TEMPLATE_BACKEND_LINE}\n");
+        let template =
+            format!("[docker]\nbase_image = \"niki-sandbox:24.04\"\n{TEMPLATE_BACKEND_LINE}\n");
         for backend in [
             crate::sandbox::SandboxBackend::Docker,
             crate::sandbox::SandboxBackend::Worktree,
@@ -549,8 +550,12 @@ mod tests {
             );
             // Whatever the wizard writes has to be readable, or the wizard is
             // not producing a config but a file.
-            let parsed: crate::config::NikiConfig = toml::from_str(&out).expect("written config must parse");
-            assert_eq!(parsed.docker.backend, backend, "round-trip lost the backend");
+            let parsed: crate::config::NikiConfig =
+                toml::from_str(&out).expect("written config must parse");
+            assert_eq!(
+                parsed.docker.backend, backend,
+                "round-trip lost the backend"
+            );
         }
     }
 
@@ -591,7 +596,10 @@ mod tests {
         );
         let parsed: crate::config::NikiConfig =
             toml::from_str(&out).expect("the wizard's output must be a valid niki.toml");
-        assert_eq!(parsed.docker.backend, crate::sandbox::SandboxBackend::Worktree);
+        assert_eq!(
+            parsed.docker.backend,
+            crate::sandbox::SandboxBackend::Worktree
+        );
         // The wizard points every agent at the chosen provider so the first run
         // does not need a second edit.
         for (role, agent) in [

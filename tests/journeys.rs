@@ -226,9 +226,11 @@ fn j_doctor_passes_on_a_keyless_containerless_machine(ctx: &JourneyCtx) -> Journ
             out.status.code()
         ));
     }
-    // It must also be the *backend* check that is honest, not merely absent.
+    // It must also say something. A report that neither passes nor warns is not
+    // a report, and on a machine with no container runtime that is exactly the
+    // state this journey is about.
     if niki::sandbox::detect_container_runtime().is_none()
-        && combined.contains("checks passed") == false
+        && !combined.contains("checks passed")
         && !combined.contains("warning")
     {
         return JourneyResult::Fail(
@@ -276,7 +278,9 @@ fn j_scripted_init_does_not_succeed_onto_a_dead_end(ctx: &JourneyCtx) -> Journey
     let out = ctx.run(&["init", "--interactive"]);
     let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
     if combined.contains("panicked at") {
-        return JourneyResult::Fail("`niki init --interactive` panicked on empty stdin".to_string());
+        return JourneyResult::Fail(
+            "`niki init --interactive` panicked on empty stdin".to_string(),
+        );
     }
     let wrote_config = ctx.project.join("niki.toml").exists();
     let unfinished = combined.contains("setup is not finished");
@@ -320,7 +324,12 @@ fn j_the_containerless_path_works_even_where_containers_exist(ctx: &JourneyCtx) 
             .find('\n')
             .map(|i| pos + i)
             .unwrap_or(text.len());
-        format!("{}{}\n{}", &text[..pos], "backend = \"worktree\"", &text[end..])
+        format!(
+            "{}{}\n{}",
+            &text[..pos],
+            "backend = \"worktree\"",
+            &text[end..]
+        )
     } else {
         format!("{text}\n[docker]\nbackend = \"worktree\"\n")
     };
