@@ -661,6 +661,65 @@ working status, the two-layer classifier, the streaming tool executor, and
 context compression — with the constraint that decides each one's design rather
 than only the intent. They start when §1–§7 have no unstarted item left.
 
+## Iteration 5 — 2026-09-30 · batch 5, twelve slices
+
+Commits `a3303de`…`a409bbf`. Canary map 175 → 217. PTY suite 14 → 15 cases.
+
+Batch 5 is the first one drawn from `ROADMAP.md` §9 — the list this programme
+wrote about itself — plus the two §6 items it had measured and not fixed. It
+is also the first batch where **most of the work was verifying the previous
+batches' claims rather than making new ones**, and three of those claims were
+wrong.
+
+| # | Commit | Slice |
+|---|---|---|
+| B5-01 | `a3303de` | Two runs cannot apply each other's patch |
+| B5-02 | `1d700e4` | One retry rule, three call sites, no disagreements |
+| B5-03 | `fbe6443` | Redaction no longer destroys the evidence it sits next to |
+| B5-04 | `1c758c5` | The gate's two unchecked items, now checked |
+| B5-05 | `e57767a` | MCP stops leaking a process and stops lying to a model |
+| B5-06 | `2e4497e` | Unsound advisories are denied, and the four exceptions say why |
+| B5-07 | `67fec56` | The container is hardened, and the tests now say so |
+| B5-08 | `01e4f29` | A page letter reaches its page in the shipped binary |
+| B5-09 | `bbc4d62` | `niki dashboard` — the one command of 28 with no test |
+| B5-10 | `a409bbf` | Both surfaces of one run read the same project's config |
+| B5-11 | this commit | Batch 5's record |
+| B5-12 | — | Full nine-gate run |
+
+### Three claims in the record that were wrong
+
+The roadmap and the previous batches' reports were treated as hypotheses, not
+facts, and three did not survive:
+
+- **"Three unsound advisories."** `cargo audit` reports **four**, across two
+  crates. The count was in a document whose whole job is to stay true.
+- **"19 of 28 CLI commands have no test."** Re-measured: **one** — only
+  `dashboard`. The other eighteen were closed by batches 1–4 and the number was
+  never updated.
+- **`run_page_ignores_navigation_hotkeys`** asserted that page letters do
+  nothing on the Run page. It passed, and the shipped binary opens Diff. The
+  test drove a page-local handler and its name described the *product*.
+
+### The theme of the batch: a test that cannot fail
+
+Fifteen times across five batches, a test stayed green while the thing it
+claimed to cover was broken. Batch 5's own share:
+
+| Test | Why it passed |
+|---|---|
+| `the_processor_applies_the_badge` | Asserted `is_retryable_code(` — it is a function *reference* to `is_some_and`, with no parenthesis |
+| `no_prompt_instructs_a_model_to_call_an_mcp_tool` | Searched both files for the old instruction; both **quote it in a comment** explaining why it is gone |
+| `every_unsound_advisory_is_named_with_a_reason` | Compared against every `ID:` line `cargo audit` prints, including six `unmaintained` ones |
+| `the_page_letter_case_exists…` | The canary named a *filename*, which is not a `grep` target, so it resolved against a doc comment |
+| `perf_is_machine_independent` | Compared a "cold" and a "warm" pass; `render_once` builds a fresh `TestBackend`, so they were the same measurement — 2% apart, so it failed 1 run in 3 |
+| `the_most_recent_run_is_the_one_dashboarded` | The sabotage left `read_dir` order to decide, and it happened to land on the newer task |
+| `the_dashboard_escapes_what_it_embeds` | I sabotaged the wrong **file**, so nothing changed and the probe "passed" |
+
+The corrective is always the same three moves: **count** instead of
+`contains`, **name the region** instead of searching for a string, and — the
+one that took longest to learn — **assert the sabotage actually applied**
+before believing its result.
+
 ### Next
 
 Batch 3 is complete: twelve slices, and `ROADMAP.md` §1 is closed in full.
