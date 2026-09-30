@@ -329,3 +329,6 @@ question-outranks-help | a_question_outranks_the_help_overlay | a question hidde
 permission-outranks-question | a_permission_prompt_outranks_a_question | the security prompt losing to an information request
 no-question-no-new-consumption | no_question_means_no_new_consumption | the ladder swallowing keys when nothing is open
 permission-survives-a-tiny-terminal | a_tiny_terminal_does_not_break_the_permission_modal | a panic on resize, with a command waiting on the answer
+# B6-05 · four of §6's five claims had rotted; the fifth was two doc lies
+readme-does-not-advertise-mcp | the_readme_does_not_advertise_mcp_as_something_agents_can_use | a feature-table row promising a half-built feature
+example-config-does-not-claim-mcp-prompt-injection | the_example_config_does_not_claim_mcp_tools_reach_the_agent | a config comment telling a user their tools reach the model

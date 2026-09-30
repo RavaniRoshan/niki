@@ -283,7 +283,7 @@ Supported providers: **Anthropic · OpenAI · Google · Ollama · OpenRouter · 
 | External source ingestion | `[knowledge]` | `docs/content/06-configuration/` |
 | Security audit pass | `[security]` | `docs/content/03-sandboxing-security/` |
 | Adversarial Red review | `[red_blue]` | `docs/content/02-agent-pipeline/06-specialized-agents.mdx` |
-| MCP server integration | `[mcp]` | `docs/content/06-configuration/` |
+| MCP server integration — **servers are discovered and listed; agents cannot call their tools yet** | `[mcp]` | `docs/content/06-configuration/` |
 | Permissions model | `[permissions]` | `docs/content/03-sandboxing-security/` |
 
 ### Sandbox backends

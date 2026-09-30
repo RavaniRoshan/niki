@@ -202,9 +202,16 @@ one rather than a reason to wait.
 - ~~19 of 28 CLI commands have no test at either level.~~ **Re-measured: 1 of 28** — only `dashboard`, closed in batch 5. The other 19 were closed by batches 1–4. `src/llm/google.rs` had **zero** tests; it has seven since B4-02.
   **zero** tests. `sandbox/worktree.rs` (853 lines, the recommended backend) and
   `sandbox/docker.rs` (634 lines, the default) have no unit tests.
-- `tests/multi_provider.rs` — 8 of 26 assert `create_provider(X).provider_name()
-  == X` where `provider_name` is a struct field holding `X`; two are *named*
-  endpoint tests and never read the endpoint.
+- ~~`tests/multi_provider.rs` — 8 of 26 assert `create_provider(X).provider_name()
+  == X`; two are *named* endpoint tests and never read the endpoint.~~
+  **STALE — re-measured in batch 6.** The file has **28** tests, and every
+  `create_provider_*` case now asserts the endpoint as well as the name
+  (`tests/multi_provider.rs:30-38` and seven siblings). The two endpoint-named
+  tests do read the endpoint, and assert the exact URL. Two more were added
+  after a sabotage probe found **all 27 prior tests stayed green** when
+  `anthropic::endpoint()` was hardcoded — which is what a name-echoing
+  assertion is worth. The stale claim survives as history in the file's own
+  header at `tests/multi_provider.rs:407-415`.
 - ~~`tests/docker_resource_caps.rs` — 8 tests on one string parser, in a file
   named after container resource caps.~~ **DONE in batch 5** (`67fec56`). Six
   of the eight were on `parse_memory_limit` and **none** touched
@@ -233,16 +240,43 @@ one rather than a reason to wait.
   `tests/no_unreferenced_public_modules.rs` now requires every `pub mod` to be
   referenced from outside its own subtree, and names its own blind spot as a
   passing test.
-- `.niki-worktrees/` is not git-ignored and passes `is_publishable_path`, so
-  after a SIGKILL the user's next `git add -A` commits a whole sandbox copy.
-  A fixed temp patch path (`git.rs:158`) also collides across concurrent runs.
-- `niki acp` and `niki goal` run the pipeline and then destroy the Coder's
+- ~~`.niki-worktrees/` is not git-ignored and passes `is_publishable_path`,
+  so after a SIGKILL the user's next `git add -A` commits a whole sandbox copy.
+  A fixed temp patch path (`git.rs:158`) also collides across concurrent runs.~~
+  **STALE — re-measured in batch 6.** Both halves were closed in batch 4
+  (`worktree_dir_is_not_committed.rs`, 8 tests). `ensure_git_excluded` writes
+  `.niki-worktrees/` into `.git/info/exclude` — per-clone, never committed,
+  idempotent, best-effort — and is called from the worktree-creation path at
+  `sandbox/worktree.rs:52`, with a test asserting that *call site* exists. The
+  publish filter refuses the path too, including the `./` and `\` spellings.
+  The `git.rs:158` claim is stale in a second way: that line is now the
+  `git diff` error arm, and the only `temp_dir()` uses left are test-local and
+  include the process id.
+- ~~`niki acp` and `niki goal` run the pipeline and then destroy the Coder's
   work: they call `execute_pipeline`, never `deliver`. Fixed for the chat in
   T3a/T3; **not fixed for these two**. `acp/server.rs:149` also stores the diff
-  *text* in a field named `branch`.
-- MCP is a documented Advanced feature that is a stub: `McpManager::call_tool`
-  has zero callers outside `src/mcp/`, and stdio children leak. **Flagged, not
-  decided** — either wire them or remove the README rows.
+  *text* in a field named `branch`.~~ **STALE — re-measured in batch 6.**
+  Closed in `c9da119`, which made *every* front door deliver:
+  `acp/server.rs:162` and `goal/runner.rs:97` both call `deliver`, and a
+  failed delivery sets `TaskStatus::Blocked` (`goal/runner.rs:114-123`) or
+  emits `task.delivery_failed` (`acp/server.rs:180-192`) rather than reporting
+  success. `record.branch` holds a branch name
+  (`record.branch = Some(branch_name.clone())`, `acp/server.rs:197`); line 149
+  is now `Ok(mut r) => {`. Guarded by `tests/every_entry_point_delivers.rs`
+  (6 tests), one of which is named
+  `the_record_branch_holds_a_branch_not_a_diff`.
+- MCP is a documented Advanced feature that is a stub. **Half stale,
+  re-measured in batch 6.** The *leak* claim is stale — `mcp/client.rs:98` sets
+  `kill_on_drop(true)`, and `shutdown()` kills the child. The **no-caller**
+  claim is true and still is: `McpManager::call_tool` has zero callers outside
+  `src/mcp/`, which `tests/mcp_does_not_leak_or_lie.rs:119` now pins as a
+  *failing* test when a caller appears. What was genuinely broken is the
+  **documentation**, and that is fixed in batch 6: the README feature row and
+  `niki.example.toml` both claimed MCP tools were injected into agent prompts.
+  They are not — `tools_summary` says `NOT YET CALLABLE` and routes the line
+  to a display notice, never to a model. Two new tests hold both.
+  **Still undecided:** wire MCP into the tool registry, or say so in the row.
+  That is a product decision, not a repair.
   ~~`web_search` returns `ToolStatus::Success` with "not yet wired".~~ **DONE in
   batch 4** (`54b64a2`): it now returns `Failed` with no
   `WebSearchResults` payload at all, and says what to do instead — an empty
@@ -250,16 +284,32 @@ one rather than a reason to wait.
   ~~`web_fetch` has a permanently empty allowlist.~~ **DONE** (`1a698d9`): it
   now honours `[network] domain_allowlist`, threaded through seven call sites.
   The default is unchanged — empty still means block-all, and that is asserted.
-- Two `cargo clippy` items the gate does not yet check: `tui_perf.rs` asserts
-  wall-clock budgets with 2× headroom, so it can only fail on a machine twice
-  as slow as the calibration box; and `tests/headless_tui.py` has two
-  unconditional `pytest.skip`s for the paths that need a live model.
+- ~~`tui_perf.rs` asserts wall-clock budgets with 2× headroom, so it can only
+  fail on a machine twice as slow as the calibration box.~~ **STALE —
+  re-measured in batch 6.** The wall-clock budgets are print-only
+  (`tests/tui_perf.rs:87-102` prints a NOTE; there is no `assert!` on that
+  path). The real gate is machine-independent:
+  `report_relative_to_baseline` compares a second run against the first in the
+  same process (`tests/tui_perf.rs:111-118`). Only the module doc at
+  `tests/tui_perf.rs:5` still describes the old scheme.
+- **`tests/headless_tui.py` has never run in any CI job** — re-measured in
+  batch 6, and it is worse than the entry said. `tests/headless_tui.py:31` is a
+  module-level `pytest.importorskip("tuiwright")`, and `tuiwright` is in no
+  requirements file, so collection stops there and neither in-body
+  `pytest.skip` (`:133`, `:147`) is ever reached. The file says so honestly at
+  `:26-30` and points at `tests/tui_smoke/`, which does run. Fixing it means
+  adding `tuiwright` to a requirements file — a dependency addition, so it is
+  in §7 as killed-for-now rather than done quietly.
 
 ## 7 · Explicitly killed
 
 - **Unifying the two event loops before stabilising the router.** A refactor
   nobody would notice missing, and it would have doubled the blast radius of
   every navigation fix in §1.
+- **Adding `tuiwright` to a requirements file** so `tests/headless_tui.py`
+  stops skipping itself at import (`:31`). Killed for now because it is a new
+  dependency, and this programme does not add one silently. The TUI's PTY
+  boundary is covered by `tests/tui_smoke/`, which does run.
 - **Broadening the CLI surface.** The competitive read is unambiguous: a git
   branch is the *category* output shape in 2026, not a differentiator — Devin
   ships draft PRs, Aider commits to your branch, OpenHands emits patches.
