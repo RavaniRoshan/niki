@@ -8,6 +8,26 @@ use std::path::Path;
 use std::path::PathBuf;
 use toml;
 
+/// Every provider slug NIKI knows how to configure.
+///
+/// Shared by `apply_env_lookup` and `resolve_keyring_with` so the two cannot
+/// drift: a slug added to one and not the other is a provider that can store a
+/// key and never use it.
+pub const PROVIDER_SLUGS: [&str; 12] = [
+    "anthropic",
+    "openai",
+    "google",
+    "openrouter",
+    "nvidia",
+    "together",
+    "groq",
+    "deepseek",
+    "ollama",
+    "zen",
+    "kimi",
+    "kilo",
+];
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct NikiConfig {
@@ -1761,9 +1781,67 @@ impl NikiConfig {
         config.project_dir = project_dir.to_path_buf();
 
         config.apply_env_vars();
+        config.resolve_keyring();
         config.resolve_aliases();
 
         Ok(config)
+    }
+
+    /// Fill in any provider key that is missing from config and environment
+    /// from the OS keyring.
+    ///
+    /// `niki auth login` writes there, and `niki doctor` — the command it tells
+    /// you to run to verify — reads it. Nothing on the *request* path did. So
+    /// the documented first-run sequence was:
+    ///
+    ///     $ niki auth login
+    ///       "Credentials are stored securely in your OS keyring."
+    ///     $ niki doctor
+    ///       green
+    ///     $ niki                       # the chat
+    ///     > hello
+    ///       "No LLM provider is configured yet. Run `niki init` (or `niki auth
+    ///        login`) to set one up"
+    ///
+    /// — the chat naming as the fix the exact command that had just been run.
+    ///
+    /// Doing it here rather than in each provider means `niki run`, `niki chat`
+    /// and `niki doctor` cannot disagree about whether a key exists, which is
+    /// how three of them came to. Env vars and `niki.toml` still win: this only
+    /// fills a gap.
+    ///
+    /// Failure is silent per provider. A keyring that is locked, unavailable or
+    /// missing is not an error — it means no stored key, which is the same as
+    /// not having run `niki auth login`, and the request path already reports
+    /// that clearly.
+    fn resolve_keyring(&mut self) {
+        self.resolve_keyring_with(&crate::cli::auth::resolve_api_key);
+    }
+
+    /// `resolve_keyring` with the lookup injected, mirroring the
+    /// `apply_env_vars` / `apply_env_lookup` pair above.
+    ///
+    /// The OS keyring is a service this test suite cannot rely on, and the
+    /// wiring being tested is precisely the connection between "a key was
+    /// stored" and "a request carries it" — so the lookup is the seam.
+    pub fn resolve_keyring_with(&mut self, lookup: &dyn Fn(&str) -> Option<String>) {
+        // Seed the known slugs the same way `apply_env_lookup` does. Without
+        // this the keyring only reaches providers that happen to be in
+        // `niki.toml`, so a user who ran `niki auth login` and nothing else
+        // — the documented path — still got "no provider configured".
+        for name in PROVIDER_SLUGS {
+            self.providers.entry(name.to_string()).or_default();
+        }
+        for (name, entry) in self.providers.iter_mut() {
+            if entry.api_key.as_ref().is_some_and(|k| !k.is_empty()) {
+                continue;
+            }
+            if let Some(key) = lookup(name)
+                && !key.is_empty()
+            {
+                entry.api_key = Some(key);
+            }
+        }
     }
 
     /// Resolve well-known model shorthands (`sonnet`, `4o`, `flash`, …) to
@@ -2058,20 +2136,7 @@ impl NikiConfig {
     /// Unify env-vs-TOML precedence (Phase 6.3): explicit non-empty environment
     /// variables always win over TOML values for keys, base URLs, and models.
     pub fn apply_env_lookup(&mut self, get_env: &dyn Fn(&str) -> Option<String>) {
-        for name in [
-            "anthropic",
-            "openai",
-            "google",
-            "openrouter",
-            "nvidia",
-            "together",
-            "groq",
-            "deepseek",
-            "ollama",
-            "zen",
-            "kimi",
-            "kilo",
-        ] {
+        for name in PROVIDER_SLUGS {
             self.providers.entry(name.to_string()).or_default();
         }
 
