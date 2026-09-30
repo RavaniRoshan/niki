@@ -605,14 +605,78 @@ fn redact_api_keys(text: &str) -> String {
         // 40-char base64 catch-all below never reaches it — an HF token was
         // the one shape measured here that survived redaction untouched.
         r"hf_[A-Za-z0-9]{34,40}",
-        r"[A-Za-z0-9+/]{40,}={0,2}",
+        // The catch-all, **narrowed**.
+        //
+        // It used to be `[A-Za-z0-9+/]{40,}={0,2}`, which is "any long
+        // unbroken alphanumeric run". Measured against real text, that is a
+        // list of things that are not secrets:
+        //
+        //     git sha (40 hex)     REDACTED
+        //     sha256 (64 hex)       REDACTED
+        //     long word             REDACTED
+        //     base64 asset path     REDACTED
+        //     minified js chunk     REDACTED
+        //
+        // A git SHA is the worst of them, because `report.md`, `trace.jsonl`
+        // and the TUI all reference commits, and a redacted one is an
+        // unreferenceable piece of evidence in the middle of a report.
+        //
+        // What separates an encoded secret from an identifier is *shape*, not
+        // length: base64 of a random secret mixes cases and digits, while a
+        // SHA is lowercase hex and a word is lowercase letters. So the run
+        // must contain at least one uppercase letter **and** at least one
+        // digit. That keeps every realistic key caught — the vendor-specific
+        // patterns above carry the ones with a known prefix, and the JSON and
+        // key=value patterns in `redact_generic_patterns` carry the rest —
+        // while letting identifiers through.
     ];
     for pattern in &patterns {
         if let Ok(re) = regex::Regex::new(pattern) {
             result = re.replace_all(&result, "[REDACTED]").to_string();
         }
     }
-    result
+    redact_encoded_runs(&result)
+}
+
+/// Blank long alphanumeric runs that look like an encoded secret.
+///
+/// Split out from [`redact_api_keys`] because the regex crate has no
+/// lookaround, so "40+ characters **and** at least one uppercase **and** at
+/// least one digit" cannot be one pattern. The shape test is in code, which is
+/// also where it can be read.
+fn redact_encoded_runs(text: &str) -> String {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re =
+        RE.get_or_init(|| regex::Regex::new(r"[A-Za-z0-9+/]{40,}={0,2}").expect("a fixed pattern"));
+    re.replace_all(text, |caps: &regex::Captures<'_>| {
+        let run = caps.get(0).map_or("", |m| m.as_str());
+        if looks_like_encoded_secret(run) {
+            "[REDACTED]".to_string()
+        } else {
+            run.to_string()
+        }
+    })
+    .to_string()
+}
+
+/// Whether a long alphanumeric run has the *shape* of an encoded secret.
+///
+/// A base64 rendering of a random secret mixes upper case, lower case and
+/// digits. A git SHA is lower-case hex; an English word is lower-case letters;
+/// a minified bundle is long but usually punctuated. Requiring an uppercase
+/// letter and a digit separates the first two, which is the harm that was
+/// measured.
+fn looks_like_encoded_secret(run: &str) -> bool {
+    let mut upper = false;
+    let mut digit = false;
+    for c in run.chars() {
+        match c {
+            'A'..='Z' => upper = true,
+            '0'..='9' => digit = true,
+            _ => {}
+        }
+    }
+    upper && digit
 }
 
 fn redact_generic_patterns(text: &str) -> String {
