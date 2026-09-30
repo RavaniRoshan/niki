@@ -276,3 +276,9 @@ resource-limits-reach-the-host-config | the_resource_limits_reach_the_host_confi
 container-is-never-privileged | a_container_is_never_privileged | nothing in the config surface can grant privilege
 # B5-08 · a page letter reaches its page in the shipped binary
 page-letter-reaches-its-page | the_page_letter_case_exists_and_asserts_the_navigation | a green test naming the product and asserting the opposite
+# B5-09 · `niki dashboard` — the one command of 28 with no test
+dashboard-empty-project-fails | an_empty_project_fails_with_a_reason | a command with no runs exiting 0
+dashboard-picks-most-recent | the_most_recent_run_is_the_one_dashboarded | the selection rule nobody was checking
+dashboard-path-only-writes-nothing | path_only_prints_and_writes_nothing | a flag that generates anyway
+dashboard-missing-task-names-it | a_missing_task_fails_by_name | failing without saying what it could not find
+dashboard-escapes-what-it-embeds | the_dashboard_escapes_what_it_embeds | a run's own text embedded raw into an HTML file

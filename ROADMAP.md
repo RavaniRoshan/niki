@@ -147,20 +147,31 @@ pipeline uses. Best done after §1 stabilises the router.
 
 ## 6 · Coverage and hygiene (P5)
 
-- 19 of 28 CLI commands have no test at either level. `src/llm/google.rs` has
+- ~~19 of 28 CLI commands have no test at either level.~~ **Re-measured: 1 of 28** — only `dashboard`, closed in batch 5. The other 19 were closed by batches 1–4. `src/llm/google.rs` had **zero** tests; it has seven since B4-02.
   **zero** tests. `sandbox/worktree.rs` (853 lines, the recommended backend) and
   `sandbox/docker.rs` (634 lines, the default) have no unit tests.
 - `tests/multi_provider.rs` — 8 of 26 assert `create_provider(X).provider_name()
   == X` where `provider_name` is a struct field holding `X`; two are *named*
   endpoint tests and never read the endpoint.
-- `tests/docker_resource_caps.rs` — 8 tests on one string parser, in a file
-  named after container resource caps. `cap_drop: ALL`, `pids_limit`,
-  `network_mode: "none"` and `readonly_rootfs` are asserted by nothing.
-- `tests/tui_navigation.rs` drives `PageRouter::handle_key`, a fallback the
+- ~~`tests/docker_resource_caps.rs` — 8 tests on one string parser, in a file
+  named after container resource caps.~~ **DONE in batch 5** (`67fec56`). Six
+  of the eight were on `parse_memory_limit` and **none** touched
+  `cap_drop`, `pids_limit`, `network_mode` or `readonly_rootfs` — a security
+  posture asserted by a file that tests something else. `build_host_config` is
+  now a plain function over the real `DockerConfig`, and six tests run on the
+  value sent to Docker: a default install hardens, opening egress leaves the
+  capability hardening alone, each key can be turned off, and no container is
+  privileged under any config.
+- ~~`tests/tui_navigation.rs` drives `PageRouter::handle_key`, a fallback the
   real chat loop reaches only for a handful of keys, and
   `run_page_ignores_navigation_hotkeys` asserts behaviour the shipped binary
-  contradicts. Two `page_router_render_current_*` tests draw every page and
-  assert nothing.
+  contradicts.~~ **DONE in batch 5** (`01e4f29`). The claim was true and is now
+  *measured*: a pty case presses `d` on the Run page and finds the Diff page,
+  because `global_page_jump` runs after the page router declines. The Rust test
+  was retargeted to what it verifies. ~~Two `page_router_render_current_*`
+  tests draw every page and assert nothing.~~ **DONE in B4-06** — they now
+  assert each page draws its own title, which found `TestLog`'s header
+  disagreeing with its declared title.
 - ~~697 lines of dead code: `src/errors.rs`, `src/control_plane/`,
   `src/persistence/` — all `pub`, so `dead_code` is silent.~~ **DONE in batch 4**
   (`d6ef83b`). All three had **zero** external references. Two were not
