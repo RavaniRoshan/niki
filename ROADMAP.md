@@ -77,12 +77,14 @@ pipeline uses. Best done after §1 stabilises the router.
 
 ## 5 · Reliability (P5)
 
-- **The 120 s client timeout is a *total* deadline whose error matches no retry
-  classifier.** It surfaces as `Kind::Body` → *"request or response body error"*,
-  which is in none of the transient lists, so a stage that runs past 120 s dies
-  with a message that does not mention time and is not retried. At the default
-  8192-token stage budget that needs >68 tok/s — a 3B model on CPU, i.e. exactly
-  the README's zero-setup path. (`provider.rs:87` vs `agents/mod.rs:141-147, 666-672`)
+- ~~The 120 s client timeout is a *total* deadline whose error matches no retry
+  classifier.~~ **DONE in batch 2.** Now `connect_timeout(15s)` +
+  `read_timeout(120s)`, so the bound is between bytes rather than across a whole
+  generation and a slow model is no longer killed mid-answer. `is_timeout_error`
+  classifies by type and, measured rather than assumed, walks the `source`
+  chain — because reqwest reports a stalled *body* as a body-decode failure
+  whose `is_timeout()` is false. Wired into all three retry paths.
+  (`provider.rs:85` vs `agents/mod.rs:141-147`, `failover.rs:203-216`)
 - `anthropic::stream` bypasses `send_request`, so it gets no HTTP retry; the
   agent-level matcher catches 429/503 but not 500/502. The comment at
   `anthropic.rs:96-98` claims "Retries on 429/5xx" and is true of `complete()`
