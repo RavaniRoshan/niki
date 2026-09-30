@@ -191,7 +191,7 @@ async fn cmd_init_interactive(target_path: &std::path::Path) -> Result<()> {
     let example_content = include_str!("../../niki.example.toml");
 
     // Local-first: Ollama needs no key. Probe the default endpoint once with
-    // a short timeout; a reachable instance becomes menu option 0.
+    // a short timeout.
     let ollama_up = crate::cli::auth::ollama_running();
     if ollama_up {
         println!("  Ollama is running locally (127.0.0.1:11434) — no API key needed.");
@@ -199,6 +199,25 @@ async fn cmd_init_interactive(target_path: &std::path::Path) -> Result<()> {
         println!(
             "  Ollama not detected locally (optional — fully offline models via http://localhost:11434)."
         );
+    }
+
+    // The sandbox backend, detected rather than assumed.
+    //
+    // The wizard used to write a provider and a model and stop there, leaving
+    // `[docker] backend` at its default of `docker`. On a machine with no
+    // container runtime — which the README says is a supported way to run NIKI,
+    // and which is the *first* thing it advertises — that produced a config the
+    // setup wizard declared successful and the very next `niki run` could not
+    // use. The failure was legible, but it was three steps too late, and
+    // `niki doctor` had already told the user to go install Podman.
+    let detected_runtime = crate::sandbox::detect_container_runtime();
+    let default_backend = crate::sandbox::default_backend_for_this_machine();
+    match &detected_runtime {
+        Some(rt) => println!("  Container runtime found: {rt}"),
+        None => println!(
+            "  No container runtime found — NIKI will use the git-worktree backend, \
+             which needs no container and runs agent commands as local processes."
+        ),
     }
     println!();
 
@@ -212,13 +231,18 @@ async fn cmd_init_interactive(target_path: &std::path::Path) -> Result<()> {
         Missing,
     }
     let mut menu: Vec<(&str, &str, &str, KeyState)> = Vec::new();
-    if ollama_up {
-        // Marker entry: no key material involved.
-        menu.push(("ollama", "Ollama (local, no key)", "", KeyState::Missing));
-    }
+    // Always offer Ollama, whether or not it is up right now.
+    //
+    // It used to appear only when `ollama_running()` answered, which hid the
+    // one provider that needs no key, no account and no spend at exactly the
+    // moment it was the right answer: a user who has not started Ollama yet.
+    // The choice they need is "how do I get a model", not "what is already
+    // running" — so it is listed either way, and the state is reported
+    // alongside it.
+    menu.push(("ollama", "Ollama (local, no key)", "", KeyState::Missing));
     for (name, label, env_var) in PROVIDERS {
         if *name == "ollama" {
-            continue; // offered as menu option 0 above when reachable
+            continue; // offered as menu option 0 above
         }
         let state = if std::env::var(env_var)
             .map(|k| !k.is_empty())
@@ -232,11 +256,21 @@ async fn cmd_init_interactive(target_path: &std::path::Path) -> Result<()> {
         };
         menu.push((name, label, env_var, state));
     }
-    for (i, (_, label, env_var, state)) in menu.iter().enumerate() {
-        let marker = match state {
-            KeyState::Env => format!("(via {})", env_var),
-            KeyState::Keyring => "(in keyring)".to_string(),
-            KeyState::Missing => String::new(),
+    for (i, (name, label, env_var, state)) in menu.iter().enumerate() {
+        let marker = if *name == "ollama" {
+            // Reported, not filtered on: the option is always present, and the
+            // state tells the user what to do next if nothing is listening yet.
+            if ollama_up {
+                "(running)".to_string()
+            } else {
+                "(not detected — run `ollama pull <model>` after setup)".to_string()
+            }
+        } else {
+            match state {
+                KeyState::Env => format!("(via {})", env_var),
+                KeyState::Keyring => "(in keyring)".to_string(),
+                KeyState::Missing => String::new(),
+            }
         };
         println!("  {}) {} {}", i, label, marker);
     }
@@ -314,15 +348,113 @@ async fn cmd_init_interactive(target_path: &std::path::Path) -> Result<()> {
     // as-is. Without this the template's Anthropic defaults survive and the
     // first `niki run` fails with a missing-key error on a fresh machine.
     let mut out = example_content.to_string();
-    if let Some((name, model)) = picked_name {
+    if let Some((name, ref model)) = picked_name {
         out = point_agents_at(&out, name, model.as_deref());
         println!("Agents (planner/coder/tester/reviewer) set to `{name}` in niki.toml.");
     }
+
+    // …and set the sandbox backend to the one this machine can actually run, so
+    // the config the wizard just wrote is one the next command can use. The
+    // template ships `# backend = "docker"` commented out, meaning "docker" —
+    // which is right for a machine with Podman and wrong for every machine
+    // without it.
+    out = set_backend(&out, default_backend);
+    let backend_word = match default_backend {
+        crate::sandbox::SandboxBackend::Docker => "docker (container isolation)",
+        crate::sandbox::SandboxBackend::Worktree => {
+            "worktree (git worktree + local process; no container runtime needed)"
+        }
+    };
+    println!("Sandbox backend set to `{backend_word}` in niki.toml.");
+
     fs::write(target_path, out)?;
     println!("Created niki.toml with provider entries.");
     println!("API keys have been stored in your OS keyring where provided.");
     println!("Run `niki doctor` to verify your setup.");
+
+    // A wizard that reports success onto a config that cannot run is worse than
+    // one that reports the problem, because the user stops reading. The two
+    // cases where the file is written but the machine is not ready are named
+    // explicitly, and the command exits non-zero so a script can act on it.
+    let mut incomplete: Vec<String> = Vec::new();
+    if picked_name.is_none() {
+        incomplete.push(
+            "No provider was configured — the file still points at the template defaults. \
+             Run `niki auth login --provider <name>`, or re-run `niki init --interactive`."
+                .to_string(),
+        );
+    }
+    if let Some(("ollama", _)) = picked_name
+        && !ollama_up
+    {
+        let (model, installed) = crate::cli::auth::preferred_ollama_model();
+        if !installed {
+            incomplete.push(format!(
+                "Ollama is not running and no model is pulled. Start it and run \
+                 `ollama pull {model}` — until then every stage will fail to get a model."
+            ));
+        }
+    }
+    if detected_runtime.is_none() {
+        println!(
+            "\nNote: no container runtime on this machine, so the worktree backend is \
+             selected. It runs agent commands as local processes with your privileges; \
+             install Podman if you want container isolation."
+        );
+    }
+
+    if !incomplete.is_empty() {
+        println!("\nniki.toml was written, but setup is not finished:");
+        for item in &incomplete {
+            println!("  - {item}");
+        }
+        anyhow::bail!(
+            "setup incomplete: {} item(s) need attention",
+            incomplete.len()
+        );
+    }
     Ok(())
+}
+
+/// Turn the template's commented-out `# backend = "docker"` into a real setting.
+///
+/// Deliberately a text rewrite rather than a serde round-trip: the file the
+/// wizard writes is the full documented template, comments and all, and
+/// re-serialising it would strip every one of those comments — which is most of
+/// what makes the file useful to read. So the same discipline `point_agents_at`
+/// uses: replace the line in place, leave everything else byte-identical.
+fn set_backend(toml_text: &str, backend: crate::sandbox::SandboxBackend) -> String {
+    let value = match backend {
+        crate::sandbox::SandboxBackend::Docker => "docker",
+        crate::sandbox::SandboxBackend::Worktree => "worktree",
+    };
+    let mut replaced = false;
+    let mut out = String::with_capacity(toml_text.len() + 32);
+    for line in toml_text.lines() {
+        let t = line.trim();
+        // Either the commented default the template ships, or an existing active
+        // setting the user edited before re-running the wizard.
+        if t == "# backend = \"docker\""
+            || t == "# backend = \"worktree\""
+            || t.starts_with("backend = ")
+        {
+            out.push_str(&format!("backend = \"{value}\"\n"));
+            replaced = true;
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if !replaced {
+        // No `[docker] backend` line at all. Append a clearly-marked one rather
+        // than guessing where the section belongs — an absent line is a
+        // template change, and a wrong guess would corrupt the file.
+        out.push_str(&format!(
+            "\n# Added by `niki init --interactive`: this machine can run the \
+             worktree backend without a container runtime.\n[docker]\nbackend = \"{value}\"\n"
+        ));
+    }
+    out
 }
 
 /// Rewrite the four `[agents.*]` sections of a niki.toml template so they use
@@ -381,6 +513,124 @@ fn prompt_yes_no(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The template line the backend rewrite targets. If this ever changes, the
+    // rewrite silently stops matching and the wizard goes back to writing a
+    // config that selects a backend the machine cannot run — which is the exact
+    // failure these tests exist to prevent.
+    const TEMPLATE_BACKEND_LINE: &str = "# backend = \"docker\"";
+
+    /// The wizard must write a backend the machine can actually run.
+    ///
+    /// It used to write none at all, so every machine without a container
+    /// runtime — the machine the README opens by describing — got a config whose
+    /// first `niki run` could not start. That is a one-line omission with a
+    /// three-step failure, so it is pinned here.
+    #[test]
+    fn wizard_writes_a_backend_the_machine_can_run() {
+        let template = format!("[docker]\nbase_image = \"niki-sandbox:24.04\"\n{TEMPLATE_BACKEND_LINE}\n");
+        for backend in [
+            crate::sandbox::SandboxBackend::Docker,
+            crate::sandbox::SandboxBackend::Worktree,
+        ] {
+            let out = set_backend(&template, backend);
+            let word = match backend {
+                crate::sandbox::SandboxBackend::Docker => "docker",
+                crate::sandbox::SandboxBackend::Worktree => "worktree",
+            };
+            assert!(
+                out.contains(&format!("backend = \"{word}\"")),
+                "the written config does not select {word}:\n{out}"
+            );
+            assert!(
+                !out.contains(TEMPLATE_BACKEND_LINE),
+                "the commented default survived, so the active line is absent or \
+                 duplicated and TOML parsing would see a duplicate key:\n{out}"
+            );
+            // Whatever the wizard writes has to be readable, or the wizard is
+            // not producing a config but a file.
+            let parsed: crate::config::NikiConfig = toml::from_str(&out).expect("written config must parse");
+            assert_eq!(parsed.docker.backend, backend, "round-trip lost the backend");
+        }
+    }
+
+    /// Re-running the wizard must not accumulate settings, and an already-active
+    /// `backend = ` line the user wrote by hand must be replaced rather than
+    /// duplicated — a duplicate key is a parse error, so this failure would be
+    /// "niki.toml is broken" with no obvious cause.
+    #[test]
+    fn wizard_is_idempotent_and_replaces_a_hand_written_backend() {
+        let template = format!("[docker]\n{TEMPLATE_BACKEND_LINE}\n");
+        let once = set_backend(&template, crate::sandbox::SandboxBackend::Worktree);
+        let twice = set_backend(&once, crate::sandbox::SandboxBackend::Worktree);
+        assert_eq!(
+            once.matches("backend = ").count(),
+            1,
+            "expected exactly one active backend line:\n{once}"
+        );
+        assert_eq!(once, twice, "re-running the wizard changed the file");
+
+        let hand_written = "[docker]\nbackend = \"docker\"\n";
+        let replaced = set_backend(hand_written, crate::sandbox::SandboxBackend::Worktree);
+        assert_eq!(
+            replaced.matches("backend = ").count(),
+            1,
+            "the hand-written line was duplicated rather than replaced:\n{replaced}"
+        );
+        assert!(replaced.contains("backend = \"worktree\""));
+    }
+
+    /// The full template is what the wizard actually writes. This is the case
+    /// that reached users, so it is the case that is pinned.
+    #[test]
+    fn wizard_output_parses_as_a_whole_config() {
+        let example = include_str!("../../niki.example.toml");
+        let out = set_backend(
+            &point_agents_at(example, "ollama", Some("qwen2.5-coder:3b")),
+            crate::sandbox::SandboxBackend::Worktree,
+        );
+        let parsed: crate::config::NikiConfig =
+            toml::from_str(&out).expect("the wizard's output must be a valid niki.toml");
+        assert_eq!(parsed.docker.backend, crate::sandbox::SandboxBackend::Worktree);
+        // The wizard points every agent at the chosen provider so the first run
+        // does not need a second edit.
+        for (role, agent) in [
+            ("planner", &parsed.agents.planner),
+            ("coder", &parsed.agents.coder),
+            ("tester", &parsed.agents.tester),
+            ("reviewer", &parsed.agents.reviewer),
+        ] {
+            assert_eq!(
+                agent.provider, "ollama",
+                "{role} still points at the template default, so the first run needs a second edit"
+            );
+        }
+    }
+
+    /// The rewrite must not eat the documentation. The whole reason the wizard
+    /// writes the full template rather than a minimal config is that the
+    /// comments are what make it useful to read; a rewrite that dropped them
+    /// would quietly remove the reason for the format.
+    #[test]
+    fn backend_rewrite_preserves_the_rest_of_the_file() {
+        let template = format!(
+            "# Sandbox backend: \"docker\" (container, default) or \"worktree\".\n\
+             [docker]\n\
+             # A comment that must survive.\n\
+             base_image = \"niki-sandbox:24.04\"\n\
+             {TEMPLATE_BACKEND_LINE}\n\
+             [security]\n\
+             enabled = true\n"
+        );
+        let out = set_backend(&template, crate::sandbox::SandboxBackend::Worktree);
+        assert!(
+            out.contains("# A comment that must survive."),
+            "comments were dropped:\n{out}"
+        );
+        assert!(out.contains("base_image = \"niki-sandbox:24.04\""));
+        assert!(out.contains("[security]"));
+        assert!(out.contains("enabled = true"));
+    }
 
     const MINI: &str = r#"[general]
 max_revision_rounds = 1

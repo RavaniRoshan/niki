@@ -106,6 +106,47 @@ pub enum SandboxBackend {
     Worktree,
 }
 
+/// Which container runtime this machine can actually reach, if any.
+///
+/// One probe, one answer, shared by everything that needs to know — the setup
+/// wizard, `niki doctor`, and `niki smoke` each had their own version of this
+/// question, and they did not agree. That is how a machine with no container
+/// runtime and no API key, which the README says runs NIKI fine on Ollama plus
+/// the worktree backend, ended up being told by `niki doctor` to install Podman
+/// while the wizard it had just run wrote a config selecting `docker`.
+///
+/// Podman first, matching the documented preference: it is rootless, needs no
+/// daemon, and is what the README recommends.
+pub fn detect_container_runtime() -> Option<String> {
+    for (bin, args) in [("podman", vec!["--version"]), ("docker", vec!["--version"])] {
+        if let Ok(out) = std::process::Command::new(bin).args(&args).output()
+            && out.status.success()
+        {
+            let version = String::from_utf8_lossy(&out.stdout);
+            let version = version.trim();
+            if !version.is_empty() {
+                return Some(version.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// The backend this machine should use by default, given what it can reach.
+///
+/// The container backend is the more isolated of the two, so it stays the
+/// default wherever it is actually available. It is only worth defaulting to a
+/// backend the machine cannot run when the alternative is a first run that
+/// cannot start — and the only signal that matters is whether a container
+/// runtime is reachable, not whether a global config happens to say otherwise.
+pub fn default_backend_for_this_machine() -> SandboxBackend {
+    if detect_container_runtime().is_some() {
+        SandboxBackend::Docker
+    } else {
+        SandboxBackend::Worktree
+    }
+}
+
 /// Abstraction over an isolated execution environment for one agent stage.
 ///
 /// `DockerSandbox` (container) and `WorktreeSandbox` (git worktree + local

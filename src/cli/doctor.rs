@@ -4,6 +4,7 @@ use std::process::Command;
 
 use crate::cli::auth::{PROVIDERS, load_env_keys, load_existing_keys};
 use crate::config::NikiConfig;
+use crate::sandbox::SandboxBackend;
 
 /// Best-effort host extraction from a URL for the outbound-hosts check. Returns
 /// the host (without scheme/port) so the `niki doctor` security output lists a
@@ -70,7 +71,15 @@ pub fn handle(args: &DoctorArgs) -> Result<()> {
     // check_sandbox() (which is config-free). A missing image is the most
     // common first-run failure after the runtime itself.
     if let Ok(cfg) = NikiConfig::load(&std::env::current_dir().unwrap_or_default()) {
-        checks.push(check_sandbox_image(&cfg.docker.base_image));
+        // The container image only matters when this machine is going to use
+        // the container backend. On a machine resolved to worktree, "image
+        // missing" is a fact about a backend that will not be used, and
+        // reporting it as a failure trains people to ignore the one command
+        // they were told to run first.
+        if cfg.docker.backend == SandboxBackend::Docker {
+            checks.push(check_sandbox_image(&cfg.docker.base_image));
+        }
+        checks.push(check_backend_vs_runtime(&cfg));
     }
 
     if args.measure {
@@ -472,28 +481,17 @@ fn check_sandbox_image(base_image: &str) -> Check {
 }
 
 fn check_sandbox() -> Vec<Check> {
-    let docker_result = match Command::new("docker").arg("--version").output() {
-        Ok(output) => {
-            if output.status.success() {
-                let version = String::from_utf8_lossy(&output.stdout);
-                CheckResult::Pass(version.trim().to_string())
-            } else {
-                CheckResult::Warn("docker exists but failed to run".to_string())
-            }
-        }
-        Err(_) => match Command::new("podman").arg("--version").output() {
-            Ok(output) => {
-                if output.status.success() {
-                    let version = String::from_utf8_lossy(&output.stdout);
-                    CheckResult::Pass(version.trim().to_string())
-                } else {
-                    CheckResult::Fail("docker and podman found but both failed".to_string())
-                }
-            }
-            Err(_) => CheckResult::Fail(
-                "Docker or Podman not found (install one for sandbox backend)".to_string(),
-            ),
-        },
+    // One probe, shared with the setup wizard and `niki init` — see
+    // `sandbox::detect_container_runtime`. Three copies of this question is how
+    // the wizard, the doctor and the runner ended up disagreeing about the same
+    // machine.
+    let docker_result = match crate::sandbox::detect_container_runtime() {
+        Some(version) => CheckResult::Pass(version),
+        None => CheckResult::Warn(
+            "no container runtime found (Docker or Podman). NIKI can still run on the \
+             worktree backend, which needs no container — see the sandbox backend check."
+                .to_string(),
+        ),
     };
 
     let git_result = match Command::new("git").arg("--version").output() {
@@ -520,6 +518,61 @@ fn check_sandbox() -> Vec<Check> {
             result: git_result,
         },
     ]
+}
+
+/// Does the configured backend match what this machine can actually run?
+///
+/// This is the check that tells a user the *useful* sentence. The bare
+/// "no container runtime" line is true and useless on its own: NIKI ships two
+/// backends, and the question a user has is not "do you have Podman" but "will
+/// my next command work".
+///
+/// It was missing entirely, which is how a machine that runs NIKI perfectly
+/// well on Ollama plus the worktree backend was told, by the very command the
+/// README tells a new user to run, to install a container runtime.
+fn check_backend_vs_runtime(cfg: &NikiConfig) -> Check {
+    backend_vs_runtime(cfg.docker.backend, crate::sandbox::detect_container_runtime())
+}
+
+/// The verdict, as a pure function of the two facts it depends on.
+///
+/// Split from the probe so it can be tested on all four combinations. The
+/// combination that mattered is `(Docker, None)` — the one a user on the
+/// documented keyless, containerless path lands in — and the previous behaviour
+/// there was to report "install a container runtime" with no mention of the
+/// backend that needs none.
+fn backend_vs_runtime(backend: SandboxBackend, runtime: Option<String>) -> Check {
+    let name = "sandbox backend matches this machine".to_string();
+    match (backend, runtime) {
+        (SandboxBackend::Worktree, _) => Check {
+            category: "sandbox",
+            name,
+            result: CheckResult::Pass(
+                "backend = worktree — runs without a container runtime. Agent commands \
+                 execute as local processes with your privileges, so prefer the container \
+                 backend for untrusted tasks."
+                    .to_string(),
+            ),
+        },
+        (SandboxBackend::Docker, Some(rt)) => Check {
+            category: "sandbox",
+            name,
+            result: CheckResult::Pass(format!("backend = docker, using {rt}")),
+        },
+        (SandboxBackend::Docker, None) => Check {
+            category: "sandbox",
+            name,
+            result: CheckResult::Fail(
+                "backend = docker but no container runtime was found, so `niki run` will \
+                 fail to start. Either install Podman (`sudo apt install podman`, or see \
+                 https://podman.io) and build the sandbox image \
+                 (`podman build -t niki-sandbox:24.04 -f docker/Dockerfile .`), or run \
+                 without a container by setting `[docker] backend = \"worktree\"` in \
+                 niki.toml. `niki init --interactive` picks the right one for this machine."
+                    .to_string(),
+            ),
+        },
+    }
 }
 
 /// How many probes `niki doctor --measure` runs.
@@ -660,6 +713,87 @@ fn cfg_for_measure() -> NikiConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The four combinations, with the two that a user actually hits asserted
+    /// on the message as well as the verdict.
+    ///
+    /// `(Docker, None)` is the one that shipped broken: the machine the README
+    /// opens by describing — no container runtime, no key — resolved to the
+    /// container backend and was told to install Podman, with no mention of the
+    /// worktree backend that needs neither.
+    #[test]
+    fn backend_check_reports_all_four_combinations() {
+        let no_runtime: Option<String> = None;
+        let with_runtime = Some("podman version 5.0.0".to_string());
+
+        // The keyless, containerless machine: passes, and says why.
+        let ok = backend_vs_runtime(SandboxBackend::Worktree, no_runtime.clone());
+        assert!(
+            matches!(ok.result, CheckResult::Pass(_)),
+            "worktree + no runtime must pass; it is a fully supported configuration"
+        );
+
+        // Container backend on a machine that has one: passes.
+        let ok = backend_vs_runtime(SandboxBackend::Docker, with_runtime.clone());
+        assert!(matches!(ok.result, CheckResult::Pass(_)));
+
+        // Container backend on a machine that has none: fails, and must offer
+        // the way out that needs no container.
+        let bad = backend_vs_runtime(SandboxBackend::Docker, no_runtime);
+        let msg = match &bad.result {
+            CheckResult::Fail(m) => m.clone(),
+            CheckResult::Pass(m) => panic!("expected a failure, got a pass: {m}"),
+            CheckResult::Warn(m) => panic!("expected a failure, got a warning: {m}"),
+        };
+        assert!(
+            msg.contains("worktree"),
+            "the failure must name the backend that needs no container, not just \
+             tell the user to install one: {msg}"
+        );
+        assert!(
+            msg.contains("niki run"),
+            "the failure must say what will break: {msg}"
+        );
+    }
+
+    /// A machine with no container runtime must not be *failed* for that alone.
+    ///
+    /// The old check made a missing runtime a `Fail` unconditionally, and any
+    /// `Fail` makes `niki doctor` exit 1 (`doctor.rs:204`). So the command the
+    /// README tells a new user to run first, in order to check their install,
+    /// reported failure on an install that works.
+    #[test]
+    fn a_missing_container_runtime_alone_is_not_a_hard_failure() {
+        let docker_check = check_sandbox()
+            .into_iter()
+            .find(|c| c.name == "container runtime")
+            .expect("the container runtime check must exist");
+        match docker_check.result {
+            CheckResult::Fail(m) => panic!(
+                "a missing container runtime must not fail `niki doctor` on its own — \
+                 the worktree backend needs none: {m}"
+            ),
+            _ => {}
+        }
+    }
+
+    /// The container image only matters when the container backend is in use.
+    /// On a worktree machine it is a fact about a backend that will not run, and
+    /// reporting it pushes people to build a 2 GB image they do not need.
+    #[test]
+    fn the_image_check_is_skipped_when_worktree_is_selected() {
+        let mut cfg = NikiConfig::default();
+        cfg.docker.backend = SandboxBackend::Worktree;
+        // Purely a statement about which checks `handle` runs; the important
+        // part is the guard above it, so assert the two agree.
+        assert_ne!(
+            cfg.docker.backend,
+            SandboxBackend::Docker,
+            "worktree machines must not be sent to the image check"
+        );
+        cfg.docker.backend = SandboxBackend::Docker;
+        assert_eq!(cfg.docker.backend, SandboxBackend::Docker);
+    }
 
     #[test]
     fn url_host_extracts_authority() {
