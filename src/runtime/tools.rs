@@ -2407,7 +2407,12 @@ impl Tool for AskUserTool {
     fn def(&self) -> &ToolDef {
         static DEF: ToolDef = ToolDef {
             name: "ask_user",
-            description: "Ask the user a question and wait for response. Fails when stdin is not interactive.",
+            description: "Ask the user a question and wait for a reply. UNAVAILABLE \
+                        whenever the TUI is running: the interface owns stdin, so \
+                        this tool always fails in `niki chat`, `niki run --tui` \
+                        and any unattended run. Do not call it to unblock a \
+                        task — report what you need instead. Works only on a \
+                        bare terminal with no interface attached.",
             category: ToolCategory::Human,
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
@@ -2484,7 +2489,11 @@ impl Tool for ApprovalTool {
     fn def(&self) -> &ToolDef {
         static DEF: ToolDef = ToolDef {
             name: "approval",
-            description: "Request approval before executing a dangerous operation. Denies by default; denies always when non-interactive.",
+            description: "Request approval before executing a dangerous operation. \
+                        Always DENIES when the TUI owns stdin (`niki chat`, \
+                        `niki run --tui`) or in any unattended run — it is \
+                        fail-closed by design, so do not plan around it. \
+                        Useful only on a bare terminal.",
             category: ToolCategory::Human,
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
