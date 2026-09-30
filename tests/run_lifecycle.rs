@@ -146,7 +146,7 @@ fn wrap_json(text: &str) -> String {
 /// finished with no reviewer artifact at all — and the tests then asserted
 /// `verdict == "Approved"` on a pass that nothing had ever granted. The suite
 /// was pinning the fabricated pass in place.
-fn successful_script(path: &std::path::Path) -> PathBuf {
+pub fn successful_script(path: &std::path::Path) -> PathBuf {
     let path = path.to_path_buf();
     MockScriptBuilder::new()
         .add_response(
@@ -209,12 +209,12 @@ fn unreviewed_script(path: &std::path::Path) -> PathBuf {
 /// For tests that genuinely mean "an independent Reviewer signed off" — they
 /// need the Reviewer's response in the mock script, which the solo fixture does
 /// not carry.
-fn multiagent_mock_toml(script_path: &std::path::Path, test_command: Option<&str>) -> String {
+pub fn multiagent_mock_toml(script_path: &std::path::Path, test_command: Option<&str>) -> String {
     minimal_mock_toml(script_path, test_command)
         .replace("topology = \"singleagent\"", "topology = \"multiagent\"")
 }
 
-fn minimal_mock_toml(script_path: &std::path::Path, test_command: Option<&str>) -> String {
+pub fn minimal_mock_toml(script_path: &std::path::Path, test_command: Option<&str>) -> String {
     // `test_command` is a per-agent field, so the placeholder has to expand
     // *inside* the `[agents.tester]` table below. It used to be a bare `{}`
     // one line further down, which worked by accident and would have silently

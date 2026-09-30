@@ -256,7 +256,33 @@ const NO_PROVIDER_MESSAGE: &str = "No LLM provider is configured yet. Run `niki 
 
 /// Process a submitted user message: stream the reply back into the chat
 /// session as an assistant turn.
-fn process_message(tx: &mpsc::Sender<DisplayEvent>, config: &NikiConfig, submit: ChatSubmit) {
+fn process_message(
+    tx: &mpsc::Sender<DisplayEvent>,
+    config: &NikiConfig,
+    project_dir: &std::path::Path,
+    submit: ChatSubmit,
+) {
+    // `/run <task>` starts the pipeline. Everything else is a conversation
+    // turn. The split is explicit on purpose: see `run_task_from_chat`.
+    if let Some(task) = submit.text.strip_prefix("/run ") {
+        let task = task.trim();
+        if task.is_empty() {
+            let _ = tx.send(DisplayEvent::ChatError {
+                message: "`/run` needs a task. Try: /run Add a GET /health endpoint".to_string(),
+                cancelled: false,
+            });
+            return;
+        }
+        run_task_from_chat(
+            tx,
+            config,
+            project_dir,
+            task.to_string(),
+            submit.cancel.clone(),
+        );
+        return;
+    }
+
     // TUI mode runs on a plain thread: bridge into async with a fresh
     // runtime. (The headless `--message` path awaits directly on the caller's
     // runtime instead — never nest runtimes here.)
@@ -374,21 +400,23 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
     let tui_tx = tx.clone();
     let tui_on_submit = on_submit_tx.clone();
     let tui_cancel = cancel.clone();
+    let tui_project = project_path.clone();
     let handle = std::thread::spawn(move || {
-        crate::display::tui::run_chat(rx, desc, project_path, Some(tui_on_submit), tui_cancel)
+        crate::display::tui::run_chat(rx, desc, tui_project, Some(tui_on_submit), tui_cancel)
     });
 
     // Spawn the message processor: each submitted user message gets a streamed
     // LLM reply.
     let proc_tx = tui_tx.clone();
     let proc_config = config.clone();
+    let proc_project = project_path.clone();
     std::thread::spawn(move || {
         while let Ok(submit) = on_submit_rx.recv() {
             // A new turn supersedes a cancelled previous one.
             submit
                 .cancel
                 .store(false, std::sync::atomic::Ordering::Relaxed);
-            process_message(&proc_tx, &proc_config, submit);
+            process_message(&proc_tx, &proc_config, &proc_project, submit);
         }
     });
 
@@ -414,5 +442,190 @@ pub async fn handle(args: &ChatArgs) -> Result<()> {
     // The TUI exits when the user presses Ctrl+C or quit.
     let _ = handle.join();
 
+    Ok(())
+}
+
+/// Run a coding task from the chat: the four agents, in a sandbox, ending in a
+/// reviewable `niki/<id>` branch.
+///
+/// This is the product's core promise, and until now the front door could not
+/// honour it — `cli/chat.rs` contained no reference to the orchestrator at
+/// all, so a bare `niki` could talk but never act. Every TUI page that shows a
+/// pipeline (Run, Pipeline, Diff, Verdict, Cost, Artifacts, TestLog) rendered
+/// fabricated content because nothing ever populated it.
+///
+/// `/run <task>` rather than inferring intent from every message: a chat that
+/// silently starts a four-agent run on a message the user meant as a question
+/// is a chat that spends money and writes to git without being asked, and this
+/// product's whole character is being honest about what it did.
+fn run_task_from_chat(
+    tx: &mpsc::Sender<DisplayEvent>,
+    config: &NikiConfig,
+    project_dir: &std::path::Path,
+    description: String,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let outcome = tokio::runtime::Runtime::new()
+        .map_err(|e| format!("Could not start the async runtime: {e}"))
+        .and_then(|rt| {
+            rt.block_on(async move {
+                run_task_to_sink(tx, config, project_dir, description, cancel).await
+            })
+        });
+
+    if let Err(message) = outcome {
+        let _ = tx.send(DisplayEvent::ChatError {
+            message,
+            cancelled: false,
+        });
+    }
+}
+
+/// Run a coding task and stream every stage into `tx`.
+///
+/// Public because it is a real capability, not a test hook: the chat is one
+/// caller, and this is the same sequence `niki run` performs — pipeline, then
+/// delivery — with the difference that progress goes to an event sink the caller
+/// owns instead of a render thread of its own.
+pub async fn run_task_to_sink(
+    tx: &mpsc::Sender<DisplayEvent>,
+    config: &NikiConfig,
+    project_dir: &std::path::Path,
+    description: String,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    use crate::display::agent_stream::AgenticDisplay;
+    use crate::orchestrator::pipeline::{Task, execute_pipeline};
+    use crate::sandbox::docker::ActiveContainers;
+    use uuid::Uuid;
+
+    let task = Task {
+        id: Uuid::new_v4(),
+        description: description.clone(),
+        project_path: project_dir.to_path_buf(),
+    };
+    let task_dir = project_dir
+        .join(&config.general.output_dir)
+        .join("tasks")
+        .join(task.id.to_string());
+    std::fs::create_dir_all(&task_dir)
+        .map_err(|e| format!("Could not create {}: {e}", task_dir.display()))?;
+
+    let branch_name = format!("niki/{}", &task.id.to_string()[..8]);
+
+    // The display feeds the chat's own event loop. `muted` is set by
+    // `attach_sink` so stage progress does not also print to stdout and
+    // corrupt the alternate screen.
+    let mut display = AgenticDisplay::new();
+    display.attach_sink(tx.clone(), cancel.clone());
+
+    // The backend comes from the configuration, NOT from whether a container
+    // runtime happens to be reachable. Deriving it from reachability looks
+    // equivalent and is not: on a machine with Podman installed and
+    // `backend = "worktree"` in `niki.toml`, the sandbox writes into a git
+    // worktree while delivery was told the diff was already on the host — so
+    // it is never replayed, the commit comes out empty, and the hermetic proof
+    // fails with "committed state changed during the run". A reachable runtime
+    // says nothing about which backend this run uses.
+    let uses_docker = matches!(
+        config.docker.backend,
+        crate::sandbox::SandboxBackend::Docker
+    );
+    // Only the container backend needs a runtime; the worktree path needs
+    // none, and that is what the zero-setup install takes.
+    let docker = if uses_docker {
+        crate::cli::run::connect_container_runtime().await.ok()
+    } else {
+        None
+    };
+    let docker_ref = docker.as_ref();
+
+    let pre_snapshot = crate::safety::snapshot(project_dir).ok();
+    // `ActiveContainers` is `Arc<Mutex<Vec<String>>>` over whichever Mutex the
+    // sandbox module imports, so name the alias rather than re-spelling it.
+    let containers: ActiveContainers = Default::default();
+
+    let mut result = execute_pipeline(
+        &task,
+        config,
+        docker_ref,
+        &mut display,
+        containers,
+        false, // dry_run
+        cancel,
+        &task_dir,
+        None,  // plan_override_json
+        false, // bare
+    )
+    .await
+    .map_err(|e| format!("The pipeline failed: {e}"))?;
+
+    // Delivery is the same function `niki run` uses, so a task started here
+    // produces exactly the same artefacts: a branch carrying the Coder's
+    // change, a report, a patch, per-agent JSON, and a hermetic proof.
+    let delivered =
+        crate::orchestrator::deliver::deliver(crate::orchestrator::deliver::DeliverInput {
+            task: &task,
+            config,
+            result: &mut result,
+            project_dir,
+            task_dir: &task_dir,
+            branch_name: branch_name.clone(),
+            pre_snapshot: pre_snapshot.as_ref(),
+            uses_docker,
+            dry_run: false,
+            force: false,
+            json_mode: false,
+            display: Some(&mut display),
+        })
+        .map_err(|e| format!("Delivery failed: {e}"))?;
+
+    // Say what actually happened. The pipeline's own events already filled the
+    // stage views; this is the sentence the user reads.
+    let summary = if let Some(note) = &delivered.block_note {
+        format!(
+            "**No branch.** {note}\n\nEvidence is in `{}`.",
+            task_dir.display()
+        )
+    } else if delivered.error.is_some() {
+        format!(
+            "**No branch.** {}\n\nEvidence is in `{}`.",
+            delivered.error.unwrap_or_default(),
+            task_dir.display()
+        )
+    } else if delivered.branch_created {
+        format!(
+            "**Done.** Branch `{}` · verdict **{:?}** · {} revision(s).\n\n\
+             Review it with `git diff main...{}` — the report and per-agent artifacts are in `{}`.",
+            branch_name,
+            result.verdict,
+            result.revision_rounds,
+            branch_name,
+            task_dir.display()
+        )
+    } else {
+        format!(
+            "**No branch.** The agents produced no file changes.\n\nEvidence is in `{}`.",
+            task_dir.display()
+        )
+    };
+    // Three events, in this order, and the order is the point:
+    //
+    //   1. `ChatFinished` commits whatever the pipeline streamed into the
+    //      in-flight buffer, so the run's own last words become a real turn
+    //      rather than being discarded when the summary arrives.
+    //   2. `ChatDelta` streams the summary.
+    //   3. `ChatFinished` commits the summary as its own assistant turn.
+    //
+    // Sending only the delta would leave the pipeline's trailing text stuck in
+    // `chat_stream` forever, and sending the summary as a `ChatMessage` would
+    // skip the streaming path the rest of the surface already uses.
+    let _ = tx.send(DisplayEvent::ChatFinished {
+        finish_reason: None,
+    });
+    let _ = tx.send(DisplayEvent::ChatDelta { text: summary });
+    let _ = tx.send(DisplayEvent::ChatFinished {
+        finish_reason: None,
+    });
     Ok(())
 }

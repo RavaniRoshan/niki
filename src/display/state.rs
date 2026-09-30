@@ -1657,6 +1657,14 @@ impl AppState {
 fn default_commands() -> Vec<Command> {
     vec![
         Command {
+            // Named `/run`, not `/run <task>`: the menu is a suggestion list
+            // with no accept action, so whatever is here is what the user has
+            // to type. The syntax lives in the description.
+            name: "/run".to_string(),
+            description: "Run the four agents on a task: /run Add a /health endpoint".to_string(),
+            action: CommandAction::Help,
+        },
+        Command {
             name: "/help".to_string(),
             description: "Show help information".to_string(),
             action: CommandAction::Help,

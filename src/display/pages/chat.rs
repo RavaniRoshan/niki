@@ -98,6 +98,7 @@ pub struct ChatPage;
 /// rather than slicing the string out of this file.
 pub const HELP_TEXT: &str = concat!(
     "Available slash commands:\n",
+    "  /run <task>      Run the four agents on a coding task; ends in a niki/<id> branch\n",
     "  /help            This list\n",
     "  /config          Edit settings — saved to niki.toml\n",
     "  /providers       See and change each agent's provider and model\n",

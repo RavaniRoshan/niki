@@ -145,6 +145,28 @@ impl AgenticDisplay {
         self.tui_thread = Some(handle);
     }
 
+    /// Forward events to an **existing** channel instead of spawning a render
+    /// thread.
+    ///
+    /// The chat surface owns its own event loop and needs the pipeline's stages
+    /// in the same transcript as the conversation. `enable_tui` spawns a second,
+    /// competing full-screen application — which is exactly what `niki run
+    /// --tui` wants and exactly what the chat must not do: two loops reading
+    /// the same terminal.
+    ///
+    /// `muted` is forced on because the caller's surface owns the screen. Left
+    /// unmuted, every stage also writes a timestamped line straight to stdout
+    /// and corrupts the alternate-screen buffer the chat is drawing into.
+    pub fn attach_sink(
+        &mut self,
+        tx: Sender<DisplayEvent>,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        self.muted = true;
+        self.cancel = Some(cancel);
+        self.tui = Some(tx);
+    }
+
     /// Signal the TUI thread to finish and wait for it to restore the terminal.
     /// Call once after the pipeline completes (and after `show_completion`).
     pub fn finish_tui(&mut self) {

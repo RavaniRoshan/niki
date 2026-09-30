@@ -214,10 +214,56 @@ without noticing because I ran a filtered lib suite and the TUI integration bina
 whole thing. They now derive columns from the row they actually found and assert that a turn is
 labelled and its body addressable.
 
+#### T3b · The chat runs the pipeline ✅
+
+Clause **C-J2**, the core promise.
+
+**What changed.** `/run <task>` in the chat starts the four agents and ends in a branch. The chat
+calls `execute_pipeline` with an `AgenticDisplay` attached to its own event sink, then calls the
+same `deliver()` that `niki run` calls — so a task started here produces the same four artefacts:
+a branch carrying the Coder's change, `report.md`, `changes.patch`, `artifacts/*.json`, and a
+hermetic proof.
+
+Two supporting changes:
+
+- `AgenticDisplay::attach_sink` forwards events to an **existing** channel instead of spawning a
+  render thread. `enable_tui` spawns a second, competing full-screen app — right for `niki run
+  --tui`, wrong for the chat, which already owns the screen. It forces `muted` on, because
+  unmuted every stage also writes a timestamped line straight to stdout and corrupts the
+  alternate-screen buffer the chat is drawing into.
+- `/run` is in the slash menu and in `/help`, first in both. Named `/run` and not `/run <task>`,
+  because the menu is a suggestion list with no accept action — whatever is listed is what the user
+  has to type.
+
+**Design decision.** A plain message stays a conversation turn; only `/run` starts the pipeline. A
+chat that silently begins a four-agent run — spending money and writing to git — on a message the
+user meant as a question is a chat that does things nobody asked for, and this product's character
+is being honest about what it did.
+
+**Bug the test caught, in my own wiring.** I first set `uses_docker` from *"is a container runtime
+reachable"*. This box has Podman installed and the fixture config says `backend = "worktree"`, so
+delivery was told the diff was already on the host, never replayed it, and the commit came out
+empty — the run failed with `NON-HERMETIC: committed state changed during the run`. A reachable
+runtime says nothing about which backend a run uses. It now comes from `config.docker.backend`, and
+the runtime is only connected when that backend is actually selected.
+
+**Can-fail proof** — `deliver()` made to report success without doing anything, which is precisely
+the `niki acp` / `niki goal` failure:
+
+```
+test a_task_typed_in_the_chat_produces_a_branch_carrying_the_change ... FAILED
+a task typed in the chat must produce a branch, got: ""
+```
+
+`tests/chat_runs_the_pipeline.rs` drives the real pipeline through the real chat entry point against
+the in-process `mock` provider, then reads the committed blob with `git show` — the same assertion
+`run_lifecycle` uses for `niki run`, so the two entry points are held to one standard.
+
 ### Next
 
-T3b · Wire the chat's `/run <task>` to `execute_pipeline` + `deliver`, streaming stages into the
-transcript.
+T4 · The UI stops lying about outcomes. `DisplayEvent::Final` sets `AwaitingApproval`
+unconditionally and that renders **"A P P R O V E D" in pulsing green** — for failed and rejected
+runs too. `[r]etry` on a failure modal quits the app. `show_failure` has zero call sites.
 
 ### Blockers
 

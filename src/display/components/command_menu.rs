@@ -172,7 +172,16 @@ mod tests {
         state.command_selected = 0;
         let cmd = get_selected_command(&state);
         assert!(cmd.is_some());
-        assert_eq!(cmd.unwrap(), "/help");
+        // The first entry is whatever the menu leads with, and that is a product
+        // decision, not a property of the selector. This used to assert
+        // "/help", so putting `/run` at the top — which is where it belongs on a
+        // surface whose whole purpose is running tasks — failed a test that had
+        // nothing to do with selection working. Assert the property instead: the
+        // unfiltered menu resolves to the first declared command, and it starts
+        // with a slash.
+        let first = state.commands.first().map(|c| c.name.as_str());
+        assert_eq!(cmd.as_deref(), first, "index 0 must be the first command");
+        assert!(cmd.unwrap().starts_with('/'));
     }
 
     #[test]
