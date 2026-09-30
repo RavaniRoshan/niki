@@ -186,3 +186,60 @@ pipeline uses. Best done after §1 stabilises the router.
 - **A `/run` that infers intent from every message.** A chat that silently
   starts a four-agent run — spending money and writing to git — on a message
   the user meant as a question is a chat that does things nobody asked for.
+
+## 8 · Queued after the hardening programme (owner directive, 2026-09-30)
+
+**These start only when §1–§7 above have no unstarted item left.** The owner's
+ordering is explicit, and the reason is the one this whole programme has been
+demonstrating: every defect in §1–§7 was found by *using* the product, and a
+new feature built on a surface that still has dead controls and lying help
+pages would inherit all of it. Ordering is recorded here so it survives.
+
+### T1 · Claude-style "living" working status — `src/display/`
+
+A pulsing glyph from `['·','✢','✳','✶','✻','✽']` on a bounce, a rotating
+gerund, a live elapsed counter and a token count, resolving to `⎿ Thought for
+Xs · N tokens`. Tool calls as bold `⏺ name args`, results as a dim `⎿`, thinking
+as dim+italic `∴`.
+
+**Constraint that decides the design:** NIKI's existing `◈ ⟠ ◉ ◆` are the
+*agent* glyphs and must not be reused or moved. The new glyphs are for working
+state only, and `--output-format json` must stay pure — so the widget is a
+render-time concern with no effect on the event stream. `tests/visual` and the
+VHS job reference the current frames, so a glyph change is a baseline change
+and must be blessed on the runner, not locally.
+
+### T2 · Two-layer permission defence — `src/risk/`
+
+Static deny (regex) → hooks → LLM transcript classifier, in that order, so
+anything allow/deny-listed in settings is a hard rule and the classifier only
+sees the residual. Plus an input probe over tool results.
+
+**The reasoning-blind property is the security property:** the classifier sees
+user messages and tool calls only, never assistant prose or tool output, so it
+cannot be talked into an approval by text the agent itself wrote. A
+classifier that reads the transcript *including* tool output inherits every
+prompt injection those outputs contain, which is the attack it exists to stop.
+
+### T3 · Streaming tool executor — `src/orchestrator/`, `src/runtime/`
+
+Begin a tool when its `tool_use` block finishes streaming rather than after
+the whole turn. `isConcurrencySafe()`: reads parallel, writes exclusive.
+
+**The concurrency rule is the whole safety content of this task.** Two
+parallel writes to one file is a lost update, and "reads are safe" is only
+true if a read cannot observe a half-applied write. The executor needs a
+per-path lock, not a read/write classification alone.
+
+### T4 · Context compression at a budget — `src/memory/`
+
+Above 95% of the context window, fire in priority order: snip duplicate
+system messages, microcompact recent tool results, collapse long file reads,
+summarise. Seven strategies in the original; four here, because the last three
+need a summarisation model call and their ordering is an empirical question
+this codebase has no data for.
+
+**The failure mode to avoid is silent truncation.** Every strategy must be
+counted and reported in the transcript, so a run that lost context says which
+strategy took it — the same rule B2-01 through B2-12 have been applying to
+every other silent degradation in this codebase.
