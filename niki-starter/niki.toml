@@ -1,0 +1,57 @@
+# niki-starter — configuration for the first run.
+#
+# This file is deliberately short. A beginner's first look at a configuration
+# should be at something they can read all of, not at the 13 KB reference that
+# `niki init` writes.
+#
+# The two settings that matter are the ones below.
+
+[general]
+# How many times the Reviewer may send work back to the Coder. The default is 3;
+# this exercise finishes in one round, and a lower number makes a first run
+# cheaper and quicker to understand.
+max_revision_rounds = 2
+
+# Where run artifacts are written: changes.patch, report.md, artifacts/*.json.
+output_dir = ".niki"
+
+[docker]
+# `worktree` needs no container runtime. It runs agent commands as local
+# processes with your own privileges, which is fine for a project you wrote and
+# wrong for one you did not.
+#
+# If you have Podman or Docker and would rather have container isolation, change
+# this to "docker" and build the sandbox image first:
+#
+#   podman build -t niki-sandbox:24.04 -f docker/Dockerfile .
+backend = "worktree"
+
+# The local-first setup: no API key, no account, no spend. The Coder is the
+# stage most likely to fail with a small model, because every stage must emit a
+# schema-valid JSON artifact — see HONESTY.md.
+[providers.ollama]
+base_url = "http://localhost:11434"
+default_model = "qwen2.5-coder:7b"
+
+[agents.planner]
+provider = "ollama"
+model = "qwen2.5-coder:7b"
+
+[agents.coder]
+provider = "ollama"
+model = "qwen2.5-coder:7b"
+
+[agents.tester]
+provider = "ollama"
+model = "qwen2.5-coder:7b"
+
+[agents.reviewer]
+provider = "ollama"
+model = "qwen2.5-coder:7b"
+
+[permissions]
+# `manual` honours the documented behaviour. Do not set `bypass` to make a
+# first run work: the permission model is the thing standing between a model and
+# your filesystem, and turning it off to get past an error removes the reason to
+# keep reading the error.
+mode = "manual"
