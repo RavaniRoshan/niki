@@ -175,11 +175,49 @@ test result: FAILED. 0 passed; 2 failed
 **T2 total: 17 new tests** (15 in `tests/chat_conversation.rs`, 2 unit tests in
 `src/display/pages/chat.rs`), all can-fail proven.
 
+### T3 · A task typed in the TUI runs the pipeline — in progress
+
+Clause **C-J2**. The chat is a coding agent, not a viewer. This is the one High-risk slice in the
+programme, and measuring it first is what changed the plan.
+
+#### T3a · Delivery extracted out of `cli/run.rs` ✅
+
+**What the measurement found.** `grep 'orchestrator\|execute_pipeline' src/cli/chat.rs` returns
+nothing, so wiring chat to the pipeline looked like one function call. It is not. The step that
+turns a diff into a reviewable branch — artifacts, the red-suite gate, replaying the sandbox diff
+onto the host working tree, conflict-marker blocking, `create_branch_and_commit`, the hermetic
+safety proof, the report — was **281 lines inside `cli/run.rs::run_inner`**, and
+`create_branch_and_commit`, `apply_diff_to_working_tree` and `generate_report` each had exactly one
+call site, all in that file.
+
+Calling `execute_pipeline` from chat without moving that would have reproduced the exact bug the
+audit found in `niki acp` and `niki goal`: the four agents run, `sandbox.destroy()` removes the
+worktree on the way out, the Coder's diff is deleted from disk, no branch exists — and the surface
+reports success. The deliverable lived one layer above the orchestrator, so the orchestrator could
+not deliver.
+
+**What changed.** `src/orchestrator/deliver.rs` — the 281 lines, plus `role_filename` and
+`write_plan_md`, which only delivery used. `run.rs` 1912 → 1578 lines. The body was moved, not
+rewritten: the CLI's locals are reconstructed at the top of `deliver()` so the extracted lines read
+exactly as they did. A refactor of the most safety-critical code in the product should be a move.
+Eleven `needless_borrow` lints came from the destructured reference bindings and were auto-fixed.
+
+**Verification.** `run_lifecycle` 13/13, lib 949/949, fmt clean, `clippy --all-targets -D warnings`
+clean. The core promise is unchanged by the move.
+
+**A regression this caught, in my own previous commit.** Three lib tests in
+`display::pages::chat` failed: `build_lines_header_and_messages` asserted the single string
+`"assistant: world"`, and two selection tests passed hard-coded columns `13..18`. All three were
+pinned to the *old pixel layout*, not to the property they claimed to test — so the markdown
+rendering in T2b broke them for a reason that had nothing to do with correctness. I shipped that
+without noticing because I ran a filtered lib suite and the TUI integration binaries but not the
+whole thing. They now derive columns from the row they actually found and assert that a turn is
+labelled and its body addressable.
+
 ### Next
 
-T3 · **A task typed in the TUI runs the pipeline.** The core promise (C-J2). `cli/chat.rs` contains
-no reference to the orchestrator at all, so nothing typed in the default front door can produce a
-branch. Every other TUI page is dead code until something populates `state.stages`.
+T3b · Wire the chat's `/run <task>` to `execute_pipeline` + `deliver`, streaming stages into the
+transcript.
 
 ### Blockers
 
@@ -190,3 +228,5 @@ None.
 - The 3 dirty files were an interrupted prior session; only the labelled sabotage was reverted.
 - `niki chat` is a **coding agent**, not a viewer (owner decision, §0a).
 - For the 12 slash commands that lie, **retracting the claim is the default**.
+- A plain chat message stays a conversation turn; `/run <task>` starts the pipeline. Inferring
+  "this is a task" from every message would be magic, and the product's ethos is honesty.
