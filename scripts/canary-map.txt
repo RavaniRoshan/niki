@@ -267,3 +267,10 @@ unsound-is-denied | unsound_advisories_are_denied_not_ignored | `unsound = "none
 exceptions-match-the-tool | every_unsound_advisory_is_named_with_a_reason | a hand-typed ignore list drifting from what audit reports
 every-exception-explains-itself | every_exception_explains_itself | a bare ignore entry nobody can review
 git2-exceptions-stay-unreachable | the_git2_exceptions_are_still_unreachable | NIKI starting to use the APIs the advisories describe
+# B5-07 · the container is hardened, and the tests now say so
+default-container-is-hardened | a_default_container_is_hardened | a default install shipping an unhardened container
+egress-does-not-unharden | opening_egress_does_not_unharden_anything_else | opening the network quietly granting capabilities
+wildcard-allowlist-opens-egress | a_wildcard_allowlist_opens_egress_too | a documented equivalent that behaves differently
+each-hardening-can-be-turned-off | each_hardening_setting_can_be_turned_off | config keys that are decoration
+resource-limits-reach-the-host-config | the_resource_limits_reach_the_host_config | the limits the file is named for, after extraction
+container-is-never-privileged | a_container_is_never_privileged | nothing in the config surface can grant privilege
