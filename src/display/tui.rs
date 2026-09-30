@@ -2011,6 +2011,7 @@ fn render(
             if let Some(ref sv) = state.session_view {
                 crate::display::pages::session::render_session(
                     sv,
+                    &state.chat_log,
                     bands.content,
                     frame.buffer_mut(),
                 );

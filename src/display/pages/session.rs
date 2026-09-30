@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 
-use crate::mission::{Agent, ChatMessage, ChatRole, Mission};
+use crate::mission::{Agent, ChatMessage, Mission};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionTab {
@@ -83,7 +83,19 @@ impl SessionState {
     }
 }
 
-pub fn render_session(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Buffer) {
+/// The Conversation tab reads the **live** chat log.
+///
+/// It used to read `SessionState::messages`, which nothing in the tree ever
+/// writes — the page therefore rendered "No messages yet" on every mission,
+/// permanently, while the conversation the user was looking at sat in
+/// `AppState::chat_log`. `messages` stays as the mission-scoped store; the
+/// tab shows what the chat view is actually showing.
+pub fn render_session(
+    state: &SessionState,
+    chat_log: &[(String, String)],
+    area: ratatui::layout::Rect,
+    buf: &mut Buffer,
+) {
     // Header (standard shape: bold title + dim meta; status word included).
     let header_text = format!(
         " session · {} · {}",
@@ -139,7 +151,7 @@ pub fn render_session(state: &SessionState, area: ratatui::layout::Rect, buf: &m
     };
 
     match state.active_tab {
-        SessionTab::Conversation => render_conversation(state, content_area, buf),
+        SessionTab::Conversation => render_conversation(chat_log, content_area, buf),
         SessionTab::Agents => render_agents(state, content_area, buf),
         SessionTab::Tools => render_tools(state, content_area, buf),
         _ => {
@@ -163,42 +175,66 @@ pub fn render_session(state: &SessionState, area: ratatui::layout::Rect, buf: &m
     );
 }
 
-#[allow(clippy::explicit_counter_loop)]
-fn render_conversation(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Buffer) {
-    if state.messages.is_empty() {
+/// Render the live transcript: `(role, text)` pairs, newest last, one row each.
+///
+/// Public so a test can drive it without the Session page's mission state —
+/// the empty-vs-populated distinction is the whole point of this change.
+pub fn render_conversation(
+    chat_log: &[(String, String)],
+    area: ratatui::layout::Rect,
+    buf: &mut Buffer,
+) {
+    if chat_log.is_empty() {
         let p = Paragraph::new("No messages yet — start from Chat (press Tab).")
             .style(Style::default().fg(crate::display::theme::fg_dim()));
         p.render(area, buf);
         return;
     }
-    let mut y = area.y;
-    for msg in &state.messages {
+    // The tail, so a long conversation shows its most recent turns rather than
+    // the first — the same choice the chat view makes.
+    let rows: Vec<(String, String)> = chat_log
+        .iter()
+        .rev()
+        .take(area.height as usize)
+        .map(|(r, t)| (r.clone(), t.clone()))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
+    for (row, (role, text)) in rows.into_iter().enumerate() {
+        let y = area.y + row as u16;
         if y >= area.y + area.height {
             break;
         }
-        let (role, color) = match msg.role {
-            ChatRole::User => ("User", crate::display::theme::accent()),
-            ChatRole::Assistant => ("NIKI", crate::display::theme::accent()),
-            ChatRole::System => ("System", crate::display::theme::warning()),
+        // `AppState::chat_log` roles are the lowercase strings the chat view
+        // pushes: "user", "assistant", "system", "error", "notice".
+        let (label, color) = match role.as_str() {
+            "user" => ("User", crate::display::theme::accent()),
+            "assistant" => ("NIKI", crate::display::theme::accent()),
+            "system" | "notice" => ("System", crate::display::theme::warning()),
+            _ => ("", crate::display::theme::fg_bright()),
         };
-        let role_w = role.len() as u16;
-        let max_content = area.width.saturating_sub(role_w + 2);
-        let content = if msg.content.len() > max_content as usize {
-            format!("{}…", &msg.content[..max_content as usize - 1])
+        let label_w = label.len() as u16 + 1;
+        let max_content = area.width.saturating_sub(label_w + 2) as usize;
+        let content = if text.chars().count() > max_content {
+            let head: String = text.chars().take(max_content.saturating_sub(1)).collect();
+            format!("{head}\u{2026}")
         } else {
-            msg.content.clone()
+            text.clone()
         };
-        let line = Line::from(vec![
-            Span::styled(
-                format!("{} ", role),
+        let mut spans = Vec::new();
+        if !label.is_empty() {
+            spans.push(Span::styled(
+                format!("{label} "),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                content,
-                Style::default().fg(crate::display::theme::fg_bright()),
-            ),
-        ]);
-        let p = Paragraph::new(line);
+            ));
+        }
+        spans.push(Span::styled(
+            content,
+            Style::default().fg(crate::display::theme::fg_bright()),
+        ));
+        let p = Paragraph::new(Line::from(spans));
         p.render(
             ratatui::layout::Rect {
                 x: area.x,
@@ -208,11 +244,9 @@ fn render_conversation(state: &SessionState, area: ratatui::layout::Rect, buf: &
             },
             buf,
         );
-        y += 1;
     }
 }
 
-#[allow(clippy::explicit_counter_loop)]
 fn render_agents(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Buffer) {
     if state.agents.is_empty() {
         let p = Paragraph::new("No agents active — agents appear here once a run starts.")
@@ -220,8 +254,8 @@ fn render_agents(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Bu
         p.render(area, buf);
         return;
     }
-    let mut y = area.y;
-    for agent in &state.agents {
+    for (row, agent) in state.agents.iter().enumerate() {
+        let y = area.y + row as u16;
         if y >= area.y + area.height {
             break;
         }
@@ -259,7 +293,6 @@ fn render_agents(state: &SessionState, area: ratatui::layout::Rect, buf: &mut Bu
             },
             buf,
         );
-        y += 1;
     }
 }
 
