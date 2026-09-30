@@ -21,6 +21,27 @@ fn fmt_duration(ms: u64) -> String {
     format!("{}.{:01}s", secs, (ms % 1000) / 100)
 }
 
+/// The model an agent row should display, from what the run reported.
+///
+/// `StageInfo` carries the role but not the model, so this matches on the role
+/// name the metrics were reported under. When the run told us nothing — no
+/// `CostJson` yet, or a row the parser could not read — it says so rather than
+/// naming a plausible-looking model.
+fn real_model_for(state: &AppState, role_name: &str) -> String {
+    state
+        .cost_agents
+        .iter()
+        .find(|a| a.role.eq_ignore_ascii_case(role_name))
+        .map(|a| {
+            if a.provider.is_empty() {
+                a.model.clone()
+            } else {
+                format!("{}/{}", a.provider, a.model)
+            }
+        })
+        .unwrap_or_else(|| "—".to_string())
+}
+
 pub struct CostPage {
     scroll_offset: u16,
 }
@@ -151,8 +172,12 @@ impl Page for CostPage {
                     format!("  {} {:<9}", glyph, name),
                     Style::default().fg(color).add_modifier(Modifier::BOLD),
                 ),
+                // The model this agent actually used, as the run reported it.
+                // This was the literal "anthropic/claude-sonnet-4" for every
+                // agent in every configuration, so a local `qwen2.5-coder` run
+                // was displayed as four Anthropic calls.
                 Span::styled(
-                    format!("{:<20}", "anthropic/claude-sonnet-4"),
+                    format!("{:<20}", real_model_for(state, name)),
                     Style::default().fg(theme::fg_color()),
                 ),
                 Span::styled(

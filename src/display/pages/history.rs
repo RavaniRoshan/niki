@@ -21,6 +21,8 @@ struct HistoryEntry {
     when: String,
     verdict_color: ratatui::style::Color,
     branch: String,
+    /// The task directory, so Enter can open the run rather than swap a label.
+    dir: std::path::PathBuf,
 }
 
 fn load_history_entries(project_path: &std::path::Path) -> Vec<HistoryEntry> {
@@ -46,7 +48,7 @@ fn load_history_entries(project_path: &std::path::Path) -> Vec<HistoryEntry> {
     records
         .into_iter()
         .take(20)
-        .map(|(_, record)| {
+        .map(|(entry_dir, record)| {
             let id = record.task_id.to_string();
             let id_short = &id[..id.len().min(8)];
             let task = record.description.clone();
@@ -74,6 +76,7 @@ fn load_history_entries(project_path: &std::path::Path) -> Vec<HistoryEntry> {
                 when,
                 verdict_color,
                 branch,
+                dir: entry_dir.clone(),
             }
         })
         .collect()
@@ -283,10 +286,15 @@ impl Page for HistoryPage {
                 true
             }
             KeyCode::Enter => {
+                // Open the run. This copied the branch string into
+                // `state.branch_name` and jumped to the Run page, which reads
+                // as "I opened my last run" and is not: the task's report,
+                // patch and artifacts were sitting in the directory and were
+                // never read. To the user, the Run page then showed that
+                // branch beside the *current* run's contents.
                 if let Some(entry) = entries.get(self.selected) {
-                    state.branch_name = entry.branch.clone();
+                    state.open_task_from_history(&entry.dir, &entry.branch);
                 }
-                state.current_page = PageId::Run;
                 true
             }
             KeyCode::Char('f') => {

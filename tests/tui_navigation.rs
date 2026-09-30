@@ -1738,3 +1738,108 @@ fn a_notice_reaches_the_transcript_rather_than_a_discarded_screen() {
     });
     assert_eq!(state.chat_log[0].0, "warning");
 }
+
+/// Nothing on the Run page may be invented.
+///
+/// The Run page is one Tab from every user and, before `/run` existed, was
+/// permanently empty of real data — so everything it showed was fabricated: a
+/// `--project ./my-app` literal, a `niki/xxxxx` ref that did not exist,
+/// "working tree: untouched" in success green with nothing behind it, and four
+/// agents marked `queued` for a run nobody had started. `niki chat` opens here.
+#[test]
+fn the_run_page_invents_nothing_before_a_run_exists() {
+    use niki::display::pages::Page;
+    use niki::display::pages::run::RunPage;
+    use ratatui::backend::TestBackend;
+
+    // Rendered for real. The first version of this test asserted against
+    // `state.chat_lines`, which is empty on a fresh state — so it passed
+    // against a page that was inventing a branch ref, a project path and four
+    // queued agents. A test that cannot fail on the defect it describes is
+    // worse than no test.
+    let state = make_state();
+    let page = RunPage::default();
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|f| page.render(f, f.area(), &state))
+        .expect("the Run page must render");
+
+    let screen = terminal.backend().to_string();
+    assert!(
+        !screen.contains("niki/xxxxx"),
+        "invented a branch ref:\n{screen}"
+    );
+    assert!(
+        !screen.contains("./my-app"),
+        "invented a project path:\n{screen}"
+    );
+    assert!(
+        !screen.contains("working tree: untouched"),
+        "asserted an unmeasured property in success green:\n{screen}"
+    );
+    assert!(
+        !screen.contains("queued"),
+        "invented agents for a run nobody started:\n{screen}"
+    );
+}
+
+/// The Cost page names the model the run used.
+///
+/// It printed the literal `anthropic/claude-sonnet-4` for every agent in every
+/// configuration, so a local `qwen2.5-coder` run was displayed as four
+/// Anthropic calls. The data was on `StageMetric` and simply was not carried
+/// across.
+#[test]
+fn the_cost_page_reads_the_model_the_run_reported() {
+    let mut state = make_state();
+    let json = serde_json::json!({
+        "total_cost_usd": 0.0042,
+        "agents": [
+            {"role": "Planner", "provider": "ollama", "model": "qwen2.5-coder"},
+            {"role": "Coder",   "provider": "ollama", "model": "qwen2.5-coder"}
+        ]
+    })
+    .to_string();
+    state.apply_event(DisplayEvent::CostJson(json));
+
+    assert_eq!(state.cost_agents.len(), 2);
+    assert_eq!(state.cost_agents[0].model, "qwen2.5-coder");
+    assert_eq!(state.cost_agents[0].provider, "ollama");
+    // The status bar and `/cost` read `state.cost`, which nothing ever assigned.
+    assert!(
+        (state.cost - 0.0042).abs() < f64::EPSILON,
+        "total cost must be recorded, got {}",
+        state.cost
+    );
+}
+
+/// Opening a run from History must load it, not rename the current one.
+#[test]
+fn opening_a_run_from_history_reads_the_task_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let task = dir.path();
+    std::fs::write(task.join("changes.patch"), "diff --git a/x b/x\n").unwrap();
+    std::fs::write(task.join("report.md"), "# the report\n").unwrap();
+    std::fs::create_dir_all(task.join("artifacts")).unwrap();
+    std::fs::write(task.join("artifacts/coder.json"), "{}").unwrap();
+
+    let mut state = make_state();
+    state.diff_content = Some("the current run's diff".to_string());
+    state.open_task_from_history(task, "niki/abcd1234");
+
+    assert_eq!(state.branch_name, "niki/abcd1234");
+    assert_eq!(
+        state.diff_content.as_deref(),
+        Some("diff --git a/x b/x\n"),
+        "the opened run's patch must replace the current one, not sit beside it"
+    );
+    assert!(
+        state
+            .report_content
+            .as_deref()
+            .unwrap()
+            .contains("the report")
+    );
+    assert_eq!(state.opened_task_dir.as_deref(), Some(task));
+}
