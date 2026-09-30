@@ -1889,7 +1889,7 @@ fn default_commands() -> Vec<Command> {
             action: CommandAction::Rewind,
         },
         Command {
-            name: "/steer".to_string(),
+            name: "/steer <agent>".to_string(),
             description: "Send a live correction to the running agent".to_string(),
             action: CommandAction::Steer,
         },

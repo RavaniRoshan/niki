@@ -96,6 +96,15 @@ pub struct ChatPage;
 ///
 /// Public so `tests/tui_sheets.rs` can assert every working command is listed,
 /// rather than slicing the string out of this file.
+/// The standard suffix for a command that is advertised but not implemented.
+///
+/// These arms used to print a success message for an action they did not take
+/// — "Session forked (new branch created)", "Thinking effort set to high",
+/// "Security audit queued". A command that reports work it did not do is
+/// worse than one that admits it is missing, because the user stops checking.
+/// One constant, so the wording cannot drift between commands.
+pub const NOT_WIRED: &str = "is on the roadmap, not wired yet";
+
 pub const HELP_TEXT: &str = concat!(
     "Available slash commands:\n",
     "  /run <task>      Run the four agents on a coding task; ends in a niki/<id> branch\n",
@@ -654,6 +663,28 @@ impl Page for ChatPage {
                         state.chat_lines.clear();
                         state.set_notice("Conversation cleared", 2500);
                     } else if trimmed == "/compact" {
+                        // This used to say "Compacted N previous turns into
+                        // memory checkpoint" and then `split_off` the turns:
+                        // the text was gone, the model was never told, no
+                        // checkpoint was written, and the next save persisted
+                        // the shortened transcript. Destructive and
+                        // misreported.
+                        let count = state.chat_log.len();
+                        if count > 2 {
+                            state.chat_log.push((
+                                "system".to_string(),
+                                format!(
+                                    "Compacting the conversation {NOT_WIRED}. Nothing has been \
+                                     removed — your full transcript is intact."
+                                ),
+                            ));
+                        } else {
+                            state.chat_log.push((
+                                "system".to_string(),
+                                format!("Nothing to compact yet; and compacting {NOT_WIRED}."),
+                            ));
+                        }
+                    } else if false {
                         let count = state.chat_log.len();
                         if count > 2 {
                             let last = state.chat_log.split_off(count - 2);
@@ -714,19 +745,35 @@ impl Page for ChatPage {
                     } else if trimmed.starts_with("/model") {
                         let arg = trimmed.strip_prefix("/model").unwrap_or("").trim();
                         if arg.is_empty() {
+                            // The configured model, not the recorded one.
+                            // `state.model` is display-only, so reporting it
+                            // here told the user which model was answering when
+                            // it was not the one they were shown.
                             state.chat_log.push((
                                 "system".to_string(),
                                 format!(
-                                    "Current model: {}. Usage: /model <model-name>",
-                                    state.model
+                                    "Model: {} (from [agents.coder] in niki.toml).\n\
+                                     Usage: /model <name> — note that switching {NOT_WIRED}.",
+                                    state.config.agents.coder.model
                                 ),
                             ));
                         } else {
+                            // Recorded for display only. The provider is
+                            // rebuilt every turn from `config.agents.coder` in a
+                            // different thread that never sees `AppState`, so
+                            // this could not change which model answers — while
+                            // the status bar then displayed the new name.
                             state.model = arg.to_string();
-                            state.update_context_limit_for_model(arg);
-                            state
-                                .chat_log
-                                .push(("system".to_string(), format!("Switched model to {}", arg)));
+                            state.chat_log.push((
+                                "system".to_string(),
+                                format!(
+                                    "Switching the model for this session {NOT_WIRED}. \
+                                     The name is recorded for display, but the provider is \
+                                     still `{}`. Change `[agents.coder] model` in niki.toml \
+                                     to actually switch.",
+                                    state.config.agents.coder.model
+                                ),
+                            ));
                         }
                     } else if trimmed == "/theme" {
                         // A list with a live preview, not a cycle. Cycling means
@@ -834,13 +881,15 @@ impl Page for ChatPage {
                         } else {
                             state.chat_log.push((
                                 "system".to_string(),
-                                format!("Session renamed to \"{}\"", name),
+                                format!(
+                                    "Session renaming {NOT_WIRED}. Sessions are not named yet."
+                                ),
                             ));
                         }
                     } else if trimmed == "/fork" {
                         state.chat_log.push((
                             "system".to_string(),
-                            "Session forked (new branch created from current state).".to_string(),
+                            format!("Forking a session {NOT_WIRED}."),
                         ));
                     } else if trimmed.starts_with("/branch") {
                         let name = trimmed
@@ -854,10 +903,13 @@ impl Page for ChatPage {
                                 format!("Current branch: {}", state.branch_name),
                             ));
                         } else {
-                            state.branch_name = name;
                             state.chat_log.push((
                                 "system".to_string(),
-                                format!("Switched to branch \"{}\"", state.branch_name),
+                                format!(
+                                    "Switching branches from the TUI {NOT_WIRED}. The name is \
+                                     recorded for display only; no git command was run. \
+                                     Use `git checkout {name}` in a shell."
+                                ),
                             ));
                         }
                     } else if trimmed == "/usage" {
@@ -880,7 +932,10 @@ impl Page for ChatPage {
                             if level.is_empty() {
                                 "Usage: /effort <low|medium|high>".to_string()
                             } else {
-                                format!("Thinking effort set to {}", level)
+                                format!(
+                                    "Reasoning effort {NOT_WIRED} on this surface. \
+                                     Set it per agent in niki.toml instead."
+                                )
                             },
                         ));
                     } else if trimmed == "/mcp" {
@@ -954,18 +1009,41 @@ create one and it is available immediately."
                             "system".to_string(),
                             format!("Markdown export ({} chars):\n{}", md.len(), md),
                         ));
+                    } else if trimmed == "/doctor" {
+                        // Advertised in the slash menu and in `/help` with the
+                        // description "Check providers, auth, and sandbox
+                        // health", and had no handler — so it was sent to the
+                        // model as the literal text "/doctor".
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Running `niki doctor` in a shell — it needs the terminal, and \
+                             this surface owns it. Press Ctrl+C to leave, then run it."
+                                .to_string(),
+                        ));
+                    } else if trimmed == "/review" || trimmed == "/code-review" {
+                        // The risk classifier already escalates auth, crypto
+                        // and network work to a security audit on its own.
+                        state.current_page = PageId::Verdict;
+                        state.chat_log.push((
+                            "system".to_string(),
+                            "Showing the Verdict page for the current run. A run schedules \
+                             its own review; there is nothing to queue by hand."
+                                .to_string(),
+                        ));
                     } else if trimmed == "/btw" {
                         state.chat_log.push((
                             "system".to_string(),
-                            "Side question mode: type your question after /btw ".to_string(),
+                            format!("Side-question mode {NOT_WIRED}."),
                         ));
-                    } else if trimmed == "/code-review" {
-                        state.current_page = PageId::Verdict;
                     } else if trimmed == "/security-review" {
                         state.current_page = PageId::Verdict;
                         state.chat_log.push((
                             "system".to_string(),
-                            "Security audit queued (Reviewer → SecurityAuditor stage).".to_string(),
+                            format!(
+                                "A security audit is scheduled automatically when a run touches \
+                                 auth, crypto or network code. There is no way to queue one by \
+                                 hand {NOT_WIRED}."
+                            ),
                         ));
                     } else if trimmed.starts_with("/add-dir") {
                         let path = trimmed
@@ -980,7 +1058,10 @@ create one and it is available immediately."
                         } else {
                             state.chat_log.push((
                                 "system".to_string(),
-                                format!("Added working directory: {}", path),
+                                format!(
+                                    "Adding a second working directory {NOT_WIRED}. The path \
+                                     was not added. Pass `--project <path>` instead."
+                                ),
                             ));
                         }
                     } else if trimmed == "/loop" {
@@ -1022,6 +1103,28 @@ create one and it is available immediately."
                              through your configured provider's STT endpoint. Set up a \
                              provider (e.g. OpenAI) in niki.toml or via OPENAI_API_KEY."
                                 .to_string(),
+                        ));
+                    } else if trimmed.starts_with("/run ") || trimmed == "/run" {
+                        // Handled by the session processor, which owns the
+                        // pipeline. It has to be named here too: the
+                        // unknown-command arm below rejects anything starting
+                        // with `/` that it does not recognise, and `/run` is
+                        // dispatched one layer down, after this returns.
+                        state
+                            .chat_log
+                            .push(("user".to_string(), trimmed.to_string()));
+                    } else if trimmed.starts_with('/') {
+                        // A command NIKI does not know must not become a prompt.
+                        //
+                        // Everything unmatched used to be pushed as a user
+                        // message, so `/doctor` and `/review` — both listed in
+                        // the slash menu and in `/help` — were silently sent to
+                        // the model as the text "/doctor". The user saw the
+                        // model reply, or nothing happen, with no indication
+                        // that a command had been typed at all.
+                        state.chat_log.push((
+                            "error".to_string(),
+                            format!("Unknown command: {trimmed}\nType /help for the list."),
                         ));
                     } else {
                         state
