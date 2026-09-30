@@ -5,14 +5,56 @@
 # Use the RustSec advisory database.
 db-urls = ["https://github.com/RustSec/advisory-db"]
 db-path = "~/.cargo/advisory-datasabases"
-# Ignore advisories that are unsound to act on in this crate (add with reason).
-ignore = []
-# How aggressively to treat unmaintained transitive deps.
+
 unmaintained = "none"
-# How aggressively to treat unsoundness advisories.
-unsound = "none"
-# Warn on yanked crates rather than failing.
+unsound = "all"
 yanked = "warn"
+
+# Advisories we have looked at and can justify, each with the reason.
+# `unsound = "all"` below means these four are the *only* unsound advisories
+# this project tolerates: anything new fails the gate. It was `"none"`, which
+# reads as a policy and is the opposite — unsoundness never failed anything,
+# so a genuine new advisory would have been as green as these.
+[[advisories.ignore]]
+id = "RUSTSEC-2026-0183"
+reason = """
+git2 0.20.4. The advisory is undefined behaviour in `Remote::list()`. NIKI
+never constructs a `Remote` or lists remote refs — the only git2 surface it
+uses is open/read/commit/diff on a local repository, and `grep -r 'Remote' src/`
+returns nothing. The bump that fixes it is git2 0.21, a 0.20 -> 0.21 move that
+also rebuilds the vendored libgit2 C library; that is a dependency change with
+its own risk, and it is scheduled rather than smuggled into a hardening pass.
+"""
+
+[[advisories.ignore]]
+id = "RUSTSEC-2026-0184"
+reason = """
+git2 0.20.4. The advisory is undefined behaviour for a `Signature` derived from
+a buffer-created `BlameHunk`. NIKI calls `git2::Signature::now` (in
+`src/output/git.rs` and one test) to build a fresh commit signature, and never
+reads blame — no `blame()`, no `BlameHunk` anywhere in the tree. The path the
+advisory describes is not reachable from here. Same bump as 0183.
+"""
+
+[[advisories.ignore]]
+id = "RUSTSEC-2026-0002"
+reason = """
+lru 0.12.5, `IterMut` violating Stacked Borrows. Transitive: the only path is
+ratatui 0.29 -> lru, so NIKI cannot bump it without a ratatui major. It is a
+soundness bug in a crate we do not call directly, in a code path that would
+require concurrent `IterMut` over an LRU inside a TUI frame.
+"""
+
+[[advisories.ignore]]
+id = "RUSTSEC-2026-0253"
+reason = """
+lru 0.12.5, use-after-free from a lack of panic safety in `LruCache::pop()`.
+Transitive via ratatui, as 0002 above. NIKI does not hold an LRU across an
+unwind; the cache lives inside the framework's own render path.
+"""
+# How aggressively to treat unmaintained transitive deps.
+# How aggressively to treat unsoundness advisories.
+# Warn on yanked crates rather than failing.
 
 [licenses]
 # Allow common OSS licenses. Keep this list tight: any crate using a license
