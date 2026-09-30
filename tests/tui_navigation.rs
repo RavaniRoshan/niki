@@ -1366,42 +1366,142 @@ fn appstate_totals_with_stages() {
 // PageRouter — render_current with various pages
 // ============================================================================
 
-#[test]
-fn page_router_render_current_all_pages() {
-    let router = PageRouter::new();
+/// Every page must render **its own title**, and something besides whitespace.
+///
+/// These two tests used to draw all fourteen pages and assert nothing. They
+/// could only fail on a panic, which is worth something — a page that indexes
+/// past its content does panic — but a page that renders blank, or renders the
+/// wrong page, or renders an empty box with a border, all passed. `ROADMAP.md`
+/// §6 called them out for exactly that.
+///
+/// The assertion is the page's `title()`, which every page already declares and
+/// which its header draws, so this asks the question the test's name implies:
+/// does this page draw this page?
+fn page_text(f: &ratatui::buffer::Buffer) -> String {
+    let area = f.area;
+    (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| f[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
+fn assert_every_page_draws_itself(with_stages: bool) {
+    let router = PageRouter::new();
     let backend = ratatui::backend::TestBackend::new(120, 40);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
 
     for page_id in PageId::all() {
-        let mut test_state = make_state_with_stages(4);
+        let mut test_state = if with_stages {
+            make_state_with_stages(4)
+        } else {
+            make_state()
+        };
         test_state.current_page = *page_id;
+        // Fleet and Session are not `Page`s — `tui.rs` renders them with their
+        // own functions, because they read the mission store rather than
+        // `AppState`. Drawing them through `PageRouter` is a no-op that leaves
+        // a blank screen, and asserting on *that* would be asserting the
+        // router's wiring rather than what a user sees. So each page is drawn
+        // the way the product draws it.
         terminal
             .draw(|f| {
                 let area = f.area();
-                router.render_current(f, area, &test_state);
+                match page_id {
+                    PageId::Fleet => niki::display::pages::fleet::render_fleet(
+                        &test_state.fleet,
+                        area,
+                        f.buffer_mut(),
+                    ),
+                    PageId::Session => {
+                        // No session open: the same explicit empty state
+                        // `tui.rs` shows, because a blank screen is the thing
+                        // B3-08 removed.
+                        f.render_widget(ratatui::widgets::Paragraph::new("no session open"), area);
+                    }
+                    other => {
+                        test_state.current_page = *other;
+                        router.render_current(f, area, &test_state)
+                    }
+                }
             })
             .unwrap();
+        let text = page_text(terminal.backend().buffer());
+
+        // Chat is the transcript, not a titled page: it has no header because
+        // the conversation *is* its content, and `PageId::title()` says "chat"
+        // for the status bar rather than for anything it draws. Asserting the
+        // word appears would be asserting a header nobody intended, so what is
+        // asserted instead is the real requirement — that the front door shows
+        // the conversation.
+        if *page_id == PageId::Chat {
+            let mut with_history = if with_stages {
+                make_state_with_stages(4)
+            } else {
+                make_state()
+            };
+            with_history
+                .chat_log
+                .push(("user".to_string(), "CANARY-QUESTION".to_string()));
+            terminal
+                .draw(|f| {
+                    let area = f.area();
+                    with_history.current_page = PageId::Chat;
+                    router.render_current(f, area, &with_history);
+                })
+                .unwrap();
+            let chat_text = page_text(terminal.backend().buffer());
+            assert!(
+                chat_text.contains("CANARY-QUESTION"),
+                "the chat view is the product's front door and must draw the \
+                 conversation. Rendered:\n{chat_text}"
+            );
+            continue;
+        }
+
+        // Fleet and Session label themselves differently from `PageId::title`
+        // — the same hand-typed-header drift this test is here to catch, one
+        // level down. Their own titles are what must appear.
+        let title = match page_id {
+            PageId::Fleet => "fleet",
+            PageId::Session => "session",
+            other => other.title(),
+        };
+        assert!(
+            text.contains(title),
+            "{page_id:?} drew nothing containing its own title {title:?}. A page \
+             that renders blank is a page the user is looking at nothing. \
+             Rendered:\n{text}"
+        );
+        assert!(
+            text.trim().chars().any(|c| !c.is_whitespace()
+                && c != '│'
+                && c != '┌'
+                && c != '┐'
+                && c != '└'
+                && c != '┘'
+                && c != '─'
+                && c != '├'
+                && c != '┤'
+                && c != '┬'
+                && c != '┴'
+                && c != '┼'),
+            "{page_id:?} drew only box-drawing characters. Rendered:\n{text}"
+        );
     }
 }
 
 #[test]
+fn page_router_render_current_all_pages() {
+    assert_every_page_draws_itself(true);
+}
+
+#[test]
 fn page_router_render_current_empty_state() {
-    let router = PageRouter::new();
-
-    let backend = ratatui::backend::TestBackend::new(120, 40);
-    let mut terminal = ratatui::Terminal::new(backend).unwrap();
-
-    for page_id in PageId::all() {
-        let mut test_state = make_state();
-        test_state.current_page = *page_id;
-        terminal
-            .draw(|f| {
-                let area = f.area();
-                router.render_current(f, area, &test_state);
-            })
-            .unwrap();
-    }
+    assert_every_page_draws_itself(false);
 }
 
 // ============================================================================
