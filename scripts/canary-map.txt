@@ -274,3 +274,5 @@ wildcard-allowlist-opens-egress | a_wildcard_allowlist_opens_egress_too | a docu
 each-hardening-can-be-turned-off | each_hardening_setting_can_be_turned_off | config keys that are decoration
 resource-limits-reach-the-host-config | the_resource_limits_reach_the_host_config | the limits the file is named for, after extraction
 container-is-never-privileged | a_container_is_never_privileged | nothing in the config surface can grant privilege
+# B5-08 · a page letter reaches its page in the shipped binary
+page-letter-reaches-its-page | the_page_letter_case_exists_and_asserts_the_navigation | a green test naming the product and asserting the opposite

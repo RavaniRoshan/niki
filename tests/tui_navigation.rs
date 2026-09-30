@@ -125,10 +125,28 @@ fn page_id_key_hints() {
 // ============================================================================
 
 #[test]
-fn run_page_ignores_navigation_hotkeys() {
+fn page_local_handlers_do_not_navigate_on_run() {
+    // **What this checks, and what it does not.**
+    //
+    // The version of this test that stood here was
+    // `run_page_ignores_navigation_hotkeys`, with the comment "All these keys
+    // should be ignored on Run page now". It passed, and it was wrong about
+    // the product: `PageRouter::handle_key` is a *page's own* key handler.
+    // Global page jumps live in `global_page_jump`, which the event loop
+    // applies after the router declines:
+    //
+    //     } else if router.handle_key(key, &mut state) { … }
+    //     else if let Some(page) = global_page_jump(key) { state.current_page = page }
+    //
+    // So on the Run page, `d` **does** open Diff. Measured in the shipped
+    // binary by `tests/tui_smoke/cases/15_page_letter_navigates.sh`, which
+    // presses the key in a real terminal and finds the Diff page.
+    //
+    // A green test whose name describes the product, asserting something the
+    // product does not do, is worse than no test: it is a claim that looks
+    // checked. This one now claims only what it verifies.
     let mut state = make_state();
     let mut router = PageRouter::new();
-    // All these keys should be ignored on Run page now
     for key in [
         key_char('p'),
         key_char('a'),

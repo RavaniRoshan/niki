@@ -129,3 +129,37 @@ fn a_page_letter_in_the_composer_is_text_not_navigation() {
         );
     }
 }
+
+/// The real terminal case must exist, and must be what backs the claim.
+///
+/// `every_pages_shortcut_is_a_real_page_letter` above checks that the navigator
+/// does not claim `h` or `l`. That is necessary and it is not sufficient: the
+/// question is whether pressing the key *in the shipped binary* lands on the
+/// page, and only a pty can answer that.
+///
+/// The canary map names this case by filename, and a filename is not a
+/// `grep` target — so without this assertion, deleting the case would leave
+/// the canary "resolving" against a doc comment that mentions it. A canary
+/// that passes because something *refers* to the test is the same defect as a
+/// test that names the product and checks something else.
+#[test]
+fn the_page_letter_case_exists_and_asserts_the_navigation() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/tui_smoke/cases/15_page_letter_navigates.sh");
+    let body = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "the pty case must exist: {e}. Without it, nothing checks that a \
+             page letter reaches its page in the shipped binary."
+        )
+    });
+    assert!(
+        body.contains("PASS: 'd' opened the Diff page"),
+        "the case must assert the navigation it exists for: {body}"
+    );
+    assert!(
+        body.contains("Tab"),
+        "and it must leave the chat view first — on the chat view the composer \
+         has focus and a typed letter is text, which is correct and which the \\
+         first version of the case got wrong"
+    );
+}
