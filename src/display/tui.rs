@@ -31,6 +31,7 @@ use ratatui::style::Style;
 use ratatui::widgets::Paragraph;
 
 use super::command_palette::CommandPalette;
+use super::components::ask_user;
 use super::components::command_menu;
 use super::components::list_cursor::FocusState;
 use super::components::permission;
@@ -167,6 +168,18 @@ pub enum DisplayEvent {
         command: String,
         response_tx: std::sync::mpsc::Sender<PermissionAction>,
     },
+    /// A question an agent asked. The TUI renders it and sends the answer back
+    /// through `response_tx`; the tool side owns the deadline.
+    ///
+    /// Separate from `PermissionRequest` because the answer is not an
+    /// `Allow`/`Deny`: it is text, possibly picked from a list, and Esc means
+    /// "not now" rather than "no".
+    AskUser {
+        question: String,
+        options: Vec<String>,
+        default: Option<String>,
+        response_tx: std::sync::mpsc::Sender<crate::display::components::ask_user::AskAnswer>,
+    },
     /// TUI sender for /steer corrections — the pipeline polls this shared state
     /// between agent streaming chunks for user corrections.
     SteerChannel(std::sync::Arc<std::sync::Mutex<Option<String>>>),
@@ -204,6 +217,11 @@ fn active_focus(state: &AppState) -> FocusState {
     // a new user sees, and it has no mouse handler at all.
     if state.show_permission_modal {
         FocusState::Permission
+    } else if state.show_ask_modal {
+        // A question is the same class of blocker as a permission prompt: the
+        // run cannot proceed without an answer, and it must not hide behind an
+        // overlay the user opened.
+        FocusState::AskUser
     } else if state.onboarding.is_some() {
         // Onboarding is keyboard-only; every mouse press is swallowed so it
         // cannot reach the surface underneath.
@@ -330,6 +348,12 @@ fn route_overlay_key(
     }
 
     if permission::handle_key(&key, state) {
+        return OverlayOutcome::Consumed;
+    }
+
+    // Next to permission, and for the same reason: a question the user cannot
+    // see is one they cannot answer, and the run is waiting on it.
+    if ask_user::handle_key(&key, state) {
         return OverlayOutcome::Consumed;
     }
 
@@ -619,7 +643,9 @@ fn route_mouse(
         // to the surface behind them. A click on the status bar during
         // onboarding previously cycled the permission mode toward BYPASS
         // through a modal the user could not see was there.
-        FocusState::Onboarding | FocusState::Modal | FocusState::Sheet => {}
+        // The question modal is keyboard-only; a click must not reach the
+        // surface underneath it, which is what onboarding already guards.
+        FocusState::Onboarding | FocusState::Modal | FocusState::Sheet | FocusState::AskUser => {}
         FocusState::Chat => {
             // Open tool-detail modal owns left-clicks (TUI-013):
             // inside is consumed, outside dismisses. The wheel
@@ -2104,6 +2130,12 @@ fn render(
         }
     }
 
+    if state.show_ask_modal {
+        if let Some(ref req) = state.ask_request {
+            super::components::ask_user::render_ask_user_modal(frame, req, size, state);
+        }
+    }
+
     // Render tool detail modal if a card is open (TUI-010: previously tracked
     // state but never painted). Renders above chat, below help overlays.
     if let Some(idx) = state.tool_detail_index {
@@ -2534,6 +2566,112 @@ mod tests {
                 "the prompt must take the key, not the overlay behind it"
             );
             assert!(!st.show_help || !st.show_permission_modal);
+        }
+
+        /// A question outranks the overlays behind it, and takes the whole
+        /// keyboard while it is open.
+        ///
+        /// The run is blocked on this answer. Every character that leaks to the
+        /// page behind lands in the composer instead of the answer, and the
+        /// user submits a question prefixed with whatever they were typing in
+        /// the chat box.
+        #[test]
+        fn an_open_question_takes_every_key() {
+            let mut st = state();
+            let (tx, _rx) = std::sync::mpsc::channel();
+            st.ask_request = Some(crate::display::state::AskRequest {
+                question: "Which database?".into(),
+                options: vec![],
+                default: None,
+                response_tx: tx,
+            });
+            st.show_ask_modal = true;
+            for k in [
+                KeyCode::Char('p'),
+                KeyCode::Tab,
+                KeyCode::Down,
+                KeyCode::PageDown,
+            ] {
+                assert_eq!(
+                    ladder(&mut st, k),
+                    OverlayOutcome::Consumed,
+                    "{k:?} must reach the question, not the page behind it"
+                );
+            }
+            assert_eq!(
+                st.ask_input, "p",
+                "and the typed character must land in the ANSWER, not in the \
+                 chat composer. The first version of this test only asserted \
+                 `Consumed`, which stayed green with the question wired out of \
+                 the ladder entirely — something behind it consumed the key."
+            );
+            assert!(
+                st.show_ask_modal,
+                "and the question must still be open — nothing answered it"
+            );
+        }
+
+        /// It outranks help, because a run that is waiting cannot be explained.
+        #[test]
+        fn a_question_outranks_the_help_overlay() {
+            let mut st = state();
+            st.show_help = true;
+            let (tx, _rx) = std::sync::mpsc::channel();
+            st.ask_request = Some(crate::display::state::AskRequest {
+                question: "Which database?".into(),
+                options: vec![],
+                default: None,
+                response_tx: tx,
+            });
+            st.show_ask_modal = true;
+            assert_eq!(ladder(&mut st, KeyCode::Enter), OverlayOutcome::Consumed);
+            assert!(
+                !st.show_ask_modal,
+                "Enter submitted the answer, so the question must close"
+            );
+        }
+
+        /// A permission prompt is a decision about something that *happens*; a
+        /// question is a request for information. Only one can be open at a
+        /// time, and if both somehow are, the security prompt has to be the one
+        /// the user sees.
+        #[test]
+        fn a_permission_prompt_outranks_a_question() {
+            let mut st = state();
+            let (ptx, _prx) = std::sync::mpsc::channel();
+            st.permission_request = Some(crate::display::state::PermissionRequest {
+                tool_name: "sandbox_exec".into(),
+                command: "rm -rf /".into(),
+                description: String::new(),
+                params: None,
+                response_tx: ptx,
+            });
+            st.show_permission_modal = true;
+            let (atx, _arx) = std::sync::mpsc::channel();
+            st.ask_request = Some(crate::display::state::AskRequest {
+                question: "Which database?".into(),
+                options: vec![],
+                default: None,
+                response_tx: atx,
+            });
+            st.show_ask_modal = true;
+            assert_eq!(
+                ladder(&mut st, KeyCode::Char('n')),
+                OverlayOutcome::Consumed
+            );
+            assert!(
+                !st.show_permission_modal,
+                "the prompt must have consumed it"
+            );
+            assert!(st.show_ask_modal, "and the question must still be waiting");
+        }
+
+        /// Without a question open, the ladder must not have grown a new
+        /// way to swallow keys.
+        #[test]
+        fn no_question_means_no_new_consumption() {
+            let mut st = state();
+            assert_eq!(ladder(&mut st, KeyCode::Char('a')), OverlayOutcome::Free);
         }
 
         #[test]

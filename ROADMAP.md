@@ -87,10 +87,14 @@ built on a stable router (§1).
   an unanswered question says it is a timeout and not a refusal; a run with no
   interface says **nobody was asked**, and never says "denied by user" — which
   would attribute a decision to a human who was never consulted.
-  **`ask_user` still fails closed.** It needs free text and a choice list,
-  which the Allow/Deny modal cannot express, so it needs a modal of its own.
-  That is the next slice; until it lands, `ask_user`'s description is honest
-  about it.
+  **`ask_user` got a modal of its own in batch 6** (B6-04). It needs free
+  text and a choice list, which an Allow/Deny modal cannot express, so
+  `components/ask_user.rs` is a separate overlay: a cursor you can move,
+  `1`–`9` to pick from a choice list, Enter to send, and **Esc as a cancel
+  rather than a refusal** — an empty answer and "I have nothing to say" are
+  different events all the way to the model. It takes the whole keyboard while
+  it is open and outranks help, so a run waiting on an answer cannot be
+  type-over. Both human-input tools now reach the user in a TUI run.
 - ~~The permission badge is still cosmetic.~~ **DONE in batch 3** (`6c8a3be`).
   The posture travels with `ChatSubmit` and lands on every stage that has not
   started, because `ToolContext` reads `config.permissions.mode` per stage.
