@@ -145,16 +145,29 @@ pub async fn run_agent(
                     // "request or response body error" and carries "timeout"
                     // only in its source chain, so the substring test below
                     // cannot see it — and the stage died unretried.
-                    let is_transient = crate::llm::provider::is_timeout_error(&e);
-                    let err_str = e.to_string().to_lowercase();
-                    let is_transient = is_transient
-                        || err_str.contains("timeout")
-                        || err_str.contains("rate")
-                        || err_str.contains("429")
-                        || err_str.contains("503")
-                        || err_str.contains("overloaded")
-                        || err_str.contains("connection")
-                        || err_str.contains("network");
+                    let err_str = e.to_string();
+                    let err_lower = err_str.to_lowercase();
+                    // The status, read from the `HTTP {code}: {body}` every
+                    // provider writes, and judged by the *same* predicate
+                    // `send_request` uses.
+                    //
+                    // This used to be a keyword list — `429`, `503`, `overloaded`
+                    // — so a 500 or 502 that the transport had already retried
+                    // four times fell out here unretried, while
+                    // `llm::failover`, a few lines away in the other direction,
+                    // listed `500`, `502`, `504` and `408`. Two copies of one
+                    // rule, disagreeing: the agent loop above the transport was
+                    // the weaker one, so a 502 got *less* resilience by having
+                    // a retry layer above it.
+                    let status_transient = crate::llm::provider::http_status_in(&err_str)
+                        .is_some_and(crate::llm::provider::is_retryable_code);
+                    let is_transient = status_transient
+                        || crate::llm::provider::is_timeout_error(&e)
+                        || err_lower.contains("timeout")
+                        || err_lower.contains("rate")
+                        || err_lower.contains("overloaded")
+                        || err_lower.contains("connection")
+                        || err_lower.contains("network");
 
                     if is_transient && attempt < MAX_TRANSIENT_RETRIES {
                         retry_count += 1;

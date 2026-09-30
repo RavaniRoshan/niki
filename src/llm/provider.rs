@@ -255,6 +255,32 @@ where
     last.expect("send_request: loop always stashes a response before returning")
 }
 
+/// The HTTP status a provider error carries, when it carries one.
+///
+/// Every provider formats a non-success response as `HTTP {code}: {body}`
+/// (`anthropic.rs:114`, `google.rs:114`, `openai.rs:179`, …), so the status is
+/// recoverable from the message. Two callers needed it and had each grown their
+/// own reading of the same string: [`crate::agents`] listed `429` and `503`,
+/// while [`crate::llm::failover`] listed `500`, `502`, `503`, `504` and `408` —
+/// so a 502 was retried by the failover chain and dropped by the agent loop
+/// sitting above it.
+///
+/// Parsed rather than substring-matched on purpose: `"500"` appears in
+/// arbitrary response bodies, and a body that happens to contain it would make
+/// a permanent 400 look transient. The anchor is the `HTTP ` prefix the
+/// providers themselves write.
+pub fn http_status_in(message: &str) -> Option<u16> {
+    let rest = message.trim_start();
+    let rest = rest
+        .strip_prefix("HTTP ")
+        .or_else(|| rest.strip_prefix("http "))?;
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.len() != 3 {
+        return None;
+    }
+    digits.parse().ok()
+}
+
 /// Whether a status code is transient, for tests.
 ///
 /// A test cannot name a  without depending on reqwest's
@@ -262,6 +288,15 @@ where
 /// nothing about the real one — so the real predicate is exposed by code.
 pub fn status_is_retryable_for_test(code: u16) -> bool {
     is_retryable_status(reqwest::StatusCode::from_u16(code).expect("a valid status code"))
+}
+
+/// Whether an HTTP status is worth retrying: 429 and any 5xx.
+///
+/// Public because the agent loop above `send_request` needs the same answer
+/// for a status it can only read out of an error message, and two copies of
+/// this rule is how they came to disagree.
+pub fn is_retryable_code(code: u16) -> bool {
+    code == 429 || (500..600).contains(&code)
 }
 
 pub(crate) fn is_retryable_status(status: reqwest::StatusCode) -> bool {
