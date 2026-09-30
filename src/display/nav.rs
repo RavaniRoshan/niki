@@ -51,6 +51,7 @@ pub fn text_focus_active(state: &crate::display::state::AppState) -> bool {
     state.show_command_menu
         || state.show_help
         || state.show_permission_modal
+        || state.show_ask_modal
         || state.reverse_search
         || state.input_state.autocomplete.is_some()
         || !state.input_state.buffer.is_empty()

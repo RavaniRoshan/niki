@@ -60,6 +60,25 @@ pub fn contextual_hints(state: &AppState) -> Vec<Hint> {
             label: "confirm",
             priority: 99,
         });
+    } else if state.show_ask_modal {
+        // The question is open and the run is waiting on it, so these are the
+        // only keys that do anything. Same priority as the permission modal's:
+        // both are states the program cannot leave without a decision.
+        hints.push(Hint {
+            key: "type",
+            label: "answer",
+            priority: 100,
+        });
+        hints.push(Hint {
+            key: "enter",
+            label: "send",
+            priority: 99,
+        });
+        hints.push(Hint {
+            key: "esc",
+            label: "skip",
+            priority: 98,
+        });
     } else if state.show_command_menu {
         hints.push(Hint {
             key: "↑↓",

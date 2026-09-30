@@ -792,6 +792,20 @@ pub enum SystemLevel {
     Error,
 }
 
+/// A question an agent asked, and the channel the answer comes back on.
+///
+/// The answer is a `components::ask_user::AskAnswer` rather than a bare
+/// `String` so "the user pressed Esc" survives the trip: an empty string and a
+/// cancel are different events, and an agent that is told "no" when the user
+/// merely had nothing to say will act on it.
+#[derive(Debug)]
+pub struct AskRequest {
+    pub question: String,
+    pub options: Vec<String>,
+    pub default: Option<String>,
+    pub response_tx: std::sync::mpsc::Sender<crate::display::components::ask_user::AskAnswer>,
+}
+
 /// Permission request from the agent.
 #[derive(Debug)]
 pub struct PermissionRequest {
@@ -899,6 +913,13 @@ pub struct AppState {
     pub show_permission_modal: bool,
     /// Current permission request (if any).
     pub permission_request: Option<PermissionRequest>,
+    /// An open question from an agent, and the field the user is typing into.
+    pub ask_request: Option<AskRequest>,
+    pub show_ask_modal: bool,
+    pub ask_input: String,
+    /// Cursor in `ask_input`, as a char index. A byte index would split a
+    /// multi-byte character the first time someone types a non-ASCII answer.
+    pub ask_cursor: usize,
     /// Selected permission option (0=allow once, 1=allow always, 2=deny).
     pub permission_selected: usize,
     /// Show raw params detail in permission modal (Ctrl+D toggle).
@@ -1246,6 +1267,10 @@ impl AppState {
             commands: default_commands(),
             show_permission_modal: false,
             permission_request: None,
+            ask_request: None,
+            show_ask_modal: false,
+            ask_input: String::new(),
+            ask_cursor: 0,
             permission_selected: 0,
             show_permission_detail: false,
             permission_scope: 0,
@@ -1735,6 +1760,23 @@ impl AppState {
                 if let Some(e) = error {
                     self.chat_log.push(("error".to_string(), e));
                 }
+            }
+            DisplayEvent::AskUser {
+                question,
+                options,
+                default,
+                response_tx,
+            } => {
+                self.ask_request = Some(AskRequest {
+                    question: question.clone(),
+                    options: options.clone(),
+                    default: default.clone(),
+                    response_tx,
+                });
+                self.ask_input.clear();
+                self.ask_cursor = 0;
+                self.show_ask_modal = true;
+                crate::display::notify::permission_needed(&question);
             }
             DisplayEvent::PermissionRequest {
                 command,

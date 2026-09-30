@@ -30,6 +30,9 @@ pub enum FocusState {
     CommandPalette,
     /// The permission request modal is active.
     Permission,
+    /// The "the agent is asking" modal is active. Keyboard-only: a click must
+    /// not reach the surface behind it.
+    AskUser,
     /// The first-run onboarding modal is active. Keyboard-only: every mouse
     /// press is swallowed so a click cannot reach the surface behind it.
     Onboarding,

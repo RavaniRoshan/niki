@@ -307,3 +307,25 @@ approval-description-matches | the_approval_description_matches_what_the_tool_do
 agents-approval-reaches-the-interface | an_agents_approval_request_reaches_the_interface_and_the_run_continues | the loop never handing a channel to the tools
 no-interface-is-reported | without_an_interface_the_approval_is_reported_as_unanswerable | a headless run hanging on, or blaming, a question
 production-contexts-carry-it | the_production_tool_contexts_carry_the_interface | the pipeline building its context with nobody attached
+# B6-04 · `ask_user` has somewhere to ask, and a modal of its own
+question-reaches-the-interface | a_question_reaches_the_interface_and_the_answer_comes_back | the question never leaving the tool, so it can only fail
+dismissal-is-not-an-answer | dismissing_a_question_is_not_an_answer | Esc reported as a reply, so a shrug becomes a decision
+string-options-become-a-list | a_comma_separated_options_string_still_becomes_a_list | a string of options silently becoming no options
+unasked-question-says-so | with_no_interface_the_question_is_reported_as_unasked | an empty string, which a model reads as "nothing to add"
+typed-answer-comes-back | a_typed_answer_comes_back_exactly_as_typed | the answer mangled on the way back
+esc-cancels-not-no | esc_cancels_rather_than_answering_no | a cancel collapsing into a refusal
+digit-picks-the-choice | a_digit_picks_the_choice_it_names | a numbered choice that picks the wrong one
+digit-without-a-choice-types | a_digit_with_no_choice_becomes_part_of_the_answer | a keystroke eaten from the answer
+default-used-when-nothing-typed | the_default_is_used_when_nothing_is_typed | Enter with no answer returning nothing
+typed-beats-default | what_the_user_typed_beats_the_default | the default overwriting what the user actually said
+cursor-inserts-where-it-points | the_cursor_can_move_and_the_text_is_inserted_where_it_points | text landing at the wrong end
+backspace-honours-the-cursor | backspace_removes_the_character_before_the_cursor | a fix-in-the-middle deleting the wrong character
+meaningless-keys-are-consumed | a_key_with_no_meaning_here_is_still_consumed | a key reaching the page behind an open question
+question-renders-nothing-when-closed | nothing_is_consumed_when_no_question_is_open | the modal swallowing keys with no question open
+question-and-choices-are-painted | the_question_and_its_choices_are_painted | a modal that clips the default or the hint
+question-survives-a-tiny-terminal | a_tiny_terminal_still_renders | geometry that indexes outside a small buffer
+open-question-takes-every-key | an_open_question_takes_every_key | the question losing the ladder, so keys reach the page
+question-outranks-help | a_question_outranks_the_help_overlay | a question hidden behind the help overlay
+permission-outranks-question | a_permission_prompt_outranks_a_question | the security prompt losing to an information request
+no-question-no-new-consumption | no_question_means_no_new_consumption | the ladder swallowing keys when nothing is open
+permission-survives-a-tiny-terminal | a_tiny_terminal_does_not_break_the_permission_modal | a panic on resize, with a command waiting on the answer

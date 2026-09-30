@@ -61,7 +61,12 @@ pub fn action_for(index: usize) -> PermissionAction {
 pub fn modal_rect(area: Rect, request: &PermissionRequest, show_detail: bool) -> Rect {
     let content_rows = option_first_row(request, show_detail) + OPTIONS.len() as u16 + 1;
     let modal_width = 60u16.min(area.width.saturating_sub(4));
-    let modal_height = (content_rows + 2).min(area.height).max(8);
+    // `.min(area.height)` then `.max(8)` produced a modal *taller than the
+    // terminal* on a small one, and rendering it indexed outside the buffer: a
+    // panic, in the one moment the user cannot work around, triggered by
+    // resizing the window while a prompt was up. The floor comes from the
+    // area; the content only sets what it would like.
+    let modal_height = (content_rows + 2).max(8).min(area.height);
     Rect {
         x: area.width.saturating_sub(modal_width) / 2,
         y: area.height.saturating_sub(modal_height) / 2,
@@ -111,6 +116,11 @@ pub fn render_permission_modal(
     state: &AppState,
 ) {
     let modal_area = modal_rect(area, request, state.show_permission_detail);
+    // Nothing is legible in a box this small, and drawing into it indexes
+    // outside the buffer. The question modal and onboarding guard the same way.
+    if modal_area.width < 8 || modal_area.height < 4 {
+        return;
+    }
 
     frame.render_widget(Clear, modal_area);
 
@@ -605,5 +615,36 @@ mod key_tests {
             !handle_key(&key(KeyCode::Char('y')), &mut state),
             "a y with no prompt must reach the composer, not be swallowed"
         );
+    }
+}
+/// A terminal too small for the box must not take the run down with it.
+///
+/// The geometry clamped the height to the area and then floored it at 8, so a
+/// short terminal produced a modal *taller than the screen* and the renderer
+/// indexed outside the buffer. A user who resized their window while a prompt
+/// was up got a panic — in the one moment they could not work around it, and
+/// with a destructive command waiting on the answer.
+#[test]
+fn a_tiny_terminal_does_not_break_the_permission_modal() {
+    use ratatui::backend::TestBackend;
+
+    for (w, h) in [(1u16, 1u16), (4, 2), (10, 3), (30, 7), (100, 40)] {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let config = crate::config::NikiConfig::default();
+        let state = crate::display::state::AppState::new("t".into(), config, ".".into());
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let req = PermissionRequest {
+            tool_name: "sandbox_exec".into(),
+            command: "rm -rf /".into(),
+            description: String::new(),
+            params: None,
+            response_tx: tx,
+        };
+        terminal
+            .draw(|f| {
+                render_permission_modal(f, &req, f.area(), &state);
+            })
+            .unwrap_or_else(|e| panic!("{w}x{h} must render: {e}"));
     }
 }

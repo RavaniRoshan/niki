@@ -641,6 +641,39 @@ impl HumanInput {
         Self { tx, timeout }
     }
 
+    /// Put a question to whoever is driving the run, and wait for the answer.
+    ///
+    /// Distinct from [`Self::ask_permission`] because the answer is not a
+    /// decision: it is text, and Esc means "I have nothing to say right now"
+    /// rather than "no". Collapsing that into a denial is how an agent ends up
+    /// reporting a refusal the user never gave.
+    pub async fn ask_question(
+        &self,
+        question: &str,
+        options: &[String],
+        default: Option<String>,
+    ) -> HumanAnswer {
+        let (response_tx, response_rx) = std::sync::mpsc::channel();
+        let request = crate::display::tui::DisplayEvent::AskUser {
+            question: question.to_string(),
+            options: options.to_vec(),
+            default,
+            response_tx,
+        };
+        let timeout = self.timeout;
+        if self.tx.send(request).is_err() {
+            return HumanAnswer::InterfaceClosed;
+        }
+        match tokio::task::spawn_blocking(move || response_rx.recv_timeout(timeout))
+            .await
+            .unwrap_or_else(|e| panic!("the question wait task died: {e}"))
+        {
+            Ok(answer) => HumanAnswer::Questioned(answer),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => HumanAnswer::TimedOut(self.timeout),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => HumanAnswer::InterfaceClosed,
+        }
+    }
+
     /// Ask whoever is driving the run to approve `command`, and wait.
     ///
     /// The interface renders the same modal the sandbox's own prompts use, and
@@ -688,6 +721,9 @@ impl HumanInput {
 #[derive(Debug)]
 pub enum HumanAnswer {
     Answered(crate::permissions::PermissionAction),
+    /// A reply to a question. `cancelled` is the user pressing Esc: they had
+    /// nothing to say, which is not the same as saying no.
+    Questioned(crate::display::components::ask_user::AskAnswer),
     /// Nobody was listening: a headless `niki run`, an MCP caller, a test.
     NoInterface,
     /// The interface went away mid-question.
@@ -705,6 +741,32 @@ impl HumanAnswer {
         )
     }
 
+    /// The answer to a question, phrased for the model's tool result.
+    ///
+    /// Every non-answer is named. A tool that returned an empty string for
+    /// "the user is not here" would have the model read a shrug as an answer.
+    pub fn question_answer(&self, question: &str) -> String {
+        match self {
+            HumanAnswer::Questioned(answer) if answer.cancelled => format!(
+                "no answer: the user dismissed the question '{question}' without                  answering it. That is not a refusal — decide for yourself, say what                  you assumed, and carry on."
+            ),
+            HumanAnswer::Questioned(answer) => answer.text.clone(),
+            HumanAnswer::NoInterface => format!(
+                "cannot ask: no interface is attached to this run, so nobody was asked                  '{question}'. Do not invent an answer — say what you would need and                  proceed with the safest assumption."
+            ),
+            HumanAnswer::InterfaceClosed => format!(
+                "cannot ask: the interface went away before it answered '{question}'.                  Nobody answered, so do not treat it as a decision."
+            ),
+            HumanAnswer::TimedOut(waited) => format!(
+                "no answer to '{question}' after {}s. That is a timeout, not a refusal —                  do not report it as one.",
+                waited.as_secs()
+            ),
+            HumanAnswer::Answered(_) => {
+                format!("'{question}' was answered as an approval question, not a free-text one")
+            }
+        }
+    }
+
     /// Why the command was not approved, phrased for the model's tool result.
     ///
     /// Every branch names what happened rather than saying "denied by user",
@@ -718,6 +780,13 @@ impl HumanAnswer {
             }
             HumanAnswer::Answered(crate::permissions::PermissionAction::Deny) => {
                 format!("the user denied it: {command}. Do not retry this — report the refusal.")
+            }
+            // Unreachable in practice: a question is not an approval, and the
+            // two tools ask through different events. Named rather than folded
+            // into a denial, so a caller that mixes them up gets a sentence
+            // that says what happened instead of one that blames the user.
+            HumanAnswer::Questioned(_) => {
+                format!("answered as a question, not an approval: '{command}' was not approved")
             }
             HumanAnswer::NoInterface => format!(
                 "cannot ask: no interface is attached to this run, so nobody was asked about \
@@ -2540,12 +2609,15 @@ impl Tool for AskUserTool {
     fn def(&self) -> &ToolDef {
         static DEF: ToolDef = ToolDef {
             name: "ask_user",
-            description: "Ask the user a question and wait for a reply. UNAVAILABLE \
-                        whenever the TUI is running: the interface owns stdin, so \
-                        this tool always fails in `niki chat`, `niki run --tui` \
-                        and any unattended run. Do not call it to unblock a \
-                        task — report what you need instead. Works only on a \
-                        bare terminal with no interface attached.",
+            description: "Ask the user a question and wait for a reply. In an \
+                        interactive run (`niki run --tui`, `niki chat`) the question is \
+                        shown in a modal and answered there, up to \
+                        `[permissions] prompt_timeout_seconds`; with `options` the user \
+                        can pick one by number. Esc is not a no — it means they had no \
+                        answer, and you must then decide yourself and say what you \
+                        assumed. DENIES nothing and blocks nothing on its own: in an \
+                        unattended run there is nobody to ask, so the call reports \
+                        that and returns at once — never invent an answer.",
             category: ToolCategory::Human,
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
@@ -2555,10 +2627,69 @@ impl Tool for AskUserTool {
         &DEF
     }
 
-    async fn execute(&self, input: ToolInput, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: ToolInput, ctx: &ToolContext) -> ToolResult {
         let question = input.str("question").unwrap_or("?").to_string();
-        let options = input.str("options").unwrap_or("").to_string();
-        let default = input.str("default").unwrap_or("").to_string();
+        let options: Vec<String> = match input.raw.get("options") {
+            Some(serde_json::Value::Array(items)) => items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect(),
+            // The schema says an array. A model that sends a string gets the
+            // string split on commas rather than a silent "no options" — the
+            // difference is a question the user can answer by number versus one
+            // they have to type.
+            Some(serde_json::Value::String(s)) => s
+                .split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect(),
+            _ => Vec::new(),
+        };
+        let default = input
+            .str("default")
+            .map(str::to_string)
+            .filter(|d| !d.is_empty());
+
+        // The interface is the one place a question can be asked. It was
+        // unreachable until batch 6, which is why this tool could only ever
+        // fail in a TUI run — the one surface with a human watching.
+        if let Some(human) = ctx.human_input.as_ref() {
+            let answer = human
+                .ask_question(&question, &options, default.clone())
+                .await;
+            let response = answer.question_answer(&question);
+            // A dismissed question is not an answered one. Reporting it as
+            // `Success` tells the model a user engaged with the run when
+            // nobody did — and the run's own metrics then count an
+            // interaction that never happened.
+            let answered = matches!(
+                answer,
+                HumanAnswer::Questioned(a) if !a.cancelled
+            );
+            return ToolResult {
+                tool_id: ToolId::generate(),
+                tool_name: "ask_user".into(),
+                status: if answered {
+                    ToolStatus::Success
+                } else {
+                    ToolStatus::Failed
+                },
+                summary: format!(
+                    "asked: {} → {}",
+                    question,
+                    if answered { "answered" } else { "no answer" }
+                ),
+                data: ToolData::UserResponse {
+                    question: question.to_string(),
+                    response,
+                },
+                duration: Duration::ZERO,
+                artifacts: Vec::new(),
+                diagnostics: Vec::new(),
+                metadata: HashMap::new(),
+            };
+        }
+
         if !is_interactive_stdin() {
             return ToolResult {
                 tool_id: ToolId::generate(),
@@ -2567,7 +2698,11 @@ impl Tool for AskUserTool {
                 summary: format!("cannot ask (non-interactive stdin): {}", question),
                 data: ToolData::UserResponse {
                     question: question.to_string(),
-                    response: String::new(),
+                    // Not an empty string. The empty string reads to a model as
+                    // "the user had nothing to add", which is a different
+                    // claim from "there was nobody to ask" — and it is the
+                    // claim that leads to a fabricated answer.
+                    response: HumanAnswer::NoInterface.question_answer(&question),
                 },
                 duration: Duration::ZERO,
                 artifacts: Vec::new(),
@@ -2575,20 +2710,26 @@ impl Tool for AskUserTool {
                 metadata: HashMap::new(),
             };
         }
+        let choices = options.join(" | ");
         if options.is_empty() {
             println!("{}:", question);
-        } else if default.is_empty() {
-            println!("{} [{}]:", question, options);
+        } else if default.is_none() {
+            println!("{} [{}]:", question, choices);
         } else {
-            println!("{} [{}] (default: {}):", question, options, default);
+            println!(
+                "{} [{}] (default: {}):",
+                question,
+                choices,
+                default.as_deref().unwrap_or_default()
+            );
         }
         let mut answer = String::new();
         if std::io::stdin().read_line(&mut answer).is_err() {
             answer = String::new();
         }
         let answer = answer.trim().to_string();
-        let answer = if answer.is_empty() && !default.is_empty() {
-            default
+        let answer = if answer.is_empty() {
+            default.unwrap_or_default()
         } else {
             answer
         };
@@ -4800,6 +4941,182 @@ mod tests {
         assert!(
             reason.contains("no interface is attached"),
             "and it must say what is actually missing: {reason}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // `ask_user` — the same channel, a different question.
+    // -----------------------------------------------------------------------
+
+    /// A question reaches the interface, and the answer comes back intact.
+    ///
+    /// `ask_user` could not do this until the interface had somewhere to put a
+    /// question, because the tool reads stdin and the TUI owns it. That made it
+    /// the one tool that was offered to every agent and could never work in the
+    /// surface a human was watching.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_question_reaches_the_interface_and_the_answer_comes_back() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ui = std::thread::spawn(move || {
+            let request = rx
+                .recv_timeout(Duration::from_secs(30))
+                .expect("the tool must put the question to the interface");
+            let crate::display::tui::DisplayEvent::AskUser {
+                question,
+                options,
+                default,
+                response_tx,
+            } = request
+            else {
+                panic!("ask_user must send a question, not a permission prompt");
+            };
+            let seen = (question, options, default);
+            let _ = response_tx.send(crate::display::components::ask_user::AskAnswer {
+                text: "postgres".into(),
+                cancelled: false,
+            });
+            seen
+        });
+
+        let mut ctx = manual_ctx();
+        ctx.human_input = Some(HumanInput::new(tx, Duration::from_secs(5)));
+        let out = crate::runtime::tools::AskUserTool
+            .execute(
+                ToolInput::new(serde_json::json!({
+                    "question": "Which database?",
+                    "options": ["sqlite", "postgres"],
+                    "default": "sqlite",
+                })),
+                &ctx,
+            )
+            .await;
+        let (question, options, default) = ui.join().expect("the interface must not panic");
+
+        assert_eq!(question, "Which database?");
+        assert_eq!(
+            options,
+            vec!["sqlite".to_string(), "postgres".to_string()],
+            "the choices must arrive as a list, so the user can pick one by \
+             number instead of retyping it"
+        );
+        assert_eq!(default.as_deref(), Some("sqlite"));
+        assert_eq!(out.status, ToolStatus::Success);
+        match &out.data {
+            ToolData::UserResponse { response, .. } => {
+                assert_eq!(response, "postgres", "the answer must arrive verbatim")
+            }
+            other => panic!("ask_user must report a UserResponse, got {other:?}"),
+        }
+    }
+
+    /// Esc is not "no".
+    ///
+    /// The user dismissing a question means they had nothing to say. Reporting
+    /// that to the model as an answer — especially an empty one — is how an
+    /// agent tells the user they declined something they were never asked to
+    /// decide.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dismissing_a_question_is_not_an_answer() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ui = std::thread::spawn(move || {
+            if let Ok(crate::display::tui::DisplayEvent::AskUser { response_tx, .. }) =
+                rx.recv_timeout(Duration::from_secs(30))
+            {
+                let _ = response_tx.send(crate::display::components::ask_user::AskAnswer {
+                    text: String::new(),
+                    cancelled: true,
+                });
+            }
+        });
+
+        let mut ctx = manual_ctx();
+        ctx.human_input = Some(HumanInput::new(tx, Duration::from_secs(5)));
+        let out = crate::runtime::tools::AskUserTool
+            .execute(
+                ToolInput::new(serde_json::json!({"question": "Which database?"})),
+                &ctx,
+            )
+            .await;
+        ui.join().unwrap();
+
+        assert_ne!(
+            out.status,
+            ToolStatus::Success,
+            "a dismissed question is not an answered one"
+        );
+        let response = match &out.data {
+            ToolData::UserResponse { response, .. } => response.clone(),
+            other => panic!("ask_user must report a UserResponse, got {other:?}"),
+        };
+        assert!(
+            response.contains("not a refusal") && response.contains("decide for yourself"),
+            "the model must be told the question went unanswered and that it \
+             should proceed on its own judgement: {response}"
+        );
+    }
+
+    /// A string where the schema says an array still reaches the user as a
+    /// list. Models send this, and a silent "no options" turns a pick-one
+    /// question into a type-the-whole-thing one.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_comma_separated_options_string_still_becomes_a_list() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ui = std::thread::spawn(move || {
+            let mut options = Vec::new();
+            if let Ok(crate::display::tui::DisplayEvent::AskUser {
+                response_tx,
+                options: sent,
+                ..
+            }) = rx.recv_timeout(Duration::from_secs(30))
+            {
+                options = sent;
+                let _ = response_tx.send(crate::display::components::ask_user::AskAnswer {
+                    text: "b".into(),
+                    cancelled: false,
+                });
+            }
+            options
+        });
+
+        let mut ctx = manual_ctx();
+        ctx.human_input = Some(HumanInput::new(tx, Duration::from_secs(5)));
+        crate::runtime::tools::AskUserTool
+            .execute(
+                ToolInput::new(serde_json::json!({
+                    "question": "Which?",
+                    "options": "a, b, c",
+                })),
+                &ctx,
+            )
+            .await;
+        assert_eq!(
+            ui.join().unwrap(),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            "a string of options must still arrive as a list"
+        );
+    }
+
+    /// With nobody to ask, the tool must say so and invent nothing.
+    #[tokio::test]
+    async fn with_no_interface_the_question_is_reported_as_unasked() {
+        let ctx = manual_ctx();
+        let out = crate::runtime::tools::AskUserTool
+            .execute(
+                ToolInput::new(serde_json::json!({"question": "Which database?"})),
+                &ctx,
+            )
+            .await;
+        let response = match &out.data {
+            ToolData::UserResponse { response, .. } => response.clone(),
+            other => panic!("ask_user must report a UserResponse, got {other:?}"),
+        };
+        assert!(
+            response.contains("no interface is attached"),
+            "the model must be told nobody was there: {response}"
+        );
+        assert!(
+            response.contains("Do not invent an answer"),
+            "and told not to make one up: {response}"
         );
     }
 
