@@ -518,13 +518,29 @@ impl DockerSandbox {
             .iter()
             .map(|f| format!("'{}'", f.replace('\'', "'\\''")))
             .collect();
-        let add = format!(
-            "cd /workspace && git add -N -- {} 2>/dev/null; true",
-            quoted.join(" ")
-        );
-        let _ = self.exec(&["sh", "-c", &add]).await;
+        // `2>/dev/null; true` was load-bearing for keeping the pipeline alive
+        // and fatal for honesty: it discarded the only record of a staging
+        // failure. The command is now split so a failure is observable, and
+        // the diff's exit code is checked.
+        let add = format!("cd /workspace && git add -N -- {}", quoted.join(" "));
+        if let Err(e) = self.exec(&["sh", "-c", &add]).await {
+            // Not fatal on its own: an existing index lock, or a file git
+            // refuses to stage, should not abort a run whose earlier work is
+            // already on disk. It must, however, be visible.
+            eprintln!(
+                "Warning: could not stage the agent's new files for diffing ({e}). \
+                 A brand-new file may be missing from the diff."
+            );
+        }
         let diff = format!("cd /workspace && git diff -- {}", quoted.join(" "));
         let output = self.exec(&["sh", "-c", &diff]).await?;
+        if output.exit_code != 0 {
+            return Err(anyhow::anyhow!(
+                "`git diff` inside the sandbox failed (exit {}): {}",
+                output.exit_code,
+                output.stderr.trim()
+            ));
+        }
         Ok(output.stdout)
     }
 

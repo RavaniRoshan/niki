@@ -92,14 +92,16 @@ pub fn is_publishable_path(path: &str) -> bool {
 /// Paths under `.niki/` / `.git/`, the credentials file `niki.toml`, and
 /// traversal escapes are dropped; see `is_publishable_path`. An empty file list
 /// yields an empty diff without touching the host at all.
-pub fn working_tree_diff_scoped(repo_path: &Path, agent_files: &[String]) -> String {
+pub fn working_tree_diff_scoped(repo_path: &Path, agent_files: &[String]) -> Result<String> {
     let files: Vec<&str> = agent_files
         .iter()
         .map(|s| s.as_str())
         .filter(|s| is_publishable_path(s))
         .collect();
+    // No publishable files is a real answer, not a failure: the agent reported
+    // only paths NIKI must not publish, so the diff is legitimately empty.
     if files.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
     // Intent-to-add ONLY agent files that are new on disk, so `git diff`
     // reports them. Pre-existing untracked user dirt stays invisible.
@@ -111,18 +113,39 @@ pub fn working_tree_diff_scoped(repo_path: &Path, agent_files: &[String]) -> Str
     if !new_files.is_empty() {
         let mut args = vec!["add", "-N", "--"];
         args.extend(new_files);
-        let _ = run_git(repo_path, &args);
+        // A failed intent-to-add is not cosmetic. Without it the new file is
+        // invisible to `git diff`, so the diff comes back empty — the same
+        // value a genuinely clean run produces — and the agent's work is
+        // discarded with a message about there being no changes.
+        //
+        // The common cause is a stale index lock: two `niki run`s in one repo,
+        // or a `git` process the user left running. Saying so is the whole
+        // point.
+        run_git(repo_path, &args).map_err(|e| {
+            anyhow::anyhow!(
+                "could not stage the agent's new files for diffing ({e}). \
+                 If another git process is running in this repository, wait for it."
+            )
+        })?;
     }
     let mut args = vec!["diff", "--"];
     args.extend(files);
     let out = std::process::Command::new("git")
         .args(&args)
         .current_dir(repo_path)
-        .output();
-    match out {
-        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
-        Err(_) => String::new(),
+        .output()
+        .map_err(|e| anyhow::anyhow!("could not run `git diff`: {e}"))?;
+    if !out.status.success() {
+        // A failed diff and an empty diff were the same value. Downstream,
+        // emptiness means "the agents changed nothing" — so a git error
+        // surfaced to the user as a confident statement about the work.
+        return Err(anyhow::anyhow!(
+            "`git diff` failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
 /// True when `path` (repo-relative) is untracked in the host repo.
@@ -485,7 +508,8 @@ mod tests {
                 ".github/workflows/ci.yml".to_string(),
                 ".niki/secretish.json".to_string(),
             ],
-        );
+        )
+        .expect("a scoped diff of a healthy repo must succeed");
 
         assert!(
             scoped.contains(".github/workflows/ci.yml"),
