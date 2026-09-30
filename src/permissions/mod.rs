@@ -103,6 +103,13 @@ pub struct PermissionConfig {
     pub doom_loop: Permission,
     /// Active permission mode (Manual/Auto/DontAsk/BypassPermissions).
     pub mode: PermissionMode,
+    /// Seconds a permission prompt stays open before it is abandoned.
+    ///
+    /// Five seconds, hard-coded, is not long enough to read a command and
+    /// decide. A user who took six seconds was told `Command denied by user` —
+    /// a refusal they never made — and since `tools.bash` defaults to `Ask`
+    /// that was the outcome for *every* command in every interactive run.
+    pub prompt_timeout_seconds: u64,
     /// Scope at which approvals are promoted.
     pub scope: PermissionScope,
     /// Paths that are always prompted for, regardless of mode (e.g. `.git`,
@@ -169,6 +176,14 @@ impl PermissionChecker {
     /// Whether headless Ask falls back to Deny instead of Allow-with-warning.
     pub fn fail_closed_headless(&self) -> bool {
         self.config.fail_closed_headless
+    }
+
+    /// How long a prompt stays open, floored at one second.
+    ///
+    /// The floor matters: a configured `0` would otherwise become an instant
+    /// deny, which is the defect this setting exists to let people escape.
+    pub fn prompt_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.config.prompt_timeout_seconds.max(1))
     }
 
     /// Default set of paths that are always prompted for — host-reaching and
