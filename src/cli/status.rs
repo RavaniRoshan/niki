@@ -55,6 +55,17 @@ pub async fn handle(args: &StatusArgs) -> Result<()> {
         }
     }
 
+    // A status command that prints a failed run and exits 0 is a command a
+    // script cannot use: `niki status && deploy` deploys after a failure.
+    // This is the same defect `niki report` had, in the sibling command.
+    let failed_reason = latest.as_ref().and_then(|(_, r)| match &r.status {
+        crate::orchestrator::state::TaskStatus::Failed { error } => Some(error.clone()),
+        crate::orchestrator::state::TaskStatus::Cancelled => {
+            Some("the run was cancelled".to_string())
+        }
+        _ => None,
+    });
+
     match latest {
         Some((dir, record)) => {
             println!("Task:       {}", record.task_id);
@@ -81,6 +92,9 @@ pub async fn handle(args: &StatusArgs) -> Result<()> {
         }
     }
 
+    if let Some(reason) = failed_reason {
+        anyhow::bail!("the most recent task did not succeed: {reason}");
+    }
     Ok(())
 }
 
