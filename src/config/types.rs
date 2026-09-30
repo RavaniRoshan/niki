@@ -803,6 +803,20 @@ pub struct PermissionsConfig {
     /// of warning and proceeding (enterprise / unattended safety).
     #[serde(default)]
     pub fail_closed_headless: bool,
+    /// Seconds a permission prompt stays open before it is abandoned.
+    ///
+    /// Five seconds, hard-coded, is not long enough to read a command and
+    /// decide. A user who took six seconds was told `Command denied by user` —
+    /// a refusal they never made — and since `tools.bash` defaults to `Ask`
+    /// that was the outcome for *every* command in every interactive run.
+    #[serde(default = "default_prompt_timeout_seconds")]
+    pub prompt_timeout_seconds: u64,
+}
+
+/// Two minutes. Long enough to read a long command line, and short enough that
+/// a run does not hang on a prompt nobody is looking at.
+fn default_prompt_timeout_seconds() -> u64 {
+    120
 }
 
 fn default_permission_mode() -> String {
@@ -817,6 +831,7 @@ impl Default for PermissionsConfig {
             mode: default_permission_mode(),
             disable_worktree: false,
             fail_closed_headless: false,
+            prompt_timeout_seconds: default_prompt_timeout_seconds(),
         }
     }
 }

@@ -66,5 +66,10 @@ late-failure-preserves-work | a_late_failure_preserves_the_coders_work_as_eviden
 killed-run-is-not-running | a_killed_run_is_reported_as_interrupted | a dead run reported as in progress forever
 slow-run-is-not-killed | a_live_run_is_never_reported_as_interrupted | a slow model misreported as dead
 heartbeat-is-persisted | saving_a_record_stamps_a_heartbeat | the check passing because nothing writes a heartbeat
+# B2-10 · a timeout is not a refusal
+timeout-is-not-a-refusal | only_a_refusal_is_reported_as_a_refusal | "denied by user" for a prompt nobody answered
+prompt-window-is-long-enough | the_default_window_is_long_enough_to_decide | a 5s fuse denying commands mid-read
+prompt-window-is-configurable | the_window_is_configurable | a window the user cannot widen
+zero-window-is-not-instant-deny | a_zero_window_does_not_become_an_instant_deny | a setting that reintroduces the defect
 # T10 · the surface is gated at all
 first-run-answers | a first run answers instead of hanging | a first session that is a hang

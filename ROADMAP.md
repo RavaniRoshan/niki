@@ -52,9 +52,12 @@ built on a stable router (§1).
 - The permission badge is still cosmetic: `state.permission_mode` is read only
   to pick the badge label, and never reaches `ToolContext`, `PermissionChecker`
   or the sandbox. `--permission-mode` does not gate the sandbox path either.
-- Permission prompts still auto-deny after **5 seconds with no countdown**, and
-  the message says *"Command denied by user"* — naming a user who did nothing.
-  (`worktree.rs:438-444`, `docker.rs:611-617`)
+- ~~Permission prompts auto-deny after **5 seconds**, saying
+  *"Command denied by user"*.~~ **DONE in batch 2.** A timeout and a refusal
+  are now distinct outcomes, the default window is two minutes rather than
+  five seconds, and it is `[permissions] prompt_timeout_seconds`. The error
+  names both the timeout and the two ways out. (`worktree.rs`,
+  `docker.rs`, `permissions/mod.rs`)
 
 ## 3 · Loop unification (P4)
 

@@ -645,12 +645,26 @@ impl Sandbox for DockerSandbox {
                             "no TUI listening — Ask fell back to Allow (headless)"
                         );
                     } else {
-                        let action = tokio::task::block_in_place(|| {
-                            response_rx.recv_timeout(std::time::Duration::from_secs(5))
-                        })
-                        .unwrap_or(PermissionAction::Deny);
-                        if matches!(action, PermissionAction::Deny) {
-                            return Err(anyhow::anyhow!("Command denied by user: '{}'", full));
+                        // A timeout is not a refusal — see the worktree
+                        // backend, which carries the full reasoning.
+                        let waited = self.permission_checker.prompt_timeout();
+                        let action =
+                            tokio::task::block_in_place(|| response_rx.recv_timeout(waited));
+                        match action {
+                            Ok(PermissionAction::Deny) => {
+                                return Err(anyhow::anyhow!("Command denied by user: '{}'", full));
+                            }
+                            Ok(_) => {}
+                            Err(_) => {
+                                return Err(anyhow::anyhow!(
+                                    "No answer to the permission prompt for '{}' after {}s, so \
+                                     the command was NOT run. That is a timeout, not a refusal — \
+                                     raise it with [permissions] prompt_timeout_seconds, or \
+                                     set fail_closed_headless = false to allow unattended runs.",
+                                    full,
+                                    waited.as_secs()
+                                ));
+                            }
                         }
                     }
                 }

@@ -486,12 +486,35 @@ impl Sandbox for WorktreeSandbox {
                             "no TUI listening — Ask fell back to Allow (headless)"
                         );
                     } else {
-                        let action = tokio::task::block_in_place(|| {
-                            response_rx.recv_timeout(std::time::Duration::from_secs(5))
-                        })
-                        .unwrap_or(PermissionAction::Deny);
-                        if matches!(action, PermissionAction::Deny) {
-                            return Err(anyhow!("Command denied by user: '{}'", full));
+                        let waited = self.permission_checker.prompt_timeout();
+                        // A timeout and a refusal are **different events**, and
+                        // they used to be the same value.
+                        //
+                        // `unwrap_or(PermissionAction::Deny)` turned "nobody
+                        // answered" into "the user said no", and the message
+                        // said so: `Command denied by user`. A user who read
+                        // the command for six seconds was told they had denied
+                        // it. Since `tools.bash` defaults to `Ask`
+                        // (`permissions/mod.rs:83-93`), that was the outcome for
+                        // *every* command in every interactive run, and the run
+                        // then failed as though the user had blocked it.
+                        let action =
+                            tokio::task::block_in_place(|| response_rx.recv_timeout(waited));
+                        match action {
+                            Ok(PermissionAction::Deny) => {
+                                return Err(anyhow!("Command denied by user: '{}'", full));
+                            }
+                            Ok(_) => {}
+                            Err(_) => {
+                                return Err(anyhow!(
+                                    "No answer to the permission prompt for '{}' after {}s, so \
+                                     the command was NOT run. That is a timeout, not a refusal — \
+                                     raise it with [permissions] prompt_timeout_seconds, or \
+                                     set fail_closed_headless = false to allow unattended runs.",
+                                    full,
+                                    waited.as_secs()
+                                ));
+                            }
                         }
                     }
                 }
