@@ -2096,7 +2096,19 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("Welcome to NIKI")));
         assert!(lines.iter().any(|l| l.contains("test task")));
         assert!(lines.iter().any(|l| l.contains("user: hello")));
-        assert!(lines.iter().any(|l| l.contains("assistant: world")));
+        // An assistant turn is a header row plus a rendered body. It used to
+        // be asserted as the single string "assistant: world", which pinned the
+        // test to one specific layout: any change to how a reply is rendered
+        // broke the test without anything being wrong. What has to hold is that
+        // the turn is labelled and its body is addressable.
+        assert!(
+            lines.iter().any(|l| l.contains("assistant:")),
+            "an assistant turn must be labelled: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.trim() == "world"),
+            "the assistant body must be its own addressable row: {lines:?}"
+        );
         assert!(lines.iter().any(|l| *l == "─".repeat(80).as_str()));
     }
 
@@ -2399,9 +2411,16 @@ mod tests {
             .chat_lines
             .iter()
             .position(|l| l.text.contains("Hello, world"))
-            .unwrap();
+            .expect("the reply must be on the line map");
+        // Columns are derived from the row that was actually found, not
+        // hard-coded. The old test passed 13..18, which silently depended on
+        // the assistant label sharing a line with the body — so a rendering
+        // change moved the text and the test failed for a reason that had
+        // nothing to do with what it claimed to test.
+        let text = &state.chat_lines[row].text;
+        let start = text.find("Hello").unwrap();
         assert_eq!(
-            ChatPage::selected_text(&state, (row, 13), (row, 18)),
+            ChatPage::selected_text(&state, (row, start), (row, start + 5)),
             "Hello"
         );
     }
@@ -2424,8 +2443,13 @@ mod tests {
             .iter()
             .position(|l| l.text.contains("World"))
             .unwrap();
-        let sel = ChatPage::selected_text(&state, (hello_row, 13), (world_row, 14));
-        assert!(sel.contains("Hello") && sel.contains("World"));
+        let hello_col = state.chat_lines[hello_row].text.find("Hello").unwrap();
+        let world_end = state.chat_lines[world_row].text.find("World").unwrap() + 5;
+        let sel = ChatPage::selected_text(&state, (hello_row, hello_col), (world_row, world_end));
+        assert!(
+            sel.contains("Hello") && sel.contains("World"),
+            "got: {sel:?}"
+        );
     }
 
     #[test]
