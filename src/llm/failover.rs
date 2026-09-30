@@ -173,9 +173,11 @@ type ProviderEntry = (
 /// malformed request will fail identically everywhere, and retrying it just
 /// spends the user's money to produce the same error twice.
 fn classify_error(err_lower: &str) -> (bool, bool) {
-    let status_is_transient = ["http 500", "http 502", "http 503", "http 504", "http 408"]
-        .iter()
-        .any(|s| err_lower.contains(s));
+    // The same rule `send_request` and the agent loop use, so the three sites
+    // cannot disagree. It used to be five literal `"http 5xx"` substrings here
+    // and a two-entry keyword list in `agents/mod.rs`.
+    let status_is_transient =
+        super::provider::http_status_in(err_lower).is_some_and(super::provider::is_retryable_code);
 
     // Both the status and the wording are checked, because providers differ:
     // Anthropic says "authentication_error", OpenAI says "Incorrect API key

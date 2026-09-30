@@ -240,3 +240,9 @@ concurrent-applies-never-cross | concurrent_applies_never_read_each_others_patch
 patch-temp-is-removed | the_patch_temp_file_is_removed | a patch left behind after an apply
 this-repo-ignores-patches | this_repository_ignores_every_patch_temporary | the old fixed name in our own .gitignore, matching none of the new ones
 leftover-patch-is-ignored | a_leftover_patch_file_is_ignored_by_git | a killed run's patch one `git add -A` from a commit
+# B5-02 · one retry rule, three call sites
+status-recovered-from-message | a_provider_status_is_recovered_from_its_message | a site guessing at the status from a substring
+body-code-is-not-the-status | a_body_mentioning_a_code_is_not_a_status | a permanent 400 mentioning "500" retried forever
+retryable-set-is-one-rule | the_retryable_set_is_one_rule | two copies of the rule disagreeing on what is transient
+no-callsite-keeps-its-own-list | no_call_site_keeps_its_own_transient_list | the agent loop listing only 429 and 503 again
+sites-agree-on-a-real-message | every_site_agrees_on_a_real_provider_message | a 502 judged non-transient above, transient beside
