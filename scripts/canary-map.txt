@@ -81,3 +81,6 @@ coder-reports-each-step | the_coder_reports_each_step | a long stage opaque from
 one-shot-still-announces | the_one_shot_path_still_announces | trading one silence for another
 # T10 · the surface is gated at all
 first-run-answers | a first run answers instead of hanging | a first session that is a hang
+# B2-12 · a failed tool loop is visible, not a silent fallback (found by a real model run)
+failed-tool-loop-is-not-empty | a_failed_tool_loop_is_not_silently_empty | `.ok()?` making a network failure look like a declined tool loop
+tool-loop-failure-is-actionable | tool_loop_failure_names_the_cause_and_the_cost | "fell back" with no cause and no warning that the fallback is worse
