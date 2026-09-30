@@ -194,16 +194,31 @@ pub fn agent_files_from_coder_json(coder_json: Option<&str>) -> Vec<String> {
 /// the sandbox copy and must be replayed onto the host before we commit the
 /// `niki/<id>` branch.
 ///
-/// Strategy (single temp file, two attempts): `git apply` first, then
+/// Strategy (one temp file per caller, two attempts): `git apply` first, then
 /// `git -c apply.whitespace=nowarn apply -p1 --3way`. The patch is normalized
 /// once up front (see [`normalize_patch`]) so `git apply` doesn't reject the
 /// final context line; the temp file is removed on every path.
+///
+/// The temp name is **unique per caller**. It used to be the fixed
+/// `.niki-tmp.patch`, which is worse than the shared-temp-name case in
+/// [`crate::util::write_restricted_atomic`]: there, one writer lost a rename.
+/// Here the file's *contents* are read back by `git apply` by path, so two
+/// concurrent runs in one repository could each apply the **other's** patch —
+/// two tasks' work silently mixed on the host tree — and whichever finished
+/// first removed the file out from under the other's `git apply`.
+///
+/// The name is still inside the repository, because `git apply` resolves
+/// relative paths against the working tree. `.niki-tmp*.patch` is in this
+/// repository's `.gitignore` and written into a user's by
+/// [`ensure_patch_files_ignored`], so a crashed run cannot leave one to be
+/// committed.
 pub fn apply_diff_to_working_tree(repo_path: &Path, diff: &str) -> Result<()> {
-    let patch_path = repo_path.join(".niki-tmp.patch");
+    let patch_path = patch_temp_path(repo_path);
     std::fs::write(&patch_path, normalize_patch(diff))?;
     let patch_str = patch_path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("patch path is not valid UTF-8"))?;
+    ensure_patch_files_ignored(repo_path);
     let res = run_git(repo_path, &["apply", patch_str]).or_else(|_| {
         run_git(
             repo_path,
@@ -219,6 +234,45 @@ pub fn apply_diff_to_working_tree(repo_path: &Path, diff: &str) -> Result<()> {
     });
     let _ = std::fs::remove_file(&patch_path);
     res
+}
+
+/// A per-caller temp path for the patch `git apply` reads.
+fn patch_temp_path(repo: &Path) -> std::path::PathBuf {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    repo.join(format!(".niki-tmp.{}.{unique}.patch", std::process::id()))
+}
+
+/// Ensure `*.patch` temporaries are ignored by the user's git.
+///
+/// `.git/info/exclude` rather than the user's tracked `.gitignore`: the file
+/// only matters on this clone, and writing a line into a file the user reviews
+/// and shares — because a tool they ran once — is a change to their repository
+/// that nothing asked for. The same reasoning as `.niki-worktrees/` in
+/// [`crate::sandbox::worktree::ensure_git_excluded`].
+pub fn ensure_patch_files_ignored(repo: &Path) {
+    const PATTERN: &str = ".niki-tmp*.patch";
+    let exclude = repo.join(".git").join("info").join("exclude");
+    if let Some(parent) = exclude.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+    if existing
+        .lines()
+        .any(|l| l.trim().trim_start_matches('/') == PATTERN)
+    {
+        return;
+    }
+    let mut out = existing;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "\n# added by niki: temporary patch files, not part of your project\n{PATTERN}\n"
+    ));
+    let _ = std::fs::write(&exclude, out);
 }
 
 /// Scan the diff's files for unresolved merge-conflict markers
