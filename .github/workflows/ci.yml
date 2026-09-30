@@ -1012,5 +1012,12 @@ jobs:
         # class of defect the gate exists to catch and requiring a failure every
         # time. It mutates working-tree copies and restores them.
         run: bash tests/docs_consistency_selftest.sh
+      - name: Handover starter is unsolved
+        # niki-starter is what a newcomer is handed: a real project with a real
+        # failing test, and one command. The obvious way to "tidy this up" is to
+        # solve the task — and then every student run starts from green and
+        # teaches nothing. Solving it is a regression, and this is the check
+        # that says so.
+        run: bash niki-starter/selftest.sh
       - name: Run Product Verification
         run: ./scripts/product-verify.sh
