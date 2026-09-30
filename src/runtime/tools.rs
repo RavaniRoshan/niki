@@ -4225,12 +4225,47 @@ mod tests {
                 .unsigned_abs()
                 .clamp(MIN_BASH_TIMEOUT_MS, MAX_BASH_TIMEOUT_MS)
         };
+
+        // The wrap this test exists for, stated first. A plain `as u64` on a
+        // negative turns `-1` into ~1.8e19, which is far past the ceiling; the
+        // clamp is the only thing standing between that and a disabled deadline.
+        assert!(
+            (-1i64) as u64 > MAX_BASH_TIMEOUT_MS,
+            "the wrap is real: an unchecked `as u64` of -1 must exceed the ceiling, \
+             or this test is asserting against a hazard that no longer exists"
+        );
+        assert!(
+            (i64::MIN as u64) > MAX_BASH_TIMEOUT_MS,
+            "and so does i64::MIN, the value a large negative actually lands on"
+        );
+
+        // So the property is: whatever a model writes, the result is inside
+        // [MIN, MAX]. A negative that is small in magnitude floors; one that
+        // is large in magnitude ceils. Neither reaches outside the band.
+        for requested in [-1i64, 0, -30_000, 30_000, 10_000_000, i64::MIN, i64::MAX] {
+            let got = clamp(requested);
+            assert!(
+                (MIN_BASH_TIMEOUT_MS..=MAX_BASH_TIMEOUT_MS).contains(&got),
+                "clamp({requested}) = {got}, which is outside the band \
+                 [{MIN_BASH_TIMEOUT_MS}, {MAX_BASH_TIMEOUT_MS}]"
+            );
+        }
+
+        // Spelled out, because the floor-versus-ceiling choice for a small
+        // negative is the part that is easy to get backwards: `(-1)` is 1ms of
+        // absolute value, so it floors to the minimum, it does not become the
+        // maximum. Either answer is a valid deadline; only leaving the band
+        // disables the kill, and that is what the loop above rules out.
         assert_eq!(
             clamp(-1),
-            MAX_BASH_TIMEOUT_MS,
-            "a negative is a cap, not a wrap"
+            MIN_BASH_TIMEOUT_MS,
+            "a small negative floors to the minimum, it does not become the maximum"
         );
-        assert_eq!(clamp(i64::MIN.unsigned_abs() as i64), MAX_BASH_TIMEOUT_MS);
+        assert_eq!(
+            clamp(i64::MIN),
+            MAX_BASH_TIMEOUT_MS,
+            "a large negative ceils"
+        );
         assert_eq!(clamp(0), MIN_BASH_TIMEOUT_MS, "zero is not 'no timeout'");
         assert_eq!(clamp(-30_000), 30_000, "a negated normal value still works");
         assert_eq!(clamp(30_000), 30_000, "an ordinary value is untouched");
