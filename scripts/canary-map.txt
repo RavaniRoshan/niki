@@ -217,3 +217,8 @@ empty-allowlist-still-blocks | an_empty_allowlist_still_blocks_everything | a sl
 other-domains-stay-blocked | a_domain_outside_the_allowlist_is_still_blocked | one listed domain opening the network to another
 context-carries-the-allowlist | the_tool_context_carries_the_configured_allowlist | a working setting with no path to the tool
 no-hardcoded-empty-allowlist | the_tool_does_not_hardcode_an_empty_allowlist | the tool constructing itself with `vec![]` again
+# B4-09 · every streaming path retries a transient failure
+anthropic-stream-retries | anthropic_stream_retries_like_complete | a stream killed by one 429 while complete() retries four times
+no-provider-opts-out-of-retry | no_provider_streams_without_the_retry_wrapper | a path that quietly drops the resilience
+retryable-set-is-what-it-says | the_retryable_set_is_what_the_comment_says | a comment claiming 429/5xx and a different list
+retried-stream-is-bounded | a_retried_stream_is_still_bounded | retries multiplying a stalled stream to 8 minutes

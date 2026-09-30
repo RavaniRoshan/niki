@@ -195,15 +195,30 @@ impl LlmProvider for AnthropicProvider {
             "stream": true
         });
 
-        let resp = self
+        // Through `send_request`, like `complete()`.
+        //
+        // This called `.send()` directly, so the streaming path got **no HTTP
+        // retry at all**: one 429 or one 503 from Anthropic killed the stream
+        // on its first attempt, while the identical non-streaming call four
+        // lines above retries. The agent-level matcher catches 429 and 503 but
+        // not 500 or 502, so those were terminal too.
+        //
+        // Retrying is safe for a stream because nothing has been yielded to
+        // the caller yet: `send_request` returns once the *response headers*
+        // are in, and the body is read afterwards. A retry after the first
+        // byte would duplicate output, so the bound is deliberately here and
+        // not around the body read.
+        let req = self
             .client
             .post(url)
             .header("x-api-key", api_key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
-            .json(&payload)
-            .send()
-            .await?;
+            .json(&payload);
+        let resp = super::provider::send_request("anthropic stream", || {
+            req.try_clone().expect("a RequestBuilder clones").send()
+        })
+        .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
