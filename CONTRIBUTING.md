@@ -65,4 +65,4 @@ Found a vulnerability? **Do not open a public issue.** See
 ## License
 
 By contributing, you agree your contributions are licensed under the
-[Apache License 2.0](../LICENSE), the same as the project.
+[Apache License 2.0](LICENSE), the same as the project.

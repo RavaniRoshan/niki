@@ -29,26 +29,76 @@ fn read(rel: &str) -> String {
 }
 
 /// Every user-facing text surface in the repo, paired with its contents.
+///
+/// This used to be a hand-written list of three files plus five prompts, and
+/// that list is the reason a whole class of drift went unnoticed for five
+/// releases. The product ships a 41-page documentation site, a 13 KB
+/// `niki.example.toml` that users copy verbatim, 23 subcommands of `--help`
+/// text, and a README full of numbers — and none of them were in scope. So
+/// `docs/launch-audit.md` could sit at the top of the repository still claiming
+/// version 0.4.0, "~30,600 lines" and "Hooks: Not implemented", with the CI
+/// badge green, because no assertion had ever read it.
+///
+/// A list is a promise to remember to update it, and nobody remembers. So this
+/// walks declared roots instead: a new page under `docs/content/` is covered the
+/// moment it is added, with no edit here. The declarations are the deliberate
+/// part; the enumeration is not.
 fn claim_surfaces() -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = vec![
-        ("src/display/tips.rs".into(), read("src/display/tips.rs")),
-        ("prompts/base.md".into(), read("prompts/base.md")),
-        ("README.md".into(), read("README.md")),
-    ];
-    for name in [
-        "coder.md",
-        "reviewer.md",
-        "tester.md",
-        "planner.md",
-        "critic.md",
+    let mut out: Vec<(String, String)> = Vec::new();
+
+    // Single files a user is certain to read.
+    for rel in [
+        "README.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "niki.example.toml",
+        "src/display/tips.rs",
     ] {
-        let rel = format!("prompts/{name}");
-        if repo_root().join(&rel).exists() {
-            let body = read(&rel);
-            out.push((rel, body));
+        let p = repo_root().join(rel);
+        if p.exists() {
+            out.push((rel.to_string(), read(rel)));
         }
     }
+
+    // Directory roots: everything a person can be told.
+    collect_ext(&repo_root().join("docs"), &["md", "mdx"], &mut out);
+    collect_ext(&repo_root().join("prompts"), &["md"], &mut out);
+
+    // Nothing found is itself the failure mode this change exists to prevent, so
+    // the guard below is not optional decoration.
     out
+}
+
+fn collect_ext(dir: &Path, exts: &[&str], out: &mut Vec<(String, String)>) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = rd.flatten().collect();
+    entries.sort_by_key(|e| e.path());
+    for e in entries {
+        let p = e.path();
+        if p.is_dir() {
+            // `node_modules` under docs/ is a build artefact, not a surface.
+            if p.file_name()
+                .is_some_and(|n| n == "node_modules" || n == "package-lock.json")
+            {
+                continue;
+            }
+            collect_ext(&p, exts, out);
+        } else if p
+            .extension()
+            .and_then(|x| x.to_str())
+            .is_some_and(|x| exts.contains(&x))
+            && let Ok(t) = std::fs::read_to_string(&p)
+        {
+            let rel = p
+                .strip_prefix(repo_root())
+                .unwrap_or(&p)
+                .display()
+                .to_string();
+            out.push((rel, t));
+        }
+    }
 }
 
 /// Phrases that assert a guarantee the product does not currently make.
@@ -226,6 +276,310 @@ fn re_derive_variants(body: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// Commands that take a sub-subcommand, and the enum each one dispatches to.
+///
+/// Only for parents where *every* second word is a subcommand. Where a command
+/// mixes subcommands and flags (`niki session undo`, `niki smoke --backend`)
+/// the second word cannot be resolved from the text alone, and guessing
+/// produced a test that failed on perfectly good copy.
+const SUBCOMMAND_PARENTS: &[(&str, &str)] = &[
+    ("config", "src/cli/config.rs"),
+    ("auth", "src/cli/auth.rs"),
+    ("architecture", "src/cli/architecture.rs"),
+    ("index", "src/cli/index.rs"),
+    ("skills", "src/cli/skills.rs"),
+    ("commands", "src/cli/commands.rs"),
+    ("session", "src/cli/session.rs"),
+    ("memory", "src/cli/memory.rs"),
+];
+
+/// The sub-subcommands each parent accepts, derived from its clap enum.
+fn subcommands_for(parent: &str) -> Option<Vec<String>> {
+    let path = SUBCOMMAND_PARENTS.iter().find(|(p, _)| *p == parent)?.1;
+    let src = std::fs::read_to_string(repo_root().join(path)).ok()?;
+    let start = src.find("pub enum ")?;
+    let body = &src[start..];
+    let end = body.find("\n}\n").unwrap_or(body.len());
+    let body = &body[..end];
+    let variants: Vec<String> = re_derive_variants(body)
+        .into_iter()
+        .map(|v| to_snake(&v))
+        .collect();
+    if variants.is_empty() {
+        None
+    } else {
+        Some(variants)
+    }
+}
+
+/// Every `niki <cmd> [<sub>]` reference in the documented surfaces must resolve.
+///
+/// The first version of this check ran over `src/**/*.rs` only, and only ever
+/// looked at the *first* word after `niki`. That is honest about what it can
+/// assert — the second word might be a flag, a value, or the start of a quoted
+/// task — but it left the documentation site entirely unchecked, which is where
+/// a user actually looks.
+///
+/// So: the surfaces are the walk, and the second word is checked wherever the
+/// parent command has a subcommand enum, because there the second word is
+/// unambiguously a sub-subcommand. `niki config chek` fails, as it should.
+#[test]
+fn every_niki_command_in_every_documented_surface_exists() {
+    let mut known: Vec<String> = Vec::new();
+    let main_rs = std::fs::read_to_string(repo_root().join("src/main.rs")).expect("main.rs");
+    let body = &main_rs[main_rs.find("enum Commands {").expect("Commands")..];
+    let body = &body[..body.find("\n#[tokio::main]").unwrap_or(body.len())];
+    for variant in re_derive_variants(body) {
+        known.push(to_snake(&variant));
+    }
+    assert!(
+        known.len() > 20,
+        "only {} commands were derived from main.rs; the derivation has broken and \
+         every assertion below would pass vacuously",
+        known.len()
+    );
+
+    let mut violations: Vec<String> = Vec::new();
+    let mut checked = 0usize;
+
+    for (rel, body) in claim_surfaces() {
+        for reference in backticked_niki_commands(&body) {
+            let mut words = reference.split_whitespace();
+            if words.next() != Some("niki") {
+                continue;
+            }
+            let Some(sub) = words.next() else { continue };
+            // A token beginning with `-` is a flag, not a command; one wrapped
+            // in `<>` or `[]` is a placeholder, not a command. The first version
+            // of this check treated both as commands and reported `niki version`
+            // for `niki --version` and `niki command` for `niki <command> --help`
+            // — which is how a gate earns a reputation for being wrong.
+            if is_flag_or_placeholder(sub) {
+                continue;
+            }
+            if !known.iter().any(|k| k == sub) {
+                violations.push(format!(
+                    "  {rel}: `niki {sub}` is not a command (known: {})",
+                    known.join(", ")
+                ));
+                continue;
+            }
+            checked += 1;
+
+            // Second word, only where it can only be a sub-subcommand.
+            let Some(second) = words.next() else { continue };
+            if is_flag_or_placeholder(second) {
+                continue;
+            }
+            let Some(subs) = subcommands_for(sub) else {
+                continue;
+            };
+            // `niki index build|query` and `niki session list/show` are shorthand
+            // for alternatives, and a user reads them that way. Every
+            // alternative is checked; a single bad one still fails.
+            let mut bad = Vec::new();
+            // In a markdown table cell a literal pipe is written `\|`, so the
+            // backslash has to go before the alternatives are split — otherwise
+            // `niki index build\|query` reads as a subcommand called `build\`,
+            // which is a defect in the checker rather than in the document.
+            let second = second.replace('\\', "");
+            for alt in second.split(['|', '/']) {
+                let alt = alt.trim();
+                if alt.is_empty() || is_flag_or_placeholder(alt) {
+                    continue;
+                }
+                if !subs.iter().any(|s| s == alt) {
+                    bad.push(alt.to_string());
+                }
+            }
+            if !bad.is_empty() {
+                violations.push(format!(
+                    "  {rel}: `niki {sub} {}` is not a subcommand of `niki {sub}` \
+                     (known: {})",
+                    bad.join(", "),
+                    subs.join(", ")
+                ));
+            }
+        }
+    }
+
+    assert!(
+        !violations.is_empty() || checked > 50,
+        "the scan checked {checked} command references; a walk that finds almost \
+         nothing is not scanning the surfaces it claims to"
+    );
+    assert!(
+        violations.is_empty(),
+        "these documented surfaces tell the user to run commands that do not exist:\n{}\n\n\
+         A user copies one of these, gets a usage error, and concludes the tool does \
+         not know what it is talking about.",
+        violations.join("\n")
+    );
+}
+
+/// Every relative link in the documentation must resolve.
+///
+/// Cheap, and it catches the class of rot this repository is full of: a file
+/// that has existed since before the docs were restructured, pointing at a path
+/// that has not existed for months. `CONTRIBUTING.md` links its own licence as
+/// `../LICENSE` from the repository root, which resolves to the parent of the
+/// repository — a link that works in a web viewer's imagination and nowhere on
+/// disk.
+#[test]
+fn every_relative_link_in_the_documentation_resolves() {
+    let mut broken: Vec<String> = Vec::new();
+    let mut checked = 0usize;
+
+    for (rel, body) in claim_surfaces() {
+        if !rel.ends_with(".md") && !rel.ends_with(".mdx") {
+            continue;
+        }
+        let base = repo_root().join(&rel).parent().unwrap().to_path_buf();
+        for target in markdown_links(&body) {
+            // External, absolute, in-page anchors and mailto are not ours.
+            if target.starts_with("http://")
+                || target.starts_with("https://")
+                || target.starts_with("mailto:")
+                || target.starts_with('#')
+                || target.starts_with('/')
+            {
+                continue;
+            }
+            // Drop any `#anchor` suffix.
+            let path = target.split('#').next().unwrap_or(&target);
+            if path.is_empty() {
+                continue;
+            }
+            checked += 1;
+            if !base.join(path).exists() {
+                broken.push(format!("  {rel}: [{target}]"));
+            }
+        }
+    }
+
+    assert!(
+        checked > 0,
+        "no relative links were found; the link extractor has broken"
+    );
+    assert!(
+        broken.is_empty(),
+        "these documentation links do not resolve to anything on disk:\n{}\n\n\
+         A dead link in a file a newcomer reads is the cheapest possible way to \
+         teach them that the documentation is not maintained.",
+        broken.join("\n")
+    );
+}
+
+/// Is this token a flag, a placeholder, or a version rather than a command?
+fn is_flag_or_placeholder(token: &str) -> bool {
+    let t = token.trim();
+    if t.is_empty() {
+        return true;
+    }
+    // `--version`, `-i`, `-p/1234`
+    if t.starts_with('-') {
+        return true;
+    }
+    // `<command>`, `[subcommand]`, `{stage}`
+    if (t.starts_with('<') && t.ends_with('>'))
+        || (t.starts_with('[') && t.ends_with(']'))
+        || (t.starts_with('{') && t.ends_with('}'))
+    {
+        return true;
+    }
+    // A version: `0.9.0`, `v0.8.0`, `1.88`. Output, not a command.
+    let core = t.strip_prefix('v').unwrap_or(t);
+    if !core.is_empty() && core.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    false
+}
+
+/// Markdown link targets, in order of appearance.
+fn markdown_links(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes: Vec<char> = text.chars().collect();
+    let mut i = 0usize;
+    while i + 1 < bytes.len() {
+        if bytes[i] == '[' {
+            // Find the matching `](`.
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != ']' {
+                j += 1;
+            }
+            if j + 1 < bytes.len() && bytes[j] == ']' && bytes[j + 1] == '(' {
+                let mut k = j + 2;
+                let mut target = String::new();
+                while k < bytes.len() && bytes[k] != ')' {
+                    target.push(bytes[k]);
+                    k += 1;
+                }
+                // Drop a title: `[a](path "title")`.
+                let target = target
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches('"')
+                    .to_string();
+                if !target.is_empty() {
+                    out.push(target);
+                }
+                i = k;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The walk has to actually cover the documentation, or every assertion built
+/// on it is decoration.
+///
+/// This is the guard that would have caught the original design error. When
+/// `claim_surfaces()` was three hardcoded filenames, everything here passed
+/// while the documentation site said the product needed a container runtime and
+/// an API key — the two things the README opens by saying you do not need.
+#[test]
+fn the_claim_walk_covers_the_documentation_site() {
+    let surfaces = claim_surfaces();
+    let names: Vec<&str> = surfaces.iter().map(|(n, _)| n.as_str()).collect();
+
+    for required in [
+        "README.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "niki.example.toml",
+    ] {
+        assert!(
+            names.contains(&required),
+            "{required} is not in scope, so nothing checks it"
+        );
+    }
+
+    let mdx = names.iter().filter(|n| n.ends_with(".mdx")).count();
+    assert!(
+        mdx >= 30,
+        "only {mdx} documentation pages are in scope; the site has 41 and they are \
+         the surface a user reads first"
+    );
+
+    let docs_md = names
+        .iter()
+        .filter(|n| n.starts_with("docs/") && n.ends_with(".md"))
+        .count();
+    assert!(
+        docs_md >= 5,
+        "only {docs_md} of the docs/*.md files are in scope"
+    );
+
+    // And the prompts, which is where the original false claim lived.
+    assert!(
+        names.contains(&"prompts/base.md"),
+        "prompts/base.md must stay in scope"
+    );
 }
 
 fn to_snake(s: &str) -> String {
