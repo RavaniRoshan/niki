@@ -1574,6 +1574,21 @@ async fn run_coder_tool_loop(
             crate::artifacts::validate::validate_artifact(&json, &schema_for_validation)
                 .map_err(|e| e.to_string())
         });
+    // The Coder must announce itself.
+    //
+    // Every other stage reaches `display.agent_start` inside `run_agent`. The
+    // Coder does not, because it does not go through `run_agent` — it runs a
+    // tool loop with its own request construction. The consequence was measured
+    // against a live provider: the log read
+    //
+    //     [Planner] Done (165s, in 1146 / out 1640) — Spec: 1 files to modify
+    //
+    // and then nothing at all. Not a slow line, not a spinner, not a stage
+    // name — silence, for as long as the Coder took. The Coder is the longest,
+    // most expensive and most failure-prone stage in the product, and the one
+    // user most needs to see progress from, was the one that reported none.
+    display.agent_start(role);
+
     let out = crate::runtime::run_tool_loop_with(
         crate::runtime::LoopOptions {
             submit_artifact: Some(crate::runtime::submit_artifact_spec(schema_json)),

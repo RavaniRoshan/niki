@@ -75,5 +75,9 @@ zero-window-is-not-instant-deny | a_zero_window_does_not_become_an_instant_deny 
 request-budget-is-bounded | the_budget_is_checked_before_every_attempt | a stage waiting 12+ minutes to give up
 bounds-are-ordered | the_two_bounds_are_ordered_as_intended | a budget longer than read x attempts x retries
 slow-provider-is-not-cut-off | a_slow_but_answering_provider_is_not_cut_off | a bound so tight it kills working models
+# B2-11 · the Coder announces itself (found by a real model run)
+coder-announces-its-stage | the_coder_tool_loop_announces_its_stage | the longest stage running in silence
+coder-reports-each-step | the_coder_reports_each_step | a long stage opaque from the outside
+one-shot-still-announces | the_one_shot_path_still_announces | trading one silence for another
 # T10 · the surface is gated at all
 first-run-answers | a first run answers instead of hanging | a first session that is a hang
