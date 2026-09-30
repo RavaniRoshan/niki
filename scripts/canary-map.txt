@@ -97,3 +97,7 @@ redaction-corpus-is-not-hollow | the_corpus_is_not_empty_and_not_hollow | a chec
 json-key-shape-is-caught | the_json_shape_specifically_is_caught | a key in a provider error body reaching the log
 redaction-does-not-eat-evidence | ordinary_output_survives_redaction | a report with [REDACTED] where the evidence was
 doctor-check-uses-the-corpus | the_doctor_check_reads_the_same_corpus_the_tests_do | the check green while the redactor regresses
+# B2-15 · `q` on a sub-page goes back; it does not quit (11 handlers were dead)
+subpage-q-reaches-the-page | a_subpage_q_reaches_the_page_not_the_nav_layer | the nav layer above the router, killing 11 page handlers
+quit-modal-is-reachable | the_confirm_quit_modal_is_reachable_from_a_subpage | the confirm-quit modal as unreachable dead code
+pty-case-proves-liveness | the_pty_case_exists_and_waits_for_the_session_to_die | a case that passes against a session about to exit
