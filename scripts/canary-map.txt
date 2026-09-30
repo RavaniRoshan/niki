@@ -145,3 +145,10 @@ session-empty-state-is-honest | an_empty_conversation_says_so_and_says_how | an 
 session-shows-the-tail | a_long_conversation_shows_its_most_recent_turns | turn one of ninety, which reads as a broken page
 session-log-is-wired | the_event_loop_passes_the_live_chat_log | the loop passing an empty log
 session-tab-uses-the-log | the_tab_uses_the_log_it_is_given | the page reading the field nothing writes
+# B3-09 · the key matrix describes the codebase that exists
+no-unresolved-divergence | no_unresolved_divergence_is_listed | a "do not fix" list of work already done
+no-bare-t-handler | there_is_no_bare_t_handler | the theme letter surviving where the chord was bound
+no-quit-from-a-page-key | no_loop_quits_from_a_key_the_page_owns | a loop breaking out on a key the page owns
+tab-goes-to-run-in-both | both_loops_send_tab_to_run | the two loops disagreeing about Tab again
+ctrl-c-is-one-handler | ctrl_c_goes_through_one_handler | Ctrl+C handled in two places
+matrix-keeps-its-chords | the_matrix_still_documents_the_chord_keys_it_claims | a binding dropped from the doc without saying so
