@@ -36,9 +36,24 @@ search · Tab apply @-file / complete `/model` arg · Shift+Tab permission mode
 
 ## Known run_tui vs run_chat divergences (do not "fix" without unification)
 
-1. Theme: Ctrl+T (run_tui, non-chat) vs bare `t` (run_chat pages).
-2. Quit: `q`/Esc confirm modal (run_tui Run page) vs `q` quit modal (run_chat).
-3. Tab: toggles Chat/Run in run_tui; in run_chat toggles Chat/last page.
-4. Ctrl+C: cancel/exit cascade only in run_tui; run_chat relies on chat keys.
+**Empty.** The four that were listed here are all resolved, and the list was
+sending the next maintainer after work that had already been done:
 
-Unify only via the keybinding table (TUI-003 follow-up), never by copying literals.
+1. ~~Theme: Ctrl+T vs bare `t`.~~ There is no bare `t` handler anywhere in
+   `src/` — the only `Char('t')` arms are guarded on `CONTROL`. The stale
+   letter also survived in the command palette's `theme: cycle` row, which
+   advertised a key that did nothing.
+2. ~~Quit: `q` confirm on one loop, `q` quit on the other.~~ `q` on a
+   sub-page goes back on both loops, and a page that declines it falls back to
+   the confirm modal on both.
+3. ~~Tab: Chat/Run vs Chat/last page.~~ Both resolve `Chat → Run`.
+4. ~~Ctrl+C: a cascade in one loop, chat keys in the other.~~ Both loops route
+   it through the same handler, and
+   `both_tui_loops_route_ctrl_c_through_the_shared_handler` says so.
+
+`tests/tui_key_matrix_matches_the_code.rs` checks this section against the
+source, so it cannot go stale again: adding a divergence without a matching
+code difference fails the build, and a stale entry fails it too.
+
+Unify only via the keybinding table (TUI-003 follow-up), never by copying
+literals.
