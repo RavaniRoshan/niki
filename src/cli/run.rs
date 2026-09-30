@@ -968,6 +968,17 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
                 let _ = rec.save_to_disk(&task_dir);
                 crate::display::notify::pipeline_complete(false, "");
             }
+            // Tell the surface before tearing it down. `show_failure` had zero
+            // call sites for its entire life: the error path went straight from
+            // "the pipeline returned Err" to "restore the terminal and print an
+            // anyhow line", so under `--tui` the alternate screen vanished
+            // mid-run still reading `Running` and the designed failure panel was
+            // never rendered once.
+            if is_cancelled {
+                display.show_cancelled();
+            } else {
+                display.show_failure(&e.to_string());
+            }
             display.finish_tui();
             if args.output_format == OutputFormat::Json {
                 *emitted_envelope = true;

@@ -1103,7 +1103,24 @@ pub enum RunState {
     Idle,
     Running,
     AwaitingReviewer,
-    AwaitingApproval,
+    /// A Reviewer approved the work.
+    ///
+    /// This used to be called `AwaitingApproval`, and there is no approval to
+    /// await: no key, no event and no action anywhere accepts or rejects a
+    /// finished run. The name said the TUI was waiting for a decision it had no
+    /// way to receive, and because the *only* way to reach it was "the run
+    /// ended, for any reason", the Verdict tile rendered a pulsing green
+    /// "A P P R O V E D" for failed runs, rejected runs, and runs that died on
+    /// an API error.
+    Approved,
+    /// A Reviewer asked for changes and the rounds ran out.
+    Rejected,
+    /// The run finished without anything reviewing it.
+    ///
+    /// Distinct from `Approved` on purpose: `verdict_source` exists precisely
+    /// because "approved" and "nothing checked the work" are different facts,
+    /// and collapsing them is the defect.
+    NoVerdict,
     Failed,
     Cancelled,
 }
@@ -1454,8 +1471,8 @@ impl AppState {
                     self.modal = Some(Modal::Error {
                         stage: format!("{role:?}"),
                         message: error,
-                        hint: "Press [r] to retry the stage, [c] to open config, \
-                               or [Esc] to return to the transcript."
+                        hint: "Press [c] to open config, or [Esc] to return to the \
+                               transcript. The run's evidence is in the task directory."
                             .to_string(),
                     });
                 }
@@ -1489,6 +1506,14 @@ impl AppState {
             }
             DisplayEvent::BranchName(name) => {
                 self.branch_name = name;
+            }
+            DisplayEvent::Notice { text, warning } => {
+                // Into the transcript, not just a transient banner: a notice
+                // that vanishes before the run ends has told nobody anything.
+                self.chat_log.push((
+                    (if warning { "warning" } else { "notice" }).to_string(),
+                    text,
+                ));
             }
             DisplayEvent::ChatPending => {
                 self.chat_pending = true;
@@ -1551,9 +1576,25 @@ impl AppState {
                     s.latency_ms = latency_ms;
                 }
             }
-            DisplayEvent::Final => {
+            DisplayEvent::Final { verdict, error } => {
                 self.finished = true;
-                self.run_state = RunState::AwaitingApproval;
+                // Derived from what actually happened. `show_failure` emits
+                // `Final` too, so a single terminal event covers both endings —
+                // and previously both produced a green APPROVED tile.
+                self.run_state = if error.is_some() {
+                    RunState::Failed
+                } else {
+                    match verdict.as_deref() {
+                        Some("approved") | Some("Approved") => RunState::Approved,
+                        Some("rejected") | Some("Rejected") => RunState::Rejected,
+                        Some("revision_needed") | Some("RevisionNeeded") => RunState::Rejected,
+                        // Ended with nothing having reviewed it. Not an approval.
+                        _ => RunState::NoVerdict,
+                    }
+                };
+                if let Some(e) = error {
+                    self.chat_log.push(("error".to_string(), e));
+                }
             }
             DisplayEvent::PermissionRequest {
                 command,

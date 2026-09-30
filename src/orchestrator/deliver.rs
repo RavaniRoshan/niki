@@ -168,7 +168,9 @@ pub fn deliver(inp: DeliverInput<'_>) -> Result<Delivered> {
         display,
     } = inp;
     let args = DeliverFlags { dry_run, force };
-    if let Some(d) = display {
+    // `as_deref`, not a move: the same display is needed again at the end to
+    // announce a blocked branch.
+    if let Some(d) = display.as_deref() {
         d.set_branch_name(&branch_name);
     }
     // Send branch name to TUI for status line display
@@ -444,6 +446,13 @@ pub fn deliver(inp: DeliverInput<'_>) -> Result<Delivered> {
                 eprintln!("Warning: could not append branch decision to report: {}", e);
             }
         }
+    }
+
+    // Say the blocking reason to the surface while it is still on screen. It is
+    // also returned in `Delivered` and printed by every non-TUI caller; this is
+    // the copy that survives `LeaveAlternateScreen`.
+    if let (Some(note), Some(d)) = (&branch_block_note, display.as_deref()) {
+        d.notice(note.clone(), false);
     }
 
     Ok(Delivered {
