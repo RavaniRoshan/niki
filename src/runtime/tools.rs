@@ -2634,6 +2634,14 @@ impl Tool for SkillLoadTool {
 }
 
 /// Git tool — version control operations.
+/// A bound on a single git invocation.
+///
+/// `git daemon` is a valid subcommand and blocks forever, so an unbounded tool
+/// loop is one `git {"subcommand": "daemon"}` away. A read-only query against
+/// a real repository finishes in well under a second; a large `log` over a
+/// deep history is the slow case, and thirty seconds is generous for it.
+const GIT_TOOL_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub struct GitTool;
 
 #[async_trait::async_trait]
@@ -2653,6 +2661,17 @@ impl Tool for GitTool {
 
     async fn execute(&self, input: ToolInput, ctx: &ToolContext) -> ToolResult {
         let subcommand = input.str("subcommand").unwrap_or("status");
+
+        // Enforce the command deny-list, exactly as the `bash` tool does.
+        //
+        // It did not, and that made every per-role deny-list entry about git
+        // unreachable: `git {"subcommand":"push"}` and
+        // `git {"subcommand":"commit"}` from the Reviewer passed, and so did
+        // `clean -fd`. The `bash` tool's own comment records the principle —
+        // "a granted tool permission must never bypass `check_command_policy`"
+        // — and this tool had a `PermissionRequirement::Ask` and no check, so
+        // the one path a role could not reach through `bash` was the one it
+        // could reach through here.
         let extra_args: Vec<&str> = match subcommand {
             "diff" => vec!["--stat"],
             "log" => vec!["--oneline", "-10"],
@@ -2660,17 +2679,56 @@ impl Tool for GitTool {
             "branch" => vec![],
             _ => vec![],
         };
-        let result = tokio::process::Command::new("git")
-            .arg(subcommand)
-            .args(&extra_args)
-            .current_dir(&ctx.project_path)
-            .output()
-            .await;
+        let mut argv: Vec<&str> = vec!["git", subcommand];
+        argv.extend(extra_args.iter().copied());
+        if let Err(e) = crate::sandbox::check_command_policy(
+            &argv,
+            &crate::config::SecurityPolicyConfig::default(),
+        ) {
+            let msg = format!("git blocked by command policy: {e}");
+            return ToolResult {
+                tool_id: ToolId::generate(),
+                tool_name: "git".into(),
+                status: ToolStatus::Failed,
+                summary: msg.clone(),
+                data: ToolData::None,
+                duration: Duration::ZERO,
+                artifacts: Vec::new(),
+                diagnostics: vec![msg],
+                metadata: HashMap::new(),
+            };
+        }
+
+        // A deadline, like every other command path. `git {"subcommand":
+        // "daemon"}` — a valid subcommand — had no bound, so the tool loop
+        // waited on it forever. The previous owner of this code already routed
+        // the `test` tool through `exec_with_timeout` "precisely because" of
+        // that; this one was missed.
+        let owned: Vec<String> = argv.iter().map(|a| a.to_string()).collect();
+        let result = crate::sandbox::exec::exec_with_timeout(
+            &owned,
+            &ctx.project_path,
+            GIT_TOOL_TIMEOUT,
+            GIT_TOOL_TIMEOUT.as_secs(),
+            crate::sandbox::truncate_head_tail,
+        )
+        .await;
         match result {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                let exit_code = output.status.code().unwrap_or(-1);
+            // A deadline is not a git failure; it is "we stopped waiting", and
+            // the model needs to hear that rather than see a tool that never
+            // returns.
+            Ok(Err(_timeout)) => {
+                return make_error_result(&format!(
+                    "git {} did not finish within {}s and was killed.",
+                    subcommand,
+                    GIT_TOOL_TIMEOUT.as_secs()
+                ));
+            }
+            Err(e) => return make_error_result(&format!("could not run git {subcommand}: {e}")),
+            Ok(Ok(output)) => {
+                let stdout = output.stdout;
+                let stderr = output.stderr;
+                let exit_code = output.exit_code;
                 let status = if exit_code == 0 {
                     ToolStatus::Success
                 } else {
@@ -2684,7 +2742,9 @@ impl Tool for GitTool {
                     data: ToolData::BashOutput {
                         stdout,
                         stderr,
-                        exit_code,
+                        // The git tool has always reported an i32 here, and
+                        // 128 + signal is well inside that range.
+                        exit_code: exit_code as i32,
                     },
                     duration: Duration::ZERO,
                     artifacts: Vec::new(),
@@ -2692,7 +2752,6 @@ impl Tool for GitTool {
                     metadata: HashMap::new(),
                 }
             }
-            Err(e) => make_error_result(&format!("git error: {}", e)),
         }
     }
 }

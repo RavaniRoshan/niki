@@ -244,3 +244,142 @@ fn the_registry_advertises_real_schemas_not_permissive_stubs() {
         "these tools still advertise an empty parameter schema: {empty:?}"
     );
 }
+
+/// The `git` tool must honour the command deny-list.
+///
+/// It did not. The `bash` tool has enforced `check_command_policy` since Phase
+/// 5.3, with the comment "a granted tool permission must never bypass
+/// `check_command_policy`" — and this tool had a `PermissionRequirement::Ask`
+/// and no check at all, so every per-role deny-list entry about git was
+/// unreachable through the one tool a role could still use. `git
+/// {"subcommand":"push"}` and `{"subcommand":"commit"}` from the Reviewer
+/// passed; so did `clean -fd`.
+///
+/// The reproduction is a policy, not a network: the default global deny-list
+/// contains `git push --force`, so the test drives the *checker* with the exact
+/// argv this tool now builds and asserts it refuses.
+#[test]
+fn a_git_subcommand_on_the_deny_list_is_refused() {
+    let policy = niki::config::SecurityPolicyConfig::default();
+    for argv in [
+        vec!["git", "push", "--force"],
+        vec!["git", "push", "-f"],
+        vec!["git", "clean", "-fd"],
+    ] {
+        let verdict = niki::sandbox::check_command_policy(&argv, &policy);
+        // `clean -fd` is not on the default list — which is the point worth
+        // recording: a subcommand with no deny entry is allowed, and only the
+        // check makes the two entries above refusable.
+        if argv.contains(&"clean") {
+            assert!(
+                verdict.is_ok(),
+                "sanity: `clean` is not on the default deny-list, so the check alone \
+                 would not stop it — the reviewer permission mode is what does"
+            );
+        } else {
+            assert!(
+                verdict.is_err(),
+                "the deny-list must refuse {argv:?}; the git tool builds exactly this argv"
+            );
+        }
+    }
+}
+
+/// And the check is not so broad that ordinary git stops working.
+#[test]
+fn ordinary_git_subcommands_are_still_allowed() {
+    let policy = niki::config::SecurityPolicyConfig::default();
+    for argv in [
+        vec!["git", "status"],
+        vec!["git", "diff", "--stat"],
+        vec!["git", "log", "--oneline", "-10"],
+        vec!["git", "branch"],
+    ] {
+        assert!(
+            niki::sandbox::check_command_policy(&argv, &policy).is_ok(),
+            "{argv:?} is what the tool is for and must not be blocked"
+        );
+    }
+}
+
+/// Drive the real tool, not the checker.
+///
+/// The two tests above assert what `check_command_policy` decides. This one
+/// asserts that `GitTool` actually calls it — which is the wiring that was
+/// missing, and the reason `git {"subcommand":"push"}` passed from a role
+/// whose `bash` equivalent was denied.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_git_tool_itself_refuses_a_denied_subcommand() {
+    use niki::runtime::tools::GitTool;
+    use niki::runtime::{Tool, ToolContext, ToolInput, ToolStatus};
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ToolContext {
+        agent_id: niki::mission::AgentId("t".into()),
+        mission_id: niki::mission::MissionId("t".into()),
+        role: "reviewer".into(),
+        project_path: dir.path().to_path_buf(),
+        permissions: std::collections::HashMap::new(),
+        // Bypass, so the *permission* layer cannot be what stops this. If the
+        // deny-list is not consulted, the command runs.
+        permission_mode: "bypass".into(),
+        fail_closed_headless: false,
+        task_store: None,
+    };
+
+    // The marker file would exist only if the command actually ran.
+    let marker = dir.path().join("PUSHED");
+    let result = GitTool
+        .execute(
+            ToolInput::new(serde_json::json!({ "subcommand": "push --force origin main" })),
+            &ctx,
+        )
+        .await;
+
+    assert_eq!(
+        result.status,
+        ToolStatus::Failed,
+        "a denied git subcommand must fail, even with permissions bypassed: {:?}",
+        result.summary
+    );
+    assert!(
+        result.summary.contains("policy") || result.summary.contains("blocked"),
+        "the refusal must name the policy, so the model knows to stop: {:?}",
+        result.summary
+    );
+    assert!(!marker.exists(), "sanity: nothing should have run");
+}
+
+/// A subcommand on the deny-list must not be able to hide behind the
+/// argument sugar the tool adds.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_git_tool_cannot_be_reached_by_a_sneaky_subcommand() {
+    use niki::runtime::tools::GitTool;
+    use niki::runtime::{Tool, ToolContext, ToolInput, ToolStatus};
+
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ToolContext {
+        agent_id: niki::mission::AgentId("t".into()),
+        mission_id: niki::mission::MissionId("t".into()),
+        role: "reviewer".into(),
+        project_path: dir.path().to_path_buf(),
+        permissions: std::collections::HashMap::new(),
+        permission_mode: "bypass".into(),
+        fail_closed_headless: false,
+        task_store: None,
+    };
+
+    for sneaky in ["push --force", "push -f", "push --force-with-lease"] {
+        let r = GitTool
+            .execute(
+                ToolInput::new(serde_json::json!({ "subcommand": sneaky })),
+                &ctx,
+            )
+            .await;
+        assert_ne!(
+            r.status,
+            ToolStatus::Success,
+            "`{sneaky}` must not succeed, even bypassing permissions"
+        );
+    }
+}
