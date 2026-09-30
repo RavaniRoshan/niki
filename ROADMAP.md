@@ -37,9 +37,22 @@ than a hand-copied list.
 Blocked behind nothing now that T3 landed, but it is large and it should be
 built on a stable router (§1).
 
-- Tool cards in the transcript, with arguments and results. The renderer
-  (`components/tool_card.rs`, `tool_detail.rs`, the Enter hit-test) is fully
-  built and unreachable, because the chat sends `tools: None`.
+- ~~**Tool cards in the transcript.**~~ **CLOSED in batch 6** as a record
+  correction, not a feature. This entry was wrong: it said the renderer
+  (`components/tool_card.rs`, `tool_detail.rs`, the Enter hit-test) was
+  "unreachable, because the chat sends `tools: None`". It is reachable.
+  `ToolCard::new` is called from `display/state.rs:1763` on
+  `DisplayEvent::ToolCall` and from `display/tui.rs:2455`; `tool_detail`'s
+  `route_click`/`render_tool_detail`/`detail_viewport`/`detail_content_lines`
+  are all called from `tui.rs`; and the Coder's tool loop emits
+  `DisplayEvent::ToolCall` per call — so a **run's** tool calls render with
+  their arguments and results today. The entry conflated two surfaces: the
+  **chat** sends `tools: None` by the §0a decision, so a *conversation* turn
+  produces no card, while the **pipeline** runs tools and its cards render.
+  Left as written it read as a bug and would invite someone to "fix" it by
+  giving the chat tools, undoing §0a. `tests/tool_cards_are_live.rs` now holds
+  both halves in place: the pipeline's cards stay wired, and the chat stays
+  tool-less.
 - ~~**Branch checkout from the TUI.**~~ **DONE in batch 2** (`aa1a244`).
   `session::branch`, shared by the TUI and the CLI, with the argument
   validated first — `git checkout -f --` discards uncommitted work and exits

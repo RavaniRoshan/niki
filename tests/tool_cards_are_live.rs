@@ -1,0 +1,135 @@
+//! The tool-card renderer is live, and the roadmap said it was not.
+//!
+//! `ROADMAP.md` §2 claimed:
+//!
+//! > Tool cards in the transcript, with arguments and results. The renderer
+//! > (`components/tool_card.rs`, `tool_detail.rs`, the Enter hit-test) is fully
+//! > built **and unreachable**, because the chat sends `tools: None`.
+//!
+//! **The renderer is reachable, and has been all along.** `ToolCard::new` is
+//! called from two production sites — `display/state.rs` on
+//! `DisplayEvent::ToolCall`, and `display/tui.rs` — and `tool_detail`'s four
+//! entry points are called from `tui.rs`. The Coder's tool loop emits
+//! `DisplayEvent::ToolCall` for every call it makes, so a run's tool calls
+//! render with their arguments and their results today.
+//!
+//! The conflation is between two surfaces. The **chat** sends `tools: None`,
+//! so a *conversation* turn never produces a card — and that is the owner's
+//! §0a decision, not a defect: "`/run <task>` starts the pipeline, plain
+//! messages stay conversation turns." The **pipeline** runs tools, and its cards
+//! render.
+//!
+//! So the item is not a missing feature to build. It is a record entry that
+//! reads as a bug and would invite someone to "fix" the chat by giving it
+//! tools — which would undo §0a.
+
+use std::path::Path;
+
+fn read(rel: &str) -> String {
+    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(rel))
+        .unwrap_or_else(|e| panic!("{rel} must be readable: {e}"))
+}
+
+/// The renderer must stay wired to the pipeline's tool events.
+#[test]
+fn a_tool_call_becomes_a_card() {
+    let state = read("src/display/state.rs");
+    // A wide window: the first version cut the arm at its closing brace, which
+    // lands *before* the `ToolCard::new` call a few lines further down, so the
+    // window never contained the thing it was checking for.
+    let arm = state
+        .split("DisplayEvent::ToolCall {")
+        .nth(1)
+        .map(|r| r.chars().take(400).collect::<String>())
+        .expect("the ToolCall arm must exist");
+    // The card must be built *from this call's own name and summary*, not
+    // merely built. The first version checked for `ToolCard::new(` and
+    // therefore passed a sabotage that kept the call and replaced its
+    // arguments — the card rendered, labelled "unwired".
+    let call = arm
+        .split("ToolCard::new(")
+        .nth(1)
+        .and_then(|r| r.split(')').next())
+        .expect("a card must be built in the ToolCall arm");
+    assert!(
+        call.contains("tool_name") && call.contains("summary"),
+        "the card must carry the tool call's own name and summary, or the \
+         transcript shows every call with the same label: ToolCard::new({call})"
+    );
+    assert!(
+        arm.contains("set_running()"),
+        "and the card must show as running until its result arrives: {arm}"
+    );
+}
+
+/// And the results must land on it.
+#[test]
+fn a_tool_result_lands_on_its_card() {
+    let state = read("src/display/state.rs");
+    assert!(
+        state.contains("DisplayEvent::ToolResult {"),
+        "a tool result must be handled, or a card runs for ever"
+    );
+    let card_src = read("src/display/components/tool_card.rs");
+    // The real API: `set_success(output, duration_ms)` and `set_failed(error)`.
+    // The first version guessed `set_error` and `set_output`, which do not exist.
+    for setter in ["set_success", "set_failed", "status_glyph", "timing"] {
+        assert!(
+            card_src.contains(setter),
+            "the card must support `{setter}`, or a result cannot be shown on it"
+        );
+    }
+}
+
+/// The detail overlay must stay reachable from the event loop, which is the
+/// "Enter hit-test" the roadmap called unreachable.
+#[test]
+fn the_detail_overlay_is_reachable() {
+    let tui = read("src/display/tui.rs");
+    for entry in [
+        "tool_detail::route_click",
+        "render_tool_detail",
+        "detail_viewport",
+    ] {
+        assert!(
+            tui.contains(entry),
+            "`{entry}` is no longer called from the event loop, so the detail \\
+             overlay is dead code"
+        );
+    }
+}
+
+/// And the two surfaces must stay *different* on purpose. This is the part
+/// that stops a well-meaning change from breaking the owner's decision: giving
+/// the chat tools would make conversation turns able to edit the project, which
+/// is exactly what §0a says they must not do.
+#[test]
+fn the_chat_still_sends_no_tools() {
+    let chat = read("src/cli/chat.rs");
+    let stream_reply = chat
+        .split("async fn stream_reply(")
+        .nth(1)
+        .and_then(|r| r.split("\n}\n").next())
+        .expect("stream_reply must exist");
+    assert!(
+        stream_reply.contains("tools: None"),
+        "the chat must not send tools: a plain conversation turn is not \\
+         permitted to edit the project (§0a). If this is being changed, that \\
+         decision is being reversed and `ROADMAP.md` §0a must change with it."
+    );
+    // And the system prompt must not claim otherwise — batch 1 removed those
+    // rules, and a description-like edit can put them back.
+    let prompt = chat
+        .split("const CHAT_SYSTEM_PROMPT: &str = \"")
+        .nth(1)
+        .and_then(|r| r.split("\";\n").next())
+        .expect("the chat system prompt must exist");
+    for lie in ["dedicated native tools", "read files", "use your tools"] {
+        assert!(
+            !prompt.to_lowercase().contains(lie),
+            "the chat prompt claims a capability it was not given — {lie:?}. \\
+             The chat sends no tools, so any such claim makes the model \\
+             narrate work it cannot do. Prompt: {prompt}"
+        );
+    }
+}

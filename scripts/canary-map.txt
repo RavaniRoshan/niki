@@ -291,3 +291,8 @@ ask-user-says-when-it-fails | ask_user_says_it_is_unavailable_in_a_tui_run | a p
 approval-says-it-always-denies | approval_says_it_always_denies_in_a_tui_run | a denial presented as a question the model can retry
 fail-closed-behaviour-untouched | the_fail_closed_behaviour_is_untouched | a description edit quietly relaxing a safety path
 nothing-depends-on-them | nothing_in_the_product_relies_on_them_working | a real caller for a tool that always fails
+# B6-02 · the tool-card renderer is live; the roadmap said it was not
+tool-call-becomes-a-card | a_tool_call_becomes_a_card | a call that builds no card, leaving the renderer dead
+tool-result-lands-on-its-card | a_tool_result_lands_on_its_card | a card running for ever
+detail-overlay-is-reachable | the_detail_overlay_is_reachable | the Enter hit-test unwired
+chat-still-sends-no-tools | the_chat_still_sends_no_tools | conversation turns able to edit the project, undoing §0a
