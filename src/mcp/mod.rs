@@ -478,21 +478,45 @@ impl McpManager {
     }
 
     /// Format MCP tools for injection into agent prompts.
-    pub fn tools_for_prompt(&self) -> String {
+    /// A **user-facing** summary of what the MCP servers offered.
+    ///
+    /// This used to be `tools_for_prompt`, and its output went into the agent's
+    /// system prompt, ending with:
+    ///
+    /// > Use these tools via the standard MCP tool call format.
+    ///
+    /// Which is an instruction the runtime cannot honour. `McpManager::call_tool`
+    /// has no production caller — the agent→server execution loop is the
+    /// follow-up the pipeline's own comment names — so a model told to use
+    /// these tools has no way to, and the likeliest outcome is a fabricated
+    /// call and a fabricated result. That is the same failure as `web_search`
+    /// returning `Success` with nothing in it, aimed at the model rather than
+    /// the user.
+    ///
+    /// So the listing no longer goes to the model. It goes to whoever ran the
+    /// command, through a notice: the servers really did connect and their
+    /// tools really were discovered, and NIKI cannot yet route a call to one.
+    /// That is useful information about a configured feature, and it is true.
+    pub fn tools_summary(&self) -> String {
         let allowed = self.allowed_tools();
         if allowed.is_empty() {
             return String::new();
         }
-
-        let mut output = String::from("\n## Available MCP Tools\n\n");
-        for tool in &allowed {
-            output.push_str(&format!(
-                "- **{}** (from {}): {}\n",
-                tool.name, tool.server_name, tool.description
-            ));
-        }
-        output.push_str("\nUse these tools via the standard MCP tool call format.\n");
-        output
+        let mut servers: Vec<&str> = allowed.iter().map(|t| t.server_name.as_str()).collect();
+        servers.sort_unstable();
+        servers.dedup();
+        format!(
+            "MCP: {} tool(s) discovered on {} — NOT YET CALLABLE. NIKI lists \
+             them but has no agent→server call path yet, so they are not in the \
+             model's tool list and cannot be invoked. Tools: {}",
+            allowed.len(),
+            servers.join(", "),
+            allowed
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 

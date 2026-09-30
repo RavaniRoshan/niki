@@ -256,3 +256,9 @@ python-skip-says-why | every_python_skip_says_why | a skip with no reason, looki
 python-skip-names-its-coverage | every_python_skip_names_where_it_is_covered | a skip that is a hole rather than a redirect
 perf-not-only-wall-clock | perf_assertions_are_not_only_wall_clock | a slow host reporting a regression that did not happen
 perf-claims-no-cache-it-lacks | the_perf_test_does_not_claim_a_cache_it_does_not_use | a docstring promising a memoisation the code never exercises
+# B5-05 · MCP does not leak a process and does not lie to the model (§9.2)
+dropped-mcp-server-does-not-live | a_dropped_mcp_server_does_not_outlive_the_run | a stdio child outliving the run, one per configured server
+shutdown-still-graceful | shutdown_is_still_the_graceful_path | the backstop replacing the teardown rather than backing it up
+no-mcp-call-instruction | no_prompt_instructs_a_model_to_call_an_mcp_tool | a model told to use tools it cannot reach
+mcp-summary-states-the-limit | the_mcp_summary_states_that_the_tools_are_not_callable | a prompt listing MCP tools unqualified
+mcp-gap-still-recorded | the_missing_call_path_is_still_recorded_as_missing | the feature gap quietly considered done
