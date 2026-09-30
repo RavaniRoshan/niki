@@ -177,6 +177,20 @@ impl PageId {
         }
     }
 
+    /// The bare letter that reaches this page, or `None` if none does.
+    ///
+    /// The inverse of [`PageId::from_key`], and it scans that function's own
+    /// candidates rather than restating them — so it cannot name a key that
+    /// does not work, which is the failure mode of every hand-written
+    /// shortcut table in this codebase. `None` means the page is reached some
+    /// other way (`Tab` for Chat, `Esc` for Run).
+    pub fn shortcut(&self) -> Option<char> {
+        ('a'..='z')
+            .chain('A'..='Z')
+            .chain(['?', ',', '/'])
+            .find(|k| PageId::from_key(*k) == Some(*self))
+    }
+
     pub fn title(&self) -> &'static str {
         match self {
             PageId::Run => "run",

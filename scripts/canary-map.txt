@@ -133,3 +133,9 @@ page-letter-in-composer-is-text | a_page_letter_in_the_composer_is_text_not_navi
 footer-keys-are-handled | an_advertised_key_is_either_handled_or_retracted | six advertised controls, none of them handled
 retracted-keys-are-gone | the_retracted_keys_are_gone_from_the_footers | `K Kill` / `V Diff` / `R Resume` back in a footer
 pause-is-one-flag-everywhere | the_real_handlers_carry_the_pause_arm | a new pause flag per surface instead of the one
+# B3-07 · a digit means one page, and the user can find out which
+digits-reach-their-page | each_digit_reaches_the_page_the_order_claims | `0` unbound, so 5 of 14 pages had no number
+no-digit-aliases | no_two_digits_reach_the_same_page | a numbering where two keys land on one page
+help-documents-every-digit | the_help_documents_every_digit | the numbering knowable only from the source
+unnumbered-pages-say-how-to-reach-them | the_pages_past_the_digits_say_how_to_reach_them | a list that stops at 9 and goes quiet
+shortcut-is-the-inverse | every_pages_shortcut_actually_reaches_it | a shortcut table that names a key which does not work

@@ -100,6 +100,17 @@ pub fn intent_from_key(key: &KeyEvent, text_focus: bool) -> Option<NavIntent> {
             KeyCode::Char(c @ '1'..='9') => {
                 return Some(NavIntent::GotoPage(c as usize - '1' as usize));
             }
+            // `0` is the tenth page, the way every tabbed interface numbers.
+            //
+            // It was unbound, so digits covered 9 of the 14 pages and the five
+            // beyond — Help, TestLog, Fleet, Session, Chat — had a letter or
+            // `Tab` and nothing else. `Chat` is deliberately still not on a
+            // digit: `Tab` is how you get to and from it, and a digit that
+            // meant something different on one page than another is the defect
+            // this whole cluster is about.
+            KeyCode::Char('0') => {
+                return Some(NavIntent::GotoPage(9));
+            }
             _ => {}
         }
     }

@@ -40,6 +40,36 @@ impl Default for HelpPage {
     }
 }
 
+/// Which digit goes to which page, generated from the order the digits index.
+///
+/// `nav.rs` answers `GotoPage(n)` with `PageId::all().get(n)`, so `all()` *is*
+/// the numbering — and until this section existed the only place a user could
+/// have learned it was the source. The pages past the digits are listed with
+/// the key that actually reaches them, because a list that stops at `9` and
+/// goes quiet is a worse reference than none.
+fn page_number_rows() -> Vec<Row> {
+    let all = PageId::all();
+    let mut rows = Vec::new();
+    for (i, page) in all.iter().enumerate() {
+        let numbered = match i + 1 {
+            1..=9 => Some((i + 1).to_string()),
+            10 => Some("0".to_string()),
+            _ => None,
+        };
+        let (key, note) = match numbered {
+            Some(k) => (k, String::new()),
+            // `PageId::shortcut` is the inverse of `PageId::from_key`, so it
+            // cannot name a key that does not reach this page.
+            None => match page.shortcut() {
+                Some(k) => (k.to_string(), " · no number".to_string()),
+                None => ("Tab".to_string(), " · no number".to_string()),
+            },
+        };
+        rows.push((key, format!("{}{note}", page.title())));
+    }
+    rows
+}
+
 /// The GLOBAL rows, generated from the central keybinding table.
 /// The GLOBAL rows, generated from the central keybinding table.
 ///
@@ -137,6 +167,11 @@ impl HelpPage {
                         ),
                     ],
                 ),
+                // Generated from `PageId::all()`, which is what the digits
+                // index. A hand-written copy of this list is how the GLOBAL
+                // section came to claim `[t] theme` when the binding is
+                // `ctrl+t`.
+                HelpSection::new("PAGE NUMBERS", page_number_rows()),
                 HelpSection::new(
                     "RUN",
                     vec![
