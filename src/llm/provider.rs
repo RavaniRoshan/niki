@@ -539,6 +539,10 @@ fn redact_api_keys(text: &str) -> String {
         r"AKIA[A-Z0-9]{16}",
         r"ghp_[A-Za-z0-9]{36}",
         r"AIza[A-Za-z0-9_\-]{35}",
+        // Hugging Face user and org tokens. `hf_` is two characters, so the
+        // 40-char base64 catch-all below never reaches it — an HF token was
+        // the one shape measured here that survived redaction untouched.
+        r"hf_[A-Za-z0-9]{34,40}",
         r"[A-Za-z0-9+/]{40,}={0,2}",
     ];
     for pattern in &patterns {
@@ -558,6 +562,14 @@ fn redact_generic_patterns(text: &str) -> String {
         r"(?i)(secret=)[A-Za-z0-9_\-\.]+",
         r"(?i)(token=)[A-Za-z0-9_\-\.]+",
         r"(?i)(authorization:)[^\n\r]+",
+        // A quoted field name, with the colon *or* an `=` after it, and an
+        // optional space. Every one of these is a shape a provider error body
+        // arrives in — and provider error bodies are JSON, which is the single
+        // place this function is actually applied. The `=`-only forms above
+        // catch `api_key=...` and miss `{"api_key": "..."}` entirely, so a key
+        // in an error response reached the log verbatim. The value class ends
+        // at the closing quote, so the surrounding JSON stays readable.
+        r#"(?i)(["']?(?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|client[_-]?secret|password|passwd)["']?\s*[:=]\s*["']?)[^"'\s,}&]+"#,
     ];
     for pattern in &patterns {
         if let Ok(re) = regex::Regex::new(pattern) {

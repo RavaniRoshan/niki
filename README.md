@@ -298,7 +298,7 @@ niki run "..." --backend worktree   # no container runtime
 
 - **No telemetry.** Only outbound traffic is your LLM API calls (or local Ollama).
 - **Sandboxed by default.** Rootless container with CapDrop ALL, network disabled, optional read-only rootfs (`[docker] readonly_rootfs`, off by default; the bind-mounted workspace stays writable).
-- **Your keys, never bundled.** BYOK only; keys redacted from logs and reports.
+- **Your keys, never bundled.** BYOK only; keys redacted from provider error text, which is what reaches logs and reports. `niki doctor --category security` measures this against 13 known key shapes.
 - **Spend cap enforced.** Aborts before branch creation if cost exceeds limit.
 - **Audit trail.** Per-agent artifacts, metrics, `safety_proof.json`, `trace.jsonl`, and `niki audit` bundles for every run.
 - **Permission posture.** Modes (`manual/auto/dontask/bypass`), project trust, worktree kill-switch, fail-closed headless option.

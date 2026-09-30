@@ -26,7 +26,7 @@ claim nobody can check.
 | **git2 is local-only**; working tree untouched unless `--backend worktree` | ✅ | `src/output/git.rs` `Repository::open(repo_path)` (local); worktree backend prints host-privilege warning (documented) |
 | Spend cap is **hard-enforced** (aborts before a branch is created) | ✅ | `enforce_spend_cap` (`src/orchestrator/pipeline.rs:1330`), called from `finish_stage` after **every** stage on **every** path. Two paths — the Planner's and the Synthesizer's — previously omitted the call, so the cap was enforced one stage late there; it is now one implementation and one call site |
 | BYOK, no telemetry | ✅ | README security posture `README.md:166-179`; no analytics calls by design |
-| Secret redaction (incl. `?key=` / Google keys) | ✅ | `CHANGELOG.md` 0.3.0 Security; redaction in report/artifact rendering |
+| Secret redaction (incl. `?key=` / Google keys) | ✅ | `redact_secrets` (`src/llm/provider.rs`), applied to provider error bodies in every provider impl. Scope: provider error text, which reaches logs and `report.md` via `RunOutcome::Failed` — *not* a redaction at the report/artifact write boundary. `niki doctor --category security` checks it against a 13-shape corpus and reports `Fail` if any leaks; the check was previously a hardcoded `Pass` constant, under which a Hugging Face token and every key in a JSON body were leaking |
 
 ## New claims since v0.4.0 (verified 2026-09-07)
 
