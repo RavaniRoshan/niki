@@ -222,3 +222,11 @@ anthropic-stream-retries | anthropic_stream_retries_like_complete | a stream kil
 no-provider-opts-out-of-retry | no_provider_streams_without_the_retry_wrapper | a path that quietly drops the resilience
 retryable-set-is-what-it-says | the_retryable_set_is_what_the_comment_says | a comment claiming 429/5xx and a different list
 retried-stream-is-bounded | a_retried_stream_is_still_bounded | retries multiplying a stalled stream to 8 minutes
+# B4-10 · state files survive the crash that writes them
+state-write-lands | a_write_lands | a write that does not arrive
+no-tail-of-previous-contents | an_overwrite_leaves_no_tail_of_the_previous_contents | the classic temp-file bug: old tail after a shorter write
+state-file-still-0600 | the_file_is_still_user_only | atomicity costing the secret-safe permission
+no-prefix-ever-published | a_partial_write_never_publishes_a_prefix | a truncated checkpoint.json that does not parse
+concurrent-writers-do-not-collide | concurrent_writers_to_one_path_do_not_collide | a shared temp name and torn state
+failed-rename-cleans-up | a_failed_rename_cleans_up_its_temp_file | a stale second copy of state beside the real one
+write-restricted-is-atomic | write_restricted_is_the_atomic_path | a bare `fs::write` behind 15 call sites
