@@ -1236,20 +1236,16 @@ fn run_tui(
                                 engine.mark_dirty();
                             }
                         } else if router.handle_key(key, &mut state) {
-                            // The remaining sub-pages' own keys, `q` included.
-                            //
-                            // This branch used to go straight to the nav layer,
-                            // which read `q` as `NavIntent::Quit` and broke the
-                            // event loop. Every one of these pages answers `q`
-                            // with "back to Run" — `pages/diff.rs:189`,
-                            // `pages/history.rs:281`, and nine more — and none
-                            // of them could run. The page goes first now, and
-                            // `q` is left for the modal below.
+                            // The remaining sub-pages' own keys, `q` and `j`/`k`
+                            // included. See `sub_page_owns` for why the
+                            // navigator must not claim them first.
                             engine.mark_dirty();
-                        } else if let Some(intent) = crate::display::nav::intent_from_key(
-                            &key,
-                            crate::display::nav::text_focus_active(&state),
-                        ) {
+                        } else if !sub_page_owns(key, &state)
+                            && let Some(intent) = crate::display::nav::intent_from_key(
+                                &key,
+                                crate::display::nav::text_focus_active(&state),
+                            )
+                        {
                             // Arrow / hjkl / digit navigation. Placed after the
                             // page-specific router above so a page's own keys
                             // still win, and gated on text focus so the composer
@@ -1613,12 +1609,11 @@ pub fn run_chat(
                     // modal below unreachable dead code, because the loop had
                     // already exited before reaching it.
                     //
-                    // So: on Chat, `q` quits. On a sub-page, `q` is not ours to
-                    // interpret — it falls through to the page, and a page that
-                    // does not want it lands on the confirm modal.
+                    // So: on Chat, these keys are ours. On a sub-page they are
+                    // the page's, and a page that declines one falls through to
+                    // the modal below.
                     if state.current_page != PageId::Chat
-                        && (key.code != KeyCode::Char('q')
-                            || crate::display::nav::text_focus_active(&state))
+                        && !sub_page_owns(key, &state)
                         && let Some(intent) = crate::display::nav::intent_from_key(
                             &key,
                             crate::display::nav::text_focus_active(&state),
@@ -2102,6 +2097,31 @@ fn render(
 /// [`PageId::from_key`], so every page is reachable from anywhere. Modified
 /// keys (Ctrl/Alt/Shift) never jump — they belong to input and shortcuts.
 /// Page-specific handlers run first; this is the fallback.
+/// Whether a focused sub-page, not the navigator, owns this key.
+///
+/// Ten pages print `[j/k]` in their footer and every one of them implements it
+/// in its own `handle_key`, against a private cursor. The navigator also claims
+/// `j`/`k`, writing `state.page_selection` — **which no renderer reads**. So on
+/// the surface where the help overlay says the key works, it did nothing, and
+/// the invisible index moved instead.
+///
+/// `q` is here for the same reason and the same shape: eleven pages answer it
+/// with "back to Run", and the navigator used to quit the app before they could.
+///
+/// The composer is exempt. When a text field has focus these are ordinary
+/// characters, and the nav layer already declines every key in that state
+/// (`text_focus_active`); excluding them here keeps that guarantee from being
+/// two independent answers to the same question.
+fn sub_page_owns(key: KeyEvent, state: &crate::display::state::AppState) -> bool {
+    if crate::display::nav::text_focus_active(state) {
+        return false;
+    }
+    matches!(
+        key.code,
+        KeyCode::Char('q') | KeyCode::Char('j') | KeyCode::Char('k')
+    )
+}
+
 fn global_page_jump(key: KeyEvent) -> Option<PageId> {
     if key.modifiers.is_empty()
         && let KeyCode::Char(c) = key.code
