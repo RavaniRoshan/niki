@@ -1289,6 +1289,39 @@ remain uncovered — the pipelines, sandboxes, PTY and heavy fixtures — and th
 honest statement in `RELEASE_REPORT.md` §5 is narrowed to match: **this lane
 covers these fifty-six, and only CI covers the rest.**
 
+### B11-04 — the lane at 69, and a test asserting the lie batch 3 removed
+
+Fifteen more binaries measured and added: **fourteen green, one red** —
+`resume_cli::test_cli_resume_command`.
+
+It asserted that `niki resume` prints **`"Session state restored successfully"`**.
+That exact string is the one batch 3 **removed as a lie**: it was printed by a
+command that restored nothing into anything and exited 0, telling a user with an
+interrupted run that they could carry on. The *behaviour* was fixed in batch 3
+and `tests/resume_tells_the_truth.rs` was written to hold it. **This assertion
+was not updated**, and no gate ran the binary — so the test had been red ever
+since, checking that the product still lied.
+
+That is a sharper version of the pattern the other four reds share: a test that
+outlives the decision it was written for and then enforces the old one.
+
+It now asserts both halves — the page must **not** contain the false claim, and
+must **contain** "Nothing was re-run" and name the command that would continue
+the work. Both sabotages bite: restoring the old string goes red, and deleting the
+honest line goes red.
+
+**The lane: 5 → 69 of 107 binaries**, warm cost **1m47**. Thirty-eight remain —
+and they are the genuinely expensive ones: pipelines (`kb_pipeline`,
+`pipeline_guards`, `chat_runs_the_pipeline`), sandboxes (`diff_scope`,
+`sandbox_teardown`, `docker_resource_caps`), PTY and visual baselines, and the
+benchmark suites. `AGENTS.md` is explicit that this box cannot run those
+together, which is why they are serialised in `.config/test-binary-groups` for
+CI. The honest line in `RELEASE_REPORT.md` §5 stands, narrowed to match:
+**this lane covers these sixty-nine, and only CI covers the rest.**
+
+**Four red tests have now been found by measuring binaries no gate ran**, and
+three of them were tests asserting behaviour a previous batch had already fixed.
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in

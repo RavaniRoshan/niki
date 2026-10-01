@@ -2399,3 +2399,33 @@ $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --test tui_q_goes_back → 3 passed
 ```
+
+---
+
+## Iteration 10d — B11-04, the lane at 69, and a test enforcing a lie
+
+Fifteen more binaries measured and added: **fourteen green, one red** —
+`resume_cli::test_cli_resume_command`.
+
+It asserted that `niki resume` prints **`"Session state restored successfully"`**.
+That is the exact string batch 3 **removed as a lie**: printed by a command that
+restored nothing into anything and exited 0, telling a user with an interrupted
+run they could carry on. The *behaviour* was fixed and
+`tests/resume_tells_the_truth.rs` was written to hold it. **This assertion was
+never updated**, and no gate ran the binary — so it had been red ever since,
+enforcing the old lie.
+
+That is a sharper version of the pattern behind the other three reds: a test
+that outlives the decision it was written for and then enforces it.
+
+It now asserts both halves — the page must not contain the false claim, and must
+contain "Nothing was re-run" and name the command that continues the work. Both
+sabotages bite: restoring the old string goes red, deleting the honest line goes
+red.
+
+**The lane: 5 → 69 of 107, warm 1m47.** The thirty-eight left are the genuinely
+expensive ones — pipelines, sandboxes, PTY, visual baselines, benchmarks — which
+`AGENTS.md` says this box cannot run together.
+
+**Four red tests found by measuring binaries no gate ran**, and **three of them
+were tests asserting behaviour a previous batch had already fixed.**

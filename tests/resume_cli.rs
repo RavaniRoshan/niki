@@ -72,7 +72,28 @@ async fn test_cli_resume_command() {
     assert!(stdout.contains("Add telemetry subsystem"));
     assert!(stdout.contains("Coder"));
     assert!(stdout.contains("niki/telemetry-feature"));
-    assert!(stdout.contains("Session state restored successfully"));
+    // It used to assert **the exact string batch 3 removed**:
+    // *"Session state restored successfully"*, printed by a command that
+    // restored nothing into anything and then exited 0. The behaviour was
+    // fixed; this assertion was not, and no gate ran the binary, so the test
+    // had been red since — asserting the lie it was written before anyone
+    // noticed the lie.
+    //
+    // Both halves now: the page says what it actually did, and it does not say
+    // the thing that was untrue.
+    assert!(
+        !stdout.contains("Session state restored successfully"),
+        "the command told a user with an interrupted run that state was \
+         restored, and restored nothing"
+    );
+    assert!(
+        stdout.contains("Nothing was re-run"),
+        "and it must say plainly that nothing was re-run: {stdout}"
+    );
+    assert!(
+        stdout.contains("niki run"),
+        "naming the command that would actually continue the work: {stdout}"
+    );
 }
 
 #[test]

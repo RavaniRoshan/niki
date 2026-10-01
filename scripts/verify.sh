@@ -192,7 +192,13 @@ if want G3; then
   # wall clock around each is cargo's per-invocation overhead, not the tests —
   # which is why "expensive" was the wrong reason to leave them out.
   #
-  # Cost, measured: the whole list runs in well under two minutes. The
+  # Fifteen more were measured in batch 11: fourteen green, **one red** —
+  # `resume_cli`, which asserted the exact string batch 3 *removed as a lie*
+  # ("Session state restored successfully", printed by a command that restored
+  # nothing). The behaviour was fixed; the assertion was not, and no gate ran
+  # the binary. Four red tests have now been found this way.
+  #
+  # Cost, measured: the whole list runs in about two and a half minutes warm. The
   # binaries this box genuinely cannot afford are the heavy ones, and they are
   # serialised elsewhere (`.config/test-binary-groups`).
   fast_lane="record_claims_are_pinned run_lifecycle agent_tool_loop reverse mcp_call_path \
@@ -211,7 +217,11 @@ if want G3; then
     tui_q_goes_back tui_tab_has_one_owner tui_every_binding_is_handled \
     tui_crash_paths tui_sheets tui_key_matrix_matches_the_code tool_contracts \
     truncated_tool_calls structured_output repo_intel structural_index provenance \
-    llm_tool_calls llm_mock_provider"
+    llm_tool_calls llm_mock_provider \
+    resume_tells_the_truth resume_cli streaming_paths_retry topology_heuristic \
+    risk_enumeration request_budget cancellation config_sections claims \
+    embedded_assets worktree_dir_is_not_committed keyring_is_on_the_request_path \
+    mcp_does_not_leak_or_lie"
   for bin in $fast_lane; do
     [ -f "tests/$bin.rs" ] || { record G3 FAIL "fast lane names tests/$bin.rs, which does not exist"; continue; }
     run_capture G3 "g3-fast-$bin" cargo test --test "$bin" $CARGO_TEST_FLAGS
