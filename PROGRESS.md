@@ -1238,3 +1238,33 @@ Two of my own tests were wrong before they were ever run: one asserted a marker
 appears exactly once when the content itself quoted it, and the other compared
 the second request against the wrong direction. Both were rewritten to assert
 something true, not weakened.
+
+### §8 T3's concurrency half — measured, and closed on evidence
+
+§8 promises *"reads parallel, writes exclusive … this will make NIKI feel 2-3x
+faster"*. Measured before building, through the real `ToolRegistry::execute`:
+
+| | 3 `read` calls, 400-line files |
+|---|---|
+| sequential | **1.62 ms** |
+| joined concurrently | **0.88 ms** |
+
+**0.74 ms per turn**, against a model request measured in seconds. The
+schedulable set is smaller than it reads: `bash` has no path (exclusive by
+construction), `web_fetch` takes a `url` not a `path` (also exclusive), and
+`grep`/`glob` touch no single path — which leaves reads of different files at
+about half a millisecond each.
+
+So wiring the scheduler into `run_tool_loop` would restructure ~170 lines of
+the hottest code in the repository to buy less than a frame. **Not done**, and
+the measurement is in ROADMAP.md §8 T3 so the idea is not re-derived from §8's
+estimate later.
+
+The latency in §8 is in the *streaming*, not the parallelism: mid-stream
+dispatch needs the loop to call `provider.stream()` where it currently calls
+`provider.complete()` (`src/runtime/tools.rs:3727`). That is a separate change
+with separate risk.
+
+`runtime/path_lock.rs` and `runtime/scheduler.rs` stay — they are the safety
+content, both are can-fail proven, and neither is wired into the loop. That is
+stated rather than left to be discovered.
