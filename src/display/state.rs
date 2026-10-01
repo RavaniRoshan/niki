@@ -1430,6 +1430,36 @@ impl AppState {
 
     /// Update the context window limit based on the active model name.
     /// Uses a small hardcoded registry of known models; falls back to 200K.
+    /// Record which model this session is talking to, and re-derive the window.
+    ///
+    /// **`update_context_limit_for_model` had zero callers**, so `context_limit`
+    /// was the hard-coded `200_000` in every run and the gauge was wrong for
+    /// every model that is not 200k. That is not cosmetic: the chat's
+    /// 90%-of-window warning fires at `limit × 0.9`, so on a model with an
+    /// 8k window it fired at **180 000** — never — and the user's request was
+    /// rejected by the provider with nothing having said anything was running
+    /// out. A warning gated on a permanently-wrong number is not a warning.
+    ///
+    /// One setter rather than a call at each of the two places `model` is
+    /// written, because two copies of one rule is how they come to disagree —
+    /// the same mistake the `is_retryable_code` unification exists to prevent.
+    pub fn set_model(&mut self, model: &str) {
+        self.model = model.to_string();
+        self.update_context_limit_for_model(model);
+    }
+
+    /// Re-derive the context window from a model name.
+    ///
+    /// **This table is a guess**, matched on substrings, and it will drift: it
+    /// says `gpt-4` is 8 000 where the real figure is 8 192, and a model it has
+    /// never heard of falls through to 200 000. It is still strictly better than
+    /// the constant it replaces — before, *every* model was 200 000, including
+    /// the ones where a warning can therefore never fire — but a model whose
+    /// real window is below the fallback is not warned about.
+    ///
+    /// Providers that report a usable context length should be preferred over
+    /// this table when one is available. Until then, the guess is stated as a
+    /// guess rather than presented as a fact.
     pub fn update_context_limit_for_model(&mut self, model: &str) {
         let lower = model.to_lowercase();
         let limit = if lower.contains("gemini") {
@@ -2647,6 +2677,56 @@ mod tests {
     /// A command named *"Show token usage & cost breakdown"* that reports zero
     /// usage is worse than no command: the user checks their bill, believes the
     /// product, and is wrong.
+    /// The context window follows the model, and the warning fires on *that*.
+    ///
+    /// `update_context_limit_for_model` had **zero callers**, so `context_limit`
+    /// was the hard-coded `200_000` in every run. The chat warns at 90% of the
+    /// window, so on an 8k model it fired at 180 000 — never — and the request
+    /// was rejected by the provider with nothing having said anything was
+    /// running out. This is the test that would have caught the warning being
+    /// gated on a permanently-wrong number.
+    #[test]
+    fn the_context_window_follows_the_model() {
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("t".into(), config, ".".into());
+
+        // A small-window model must not be given the 200k default.
+        state.set_model("gpt-4");
+        assert_eq!(
+            state.context_limit, 8_000,
+            "an 8k model given a 200k window cannot warn: the gauge reads ~4% \
+             when the provider is about to reject the request"
+        );
+
+        state.set_model("gemini-2.5-pro");
+        assert_eq!(state.context_limit, 1_000_000, "a 1M model is not 200k");
+
+        // And the warning fires against the model's own window, not a constant.
+        let mut state = AppState::new(
+            "t".into(),
+            crate::config::types::NikiConfig::default(),
+            ".".into(),
+        );
+        state.set_model("gpt-4");
+        state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            cost_usd: 0.0,
+            finish_reason: None,
+            usage: Some(crate::llm::provider::TokenUsage {
+                input_tokens: 7_500,
+                output_tokens: 0,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
+            }),
+        });
+        assert!(
+            state
+                .chat_log
+                .iter()
+                .any(|(r, t)| r == "system" && t.contains("Context is")),
+            "7 500 of 8 000 is 94% of the window and must be said out loud"
+        );
+    }
+
     #[test]
     fn cost_reports_what_a_conversation_actually_cost() {
         let config = crate::config::types::NikiConfig::default();

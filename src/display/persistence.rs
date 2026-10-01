@@ -83,7 +83,8 @@ pub fn apply_session(state: &mut AppState, session: ChatSession) {
         .map(|note| (note, ratatui::style::Color::Yellow))
         .collect();
     if !session.model.is_empty() {
-        state.model = session.model;
+        let m = session.model.clone();
+        state.set_model(&m);
     }
     state.revision_round = session.revision_round;
     // Rebuild the rendered chat lines so the resumed log shows immediately.

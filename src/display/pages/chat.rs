@@ -781,7 +781,7 @@ impl Page for ChatPage {
                             // different thread that never sees `AppState`, so
                             // this could not change which model answers — while
                             // the status bar then displayed the new name.
-                            state.model = arg.to_string();
+                            state.set_model(arg);
                             state.chat_log.push((
                                 "system".to_string(),
                                 format!(
@@ -2414,6 +2414,44 @@ mod tests {
         let down = KeyEvent::new(KeyCode::Down, KeyModifiers::empty());
         assert!(page.handle_key(down, &mut state));
         assert_eq!(state.input_state.autocomplete.as_ref().unwrap().selected, 0);
+    }
+
+    /// `/model` must re-derive the context window, not just relabel the bar.
+    ///
+    /// The first version of this test called `state.set_model(...)` directly and
+    /// was **green against the defect**: it could not see whether `/model` routed
+    /// through the setter or wrote the field itself. Third time this programme
+    /// has hit that shape — B9-03 with the usage, B9-04 with the cost, here with
+    /// the model — and the fix is the same each time: drive the producer, not
+    /// the setter.
+    ///
+    /// It matters because the status bar shows a percentage of `context_limit`.
+    /// A user who types `/model gpt-4` and watches "ctx" keep reporting against
+    /// a 200k window is being shown a number about a model they are not using.
+    #[test]
+    fn switching_model_moves_the_context_window() {
+        let mut state = base_state();
+        assert_eq!(
+            state.context_limit, 200_000,
+            "the default session starts on the fallback window"
+        );
+
+        state.input_state.mode = crate::display::state::InputMode::Command;
+        state.input_state.buffer = "/model gpt-4".to_string();
+        state.input_state.cursor_pos = "/model gpt-4".len();
+        let mut page = ChatPage::new();
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
+        assert!(
+            page.handle_key(enter, &mut state),
+            "submitting /model must be handled"
+        );
+
+        assert_eq!(state.model, "gpt-4", "the name is recorded");
+        assert_eq!(
+            state.context_limit, 8_000,
+            "and the window follows it: a gauge reporting against 200k for an \
+             8k model is a number about a model the user is not talking to"
+        );
     }
 
     #[test]
