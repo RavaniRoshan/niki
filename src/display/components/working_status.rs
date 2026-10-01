@@ -336,3 +336,122 @@ mod tests {
         assert!(text.contains("Thought for 12s"), "{text}");
     }
 }
+
+#[cfg(test)]
+mod render_tests {
+    //! The line as the TUI actually draws it.
+    //!
+    //! A pty case for this was written and dropped: it drove a real run
+    //! through the scripted model, and it was **flaky** — it passed on the
+    //! sabotaged build and failed on the restored one, because whether a stage
+    //! is still `Running` when the case reads the screen is a race. The claim
+    //! here is "the render puts a clock and a word on the working line", and a
+    //! `TestBackend` proves exactly that with no timing in it at all.
+    //!
+    //! The user's product behaviour — a run in a terminal — is still covered:
+    //! by `tests/tui_smoke/16_agent_asks_the_user.sh` for a driven run, and by
+    //! a human looking at a real one.
+
+    use super::*;
+    use crate::display::state::{AppState, StageInfo, StageStatus};
+    use ratatui::backend::TestBackend;
+
+    fn text_of(spans: &[Span<'static>]) -> String {
+        spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn a_working_line_is_glyph_word_and_clock() {
+        let line = working_line(1, Duration::from_secs(7), Some(2300));
+        let text = text_of(&line);
+        assert!(
+            WORKING_GLYPHS.iter().any(|g| text.starts_with(*g)),
+            "{text}"
+        );
+        assert!(text.contains(gerund_for(1)), "no word: {text}");
+        assert!(text.contains("(7s"), "no clock: {text}");
+        assert!(text.contains("2.3k tokens"), "no count: {text}");
+    }
+
+    /// The resolved line, drawn the same way.
+    #[test]
+    fn a_resolved_line_says_it_is_finished() {
+        let text = text_of(&resolved_line(Duration::from_secs(7), Some(2300)));
+        assert!(text.starts_with('⎿'), "{text}");
+        assert!(text.contains("Thought for 7s"), "{text}");
+    }
+
+    /// And the whole widget draws without panicking in a small frame, which
+    /// is the same bar every other overlay in this directory is held to.
+    #[test]
+    fn the_widget_draws_in_a_small_frame() {
+        for (w, h) in [(20u16, 10u16), (40, 3), (8, 2)] {
+            let backend = TestBackend::new(w, h);
+            let mut term = ratatui::Terminal::new(backend).expect("terminal");
+            let config = crate::config::NikiConfig::default();
+            let mut state = AppState::new("t".into(), config, ".".into());
+            state.stages.push(StageInfo {
+                role: crate::artifacts::types::AgentRole::Coder,
+                status: StageStatus::Running,
+                stream: String::new(),
+                full_transcript: String::new(),
+                input_tokens: 100,
+                output_tokens: 200,
+                cost_usd: 0.0,
+                latency_ms: 0,
+                summary: Vec::new(),
+                start: None,
+                completed_at: None,
+                prompt_file: None,
+                retry_count: 0,
+                error_message: None,
+            });
+            term.draw(|f| {
+                let spans = working_line(0, Duration::from_secs(1), Some(300));
+                f.render_widget(
+                    ratatui::widgets::Paragraph::new(ratatui::text::Line::from(spans)),
+                    f.area(),
+                );
+            })
+            .unwrap_or_else(|e| panic!("{w}x{h} must draw: {e}"));
+        }
+    }
+}
+
+/// The TUI's activity line must actually draw the working line.
+///
+/// A source assertion, and deliberately so. The component's own tests pass
+/// whether or not anything calls it — the seventh sabotage in this programme's
+/// history was a revert of this call site that left **every** test green,
+/// because the component tests never touch `render_activity_spinner`. The
+/// idiom is the one the repository already uses for "this call site must call
+/// that" (`the_production_tool_contexts_carry_the_interface`,
+/// `the_scripted_server_entry_point_stays_wired_to_ci`): a grep proves a wiring
+/// fact and nothing else does.
+#[test]
+fn the_activity_line_draws_the_working_status() {
+    let tui = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/display/tui.rs"),
+    )
+    .expect("src/display/tui.rs must be readable");
+    let start = tui
+        .find("fn render_activity_spinner(")
+        .expect("the activity line must still exist");
+    // 3200 characters, **measured**: the call is 2345 past the marker. The
+    // first version used 2500 and failed on the clean tree — the window stopped
+    // short of the thing it was checking for, which is the same trap as the
+    // `ToolCall` arm in batch 6 and the bounce period in B7-19. A window is
+    // never sized by eye.
+    let region: String = tui[start..].chars().take(3200).collect();
+    for marker in [
+        "working_status::working_line(",
+        "working_status::WORKING_GLYPHS[0]",
+    ] {
+        assert!(
+            region.contains(marker),
+            "`render_activity_spinner` must use `{marker}` — a component whose \
+             tests pass while nothing renders it is a component that does \
+             nothing. The region reads:\n{region}"
+        );
+    }
+}

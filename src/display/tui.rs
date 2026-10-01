@@ -1962,15 +1962,50 @@ fn render_activity_spinner(
         state.tick,
         reduced_motion,
     );
-    let spinner = crate::display::components::SpinnerState::with_tick(if reduced_motion {
-        0
-    } else {
-        state.tick
+    // The working-status line: `✶ Cerebrating… (4s · ↓ 1.2k tokens)`.
+    //
+    // It replaces the bare spinner rather than sitting beside it. Two spinners
+    // on one row is one too many, and the old `⠋ running (1 stage)` said
+    // *that* something was happening while saying nothing about *how long* it
+    // had been happening — which is the number a user watching a slow Coder
+    // actually wants.
+    //
+    // Reduced motion freezes the animation but **keeps the word and the clock**:
+    // turning the whole line off would leave a user who has asked for less
+    // motion with no indication that anything is running at all.
+    let elapsed = state.start_time.map(|t| t.elapsed()).unwrap_or_default();
+    let turn = state
+        .stages
+        .iter()
+        .filter(|s| s.status != crate::display::state::StageStatus::Queued)
+        .count();
+    // The *running* stage's tokens, and `None` when it has none yet — a stage
+    // that has not reported is not a stage that reported zero.
+    let running_stage = state
+        .stages
+        .iter()
+        .find(|s| s.status == crate::display::state::StageStatus::Running);
+    let tokens = running_stage.and_then(|s| {
+        let total = s.input_tokens.saturating_add(s.output_tokens);
+        (total > 0).then_some(total)
     });
-    let mut spans = vec![spinner.render()];
+    let mut spans = if reduced_motion {
+        // Frozen glyph, live everything else.
+        let mut line =
+            crate::display::components::working_status::working_line(turn, elapsed, tokens);
+        if let Some(first) = line.first_mut() {
+            *first = ratatui::text::Span::styled(
+                crate::display::components::working_status::WORKING_GLYPHS[0].to_string(),
+                first.style,
+            );
+        }
+        line
+    } else {
+        crate::display::components::working_status::working_line(turn, elapsed, tokens)
+    };
     spans.push(ratatui::text::Span::styled(
         format!(
-            " running ({} stage{})",
+            "  ({} stage{})",
             running,
             if running == 1 { "" } else { "s" }
         ),

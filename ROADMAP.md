@@ -386,9 +386,21 @@ which at 120 ms reads as a stutter on every turn); the gerund is a
 random word makes every recorded visual frame unreproducible and an
 unreproducible frame is not a baseline; and **no token accounting prints no
 count**, because `↓ 0 tokens` claims an accounting that does not exist.
-**Not yet rendered** — wiring it into the live TUI is the next slice, and it
-is a baseline change for `tests/visual` and the VHS job, which must be blessed
-on the runner rather than locally.
+**RENDERED (B7-20).** `render_activity_spinner` now draws the working line in
+place of the bare `⠋ running (1 stage)` — the old row said *that* something
+happened and nothing about *how long*. The stage count and progress bar stay;
+the clock and word are new. Reduced motion freezes the glyph and keeps the word
+and the clock, because turning the whole line off would leave a user who asked
+for less motion with no sign anything is running.
+
+**The visual baselines are unaffected, and that is measured rather than
+assumed.** `tests/visual/run.sh` says in capitals that blessing a reference
+locally is not a local operation, so the right move was to establish that
+*nothing needs re-blessing*: the activity line only draws while a stage is
+`Running`, and every tape types a slash command into `niki chat` without ever
+starting a pipeline. `tests/visual_baselines_are_unaffected.rs` pins that from
+both sides — no tape types `/run`, and every tape launches `chat` — so if a
+tape ever grows a run, the test fails and says to re-bless *on the runner*.
 
 A pulsing glyph from `['·','✢','✳','✶','✻','✽']` on a bounce, a rotating
 gerund, a live elapsed counter and a token count, resolving to `⎿ Thought for
