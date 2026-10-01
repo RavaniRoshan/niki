@@ -390,6 +390,15 @@ def anthropic_json_response(role, body):
     """Non-streaming Anthropic response with the same tool-loop behavior."""
     text = json.dumps(body)
     tools = body.get("tools") or []
+    # `scripted` was never computed in this function. The OpenAI half of the
+    # same feature had it, and the Rust test drove `/v1/chat/completions` — so
+    # the Anthropic path raised `NameError` on the first scripted call and took
+    # the whole server down with it, which the end-to-end leg saw as "connection
+    # closed before message completed" and no reason at all.
+    #
+    # A feature scripted on one provider and run on the other has to be tested
+    # on both, or it is not a feature and it is a trap.
+    scripted = _next_scripted_call(body)
     if scripted and tools:
         return {
             "id": "msg_" + uuid.uuid4().hex[:24],

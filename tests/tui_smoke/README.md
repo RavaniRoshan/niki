@@ -26,6 +26,7 @@ and assert on rendered text, so they stay stable as internals change.
 | `05_slash_version`  | `/version` → version banner |
 | `06_input_editing`  | typed echo + kill-ring word kill/yank round-trip |
 | `07_quit`           | `Ctrl+C` ×2 exits and tears down the session |
+| `16_agent_asks_the_user` | a scripted model calls `ask_user`; the modal opens, and the answer reaches the tool |
 
 ## CI
 
