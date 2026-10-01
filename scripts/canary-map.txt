@@ -472,3 +472,10 @@ three-consecutive-denials-stop | three_consecutive_denials_stop_the_run | the ru
 twenty-denials-in-total-stop | twenty_denials_in_total_stop_the_run | the total reset by an allow, so nagging never ends
 allow-resets-only-consecutive | an_allow_resets_only_the_consecutive_count | the two counters conflated
 classifier-prompt-asks-one-question | the_prompt_asks_one_question_and_shows_the_action | a prompt drifting from the decision it is about
+# B7-24 · §8 T3: the per-path lock — the safety content of a streaming executor
+two-writes-do-not-lose-an-update | two_writes_to_one_file_do_not_lose_an_update | two parallel writers, one lost update
+a-read-cannot-see-a-half-applied-write | a_read_cannot_observe_a_half_applied_write | a read taking the lock only for its write, which is the classification bug
+different-paths-still-run-together | different_paths_do_not_block_each_other | one global lock, which makes the above true and the executor sequential
+two-spellings-one-lock | two_spellings_of_one_path_take_the_same_lock | `./src/lib.rs` and `src/../src/lib.rs` taking different locks
+no-lock-entries-survive | no_entries_survive_their_guards | a map that only grows, which is a leak with a plausible shape
+missing-file-still-locks | a_file_that_does_not_exist_yet_still_locks | creation being the case most likely to be concurrent, and canonicalisation failing on it

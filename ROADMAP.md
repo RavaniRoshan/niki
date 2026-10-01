@@ -474,7 +474,40 @@ cannot be talked into an approval by text the agent itself wrote. A
 classifier that reads the transcript *including* tool output inherits every
 prompt injection those outputs contain, which is the attack it exists to stop.
 
-### T3 · Streaming tool executor — `src/orchestrator/`, `src/runtime/`
+### T3 · Streaming tool executor — `src/orchestrator/`, `src/runtime/` — **FIRST
+SLICE BUILT (B7-24): `runtime/path_lock.rs`, 6 tests.** The safety content
+comes before the executor, exactly as §8 says it does: *"reads are safe" is
+only true if a read cannot observe a half-applied write. The executor needs a
+per-path lock, not a read/write classification alone.*
+
+So **a read takes the same lock a write does**, for the whole
+read-modify-write. The lock is per path, so the parallelism is kept where it
+is safe — `different_paths_do_not_block_each_other` asserts two paths can be
+held at once, because a single global lock makes every safety test pass and
+the executor sequential, which is the failure a naive fix lands in. That test
+is what catches the global-lock sabotage, and it is the only one that does.
+
+Paths are canonicalised where possible, so `./src/lib.rs` and
+`src/../src/lib.rs` are one lock; a path with nothing at it falls back to a
+lexical normalisation, because *creating* files is the case most likely to be
+concurrent and canonicalisation fails on exactly those.
+
+**The map holds `Weak` references**, and that choice removed three bugs the
+first three versions walked into. A strong `Arc` per entry needs a
+`strong_count == 1` test to remove it, and that is an *ordering* question —
+the guard's own mutex guard drops **after** `Drop::drop` returns, so a spawned
+release can run first, see a count one too high, and remove nothing. The map
+then grows for the life of the run, which is the exact leak the first
+version's own doc comment claimed it did not have. With a `Weak` there is no
+cleanup path to get wrong, because there is no cleanup path.
+
+**Not yet built:** the streaming dispatch itself — beginning a tool when its
+`tool_use` block finishes streaming rather than after the whole turn, and the
+scheduler that decides which ready tools run together. The lock is what makes
+that safe, and it is the part whose absence would be a data-loss bug rather
+than a slowdown.
+
+T3 · Streaming tool executor — `src/orchestrator/`, `src/runtime/`
 
 Begin a tool when its `tool_use` block finishes streaming rather than after
 the whole turn. `isConcurrencySafe()`: reads parallel, writes exclusive.
