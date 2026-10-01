@@ -94,11 +94,16 @@ def handle(msg):
         name = params.get("name")
         if name == "echo":
             text = (params.get("arguments") or {}).get("text", "")
+            # `isError: true` with a 200 and a well-formed result is the shape
+            # a tool-level failure takes in MCP: the *call* succeeded, the
+            # *tool* did not. A client that only looks at the transport reports
+            # Success with an error in the payload — which is the defect
+            # `web_search` shipped for two batches.
             reply(
                 msg_id,
                 {
                     "content": [{"type": "text", "text": f"echo: {text}"}],
-                    "isError": False,
+                    "isError": os.environ.get("MCP_FIXTURE_ISERROR") == "1",
                 },
             )
         elif name == "write_note":

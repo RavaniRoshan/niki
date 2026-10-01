@@ -374,3 +374,11 @@ mcp-server-error-is-an-error | a_server_side_failure_is_an_error_not_an_empty_su
 mcp-held-manager-stays-callable | a_held_manager_keeps_its_server_callable | the manager scoped to discovery, so the server dies before the run
 mcp-shutdown-is-reachable | shutdown_is_callable_on_a_manager_that_connected | servers that can never be reaped at the end of a run
 mcp-manager-outlives-discovery | the_pipeline_holds_the_mcp_manager_beyond_discovery | the original scope, back again
+# B7-02 · a discovered tool is a `Tool`, not a promise
+mcp-tool-in-the-registry | a_discovered_tool_is_in_the_registry | a live server whose tools nothing registered
+mcp-registry-call-reaches-the-server | calling_through_the_registry_reaches_the_server | a registered tool that answers itself instead of the server
+mcp-cannot-shadow-a-niki-tool | an_mcp_tool_cannot_shadow_a_niki_tool | a flat name, so a server's `bash` wins the register race
+mcp-undocumented-tool-says-so | an_undocumented_tool_says_so | a blank description, or a schema the server never sent
+mcp-permission-mirrors-governance | the_permission_mirrors_the_governance | a mutating third-party tool quietly Allowed
+mcp-tool-level-error-is-not-success | a_tool_level_error_is_not_reported_as_success | `isError: true` reaching the model as a payload that reads like an answer
+mcp-registration-is-wired | the_pipeline_holds_the_mcp_manager_beyond_discovery | the gap between "the server is alive" and "the model can call it"

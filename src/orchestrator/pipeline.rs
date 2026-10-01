@@ -1107,6 +1107,10 @@ async fn run_parallel_coders(
     // and these are not consumable so they are simply shared.
     permission_mode: String,
     fail_closed_headless: bool,
+    // The MCP servers for this run, shared like the posture above: N coders
+    // must not each get their own view of what they may call, and the
+    // connections are behind an `Arc` precisely so they can share one.
+    mcp: Option<std::sync::Arc<crate::mcp::McpManager>>,
     // `[network] domain_allowlist`, shared like the posture above: N coders
     // must not each get a different view of what they may reach.
     network_allowlist: Vec<String>,
@@ -1138,6 +1142,7 @@ async fn run_parallel_coders(
         // simply be read at the use site below.
         let permission_mode = permission_mode.clone();
         let network_allowlist = network_allowlist.clone();
+        let mcp = mcp.clone();
 
         tasks.push(tokio::spawn(async move {
             // Own worktree sandbox per coder → isolated changes.
@@ -1192,6 +1197,7 @@ async fn run_parallel_coders(
                 parallel_cost_ceiling,
                 permission_mode.clone(),
                 fail_closed_headless,
+                mcp.clone(),
                 prompt_timeout,
                 network_allowlist,
             )
@@ -1255,6 +1261,8 @@ async fn run_experimental_research(
     config: &NikiConfig,
     display: &mut AgenticDisplay,
     budget: Option<&mut super::budget::RunBudget>,
+    // The run's MCP servers, so a discovered tool is callable here too.
+    mcp: Option<std::sync::Arc<crate::mcp::McpManager>>,
 ) -> Result<Option<(String, StageMetric)>> {
     if !config.tools.experimental_tool_loop {
         return Ok(None);
@@ -1276,6 +1284,8 @@ async fn run_experimental_research(
         fail_closed_headless: config.permissions.fail_closed_headless,
         network_allowlist: config.docker.network_allowlist.clone(),
         task_store: None,
+        // The run's MCP servers, so a discovered tool is callable here too.
+        mcp: mcp.clone(),
         // Whoever is driving the run. Without it `ask_user` and `approval`
         // cannot ask, and both fail closed.
         human_input: display.tui_tx().map(|tx| {
@@ -1539,6 +1549,10 @@ async fn run_coder_tool_loop(
     // of the configuration to do it. A tool that asks a question needs a
     // deadline, or an unanswered question hangs the run for ever.
     prompt_timeout: std::time::Duration,
+    // The run's MCP servers. This is the loop that runs tools, so this is what
+    // makes a discovered MCP tool callable rather than merely advertised — the
+    // whole of §9.2.
+    mcp: Option<std::sync::Arc<crate::mcp::McpManager>>,
     // See `run_role`: a plain value, not a config borrow.
     network_allowlist: Vec<String>,
     // Sent to the provider on every request the loop makes. See
@@ -1568,7 +1582,14 @@ async fn run_coder_tool_loop(
     env.add_template("loop", &template).ok()?;
     let system_prompt = env.get_template("loop").ok()?.render(ctx).ok()?;
 
-    let registry = crate::runtime::build_baseline_registry();
+    let mut registry = crate::runtime::build_baseline_registry();
+    // The run's MCP tools join the registry under namespaced names, so the
+    // loop dispatches them like any other tool — which is the difference
+    // between a server being *reachable* (B7-01) and being *usable* (here).
+    if let Some(manager) = mcp.as_ref() {
+        let added = crate::runtime::mcp_tool::build_registry(&mut registry, manager.clone());
+        tracing::debug!(target: "niki::mcp", added, "MCP tools registered with the tool loop");
+    }
     let tool_ctx = crate::runtime::ToolContext {
         agent_id: crate::mission::AgentId(format!("coder-{}", project_path.display())),
         mission_id: crate::mission::MissionId(project_path.display().to_string()),
@@ -1588,6 +1609,9 @@ async fn run_coder_tool_loop(
         fail_closed_headless,
         network_allowlist,
         task_store: None,
+        // The run's MCP servers, so the registry built just above can offer
+        // their tools and this context can dispatch them.
+        mcp: mcp.clone(),
         // Whoever is driving the run. The Coder is the loop that runs tools, so
         // this is where `ask_user` and `approval` become reachable at all.
         human_input: display
@@ -1952,6 +1976,9 @@ async fn run_role(
     // loop. Plain strings and a bool for the same reason as `step_cap`.
     permission_mode: String,
     fail_closed_headless: bool,
+    // The run's MCP servers, forwarded to the Coder's tool loop. `run_role` is
+    // reached from paths that never discovered any, hence `Option`.
+    mcp: Option<std::sync::Arc<crate::mcp::McpManager>>,
     // `[permissions] prompt_timeout_seconds`, for the same reason and the
     // same pairing: a tool that asks a question needs a deadline, or an
     // unanswered question hangs the run.
@@ -2154,6 +2181,7 @@ async fn run_role(
             &permission_mode,
             fail_closed_headless,
             prompt_timeout,
+            mcp.clone(),
             network_allowlist.clone(),
             reasoning_effort,
             display,
@@ -2272,6 +2300,10 @@ async fn run_bookkept_stage(
     task_dir: &Path,
     state: &mut super::state::PipelineState,
     bare: bool,
+    // Forwarded to `run_role`. A post-loop stage does not usually run tools,
+    // but it is the same call, and a signature that cannot carry the manager
+    // is one somebody will change the next time they need it.
+    mcp: Option<std::sync::Arc<crate::mcp::McpManager>>,
     // Whether this run actually has a SecurityAuditor stage. Taken from the
     // resolved stage list rather than `config.security.enabled` because a
     // High/Security-risk task gets one injected whether or not the config
@@ -2310,6 +2342,7 @@ async fn run_bookkept_stage(
         state.run_budget.remaining_usd(),
         config.permissions.mode.clone(),
         config.permissions.fail_closed_headless,
+        mcp.clone(),
         std::time::Duration::from_secs(config.permissions.prompt_timeout_seconds),
         config.docker.network_allowlist.clone(),
     )
@@ -2835,6 +2868,7 @@ pub async fn execute_pipeline(
                 config,
                 display,
                 Some(&mut state.run_budget),
+                mcp.clone(),
             )
             .await?
             {
@@ -3208,6 +3242,7 @@ run_stage(
                         .map(|u| u / config.parallel.coder_count.max(1) as f64),
                     config.permissions.mode.clone(),
                     config.permissions.fail_closed_headless,
+                    mcp.clone(),
                     config.docker.network_allowlist.clone(),
                     std::time::Duration::from_secs(config.permissions.prompt_timeout_seconds),
                 )
@@ -3275,6 +3310,7 @@ run_stage(
                     state.run_budget.remaining_usd(),
                     config.permissions.mode.clone(),
                     config.permissions.fail_closed_headless,
+                    mcp.clone(),
                     std::time::Duration::from_secs(config.permissions.prompt_timeout_seconds),
                     config.docker.network_allowlist.clone(),
                 )
@@ -3367,6 +3403,7 @@ run_stage(
                         state.run_budget.remaining_usd(),
                         config.permissions.mode.clone(),
                         config.permissions.fail_closed_headless,
+                        mcp.clone(),
                         std::time::Duration::from_secs(config.permissions.prompt_timeout_seconds),
                         config.docker.network_allowlist.clone(),
                     )
@@ -3498,6 +3535,7 @@ run_stage(
                             state.run_budget.remaining_usd(),
                             config.permissions.mode.clone(),
                             config.permissions.fail_closed_headless,
+                            mcp.clone(),
                             std::time::Duration::from_secs(
                                 config.permissions.prompt_timeout_seconds,
                             ),
@@ -3901,6 +3939,7 @@ run_stage(
                 &config.permissions.mode,
                 config.permissions.fail_closed_headless,
                 std::time::Duration::from_secs(config.permissions.prompt_timeout_seconds),
+                mcp.clone(),
                 config.docker.network_allowlist.clone(),
                 coder_stage.reasoning_effort.as_deref(),
                 display,
@@ -4134,6 +4173,7 @@ run_stage(
                 task_dir,
                 &mut state,
                 bare,
+                mcp.clone(),
                 security_enabled,
                 steer_rx,
             )
@@ -4181,6 +4221,7 @@ run_stage(
                     task_dir,
                     &mut state,
                     bare,
+                    mcp.clone(),
                     security_enabled,
                     steer_rx,
                 )
@@ -4225,6 +4266,7 @@ run_stage(
                     task_dir,
                     &mut state,
                     bare,
+                    mcp.clone(),
                     security_enabled,
                     steer_rx,
                 )
@@ -4615,10 +4657,18 @@ mod tests {
             project_path: tmp.path().to_path_buf(),
         };
         let mut display = AgenticDisplay::new();
-        let out =
-            run_experimental_research(&provider, "m", "mock", &task, &config, &mut display, None)
-                .await
-                .unwrap();
+        let out = run_experimental_research(
+            &provider,
+            "m",
+            "mock",
+            &task,
+            &config,
+            &mut display,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert!(out.is_none());
     }
 
@@ -4636,11 +4686,19 @@ mod tests {
             project_path: tmp.path().to_path_buf(),
         };
         let mut display = AgenticDisplay::new();
-        let (appendix, metric) =
-            run_experimental_research(&provider, "m", "mock", &task, &config, &mut display, None)
-                .await
-                .unwrap()
-                .expect("flag on must run the loop");
+        let (appendix, metric) = run_experimental_research(
+            &provider,
+            "m",
+            "mock",
+            &task,
+            &config,
+            &mut display,
+            None,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("flag on must run the loop");
         assert!(appendix.contains("researched facts here"), "{appendix}");
         assert_eq!(metric.input_tokens, 30);
         assert_eq!(metric.output_tokens, 12);

@@ -210,6 +210,20 @@ pub struct McpManager {
     connections: HashMap<String, std::sync::Arc<tokio::sync::Mutex<client::McpConnection>>>,
 }
 
+/// `ToolContext` derives `Debug` and now carries the manager, so it needs one.
+/// Hand-written rather than derived: the connections map is the useful part
+/// and a derived impl would print every child process's handles.
+impl std::fmt::Debug for McpManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpManager")
+            .field("servers", &self.servers.len())
+            .field("tools", &self.tools.len())
+            .field("connected", &self.connections.len())
+            .field("read_only", &self.governance.read_only)
+            .finish()
+    }
+}
+
 impl McpManager {
     /// Create a new MCP manager.
     pub fn new() -> Self {

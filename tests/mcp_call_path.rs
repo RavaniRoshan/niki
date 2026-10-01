@@ -260,6 +260,19 @@ fn the_pipeline_holds_the_mcp_manager_beyond_discovery() {
         "shutdown must come before the result is returned, and not somewhere \
          near the discovery block at the top of a 4,000-line function"
     );
+    // And the registration itself: the gap between "the server is alive" and
+    // "the model can call it" is one call, and it is the one a reader skims.
+    let reg_start = pipeline
+        .find("MCP tools registered with the tool loop")
+        .expect("the Coder's loop must register the run's MCP tools");
+    let reg_region: String = pipeline[reg_start.saturating_sub(600)..reg_start]
+        .chars()
+        .collect();
+    assert!(
+        reg_region.contains("build_registry(&mut registry"),
+        "a live server nobody registered is a server the model cannot call — \
+         which is the state this whole feature was in. The region reads:\n{reg_region}"
+    );
 }
 
 /// And a graceful shutdown at the end of a run is reachable, which is what
@@ -273,4 +286,196 @@ async fn shutdown_is_callable_on_a_manager_that_connected() {
     // Best-effort by contract: a server that will not close must not fail the
     // run that already produced its result, so there is nothing to assert on
     // the return. What is asserted is that the call exists and returns.
+}
+
+// ---------------------------------------------------------------------------
+// The model can actually reach the tool. B7-01 made the servers live; this is
+// the other half — a `Tool` in the registry, under a name the loop dispatches.
+// ---------------------------------------------------------------------------
+
+use niki::runtime::mcp_tool::{build_registry, qualified_name};
+use niki::runtime::tools::Tool;
+use niki::runtime::{ToolRegistry, build_baseline_registry};
+
+async fn connected() -> std::sync::Arc<McpManager> {
+    let mut mgr = manager("fixture", &[]);
+    mgr.connect_all().await.expect("the fixture must start");
+    std::sync::Arc::new(mgr)
+}
+
+fn ctx() -> niki::runtime::ToolContext {
+    niki::runtime::ToolContext {
+        agent_id: niki::mission::AgentId("t".into()),
+        mission_id: niki::mission::MissionId("t".into()),
+        role: "coder".into(),
+        project_path: std::env::temp_dir(),
+        permissions: std::collections::HashMap::new(),
+        permission_mode: "bypass".into(),
+        fail_closed_headless: false,
+        network_allowlist: Vec::new(),
+        task_store: None,
+        human_input: None,
+        mcp: None,
+    }
+}
+
+/// A discovered tool is in the registry, under a name the model can be told.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_discovered_tool_is_in_the_registry() {
+    let mgr = connected().await;
+    let mut reg = build_baseline_registry();
+    let added = build_registry(&mut reg, mgr);
+    assert_eq!(added, 1, "exactly `echo` — `write_note` is not read-only");
+    let name = qualified_name("fixture", "echo");
+    assert!(reg.get(&name).is_some(), "the registry must carry {name:?}");
+}
+
+/// And calling it through the registry reaches the server.
+///
+/// This is the end-to-end claim: a model that emits `mcp__fixture__echo`
+/// gets the server's own answer back. A test that only checked the name was
+/// registered would pass with a tool that returned a constant.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn calling_through_the_registry_reaches_the_server() {
+    let mgr = connected().await;
+    let mut reg = build_baseline_registry();
+    build_registry(&mut reg, mgr);
+    let name = qualified_name("fixture", "echo");
+    let out = reg
+        .execute(
+            &name,
+            niki::runtime::tools::ToolInput::new(serde_json::json!({"text": "via-registry"})),
+            &ctx(),
+        )
+        .await;
+    assert_ne!(
+        out.status,
+        niki::runtime::tools::ToolStatus::Failed,
+        "an allowed MCP tool must be callable through the registry: {:?} / {:?}",
+        out.summary,
+        out.diagnostics
+    );
+    assert_eq!(
+        out.status,
+        niki::runtime::tools::ToolStatus::Success,
+        "the call failed: {:?} / {:?}",
+        out.summary,
+        out.diagnostics
+    );
+    match &out.data {
+        niki::runtime::tools::ToolData::Text { text } => assert!(
+            text.contains("echo: via-registry"),
+            "the answer must be the server's: {text}"
+        ),
+        other => panic!("a text result must arrive as Text, got {other:?}"),
+    }
+}
+
+/// The name cannot collide with NIKI's own tools.
+///
+/// An MCP server is a third party and may call a tool `read` or `bash`. A flat
+/// name would let a server's `bash` shadow the real one — and whichever won the
+/// `register` race would be the one the model gets, silently.
+#[test]
+fn an_mcp_tool_cannot_shadow_a_niki_tool() {
+    for (server, tool) in [("fixture", "read"), ("bash", "read"), ("x", "write")] {
+        let name = qualified_name(server, tool);
+        let mut reg = ToolRegistry::new();
+        reg.register(Box::new(niki::runtime::tools::ReadTool));
+        assert!(
+            reg.get(&name).is_none(),
+            "{name:?} must not resolve to NIKI's own tool"
+        );
+    }
+    // And the prefix is what makes the space disjoint, stated as a test.
+    assert!(qualified_name("fixture", "read").starts_with("mcp__"));
+}
+
+/// A server that documents nothing still gets a description the model can act
+/// on — and one that does not pretend to know the arguments.
+#[test]
+fn an_undocumented_tool_says_so() {
+    let adapter = niki::runtime::mcp_tool::McpToolAdapter::new(
+        std::sync::Arc::new(McpManager::new()),
+        niki::mcp::McpTool {
+            name: "mystery".into(),
+            description: "   ".into(),
+            server_name: "fixture".into(),
+            input_schema: None,
+            read_only: true,
+        },
+    );
+    let d = adapter.def();
+    assert!(
+        d.description.contains("no documentation"),
+        "an undocumented tool must say so rather than advertise a blank: {}",
+        d.description
+    );
+    assert!(
+        d.parameters.contains("additionalProperties"),
+        "and must not pretend to know the arguments: {}",
+        d.parameters
+    );
+}
+
+/// Read-only is `Allow`; anything else is `Ask`.
+///
+/// Under the default posture governance already denies the mutating tool, so
+/// this is belt and braces — and a user who turns governance *off* still gets
+/// a prompt rather than silent third-party writes.
+#[test]
+fn the_permission_mirrors_the_governance() {
+    use niki::runtime::tools::PermissionRequirement;
+    let mk = |read_only: bool| {
+        niki::runtime::mcp_tool::McpToolAdapter::new(
+            std::sync::Arc::new(McpManager::new()),
+            niki::mcp::McpTool {
+                name: "t".into(),
+                description: "d".into(),
+                server_name: "s".into(),
+                input_schema: None,
+                read_only,
+            },
+        )
+        .def()
+        .permission
+    };
+    assert_eq!(mk(true), PermissionRequirement::Allow);
+    assert_eq!(mk(false), PermissionRequirement::Ask);
+}
+
+/// A tool-level failure inside a successful call is a failure.
+///
+/// MCP reports this as `isError: true` with HTTP 200 and a well-formed result:
+/// the *call* worked, the *tool* did not. A client that only looks at the
+/// transport reports `Success` and hands the model a payload that reads like
+/// an answer — the exact defect `web_search` shipped for two batches, aimed at
+/// a third-party server's output instead of NIKI's own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_tool_level_error_is_not_reported_as_success() {
+    let mut mgr = manager("fixture", &[("MCP_FIXTURE_ISERROR", "1")]);
+    mgr.connect_all().await.expect("the fixture must start");
+    let mut reg = build_baseline_registry();
+    build_registry(&mut reg, std::sync::Arc::new(mgr));
+
+    let out = reg
+        .execute(
+            &qualified_name("fixture", "echo"),
+            niki::runtime::tools::ToolInput::new(serde_json::json!({"text": "x"})),
+            &ctx(),
+        )
+        .await;
+    assert_eq!(
+        out.status,
+        niki::runtime::tools::ToolStatus::Failed,
+        "isError: true is a tool that failed, whatever the transport said. \
+         The result was: {:?}",
+        out.data
+    );
+    assert!(
+        out.diagnostics.iter().any(|d| d.contains("isError")),
+        "and the diagnostic must name the reason, so a model is not left \
+         re-reading a payload that looks like an answer: {:?}",
+        out.diagnostics
+    );
 }

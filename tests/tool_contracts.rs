@@ -327,6 +327,7 @@ async fn the_git_tool_itself_refuses_a_denied_subcommand() {
         // Empty = block-all, the shipped default.
         network_allowlist: Vec::new(),
         task_store: None,
+        mcp: None,
         human_input: None,
     };
 
@@ -372,6 +373,7 @@ async fn the_git_tool_cannot_be_reached_by_a_sneaky_subcommand() {
         // Empty = block-all, the shipped default.
         network_allowlist: Vec::new(),
         task_store: None,
+        mcp: None,
         human_input: None,
     };
 
