@@ -32,6 +32,56 @@ fn a_provider_status_is_recovered_from_its_message() {
     }
 }
 
+/// The message that reaches the classifier is **NIKI's**, not the provider's.
+///
+/// Every provider writes `HTTP 500: …` at the front of its own text. What
+/// actually arrives is that text wrapped in NIKI's prefix:
+///
+///     LLM provider error (anthropic): HTTP 500 Internal Server Error: {"error":…}
+///
+/// `http_status_in` used to anchor at position zero, so it returned `None` for
+/// the real string — and because *both* call sites (the agent loop at
+/// `agents/mod.rs:162` and the failover chain at `failover.rs:180`) classify
+/// whole error messages, a 500 was judged **permanent at both of them** and the
+/// chain did not fail over at all.
+///
+/// It was caught by `cost::a_fallback_served_call_is_priced_by_the_fallback`,
+/// which had been red on this branch for an unknown number of runs while every
+/// gate reported PASS, because G3 does not run the full suite.
+#[test]
+fn a_provider_status_is_wrapped_in_niki_s_own_prefix() {
+    for (msg, expected) in [
+        (
+            "LLM provider error (anthropic): HTTP 500 Internal Server Error: {\"error\":{\"message\":\"unavailable\"}}",
+            500u16,
+        ),
+        (
+            "LLM provider error (openai): HTTP 429 Too Many Requests",
+            429,
+        ),
+        ("LLM provider error (openai): HTTP 401 Unauthorized", 401),
+    ] {
+        assert_eq!(
+            http_status_in(msg),
+            Some(expected),
+            "NIKI's own prefix must not hide the provider's status: {msg}"
+        );
+    }
+
+    // …and the prefix must not turn the rule into "retry everything": the
+    // wrapped shape of a permanent failure is still permanent.
+    assert!(
+        !http_status_in("LLM provider error (openai): HTTP 400 Bad Request")
+            .is_some_and(is_retryable_code),
+        "a 400 wrapped in the same prefix must stay non-retryable"
+    );
+    assert_eq!(
+        http_status_in("LLM provider error (openai): bad request: try http 500 later"),
+        Some(500),
+        "the first anchored status wins over anything the body mentions"
+    );
+}
+
 /// And it is **parsed**, not matched as a bare number: a body that happens to
 /// contain "500" must not make a permanent 400 look transient.
 #[test]
