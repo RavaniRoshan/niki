@@ -1318,3 +1318,58 @@ An `ActionClassifier` backed by a real provider. The trait, the gate, the
 escalation limits and the reasoning-blind view are built and tested; what is
 missing is the thing that talks to a model, which needs a provider and a model
 choice — a decision for the owner, not a slice.
+
+---
+
+## Iteration 7e — B8-01, B8-02
+
+### B8-01 · §8's T1 was half-rendered
+
+`resolved_line` was built, had nine unit tests, and had **zero callers outside
+them**. `render_activity_spinner` only ever drew `working_line`, and the strip
+was rendered only `if state.has_running_stage()`, so the line the brief asks for
+— *"On finish, resolve to ⎿ Thought for Xs · N tokens"* — was never on screen.
+The component's tests all passed; a component's tests cannot see that nothing
+draws it. Third time in this repository a component shipped complete, tested and
+inert, after `working_status` and `input_probe`.
+
+`AppState::resolved_run` is set when the **last** running stage finishes — not on
+every stage, because "Thought for 12s" under a run that still has a Reviewer to
+go is a claim about the wrong run. Tests assert on the rendered `TestBackend`
+buffer. Can-fail proven twice: removing the render branch, and never setting the
+state.
+
+### B8-02 · §9.2a closed — the failing case never produced a screen
+
+The row said the next step was to read the trace. **There was nothing to read.**
+All twelve `.failure.txt` files were **0 bytes**. Two causes, both in the
+harness:
+
+1. `run.sh` runs each case in a subshell and `tui_begin` installs
+   `trap 'tui_kill; …' EXIT` inside it, so tmux was dead before the parent
+   captured.
+2. Every case sources `lib.sh`, whose line 16 is `set -euo pipefail` — which
+   undoes the harness's own `set +e`, so the subshell exited at the first
+   failing assertion: the exact path that needed to reach the capture.
+
+Fixed by capturing **inside the EXIT trap, before the teardown**.
+
+**The obvious fix was wrong and was caught.** `set +e` inside the subshell —
+which cause (2) invites — makes a case whose third assertion fails and whose
+last command succeeds report **OK**. Verified with a probe case written to fail
+midway then `true`: it reports **FAIL**, with a 2 200-byte capture. Both probe
+cases deleted; the suite runs 16 cases again.
+
+### Evidence
+
+```
+$ bash tests/tui_smoke/run.sh --bin ./target/release/niki
+RESULT  pass=16  fail=0  skip=0
+
+$ ./scripts/verify.sh --only G3 → PASS  409 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS  no credentials in the tree or in history
+$ ./scripts/verify.sh --only G7 → PASS  every README command parses
+```
+
+**Two probes in one slice**, and the second one is the point: the first version
+of this fix would have made a failing suite green.
