@@ -523,6 +523,15 @@ Only the 5s window was real.
    Planner completed reliably; the Coder never did. That is a property of the
    tier, and it is why the real-model leg is not a gate.
 
+6. **Three decisions about the safety classifier, none of which block a
+   release.** `risk/` now has the hook layer, the gate, the escalation limits
+   and the reasoning-blind view — but **nothing implements `ActionClassifier`
+   against a real provider**, so that layer is inert in the product and is not
+   claimed as shipped. Turning it on needs: a model id and provider (NIKI is
+   BYOK, so there can be no sensible default), whether failing closed is the
+   default when that provider is unavailable, and whether it is opt-in at all.
+   Full statement, with the cost argument, in `BLOCKERS.md` **B7**.
+
 ### What is **not** on this list, and why
 
 **The NVIDIA key used for batch 2's live runs** is not a go-live step and is not
@@ -800,3 +809,107 @@ like a pass). A test that drove the shared helper and not the backend's own
 inline check. A test whose premise was broken by its own fixture. Each found
 by reading the **count**, not by trusting the word "ok" — and the last is why
 `ROADMAP.md` §0 exists.
+
+---
+
+## 2i · Batch 7, §8 — the interface, the defence, and the context
+
+Four tasks from the Claude-architecture brief. What each one turned out to be
+is not what §8 predicted, and the differences are the useful part.
+
+### T1 · the living working status — shipped and rendered
+
+`components/working_status.rs` is pure: it emits no event, so
+`--output-format json` is untouched by construction rather than by a flag
+someone remembered to set. `tests/visual_baselines_are_unaffected.rs` proves
+the baselines did not move — no tape types `/run`, and every tape launches
+`chat`.
+
+### T4 · context compression — the loop's transcript was never compressed
+
+Two compressors already existed and **neither touches the conversation the model
+is in**. `memory/compression.rs` writes a knowledge block to disk and its one
+call site is `let _ = compress_context(…)` — the result discarded.
+`runtime/compaction.rs` has **zero callers in `src/`**: `ContextCompactor` is
+exercised only by its own tests. So a Coder running sixty tool steps grew
+without bound and nothing noticed.
+
+`runtime/transcript.rs` is the first compressor over the loop's own
+`Vec<LoopMessage>`, wired where a tool result has been pushed and the next
+request has not been built. Three strategies in §8's order; `Summarise` is
+deliberately **unbuilt** — it needs a model call and loses detail — and a test
+pins that no run ever reports a strategy that did not run.
+
+Only tool results are compressed. Eliding the model's own prose leaves it
+reasoning about a conversation it no longer has; an elided user instruction is a
+task that changed with nobody deciding it should.
+
+The trigger is content size, not §8's 95%-of-a-token-budget: the loop has no
+context-window figure, and inventing one would put a number in the code that
+looks authoritative and is not.
+
+**9/9 can-fail proven**, including deleting the `compress()` call from the loop
+— a compressor nothing calls is a component that does nothing, which had
+already happened twice in this repository.
+
+### T3 · the concurrency half — measured, and not built
+
+§8 promises *"reads parallel, writes exclusive … this will make NIKI feel 2-3x
+faster"*. Measured through the real `ToolRegistry::execute` on three 400-line
+files:
+
+| | 3 reads |
+|---|---|
+| sequential | **1.62 ms** |
+| joined | **0.88 ms** |
+
+**0.74 ms per turn**, against a model request measured in seconds. And the
+schedulable set is smaller than it reads: `bash` has no path, `web_fetch` takes
+a `url`, `grep`/`glob` touch no single path — all exclusive by construction.
+What is left is reads of different files, at about half a millisecond each.
+
+Wiring the scheduler into `run_tool_loop` would restructure ~170 lines of the
+hottest code in the repository to buy less than a frame. **Not built.** The
+latency in §8 is in the *streaming*, not the parallelism — mid-stream dispatch
+needs the loop to call `provider.stream()` where it currently calls
+`provider.complete()` (`src/runtime/tools.rs:3727`), which is a separate change
+with separate risk.
+
+`path_lock.rs` and `scheduler.rs` stay: they are the safety content, both are
+can-fail proven, and **neither is wired into the loop**, which is now stated
+rather than left to be discovered.
+
+### T2 · the hook layer — the model cannot overrule a rule
+
+The property is not "the hooks deny things". It is **"the classifier is never
+consulted once the hooks have decided"** — because a model that can overrule a
+rule somebody wrote in a file is a hole in the first layer, not a second one.
+
+The rules come from `permissions::PermissionConfig`, so `niki.toml` needs no new
+format. `Ask` is deliberately not a decision, and a hard denial does not charge
+the model's denial tally — a user's own rules denying twenty commands must not
+trip the escalation limits and fail the run.
+
+7/7 can-fail proven. **Still not built:** an `ActionClassifier` backed by a real
+provider. The trait, the gate, the escalation limits and the reasoning-blind
+view are all built and tested; what is missing is the thing that talks to a
+model, which is a provider and model choice — the owner's decision.
+
+### Three sabotages that did not bite, and two tests that were wrong
+
+The hook layer's determinism test **could not** fail when the sort was removed,
+because `HashMap` iteration order is stable within a process: it compared one
+built object with itself. It now asserts the outcome the sort produces.
+
+A test that called the `pending()` helper directly **could not** fail when its
+caller stopped calling it — the exact sabotage that leaves the hooks deciding
+nothing while every other test stays green. It now drives `adjudicate` end to
+end.
+
+And in T4, the "trust the elision marker" sabotage initially guarded only *one*
+of the two elision strategies, so the other still dropped the middle and the
+test stayed green. Guarding both made it red.
+
+**Five proofs that did not run, across §8 — more than in any earlier batch**,
+and every one found the same way: by reading the count and then asking whether
+the *sabotage* was wrong before assuming the *test* was.
