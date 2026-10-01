@@ -133,3 +133,105 @@ fn the_chat_still_sends_no_tools() {
         );
     }
 }
+
+/// A tool result must never vanish, whatever the interface saw beforehand.
+///
+/// `AppState`'s `ToolResult` arm matched a result to a pending card and had
+/// **no `else`** — so a result whose `ToolCall` was never applied simply
+/// disappeared. A tool that ran, did work and reported an outcome became a
+/// card that never appeared: the same failure as `web_search` returning
+/// `Success` with nothing in it, except here the user cannot even tell it
+/// happened.
+///
+/// That is not hypothetical. `ROADMAP.md` §9.2a's live reading is "one call,
+/// answered, and the interface still painting a question the tool already
+/// answered" — and a dropped result is one way a run's output and its cards
+/// drift apart.
+#[test]
+fn a_result_with_no_card_to_land_on_is_still_shown() {
+    use niki::artifacts::types::AgentRole;
+    use niki::display::tui::DisplayEvent;
+
+    let config = niki::config::NikiConfig::default();
+    let mut state = niki::display::state::AppState::new("t".to_string(), config, ".".into());
+
+    // No ToolCall first: the result arrives on its own.
+    state.apply_event(DisplayEvent::ToolResult {
+        role: AgentRole::Coder,
+        tool_name: "read_file".into(),
+        success: true,
+        error: None,
+        output: Some("fn main() {}".into()),
+        duration_ms: 12,
+    });
+
+    assert_eq!(
+        state.tool_cards.len(),
+        1,
+        "the result must produce a card of its own, or the work is invisible: \
+         {:?}",
+        state.tool_cards
+    );
+    let card = &state.tool_cards[0];
+    assert_eq!(card.tool_name, "read_file");
+    assert_eq!(
+        card.output.as_deref(),
+        Some("fn main() {}"),
+        "and it must carry the output the tool reported — a card that says \\
+         only that a tool ran is not a result"
+    );
+}
+
+/// The same for a failure, and the failure's own message.
+#[test]
+fn a_failure_with_no_card_to_land_on_is_still_shown() {
+    use niki::artifacts::types::AgentRole;
+    use niki::display::tui::DisplayEvent;
+
+    let config = niki::config::NikiConfig::default();
+    let mut state = niki::display::state::AppState::new("t".to_string(), config, ".".into());
+    state.apply_event(DisplayEvent::ToolResult {
+        role: AgentRole::Coder,
+        tool_name: "bash".into(),
+        success: false,
+        error: Some("command not found".into()),
+        output: None,
+        duration_ms: 5,
+    });
+    assert_eq!(state.tool_cards.len(), 1, "a failure is still a result");
+    assert_eq!(state.tool_cards[0].tool_name, "bash");
+}
+
+/// And the ordinary path is unchanged: a result lands on its call's card
+/// rather than making a second one. A fix that always appended would turn
+/// every tool call into two cards.
+#[test]
+fn a_result_still_lands_on_its_own_card() {
+    use niki::artifacts::types::AgentRole;
+    use niki::display::tui::DisplayEvent;
+
+    let config = niki::config::NikiConfig::default();
+    let mut state = niki::display::state::AppState::new("t".to_string(), config, ".".into());
+
+    state.apply_event(DisplayEvent::ToolCall {
+        role: AgentRole::Coder,
+        tool_name: "grep".into(),
+        summary: "grep in src".into(),
+    });
+    state.apply_event(DisplayEvent::ToolResult {
+        role: AgentRole::Coder,
+        tool_name: "grep".into(),
+        success: true,
+        error: None,
+        output: Some("3 matches".into()),
+        duration_ms: 7,
+    });
+
+    assert_eq!(
+        state.tool_cards.len(),
+        1,
+        "a call and its result are one card, not two: {:?}",
+        state.tool_cards
+    );
+    assert_eq!(state.tool_cards[0].output.as_deref(), Some("3 matches"));
+}

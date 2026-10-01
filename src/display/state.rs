@@ -1833,6 +1833,33 @@ impl AppState {
                     if self.current_tool_index == Some(idx) {
                         self.current_tool_index = None;
                     }
+                } else {
+                    // A result with no card to land on is **not** dropped.
+                    //
+                    // The `if let Some(idx)` had no `else`, so a result whose
+                    // `ToolCall` was never applied — a fork, a display that
+                    // was rebuilt, an event that arrived before the interface
+                    // was listening — vanished silently. A tool that ran, did
+                    // work and reported an outcome became a card that never
+                    // appeared, which is the same failure as `web_search`
+                    // returning `Success` with nothing in it, except the user
+                    // cannot even tell it happened.
+                    //
+                    // So the result gets a card of its own. It is the honest
+                    // rendering: the work happened, and here is what it said.
+                    let detail = match (&error, &output) {
+                        (Some(e), _) if !e.is_empty() => e.clone(),
+                        (_, Some(o)) if !o.is_empty() => o.clone(),
+                        _ => "completed with no output".to_string(),
+                    };
+                    let mut card =
+                        crate::display::components::tool_card::ToolCard::new(&tool_name, detail);
+                    if success {
+                        card.set_success(output, duration_ms);
+                    } else {
+                        card.set_failed(error.unwrap_or_default());
+                    }
+                    self.tool_cards.push(card);
                 }
             }
         }

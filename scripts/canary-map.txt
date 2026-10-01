@@ -404,3 +404,7 @@ question-answer-reaches-the-loop | a_questions_answer_reaches_the_loop_and_it_mo
 question-closes-when-answered | a_question_closes_when_it_is_answered | a question left on screen whose tool already returned
 # B7-11 · a run must not deafen the chat
 run-dispatch-costs-what-a-message-costs | dispatching_a_run_costs_about_what_dispatching_a_message_costs | the pipeline running inline on the thread that receives messages
+# B7-12 · a tool result must never vanish
+result-with-no-card-is-shown | a_result_with_no_card_to_land_on_is_still_shown | a result whose call was never seen, disappearing silently
+failure-with-no-card-is-shown | a_failure_with_no_card_to_land_on_is_still_shown | a failure vanishing, which is worse than a failure
+result-still-lands-on-its-own-card | a_result_still_lands_on_its_own_card | the fix appending unconditionally, so every call became two cards
