@@ -436,3 +436,8 @@ word-is-reproducible | the_word_is_reproducible | a random draw, which makes eve
 elapsed-is-compact-and-honest | elapsed_is_compact_and_never_lies | an elapsed clock that rounds away or misreports
 no-token-accounting-prints-nothing | no_token_accounting_prints_no_count | `↓ 0 tokens` claiming an accounting that does not exist
 resolved-line-is-not-a-spinner | the_resolved_line_is_not_a_spinner | a spinner still spinning after the answer is in
+working-line-renders-glyph-word-clock | a_working_line_is_glyph_word_and_clock | the widget building but the render not carrying a word or a clock
+resolved-line-renders | a_resolved_line_says_it_is_finished | the finished form not drawn
+working-line-draws-in-a-small-frame | the_widget_draws_in_a_small_frame | a panic in a small terminal, which is the bar every overlay here is held to
+no-visual-tape-starts-a-pipeline | no_visual_tape_starts_a_pipeline | a tape growing a `/run`, which renders the activity line and needs runner-side re-blessing
+every-tape-launches-chat | every_visual_tape_launches_the_chat_surface | a tape driving another surface, which may render the line
