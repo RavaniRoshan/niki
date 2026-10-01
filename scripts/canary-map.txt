@@ -394,3 +394,7 @@ salvaged-render-leaves-no-scratch | a_render_leaves_no_scratch_copy_behind | a c
 salvaged-create-renders-as-new-file | a_created_file_renders_as_a_new_file | a created file rendering as nothing
 salvaged-unpublishable-path-refused | an_unpublishable_path_is_refused_rather_than_rendered | a recovered artifact rendering `.env` or a traversal escape
 salvaged-unmatched-edit-is-reported | an_unmatched_edit_is_reported_rather_than_rendering_a_short_patch | a quietly short patch, which reads as "that is all the change was"
+# B7-06 · the mock server can be told which tool calls to make, in order
+mock-scripted-sequence-followed | a_scripted_tool_call_sequence_is_followed_in_order | the sequence ignored, so no leg can drive a tool the harness hardcodes
+mock-script-runs-out | the_script_runs_out_rather_than_repeating | a sequence that replays, walking a loop off the end of a list
+mock-no-script-untouched | with_no_script_the_built_in_story_is_untouched | an empty script read as "call nothing ever", changing every existing consumer at once
