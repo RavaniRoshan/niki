@@ -479,3 +479,12 @@ different-paths-still-run-together | different_paths_do_not_block_each_other | o
 two-spellings-one-lock | two_spellings_of_one_path_take_the_same_lock | `./src/lib.rs` and `src/../src/lib.rs` taking different locks
 no-lock-entries-survive | no_entries_survive_their_guards | a map that only grows, which is a leak with a plausible shape
 missing-file-still-locks | a_file_that_does_not_exist_yet_still_locks | creation being the case most likely to be concurrent, and canonicalisation failing on it
+# B7-25 · §8 T3: which calls may run together, and what order comes back
+two-writes-one-file-never-batched | two_writes_to_one_file_are_never_batched | two writers sharing a batch, which is a lost update
+read-not-batched-with-write | a_read_is_not_batched_with_a_write_of_the_same_file | a read queued behind a lock that would block it anyway
+two-reads-one-file-are-batched | two_reads_of_one_file_are_batched | reads serialised for no reason, which is the executor going sequential
+different-files-always-batch | different_files_always_batch | parallelism lost where it is safe
+no-known-path-runs-alone | a_call_with_no_known_path_runs_alone | `bash` beside a write, which no per-path lock can see
+unknown-tool-is-a-write | an_unrecognised_tool_is_treated_as_a_write | a misread write gaining parallelism it must not have
+results-in-the-order-asked | results_are_delivered_in_the_order_the_model_asked | a model reading its own actions out of order
+mixed-turn-plans-sensibly | a_mixed_turn_is_planned_into_sensible_batches | the plan no longer being a function of the call list

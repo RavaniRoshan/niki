@@ -18,6 +18,7 @@ pub mod mcp_tool;
 pub mod metrics;
 pub mod path_lock;
 pub mod policy;
+pub mod scheduler;
 pub mod session;
 pub mod step;
 pub mod tools;
