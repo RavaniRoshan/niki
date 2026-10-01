@@ -2243,3 +2243,72 @@ async fn a_model_that_narrates_its_finished_work_is_asked_to_submit() {
         out.steps
     );
 }
+
+/// A bare artifact in prose must be recovered, **even when the prose contains
+/// a brace first**.
+///
+/// Measured on a live run (`stealth/space-bunny-alpha`). The rebuild Coder
+/// emitted its artifact as raw JSON in a prose answer; the loop printed it and
+/// fell back to one-shot anyway. The recovery path exists for exactly that and
+/// did not fire.
+///
+/// The cause is in `first_json_object`: it took `text.find('{')` — the
+/// **first** brace — and depth-balanced from there. A model that writes a
+/// sentence with a brace in it before the artifact puts the start in the wrong
+/// place, the balanced span ends inside the aside, and the parse fails.
+#[test]
+fn an_artifact_behind_a_brace_in_prose_is_still_recovered() {
+    let content = concat!(
+        "I updated the function. Note the {draft} marker is gone now.\n",
+        "{\"edits\":[{\"search\":\"a - b\",\"replace\":\"a + b\"}],",
+        "\"files_changed\":[{\"path\":\"src.rs\",\"action\":\"modify\"}]}"
+    );
+    let recovered = niki::runtime::tools::recover_artifact_from_content_for_test(content);
+    assert!(
+        recovered.is_some(),
+        "an artifact behind a brace in prose must still be found: {content}"
+    );
+    assert_eq!(
+        recovered.expect("recovered")["edits"][0]["replace"],
+        "a + b",
+        "and it must be the artifact, not the aside"
+    );
+}
+
+/// A clean bare object — the case that already worked — keeps working.
+#[test]
+fn a_bare_artifact_still_recovers() {
+    let recovered = niki::runtime::tools::recover_artifact_from_content_for_test(
+        r#"{"edits":[{"search":"a","replace":"b"}],"files_changed":[]}"#,
+    );
+    assert!(recovered.is_some(), "a bare artifact must recover");
+}
+
+/// And prose that merely *discusses* JSON is not taken at its word.
+#[test]
+fn prose_about_json_is_not_an_artifact() {
+    let recovered = niki::runtime::tools::recover_artifact_from_content_for_test(
+        r#"The shape is {"edits": "a list", "files_changed": "a list"} — I filled both in."#,
+    );
+    assert!(
+        recovered.is_none(),
+        "a value whose `edits` is a string is a description, not an artifact"
+    );
+}
+
+/// Every brace-balanced span is examined, so a real artifact later in the text
+/// wins over a `{…}` earlier in it.
+#[test]
+fn a_later_artifact_beats_an_earlier_brace_span() {
+    let content = concat!(
+        "Before I forget: {\"note\": \"a - b is deliberate\"}\n",
+        "and here is the change:\n",
+        "{\"edits\":[{\"search\":\"x\",\"replace\":\"y\"}],\"files_changed\":[]}"
+    );
+    let recovered = niki::runtime::tools::recover_artifact_from_content_for_test(content)
+        .expect("the later artifact must be found");
+    assert!(
+        recovered["edits"].is_array(),
+        "and it must be the artifact, not the note: {recovered}"
+    );
+}

@@ -3355,10 +3355,36 @@ pub fn was_truncated(finish_reason: Option<&str>) -> bool {
 /// fenced or bare JSON carrying a `name` of `submit_artifact`, or a bare
 /// artifact object. Returns `None` for anything that is not JSON, so ordinary
 /// prose is never mistaken for a submission.
+/// Test seam for [`recover_artifact_from_content`].
+///
+/// A live run showed a bare artifact in prose being dropped, and the recovery
+/// is three fallbacks chained — which is exactly the shape that is hard to see
+/// from the outside. This exposes the whole path so the tests can drive the
+/// real function rather than a re-implementation of it.
+pub fn recover_artifact_from_content_for_test(content: &str) -> Option<serde_json::Value> {
+    recover_artifact_from_content(content)
+}
+
 fn recover_artifact_from_content(content: &str) -> Option<serde_json::Value> {
-    let value = crate::config::edit::json_value_of(content)
-        .or_else(|| fenced_json_anywhere(content))
-        .or_else(|| first_json_object(content))?;
+    // Every candidate, not just the first that *looks* like JSON: a model can
+    // put a brace in a sentence before the artifact, and the whole point of
+    // this path is to rescue an artifact from prose that is not only the
+    // artifact.
+    let candidates = crate::config::edit::json_value_of(content)
+        .into_iter()
+        .chain(fenced_json_anywhere(content))
+        .chain(json_objects_in(content))
+        .collect::<Vec<_>>();
+    // Prefer one that actually looks like an artifact; fall back to the first
+    // that parsed, so a wrapped `submit_artifact` is still found.
+    let value = candidates
+        .iter()
+        .find(|v| {
+            v.get("edits").is_some()
+                || v.get("verdict").is_some()
+                || v.get("name").and_then(|n| n.as_str()) == Some("submit_artifact")
+        })
+        .or_else(|| candidates.first())?;
     if value.get("name").and_then(|n| n.as_str()) == Some("submit_artifact") {
         return value
             .get("arguments")
@@ -3366,9 +3392,12 @@ fn recover_artifact_from_content(content: &str) -> Option<serde_json::Value> {
             .cloned();
     }
     // A bare artifact: it has to look like one, or a model that merely
-    // discussed JSON would be taken at its word.
-    if value.get("edits").is_some() || value.get("verdict").is_some() {
-        return Some(value);
+    // discussed JSON would be taken at its word. `edits` must be an *array* —
+    // see the note in `recover_artifact_from_content`.
+    if value.get("edits").is_some_and(|e| e.is_array())
+        || value.get("verdict").is_some_and(|x| !x.is_null())
+    {
+        return Some(value.clone());
     }
     None
 }
@@ -3456,30 +3485,59 @@ fn fenced_json_anywhere(text: &str) -> Option<serde_json::Value> {
 ///
 /// A model that answers in prose with an unlabelled object is still answering;
 /// this is the last shape worth trying before giving up.
-fn first_json_object(text: &str) -> Option<serde_json::Value> {
-    let start = text.find('{')?;
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (i, c) in text[start..].char_indices() {
-        if escaped {
-            escaped = false;
+/// Every balanced `{…}` span in the text, in order.
+///
+/// It used to return the **first** one only, and `text.find('{')` chose where
+/// to start. A model that writes a sentence containing a brace before the
+/// artifact — `Here's the change (note: {draft}) … {"edits": […]}` — has its
+/// first brace inside the aside, so the balanced span ended in the wrong place,
+/// the parse failed, and recovery returned `None`. The loop then handed the
+/// content to a one-shot call, which re-asked from scratch.
+///
+/// Measured on a live run (`stealth/space-bunny-alpha`), where a bare
+/// artifact in prose was printed and then dropped.
+fn json_objects_in(text: &str) -> Vec<serde_json::Value> {
+    let bytes = text.as_bytes();
+    let mut found = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'{' {
+            i += 1;
             continue;
         }
-        match c {
-            '\\' if in_string => escaped = true,
-            '"' => in_string = !in_string,
-            '{' if !in_string => depth += 1,
-            '}' if !in_string => {
+        let start = i;
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut end = None;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' && in_string {
+                escaped = true;
+            } else if c == b'"' {
+                in_string = !in_string;
+            } else if !in_string && c == b'{' {
+                depth += 1;
+            } else if !in_string && c == b'}' {
                 depth -= 1;
                 if depth == 0 {
-                    return serde_json::from_str(&text[start..=start + i]).ok();
+                    end = Some(i);
+                    break;
                 }
             }
-            _ => {}
+            i += 1;
         }
+        let Some(end) = end else { break };
+        if let Ok(v) = serde_json::from_str(&text[start..=end]) {
+            found.push(v);
+        }
+        // Continue *after* this span: a nested artifact is not a second
+        // candidate, and rescanning inside it is wasted work.
+        i = end + 1;
     }
-    None
+    found
 }
 
 pub async fn run_tool_loop(
