@@ -1527,3 +1527,31 @@ that `agent_metrics` was non-empty on the fast path, and it passed — because t
 Planner's metric alone makes it non-empty, so it said nothing about the Coder.
 Disabling the Coder's billing entirely did **not** turn it red. The version
 shipped asks for the `coder` role by name, and that one bites.
+
+---
+
+## Iteration 7j — B8-10, and `KNOWN_FAILING` is empty
+
+The last entry said *"artifact schemas declare no minItems/minLength, so a no-op
+validates cleanly"*. **False against the shipped schemas**: `code_diff.schema.json`
+declares `"minItems": 1` on both `edits` and `files_changed`, and
+`validate_artifact` rejects an empty diff with *"[] has less than 1 item; [] has
+less than 1 item"*. The protection is in the schema, where it belongs. The
+failure *message* repeated the false claim, which would have sent a reader
+looking for a schema bug that is not there.
+
+The check also had the opposite problem. `is_semantically_empty` read `summary`
+— a field `review_verdict.schema.json` has not had for some time — so `has_text`
+was permanently false and **every approved review with no issues was flagged
+hollow**. A clean approval is the correct outcome. An audit-style check that
+cries wolf on a perfect review trains a reader to ignore it.
+
+Now reads `overall_assessment`, keeping `summary` as a fallback. Proven both
+ways: restoring the `summary`-only read makes a clean approval fail; disabling
+the hollow branch makes a genuinely hollow verdict pass.
+
+**`KNOWN_FAILING` is now empty.** All four entries struck in batch 8, each
+against a measurement. The ratchet's scope was corrected on the way: the first
+draft generalised "every entry must fire on this trace", which failed on
+`INV-TERMINAL-SAFE` — reproduced by a *different* trace. A check written to be
+exhaustive rather than true drifts into demanding things nobody wanted.

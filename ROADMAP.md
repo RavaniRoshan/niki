@@ -737,6 +737,39 @@ unmetered one still fails.
 **Can-fail proven:** restoring the capital-S comparison goes red, and a real run
 whose `agent_metrics` is emptied goes red on `run_lifecycle`.
 
+### `INV-ARTIFACT-SEMANTIC` — the last entry, struck in batch 8 (B8-10)
+
+`KNOWN_FAILING` is now **empty**. Every one of the four entries has been struck
+against a measurement rather than an opinion.
+
+**The stated cause was false.** The entry said *"artifact schemas declare no
+minItems/minLength, so a no-op validates cleanly"*. Measured against the shipped
+schemas: `code_diff.schema.json` declares `"minItems": 1` on **both** `edits`
+and `files_changed`, and `validate_artifact` rejects an empty diff with
+
+```
+Artifact does not match schemas/code_diff.schema.json.
+[] has less than 1 item; [] has less than 1 item;
+```
+
+The protection the entry asked for is in the schema, where it belongs. The
+failure *message* repeated the false claim too — and a failure message that
+misstates its cause sends whoever reads it looking for a schema bug that is not
+there.
+
+**And the check had the opposite problem.** `is_semantically_empty` read
+`summary` — a field `review_verdict.schema.json` has not had for some time — so
+`has_text` was permanently false and **every approved review with no issues was
+flagged hollow**. A clean approval is the *correct* outcome. An audit-style check
+that cries wolf on a perfect review trains a reader to ignore it, which is the
+one thing such a check cannot afford.
+
+Now it reads `overall_assessment`, keeping `summary` as a fallback so a record
+written before the rename is not suddenly reported hollow.
+
+**Can-fail proven both ways:** restoring the `summary`-only read makes the clean
+approval fail; disabling the hollow branch makes a genuinely hollow verdict pass.
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in
