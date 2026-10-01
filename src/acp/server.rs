@@ -38,6 +38,78 @@ fn notify<W: Write>(out: &mut W, method: &str, params: serde_json::Value) {
 }
 
 /// Run the pipeline for one `prompt/send` and stream progress as notifications.
+/// The ACP notification one buffered pipeline event becomes, or `None` if the
+/// replay does not carry it.
+///
+/// Extracted from `run_prompt` so a test can reach it. The mapping is where a
+/// `Notice` was silently dropped for as long as that arm did not exist — the
+/// replay's `_ => continue` swallowed every one of them — and a test that can
+/// only drive a whole JSON-RPC session cannot see an arm that is missing.
+fn acp_notification(
+    ev: crate::display::tui::DisplayEvent,
+) -> Option<(&'static str, serde_json::Value)> {
+    Some(match ev {
+        crate::display::tui::DisplayEvent::StageStart { role } => (
+            "stage.start",
+            serde_json::json!({ "role": format!("{:?}", role) }),
+        ),
+        crate::display::tui::DisplayEvent::StageToken { role, token } => (
+            "stage.token",
+            serde_json::json!({ "role": format!("{:?}", role), "token": token }),
+        ),
+        crate::display::tui::DisplayEvent::StageDone {
+            role,
+            summary,
+            input_tokens,
+            output_tokens,
+            cost_usd,
+            latency_ms,
+            retry_count,
+        } => (
+            "stage.done",
+            serde_json::json!({
+                "role": format!("{:?}", role),
+                "summary": summary,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_usd": cost_usd,
+                "latency_ms": latency_ms,
+                // An IDE client gets the retry count too. It was carried in every
+                // task record and every budget and reached nothing a human could
+                // see; now it reaches the transcript and here.
+                "retry_count": retry_count,
+            }),
+        ),
+        crate::display::tui::DisplayEvent::StageFailed { role, error } => (
+            "stage.failed",
+            serde_json::json!({ "role": format!("{:?}", role), "error": error }),
+        ),
+        crate::display::tui::DisplayEvent::Revision { round, max, issues } => (
+            "stage.revision",
+            serde_json::json!({ "round": round, "max": max, "issues": issues }),
+        ),
+        crate::display::tui::DisplayEvent::DiffContent(diff) => {
+            ("task.diff", serde_json::json!({ "diff": diff }))
+        }
+        // A notice is "something that is neither an error nor a verdict", and it
+        // reached the TUI and nothing else: this arm did not exist, so the
+        // replay's `_ => continue` swallowed every one of them.
+        // `AgenticDisplay::emit` buffers unconditionally precisely so a headless
+        // driver can replay progress — the events were produced, kept, and then
+        // thrown away here.
+        //
+        // Two things produce them today, and both matter more in an IDE than in
+        // a terminal: the MCP tool summary, so someone who configured a server
+        // learns what it offered; and the blocked-branch reason from `deliver.rs`,
+        // which is the one message that explains why a run cannot land its work.
+        crate::display::tui::DisplayEvent::Notice { text, warning } => (
+            "notice",
+            serde_json::json!({ "text": text, "warning": warning }),
+        ),
+        _ => return None,
+    })
+}
+
 async fn run_prompt(
     out: &mut impl Write,
     prompt: &str,
@@ -96,54 +168,9 @@ async fn run_prompt(
     // Replay every buffered pipeline event as an ACP notification so an IDE
     // sees live stage.start / stage.token / stage.done / stage.failed events.
     for ev in display.take_events() {
-        let (method, params) = match ev {
-            crate::display::tui::DisplayEvent::StageStart { role } => (
-                "stage.start",
-                serde_json::json!({ "role": format!("{:?}", role) }),
-            ),
-            crate::display::tui::DisplayEvent::StageToken { role, token } => (
-                "stage.token",
-                serde_json::json!({ "role": format!("{:?}", role), "token": token }),
-            ),
-            crate::display::tui::DisplayEvent::StageDone {
-                role,
-                summary,
-                input_tokens,
-                output_tokens,
-                cost_usd,
-                latency_ms,
-
-                retry_count,
-            } => (
-                "stage.done",
-                serde_json::json!({
-                    "role": format!("{:?}", role),
-                    "summary": summary,
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "cost_usd": cost_usd,
-                    "latency_ms": latency_ms,
-                    // An IDE client gets the retry count too. It was carried in
-                    // every task record and every budget and reached the TUI's
-                    // own `StageDone` handler as an unused binding — the number
-                    // existed everywhere except where a human could see it.
-                    "retry_count": retry_count,
-                }),
-            ),
-            crate::display::tui::DisplayEvent::StageFailed { role, error } => (
-                "stage.failed",
-                serde_json::json!({ "role": format!("{:?}", role), "error": error }),
-            ),
-            crate::display::tui::DisplayEvent::Revision { round, max, issues } => (
-                "stage.revision",
-                serde_json::json!({ "round": round, "max": max, "issues": issues }),
-            ),
-            crate::display::tui::DisplayEvent::DiffContent(diff) => {
-                ("task.diff", serde_json::json!({ "diff": diff }))
-            }
-            _ => continue,
-        };
-        notify(out, method, params);
+        if let Some((method, params)) = acp_notification(ev) {
+            notify(out, method, params);
+        }
     }
 
     match result {
@@ -361,4 +388,48 @@ pub async fn run(project_dir: PathBuf) -> std::io::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A notice reaches an IDE client.
+    ///
+    /// The replay mapped eight variants and dropped the rest through
+    /// `_ => continue`, and `Notice` was among the dropped: two things produce
+    /// one — the MCP tool summary and the blocked-branch reason — and an IDE
+    /// user saw neither. `AgenticDisplay::emit` buffers *unconditionally*
+    /// precisely so a headless driver can replay progress, so the events were
+    /// produced, kept in memory, and then discarded at the last step.
+    #[test]
+    fn a_notice_is_not_dropped_by_the_replay() {
+        let (method, params) = acp_notification(crate::display::tui::DisplayEvent::Notice {
+            text: "branch niki/abc is blocked by an unmerged change".to_string(),
+            warning: false,
+        })
+        .expect("a notice must survive the replay");
+        assert_eq!(method, "notice");
+        assert_eq!(
+            params["text"],
+            "branch niki/abc is blocked by an unmerged change"
+        );
+        assert_eq!(
+            params["warning"], false,
+            "and whether it is a warning is part of what the client is told"
+        );
+    }
+
+    /// The warning flag is carried, not flattened — an MCP connect failure and
+    /// a blocked branch are not the same severity and a client cannot tell them
+    /// apart if the flag is dropped.
+    #[test]
+    fn a_warning_notice_keeps_its_flag() {
+        let (_, params) = acp_notification(crate::display::tui::DisplayEvent::Notice {
+            text: "MCP: 3 tools from 1 server".to_string(),
+            warning: true,
+        })
+        .expect("a notice must survive the replay");
+        assert_eq!(params["warning"], true);
+    }
 }

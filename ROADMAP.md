@@ -984,7 +984,7 @@ bypassing it — each `left: 200000, right: 8000`.
 | `/status` and `/usage` read `state.totals()` (a sum of `StageInfo`), so on a pure chat they report `$0.0000` — **contradicting the `/cost` this batch fixed** | `chat.rs:856`, `chat.rs:953`, `state.rs:1979` |
 | `/cost` after `/run` in the chat shows real dollars beside `0` tokens, because `StageDone` writes only per-stage fields | `state.rs:1618-1657` |
 | `StageInfo.retry_count` is a literal `0` and `StageDone` has no such field, so the transcript's `retry n/3` is always `retry 0/3` — while the pipeline's own `StageMetric` carries the real count | `state.rs:1583`, `tui.rs:59-66` |
-| ACP drops `DisplayEvent::Notice` in its replay (`_ => continue`), so an IDE client never sees *"spend cap exceeded"* or *"the Coder produced nothing"* | `acp/server.rs:137` |
+| ~~ACP drops `DisplayEvent::Notice` in its replay~~ **DONE in batch 9 (B9-11)**. Note the sweep's examples were wrong — nothing emits *"spend cap exceeded"*; the two producers are the **MCP tool summary** and the **blocked-branch reason**. The defect was real and the same shape as the rest of the batch: `emit` buffers unconditionally so a headless driver can replay progress, and the replay's `_ => continue` then threw the notices away at the last step. | `acp/server.rs` |
 | `frame_mean_ms` / `frame_p95_ms` are written only by `run_tui`, never by `run_chat`, so the Cost page footer reads `0.0/0.0` in a chat session | `tui.rs:1090`, `cost.rs:292` |
 | Four `AppState` fields (`background_tasks`, `chat_input`, `chat_cursor`, `voice`) are declared, initialised, and touched by nothing. `voice`'s doc says *"push-to-talk (Ctrl+Shift+V)"* and **no such keybinding exists** | `state.rs:977,1022,1024,1118` |
 | The permission modal presents four options and three scopes; `action_for` maps indices `0 | 1` both to `Allow`, so *"Allow once"* and *"Allow always"* are identical | `permissions/permission.rs:52-55` |
@@ -1088,6 +1088,31 @@ inventing one from the stream would be a number nobody measured.
 Can-fail proven both ways: dropping the chat counters gives `left: 0, right:
 3000`; summing instead of maxing gives *"two views of the same money … never
 added: 0.75"*.
+
+### B9-11 — an IDE client never saw a notice (BUILT)
+
+The ACP replay mapped eight variants and dropped the rest through
+`_ => continue`. `Notice` was among the dropped, and `AgenticDisplay::emit`
+buffers **unconditionally** precisely so a headless driver can replay progress —
+so the events were produced, kept in memory, and thrown away at the last step.
+
+**The sweep's examples were wrong** and are corrected in the table above: nothing
+emits *"spend cap exceeded"*. The two producers are the **MCP tool summary** and
+the **blocked-branch reason** — and both matter *more* in an IDE than in a
+terminal, because an IDE user has no status line and no terminal scrollback to
+read them in.
+
+The mapping is now `acp_notification`, extracted from `run_prompt` so a test can
+reach it: a test that can only drive a whole JSON-RPC session cannot see an arm
+that is missing. Both tests can fail by removing the arm.
+
+**Not done, and it is a decision rather than a slice.** `DisplayEvent` has 25
+variants and the replay maps 9. Making the match **exhaustive** would make a
+future variant a compile error here rather than a silent drop — which is the
+structural fix — but it forces a decision on all 16 others, several of which an
+IDE client arguably *needs* (permission prompts, `ask_user`, tool cards, chat
+deltas). That is a product call about what an editor should see, and it is
+recorded here rather than taken.
 
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
