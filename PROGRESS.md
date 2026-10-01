@@ -2075,3 +2075,37 @@ $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --lib → 1098 passed; 0 failed
 $ cargo test --test acp_server → 7 passed
 ```
+
+---
+
+## Iteration 8k — B9-12, a doc promising a keybinding that does not exist
+
+Four `AppState` fields were declared, initialised and touched by nothing:
+`background_tasks`, `chat_input`, `chat_cursor`, `voice`. All four deleted.
+
+`voice`'s doc read *"Push-to-talk voice input state (Ctrl+Shift+V)"* — and there
+is **no `Ctrl+Shift+V` binding anywhere in the codebase**. Nothing read or wrote
+the field, and `/voice` already told users the truth: voice is the separate
+`niki voice` subcommand.
+
+**The sweep got the field wrong too.** It reported `voice` with two references and
+dead; it has twenty, because `display::voice` is a real module behind that
+subcommand. The *field* was dead, the module is not, and the module stays.
+
+**The first version of the test did not bite.** It asserted `/voice` *mentions*
+`niki voice` — which a message saying *"press Ctrl+Shift+V to talk. `niki voice`
+records…"* satisfies. The negative half is what makes it a canary.
+
+**Stated rather than implied:** that a `pub` field is *unused* cannot be checked
+from inside the crate. Rust will not warn on a public field of a public struct,
+there is no way to enumerate them, and neither G9 nor clippy catches it. Putting
+`voice` back would fail nothing. The only mechanism is review, and this entry is
+the record.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  431 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --lib → 1099 passed; 0 failed
+```
