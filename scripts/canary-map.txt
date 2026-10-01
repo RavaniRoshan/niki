@@ -504,3 +504,5 @@ first-pattern-wins | the_first_pattern_wins_not_the_first_rule_built | hash orde
 patternless-rule-is-no-rule | a_patternless_rule_is_not_a_rule | a hook layer that fires on everything while looking configured
 hard-denial-not-charged-to-model | a_hard_denial_does_not_charge_the_models_tally | a user's own rules tripping the model's escalation limits
 decision-reads-the-call | the_decision_comes_from_the_call_in_the_view | hooks reading nothing while every other test stays green
+finished-run-draws-its-resolution | a_finished_run_draws_what_the_working_line_resolved_into | a built-and-tested component that nothing draws
+running-run-is-not-labelled-finished | a_running_run_does_not_also_draw_the_resolved_line | "Thought for 12s" under a run still going
