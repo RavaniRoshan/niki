@@ -1999,3 +1999,45 @@ $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --lib → 1095 passed; 0 failed
 ```
+
+---
+
+## Iteration 8i — B9-09, three commands, one conversation, opposite answers
+
+`totals()` summed `StageInfo`, and a chat conversation creates **no
+`StageInfo`**. So `/status` and `/usage` reported `$0.0000` and `0` tokens for a
+conversation that had spent real money — **in the same session where `/cost`
+reported the true figure**, because B9-04 fixed `/cost` and left the other two
+contradicting it. `/status` is the one the product lists in `/help`.
+
+A user told `$0.0417` by one command and `$0.0000` by the next concludes that
+the product does not know. They would be right.
+
+`totals()` is now session-wide: stages **and** chat turns.
+
+**Cost is `max(self.cost, the stage sum)` — neither alone, never their sum.**
+They are two views of the same money: the pipeline *assigns* `self.cost` from the
+record's `total_cost_usd`, and the per-stage `cost_usd` values add up to the same
+amount. Adding them double-counts every run. Taking the larger is "use whichever
+one we have" — the record when it arrived, the stage sum when it did not, and
+`self.cost` alone for a conversation with no run.
+
+Both sabotages bite: dropping the chat counters gives `left: 0, right: 3000`;
+summing instead of maxing gives *"two views of the same money … never added:
+0.75"*.
+
+**The lesson from B9-08 generalised further.** Fixing `/cost` without checking
+`/status` and `/usage` left the surface *more* inconsistent than before: there
+was one command and now there were two that disagreed. A fix that makes a number
+right can still leave the product lying, if other readers of the same fact are
+not moved with it. Worth writing down: **when a number starts being reported,
+find every reader of it.**
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  428 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --lib → 1096 passed; 0 failed
+$ cargo test --test tui_navigation → appstate_totals 2 passed
+```
