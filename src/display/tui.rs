@@ -63,6 +63,18 @@ pub enum DisplayEvent {
         output_tokens: u32,
         cost_usd: f64,
         latency_ms: u64,
+        /// How many times the stage had to be re-asked before it answered.
+        ///
+        /// The pipeline has always known this — `StageMetric.retry_count` is
+        /// incremented in `agents/mod.rs` and carried into every record and
+        /// every budget — and the transcript used to render `retry n/3`. But
+        /// this event had no field for it, `StageInfo.retry_count` was a literal
+        /// `0`, and the renderer only draws the line `if s.retry_count > 0`.
+        ///
+        /// So the line **never appeared**: a stage that took three retries —
+        /// three failed requests, three sets of tokens — was drawn exactly like
+        /// one that succeeded first time. Not a wrong number; a missing one.
+        retry_count: u32,
     },
     StageFailed {
         role: AgentRole,
@@ -2428,6 +2440,7 @@ mod tests {
             role: AgentRole::Planner,
         });
         state.apply_event(DisplayEvent::StageDone {
+            retry_count: 0,
             role: AgentRole::Planner,
             summary: vec!["Spec: 1 file".into()],
             input_tokens: 1200,
@@ -2465,6 +2478,7 @@ mod tests {
             role: AgentRole::Planner,
         });
         state.apply_event(DisplayEvent::StageDone {
+            retry_count: 0,
             role: AgentRole::Planner,
             summary: vec!["Spec".into()],
             input_tokens: 100,
@@ -2496,6 +2510,7 @@ mod tests {
         assert_eq!(state.stages[0].role, AgentRole::Planner);
 
         state.apply_event(DisplayEvent::StageDone {
+            retry_count: 0,
             role: AgentRole::Planner,
             summary: vec!["Spec: 1 file".into()],
             input_tokens: 1200,

@@ -1341,6 +1341,7 @@ async fn run_experimental_research(
         )],
         out.usage,
         cost_usd,
+        0,
     );
     let latency_ms = start.elapsed().as_millis() as u64;
     let appendix = format!(
@@ -2422,7 +2423,10 @@ async fn run_bookkept_stage(
         .last()
         .map(|m| (m.usage(), m.cost_usd))
         .unwrap_or((crate::llm::provider::TokenUsage::default(), 0.0));
-    display.agent_done(stage.role, summary, usage, cost);
+    // The retry count is on the metric the stage just produced; it was being
+    // dropped here, which is why the transcript's `retry n/3` never rendered.
+    let retry_count = metrics.last().map(|m| m.retry_count).unwrap_or(0);
+    display.agent_done(stage.role, summary, usage, cost, retry_count);
     finish_stage(
         display,
         metrics,
@@ -3006,6 +3010,7 @@ run_stage(
         crate::display::artifact_render::render_task_spec_summary(&task_spec),
         pm.usage(),
         pm.cost_usd,
+        pm.retry_count,
     );
     // No PostAgentStop when the Planner was skipped by --plan (no agent ran).
     if plan_override_json.is_none() {
@@ -3385,7 +3390,13 @@ run_stage(
                 let m = metrics.last().unwrap_or_else(|| {
                     unreachable!("metrics always has at least one entry after push")
                 });
-                display.agent_done(AgentRole::Synthesizer, summary, m.usage(), m.cost_usd);
+                display.agent_done(
+                    AgentRole::Synthesizer,
+                    summary,
+                    m.usage(),
+                    m.cost_usd,
+                    m.retry_count,
+                );
                 finish_stage(
                     display,
                     &mut metrics,
@@ -3482,7 +3493,7 @@ run_stage(
                     let m = metrics.last().unwrap_or_else(|| {
                         unreachable!("metrics always has at least one entry after push")
                     });
-                    display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
+                    display.agent_done(stage.role, summary, m.usage(), m.cost_usd, m.retry_count);
                     finish_stage(
                         display,
                         &mut metrics,
@@ -3671,7 +3682,13 @@ run_stage(
                         let m = metrics.last().unwrap_or_else(|| {
                             unreachable!("metrics always has at least one entry after push")
                         });
-                        display.agent_done(stage.role, summary, m.usage(), m.cost_usd);
+                        display.agent_done(
+                            stage.role,
+                            summary,
+                            m.usage(),
+                            m.cost_usd,
+                            m.retry_count,
+                        );
                         finish_stage(
                             display,
                             &mut metrics,
@@ -4045,6 +4062,7 @@ run_stage(
                 vec!["solo code diff produced".to_string()],
                 usage,
                 cost,
+                0,
             );
             finish_stage(
                 display,
@@ -4092,6 +4110,7 @@ run_stage(
                     vec![format!("patch did not apply ({apply_err}) — repairing")],
                     usage,
                     cost,
+                    0,
                 );
                 fire_hook(
                     &hook_bus,
@@ -4139,6 +4158,7 @@ run_stage(
                     vec!["repaired code diff produced".to_string()],
                     rm.usage(),
                     rm.cost_usd,
+                    rm.retry_count,
                 );
                 finish_stage(
                     display,

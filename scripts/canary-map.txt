@@ -527,3 +527,4 @@ chat-turn-is-priced-from-the-real-model | a_chat_turn_is_priced_from_the_model_t
 context-window-follows-the-model | switching_model_moves_the_context_window | a gauge reporting against 200k for a model with an 8k window
 every-permission-option-does-something | every_option_resolves_to_a_distinct_action | "Allow always" silently meaning "allow once"
 no-scope-the-protocol-cannot-carry | no_scope_is_offered_that_the_protocol_cannot_carry | a scope selector whose choice reaches no behaviour
+retried-stage-says-so | the_pipeline_carries_the_retry_count_to_the_surface | a stage that took three retries drawn like one that succeeded first time

@@ -1004,6 +1004,36 @@ is a promise the product does not keep"*.
 is where the promise was made to the user, and reinstating the selector turns it
 red.
 
+### B9-08 — `retry n/3` never rendered (BUILT)
+
+`StageInfo.retry_count` was a literal `0`, and the renderer draws the line only
+`if s.retry_count > 0`. So the line **never appeared at all**: a stage that took
+three retries — three failed requests, three sets of tokens, three times the
+latency — was drawn exactly like one that succeeded first time.
+
+The pipeline has always known the number. `agents/mod.rs` increments it, it lands
+in `StageMetric.retry_count`, and every budget and every task record reads it.
+It reached nowhere a human could see it. `DisplayEvent::StageDone` had no field,
+`agent_done` had no parameter, and the call site in `pipeline.rs` had nothing to
+pass. Now it does — and the ACP `stage.done` payload carries it too, since an IDE
+client learning that a stage took three retries is as useful as the transcript
+learning it.
+
+**Three hops, two of them now covered, and the third named rather than claimed.**
+
+| hop | covered by |
+|---|---|
+| `agent_done` → event → `StageInfo` | `the_pipeline_carries_the_retry_count_to_the_surface` — drives `attach_sink` → `agent_start` → `agent_done` → `AppState` |
+| `StageDone` → `StageInfo` | `a_stage_that_retried_says_so_in_the_transcript` |
+| **`pipeline.rs` → `agent_done`** | **inspection only** |
+
+The third is uncovered and is recorded as such. `let retry_count =
+metrics.last().map(\|m\| m.retry_count).unwrap_or(0);` returning `0` leaves every
+test green, because the test calls `agent_done` itself with the number it wants.
+Closing it needs a pipeline-level test that runs a stage — which is the same
+"drive the producer, not the constructor" rule, one level further out, and is
+recorded rather than written around.
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in

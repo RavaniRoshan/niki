@@ -345,12 +345,15 @@ impl AgenticDisplay {
         let _ = std::io::stdout().flush();
     }
 
+    /// `retry_count` is how many times the stage had to be re-asked. The
+    /// pipeline has always known it; the transcript never saw it.
     pub fn agent_done(
         &mut self,
         role: AgentRole,
         summary: Vec<String>,
         usage: TokenUsage,
         cost_usd: f64,
+        retry_count: u32,
     ) {
         if self.tui.is_some() {
             let latency_ms = self
@@ -366,6 +369,7 @@ impl AgenticDisplay {
                 output_tokens: usage.output_tokens,
                 cost_usd,
                 latency_ms,
+                retry_count,
             });
             return;
         }

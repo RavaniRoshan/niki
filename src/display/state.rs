@@ -1597,6 +1597,9 @@ impl AppState {
                 // "Thought for 12s" under a run that has been going for two.
                 self.resolved_run = None;
                 self.stages.push(StageInfo {
+                    // A stage that has not finished has not retried yet; the
+                    // real count arrives with `StageDone`.
+                    retry_count: 0,
                     role,
                     status: StageStatus::Running,
                     stream: String::new(),
@@ -1609,7 +1612,7 @@ impl AppState {
                     start: Some(std::time::Instant::now()),
                     completed_at: None,
                     prompt_file: Some(format!("{}.md", role_to_prompt_name(role))),
-                    retry_count: 0,
+
                     error_message: None,
                 });
                 self.run_state = RunState::Running;
@@ -1652,6 +1655,7 @@ impl AppState {
                 output_tokens,
                 cost_usd,
                 latency_ms,
+                retry_count,
             } => {
                 if let Some(s) = self
                     .stages
@@ -1666,6 +1670,11 @@ impl AppState {
                     s.cost_usd = cost_usd;
                     s.latency_ms = latency_ms;
                     s.completed_at = Some(std::time::Instant::now());
+                    // Was a literal `0`, so the transcript's `retry n/3` never
+                    // rendered: a stage that took three retries — three failed
+                    // requests, three sets of tokens — looked exactly like one
+                    // that succeeded first time.
+                    s.retry_count = retry_count;
                     s.stream.clear();
                 }
                 let total = input_tokens.saturating_add(output_tokens) as usize;
@@ -2724,6 +2733,109 @@ mod tests {
                 .iter()
                 .any(|(r, t)| r == "system" && t.contains("Context is")),
             "7 500 of 8 000 is 94% of the window and must be said out loud"
+        );
+    }
+
+    /// The producer puts the count in, and the surface shows it.
+    ///
+    /// **Fifth time in this batch** a test that constructed the event itself was
+    /// green against the producer dropping it: `agent_done(role, summary, usage,
+    /// cost)` had no retry parameter at all, and a test calling
+    /// `apply_display_event` with `retry_count: 3` could not see that the stage
+    /// it came from had nothing to put there.
+    ///
+    /// So this drives the **producer**: `AgenticDisplay::attach_sink` forwards to
+    /// a channel, `agent_done` builds the event, and `AppState` receives it — the
+    /// whole path, with the number chosen at the only place it exists.
+    #[test]
+    fn the_pipeline_carries_the_retry_count_to_the_surface() {
+        use crate::artifacts::types::AgentRole;
+        let mut state = AppState::new(
+            "t".into(),
+            crate::config::types::NikiConfig::default(),
+            ".".into(),
+        );
+        let (tx, rx) = std::sync::mpsc::channel::<crate::display::tui::DisplayEvent>();
+        let mut display = crate::display::agent_stream::AgenticDisplay::new();
+        display.attach_sink(
+            tx,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+
+        display.agent_start(AgentRole::Planner);
+        display.agent_done(
+            AgentRole::Planner,
+            vec!["Spec".into()],
+            Default::default(),
+            0.0,
+            2,
+        );
+        for ev in rx.try_iter() {
+            state.apply_display_event(ev);
+        }
+
+        assert_eq!(
+            state.stages.last().map(|s| s.retry_count),
+            Some(2),
+            "the pipeline said 2 and the transcript must be able to show it"
+        );
+    }
+
+    /// A stage that took retries says so.
+    ///
+    /// `StageInfo.retry_count` was a literal `0` and the renderer only draws
+    /// `retry n/3` when it is greater than zero — so the line **never
+    /// appeared**. A stage that took three retries: three failed requests, three
+    /// sets of tokens, three times the latency — was drawn exactly like one that
+    /// succeeded first time.
+    ///
+    /// The pipeline has always known the number (`StageMetric.retry_count`, fed
+    /// by `agents/mod.rs` and read by every budget and every record). It reached
+    /// nowhere a human could see it, which is the fourth time in this batch that
+    /// a value was produced correctly and dropped at a boundary.
+    #[test]
+    fn a_stage_that_retried_says_so_in_the_transcript() {
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("t".into(), config, ".".into());
+        state.apply_display_event(crate::display::tui::DisplayEvent::StageStart {
+            role: crate::artifacts::types::AgentRole::Planner,
+        });
+        state.apply_display_event(crate::display::tui::DisplayEvent::StageDone {
+            role: crate::artifacts::types::AgentRole::Planner,
+            summary: vec!["Spec: 1 file".into()],
+            input_tokens: 100,
+            output_tokens: 50,
+            cost_usd: 0.01,
+            latency_ms: 3400,
+            retry_count: 3,
+        });
+        assert_eq!(
+            state.stages[0].retry_count, 3,
+            "the count the pipeline reported must survive the event"
+        );
+    }
+
+    /// …and a stage that did not is not accused of having tried.
+    #[test]
+    fn a_stage_with_no_retries_records_none() {
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("t".into(), config, ".".into());
+        state.apply_display_event(crate::display::tui::DisplayEvent::StageStart {
+            role: crate::artifacts::types::AgentRole::Planner,
+        });
+        state.apply_display_event(crate::display::tui::DisplayEvent::StageDone {
+            role: crate::artifacts::types::AgentRole::Planner,
+            summary: vec!["Spec".into()],
+            input_tokens: 100,
+            output_tokens: 50,
+            cost_usd: 0.01,
+            latency_ms: 100,
+            retry_count: 0,
+        });
+        assert_eq!(
+            state.stages[0].retry_count, 0,
+            "and the renderer only draws the line when it is non-zero, so zero \
+             must stay zero"
         );
     }
 
