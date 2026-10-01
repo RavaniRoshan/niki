@@ -646,12 +646,27 @@ _spent`, drives a provider that answers once and then fails and asserts the
 tally carries the 4 242 input tokens it was actually charged for. That one bites:
 mirroring only on the success path gives `left: 0, right: 4242`.
 
-**What is still not covered, measured not assumed:** replacing the pipeline's
-`&loop_spend.usage` with a hard-coded default leaves both the source-level check
-and the behavioural test green. The mechanism is held behaviourally; the one-line
-wiring is held only by the source check. Driving `run_coder_tool_loop` end to end
-would hold it properly — it is private, needs `AgenticDisplay` and a live
-registry, and is the next slice rather than this one.
+**The gap that remained is now closed (B8-07).** Measured last slice: with the
+pipeline's `&loop_spend.usage` replaced by `TokenUsage::default()`, both the
+source-level check and the `runtime::tools` behavioural test stayed **green**.
+Neither reaches the layer that turns a tally into a `StageMetric`.
+
+`a_coder_loop_that_failed_still_leaves_a_bill_behind` drives the real
+`run_coder_tool_loop` with a provider that answers once and then fails, and
+asserts on the metrics the pipeline is left holding: exactly one, carrying the
+**3 131** input tokens and **77** output tokens the model was actually charged
+for. Against the hard-coded zero it goes red (`left: 0, right: 3131`) while the
+source-level check stays green — the coverage hole, closed and demonstrated.
+Skipping the bill entirely also goes red (`left: 0, right: 1`).
+
+**The test was wrong first, and that is the record worth keeping.** It passed
+`"code_diff.schema.json"` where the real caller passes
+`"schemas/code_diff.schema.json"`, so `load_asset` missed the embedded copy and
+the function returned `None` at its third line without spending anything — and
+the assertion `metrics.len() == 1` said so instead of the test passing for the
+wrong reason. It is worth noting that this is *the same class of bug* the
+function's own comment describes: `load_asset` splits on the first `/`, a bare
+name misses the embedded lookup, and the caller reads `None` as "no loop".
 
 #### The gate gap itself
 
