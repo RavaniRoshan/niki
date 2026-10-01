@@ -408,3 +408,5 @@ run-dispatch-costs-what-a-message-costs | dispatching_a_run_costs_about_what_dis
 result-with-no-card-is-shown | a_result_with_no_card_to_land_on_is_still_shown | a result whose call was never seen, disappearing silently
 failure-with-no-card-is-shown | a_failure_with_no_card_to_land_on_is_still_shown | a failure vanishing, which is worse than a failure
 result-still-lands-on-its-own-card | a_result_still_lands_on_its_own_card | the fix appending unconditionally, so every call became two cards
+# B7-14 · a model that finished the work must be asked to submit it
+narrated-work-is-asked-to-submit | a_model_that_narrates_its_finished_work_is_asked_to_submit | the loop abandoning an edited worktree because the model summarised instead of submitting

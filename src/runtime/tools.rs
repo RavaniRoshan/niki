@@ -3623,6 +3623,9 @@ pub async fn run_tool_loop_with(
     // on the fourth attempt — it will just be cut off again, more expensively.
     let mut steps_failed_truncated: u32 = 0;
     const MAX_TRUNCATED_ANSWER_RETRIES: u32 = 1;
+    // How many times this loop has told the model to stop exploring and submit.
+    // One. See the branch that increments it.
+    let mut steps_asked_to_submit: u32 = 0;
 
     loop {
         if steps >= max_steps {
@@ -3744,6 +3747,55 @@ pub async fn run_tool_loop_with(
             // model that stops after one turn, which is most small models.
             let recovered =
                 recover_submission(None, &response.content, &opts, &ctx.role, &mut call_log);
+
+            // …and where a model that has *already done the work* but narrated
+            // it instead of submitting it has to be asked once.
+            //
+            // Measured against a live provider (`stealth/space-bunny-alpha`):
+            // the Coder ran `list`, `read`, `bash`, `edit`, `bash`, `bash`,
+            // `read` — six steps, the edit applied and compiling — and then
+            // said *"The change is in place and compiles cleanly"* without ever
+            // calling `submit_artifact`. `recover_submission` found no JSON in
+            // the prose, returned `None`, and the caller **discarded the loop
+            // and re-ran the whole Coder one-shot**. The work was in the
+            // worktree the entire time; the harness simply stopped listening to
+            // the only channel the model was still using.
+            //
+            // One ask, then give up. A model that will not submit after being
+            // told plainly will not submit on the fourth turn either — it will
+            // just narrate again, more expensively.
+            if recovered.is_none()
+                && opts.submit_artifact.is_some()
+                && steps < max_steps
+                && steps_asked_to_submit == 0
+            {
+                steps_asked_to_submit += 1;
+                let name = opts
+                    .submit_artifact
+                    .as_ref()
+                    .map(|t| t.name.clone())
+                    .unwrap_or_else(|| "submit_artifact".to_string());
+                let used: Vec<String> = call_log.iter().map(|(name, _)| name.clone()).collect();
+                messages.push(LoopMessage::Assistant {
+                    content: response.content.clone(),
+                    tool_calls: Vec::new(),
+                });
+                messages.push(LoopMessage::User(format!(
+                    "You have finished the work — stop exploring. Nothing you say \
+                     becomes part of the result; only `{name}` does.\n\n\
+                     Call `{name}` now, with the edit you already made. Do not \
+                     run more tools, do not re-read the file, and do not \
+                     summarise.\n\
+                     Tools you have already used: {}. If you are not ready, \
+                     say what is missing in one line and stop.",
+                    if used.is_empty() {
+                        "none".to_string()
+                    } else {
+                        used.join(", ")
+                    }
+                )));
+                continue;
+            }
             return Ok(LoopOutput {
                 content: response.content,
                 steps,
