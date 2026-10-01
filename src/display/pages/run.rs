@@ -124,7 +124,10 @@ impl Page for RunPage {
         let cmd_line = Line::from(vec![
             Span::styled("$ ", Style::default().fg(theme::fg_dim())),
             Span::styled(
-                format!("niki run \"{}\"", state.description),
+                // Quoted for the same reason `resume` quotes: this line is a
+                // command the user copies, and the description is their own
+                // free text.
+                format!("niki run {}", crate::util::shell_quote(&state.description)),
                 Style::default().fg(theme::fg_color()),
             ),
             // The real project path. This was the literal "./my-app", on every
