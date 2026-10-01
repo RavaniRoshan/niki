@@ -184,7 +184,7 @@ fn known_failing_invariants_are_still_failing() {
         .collect();
 
     for (id, why) in KNOWN_FAILING {
-        if *id == "INV-ARTIFACT-SEMANTIC" || *id == "INV-VERDICT-NOT-FABRICATED" {
+        if *id == "INV-ARTIFACT-SEMANTIC" {
             // (INV-COST-SUM was removed from KNOWN_FAILING when the tool loop
             // and repair-retry paths were switched from `.max()` to `+=`.)
             assert!(
@@ -195,10 +195,87 @@ fn known_failing_invariants_are_still_failing() {
         }
     }
 
-    // The two defects this trace is built to reproduce must be the ones that
-    // fire — otherwise the fixture has drifted into testing nothing.
+    // The one defect this trace is built to reproduce must be the one that
+    // fires — otherwise the fixture has drifted into testing nothing.
     assert!(failing.contains("INV-ARTIFACT-SEMANTIC"));
-    assert!(failing.contains("INV-VERDICT-NOT-FABRICATED"));
+
+    // **`INV-VERDICT-NOT-FABRICATED` was struck from `KNOWN_FAILING` in batch 8.**
+    //
+    // It named this defect: *"SingleAgent assigns `verdict = Verdict::Approved`
+    // without a Reviewer (`pipeline.rs:2395)`"* — a line number that has since
+    // moved, for code that no longer says what the entry claims.
+    //
+    // What the product does now, measured rather than assumed:
+    //
+    // * `RunOutcome::SelfVerified` for the SingleAgent fast path, and the final
+    //   verdict is `outcome.verdict().unwrap_or(Verdict::RevisionNeeded)` — so a
+    //   run with nobody reviewing it cannot carry a bare `Approved`;
+    // * `verdict_source` is recorded on every path, and `Reviewed` is reachable
+    //   only when `reviewer_ran && verdict_source.is_some()`;
+    // * a **real** run asserts it: `tests/run_lifecycle.rs` reads
+    //   `task.json` back and checks `outcome.outcome == "self_verified"`.
+    //
+    // The ratchet entry was pinning the programme to a *synthetic* failure — a
+    // trace hand-built to be forbidden — so `KNOWN_FAILING` was reporting an
+    // open defect that no run produces. Striking it is only honest if the check
+    // still bites, which is what this holds: the shape the product writes must
+    // pass, and the shape the invariant forbids must still fail.
+    // `status` is `"Completed"` with a capital C, because that is what
+    // `is_completed()` looks for. The first draft of this used `"completed"`,
+    // so every check returned `pass()` at the top and **both** assertions were
+    // vacuous — including the one that appeared to prove the strike was safe.
+    let real_single_agent = invariants::RunTrace {
+        task_dir: PathBuf::from("/nonexistent-task-dir"),
+        record: Some(serde_json::json!({
+            "status": "Completed",
+            "verdict_source": "solo-coder (no independent review)",
+            "agent_metrics": [{"role": "coder", "cost_usd": 0.30}],
+            "outcome": {
+                "outcome": "self_verified",
+                "note": "the SingleAgent fast path approves its own patch; no \
+                         independent review was performed",
+            },
+        })),
+        artifacts: std::collections::BTreeMap::new(),
+        patch: Some("diff --git a/src/list.rs b/src/list.rs\n".to_string()),
+        report: None,
+    };
+    let solo_results = invariants::check(&real_single_agent);
+    let solo = solo_results
+        .iter()
+        .find(|(id, _, _)| *id == "INV-VERDICT-NOT-FABRICATED")
+        .expect(
+            "the invariant is still registered — striking the KNOWN_FAILING \
+                 entry must not delete the check",
+        );
+    assert!(
+        matches!(solo.2, Verdict::Pass),
+        "a run that says plainly it reviewed nothing must not be flagged as \
+         fabricating a verdict: {}",
+        describe(&solo.2)
+    );
+
+    let fabricated = invariants::RunTrace {
+        record: Some(serde_json::json!({
+            "status": "Completed",
+            "verdict_source": "solo-coder (no independent review)",
+            "agent_metrics": [{"role": "coder", "cost_usd": 0.30}],
+            "outcome": {"outcome": "reviewed", "verdict": "approved", "by": "solo-coder"},
+        })),
+        ..real_single_agent
+    };
+    let fabricated_results = invariants::check(&fabricated);
+    let caught = fabricated_results
+        .iter()
+        .find(|(id, _, _)| *id == "INV-VERDICT-NOT-FABRICATED")
+        .expect("registered");
+    assert!(
+        matches!(caught.2, Verdict::Fail(_)),
+        "and a self-approval dressed as an independent review must still be \
+         caught — otherwise striking the entry removed a check rather than a \
+         debt: {}",
+        describe(&caught.2)
+    );
 }
 
 /// The terminal-safety invariant must fire on content that came off the wire,

@@ -675,6 +675,39 @@ exists. It does not run the suite, because the suite does not fit this machine.
 That is a real constraint, and the consequence is that **the canary map cannot
 tell you the suite is green** — only CI can. Recorded in `RELEASE_REPORT.md` §5.
 
+### `INV-VERDICT-NOT-FABRICATED` — struck in batch 8 (B8-08)
+
+`KNOWN_FAILING` listed it as *"SingleAgent assigns `verdict = Verdict::Approved`
+without a Reviewer (`pipeline.rs:2395)`"* — a line number that has moved, for
+code that no longer says what the entry claims.
+
+**Measured, not assumed:**
+
+- `RunOutcome::SelfVerified` for the SingleAgent fast path, and the final
+  verdict is `outcome.verdict().unwrap_or(Verdict::RevisionNeeded)`, so a run
+  with nobody reviewing it cannot carry a bare `Approved`;
+- `verdict_source` is recorded on every path, and `Reviewed` is reachable only
+  when `reviewer_ran && verdict_source.is_some()`;
+- a **real** run asserts it: `tests/run_lifecycle.rs` reads `task.json` back and
+  checks `outcome.outcome == "self_verified"`.
+
+So `KNOWN_FAILING` was reporting an open defect that no run produces, and
+`known_failing_invariants_are_still_failing` was **pinning the programme to a
+synthetic failure** — a trace hand-built to be forbidden.
+
+**Struck, and the strike is held in both directions.** The ratchet now asserts
+the shape the product writes must **pass**, and the shape the invariant forbids
+(`reviewed` + `approved` + `by: "solo-coder"`) must still **fail**. Sabotage
+proven both ways: the honest shape turned into a self-approval is caught, and
+deleting the invariant registration entirely is caught.
+
+**The replacement assertion was vacuous on its first run.** `is_completed()`
+looks for `"Completed"` with a capital C; the draft used `"completed"`, so
+every check returned `pass()` at the top — including the one that appeared to
+prove the strike was safe. The green was the absence of a check. Worth writing
+down because the second failure mode is worse than the first: it is not a red
+test, it is a green one that proves nothing.
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in
