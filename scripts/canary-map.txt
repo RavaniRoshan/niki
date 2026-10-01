@@ -530,3 +530,4 @@ no-scope-the-protocol-cannot-carry | no_scope_is_offered_that_the_protocol_canno
 retried-stage-says-so | the_pipeline_carries_the_retry_count_to_the_surface | a stage that took three retries drawn like one that succeeded first time
 spending-commands-agree | every_spending_command_reports_the_same_number | /cost, /status and /usage giving opposite answers for one conversation
 record-rules-are-written-down | known_failing_invariants_are_still_failing | a lesson learned five times and recorded five times instead of once
+notice-reaches-an-ide-client | a_notice_is_not_dropped_by_the_replay | a buffered event produced, kept, then discarded at the last step

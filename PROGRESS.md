@@ -2041,3 +2041,37 @@ $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --lib → 1096 passed; 0 failed
 $ cargo test --test tui_navigation → appstate_totals 2 passed
 ```
+
+---
+
+## Iteration 8j — B9-11, an IDE client never saw a notice
+
+The ACP replay mapped eight variants and dropped the rest through
+`_ => continue`. `Notice` was among them, and `AgenticDisplay::emit` buffers
+**unconditionally** precisely so a headless driver can replay progress — so the
+events were produced, kept in memory, and thrown away at the last step. The same
+shape as everything else in this batch, one boundary further out.
+
+**The sweep's examples were wrong** and that is corrected in `ROADMAP.md`:
+nothing emits *"spend cap exceeded"*. The two producers are the **MCP tool
+summary** and the **blocked-branch reason** — both of which matter *more* in an
+IDE, which has no status line and no scrollback to read them in.
+
+The mapping is extracted as `acp_notification` so a test can reach it: a test
+that can only drive a whole JSON-RPC session cannot see an arm that is missing.
+Both tests go red when the arm is removed.
+
+**Not done, and it is a decision rather than a slice.** `DisplayEvent` has 25
+variants and the replay maps 9. Making the match exhaustive would make a future
+variant a compile error instead of a silent drop — the structural fix — but it
+forces a call on all 16 others, several of which an IDE client arguably needs
+(permission prompts, `ask_user`, tool cards, chat deltas). Recorded, not taken.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  430 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --lib → 1098 passed; 0 failed
+$ cargo test --test acp_server → 7 passed
+```
