@@ -90,3 +90,100 @@ pub fn fnv1a64_hex(bytes: &[u8]) -> String {
     }
     format!("{hash:016x}")
 }
+
+/// Quote a string so a POSIX shell reproduces it exactly.
+///
+/// **Only for output the user is invited to paste back into a terminal.** NIKI
+/// prints commands like `niki run "<the task>"` and tells a user to run them, and
+/// a task description is free text. Interpolating one inside double quotes is
+/// how a resume page hands back a command for a *different* task:
+///
+/// ```text
+/// description:  add a "tally" function that sums a slice
+/// printed:      niki run "add a "tally" function that sums a slice"
+/// pasted:       niki run add a tally function that sums a slice
+/// ```
+///
+/// The quotes vanish, and the user runs something else believing it is their
+/// interrupted work. Single quotes disable every expansion, so the only escape
+/// needed is the single quote itself — closed, an escaped literal one, reopened.
+pub fn shell_quote(s: &str) -> String {
+    if !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_./:=@,+".contains(c))
+    {
+        return s.to_string();
+    }
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+#[cfg(test)]
+mod shell_quote_tests {
+    use super::shell_quote;
+
+    /// The quoted form must survive a shell's own parsing unchanged.
+    ///
+    /// Every case here is one that a plausible fix misses: quoting with `"`
+    /// (the original bug), escaping with `\` alone (which breaks inside `$(…)`),
+    /// or stripping rather than quoting.
+    #[test]
+    fn the_quoted_form_round_trips() {
+        for input in [
+            "add a \"tally\" function that sums a slice",
+            "it's a fix",
+            "both \" and ' in one",
+            "a $VAR and a `cmd` and $(subshell)",
+            "a backslash \\ and a newline\nhere",
+            "",
+            "  leading and trailing  ",
+            "*",
+            "a;b|c&d",
+        ] {
+            let quoted = shell_quote(input);
+            assert!(
+                quoted.starts_with('\'') && quoted.ends_with('\''),
+                "{input:?} must be single-quoted, or the shell expands it: {quoted}"
+            );
+            // The inner `'\''` is the standard close-escape-reopen dance.
+            let body = &quoted[1..quoted.len() - 1];
+            let mut unescaped = String::new();
+            let mut it = body.chars().peekable();
+            while let Some(c) = it.next() {
+                if c == '\'' {
+                    // must be followed by \ ' '
+                    assert_eq!(it.next(), Some('\\'), "{input:?}: bare quote inside");
+                    assert_eq!(it.next(), Some('\''), "{input:?}: bad escape");
+                    assert_eq!(it.next(), Some('\''), "{input:?}: bad escape tail");
+                    unescaped.push('\'');
+                } else {
+                    unescaped.push(c);
+                }
+            }
+            assert_eq!(
+                unescaped, input,
+                "{input:?} did not round-trip via {quoted}"
+            );
+        }
+    }
+
+    /// Text with nothing a shell would touch is left alone, because
+    /// `niki run src/lib.rs` reads better than `niki run 'src/lib.rs'` — and a
+    /// reader is more likely to trust a command they can read.
+    #[test]
+    fn only_text_a_shell_cannot_misread_is_left_alone() {
+        for safe in ["src/lib.rs", "lib.rs:42", "a-b_c.d", "build--all"] {
+            assert_eq!(shell_quote(safe), safe, "{safe} needs no quoting");
+        }
+        // **A space is not safe.** The first draft of this test expected
+        // `add a --verbose flag` bare, which would paste as three arguments and
+        // run a different command — the exact defect this function exists to
+        // stop. The allow-list has to exclude it.
+        for unsafe_input in ["two words", "add a --verbose flag", "a\"b", "a'b"] {
+            assert_eq!(
+                shell_quote(unsafe_input),
+                format!("'{}'", unsafe_input.replace('\'', r"'\''")),
+                "{unsafe_input:?} must be quoted"
+            );
+        }
+    }
+}

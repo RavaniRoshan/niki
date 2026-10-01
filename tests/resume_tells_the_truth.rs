@@ -29,13 +29,19 @@ use niki::runtime::checkpoint::SessionCheckpoint;
 
 /// Build and save a real checkpoint, the way a run does.
 fn seed(project: &std::path::Path) -> (String, String) {
+    seed_with(project, "add a health endpoint")
+}
+
+/// The same session with a chosen task description, so a test can seed one a
+/// shell would mangle.
+fn seed_with(project: &std::path::Path, description: &str) -> (String, String) {
     let task_id = uuid::Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").expect("uuid");
     let session_id = "s-resume-test".to_string();
     let cp = SessionCheckpoint {
         checkpoint_id: "chk-test01".to_string(),
         session_id: session_id.clone(),
         task_id,
-        task_description: "add a health endpoint".to_string(),
+        task_description: description.to_string(),
         current_role: AgentRole::Coder,
         current_turn: 1,
         current_step: 3,
@@ -58,6 +64,74 @@ fn seed(project: &std::path::Path) -> (String, String) {
     cp.save(project)
         .expect("a real checkpoint saves with the real serializer");
     (session_id, task_id.to_string())
+}
+
+/// The command `niki resume` tells a user to paste must be that command.
+///
+/// The page exists to recover an interrupted run, and it ends by printing
+/// `niki run "<the task description>"`. A description is free text, and
+/// interpolating one inside double quotes meant a task described as
+/// `add a "tally" function` printed
+/// `niki run "add a "tally" function"` — which a shell reads as three
+/// arguments, so the user re-ran a *different* task believing it was the one
+/// that had been interrupted.
+///
+/// The check is end to end: seed a session whose description contains a quote,
+/// run the real binary, and hand the printed command to a real shell parser.
+/// That is the only version of this assertion that can see what the user gets.
+#[test]
+fn the_command_resume_prints_survives_a_shell() {
+    const AWKWARD: &str = "add a \"tally\" function that sums a slice";
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let (session_id, _task_id) = seed_with(tmp.path(), AWKWARD);
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_niki"))
+        .args(["resume", &session_id, "--project"])
+        .arg(tmp.path())
+        .output()
+        .expect("niki must run");
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Find the `niki run …` the page tells the user to run.
+    let line = all
+        .lines()
+        .find(|l| l.contains("niki run "))
+        .unwrap_or_else(|| panic!("resume must tell the user how to continue: {all}"));
+    let cmd = line
+        .split("niki run ")
+        .nth(1)
+        .expect("the line carries a command")
+        .trim()
+        .trim_matches('`');
+
+    // Hand it to a shell and see what argv comes out. `printf %s` stands in for
+    // the pipeline: it prints one argument per line, so a split is visible.
+    // `run` is prepended so the argv a shell would build is visible in full:
+    // the verb, then exactly one task.
+    let parsed = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("printf '%s\n' run {cmd}"))
+        .output()
+        .expect("sh must run");
+    let args: Vec<String> = String::from_utf8_lossy(&parsed.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
+
+    assert_eq!(
+        args.len(),
+        2,
+        "the printed command must reach the shell as `run` plus exactly one \
+         task, not split into several: {cmd:?} -> {args:?}"
+    );
+    assert_eq!(
+        args[1], AWKWARD,
+        "and the task must arrive exactly as it was written"
+    );
 }
 
 /// **The defect.** The command must not claim it continued anything.

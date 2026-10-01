@@ -2181,3 +2181,45 @@ $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --lib → 1100 passed; 0 failed
 ```
+
+---
+
+## Iteration 9b — B10-02, a recovery page that handed back the wrong command
+
+§9.1 is a **design decision**, not a slice: what a resumed run is *for* is the
+owner's call, and `niki resume` already says honestly that nothing was re-run and
+names what to do instead. Not built, deliberately.
+
+But the command it prints could not be pasted. It interpolated the task
+description inside double quotes, so a task described as `add a "tally" function`
+printed:
+
+```
+niki run "add a "tally" function that sums a slice"
+```
+
+which a shell reads as **eight arguments** — and the user, on the page that
+exists to recover an interrupted run, re-ran a *different* task.
+
+`util::shell_quote` now serves both sites that interpolate a real value (`resume`
+and the Run page's command line). The canary is end to end: seed a session with
+an awkward description, run the **real binary**, and hand its printed command to
+a **real shell**. The sabotage output is the user's failure exactly:
+
+```
+["run", "add", "a", "tally", "function", "that", "sums", "a", "slice"]
+```
+
+**One test was wrong first, in the direction that matters.** It expected
+`add a --verbose flag` to be left unquoted. A space is *not* safe to leave bare —
+that would paste as three arguments, the same defect. The allow-list excludes it.
+
+`shell_quote` leaves genuinely shell-safe text alone (`src/lib.rs`, `lib.rs:42`)
+because a command a reader can read is one they trust.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  433 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --test resume_tells_the_truth → 4 passed
+```

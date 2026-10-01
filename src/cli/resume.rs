@@ -90,14 +90,14 @@ pub async fn handle(args: &ResumeArgs) -> Result<()> {
             "                report.md, changes.patch and artifacts/ are there if the run got that far."
         );
     }
-    println!(
-        "  To continue:  re-run the task — `niki run \"{}\"`",
-        session.task_description
-    );
-    println!(
-        "                or, from the TUI, `niki chat` then `/run {}`.",
-        session.task_description
-    );
+    // Quoted, because a task description is free text and this is a command the
+    // user is invited to paste. A description containing `"` used to print
+    // `niki run "add a "tally" function"`, and the shell swallowed the quotes —
+    // handing back a command for a *different* task on the page that exists to
+    // recover an interrupted one.
+    let quoted = crate::util::shell_quote(&session.task_description);
+    println!("  To continue:  re-run the task — `niki run {quoted}`");
+    println!("                or, from the TUI, `niki chat` then `/run {quoted}`.");
     println!("  To inspect:   `niki report {}`", checkpoint.task_id);
 
     Ok(())
