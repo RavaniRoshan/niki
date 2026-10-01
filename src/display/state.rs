@@ -1114,8 +1114,6 @@ pub struct AppState {
     pub output_tokens: usize,
     /// Total session cache-read tokens.
     pub cache_read_tokens: usize,
-    /// Total session cache-write tokens.
-    pub cache_write_tokens: usize,
     /// Push-to-talk voice input state (Ctrl+Shift+V).
     pub voice: crate::display::voice::VoiceState,
     // --- Tool execution cards (Claude Code / Kimi Code parity) ---
@@ -1379,7 +1377,6 @@ impl AppState {
             input_tokens: 0,
             output_tokens: 0,
             cache_read_tokens: 0,
-            cache_write_tokens: 0,
             voice: crate::display::voice::VoiceState::new(),
             tool_cards: Vec::new(),
             tool_detail_index: None,
@@ -1767,6 +1764,7 @@ impl AppState {
             DisplayEvent::ChatFinished {
                 finish_reason,
                 usage,
+                cost_usd,
             } => {
                 self.chat_pending = false;
                 // Count what the provider says this turn cost, then say
@@ -1784,6 +1782,20 @@ impl AppState {
                 // defect B2-01 was built to remove. The user is told, and the
                 // three commands that already exist to help are named.
                 if let Some(u) = usage {
+                    // `/cost` reads these fields and `self.cost`, and **nothing
+                    // ever assigned them on the chat path** — the pipeline
+                    // assigns `self.cost` from the run record, so `/cost` after a
+                    // run showed a real number while `/cost` in a conversation
+                    // showed `$0.0000` and `0` tokens after real, paid API
+                    // calls. A command named "Show token usage & cost breakdown"
+                    // that reports zero usage is worse than no command.
+                    self.input_tokens = self.input_tokens.saturating_add(u.input_tokens as usize);
+                    self.output_tokens =
+                        self.output_tokens.saturating_add(u.output_tokens as usize);
+                    self.cache_read_tokens = self
+                        .cache_read_tokens
+                        .saturating_add(u.cached_input_tokens as usize);
+                    self.cost += cost_usd;
                     self.token_count = self
                         .token_count
                         .saturating_add(u.input_tokens.saturating_add(u.output_tokens) as usize);
@@ -2603,6 +2615,7 @@ mod tests {
         assert_eq!(state.token_count, 0);
 
         state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            cost_usd: 0.0,
             finish_reason: Some("stop".into()),
             usage: Some(crate::llm::provider::TokenUsage {
                 input_tokens: 100,
@@ -2621,6 +2634,64 @@ mod tests {
              means nothing: {}",
             state.context_usage
         );
+    }
+
+    /// `/cost` reports what a conversation actually cost.
+    ///
+    /// `/cost` reads `self.cost`, `self.input_tokens`, `self.output_tokens` and
+    /// `self.cache_read_tokens` — and **nothing ever assigned any of them on the
+    /// chat path**. The pipeline assigns `self.cost` from the run record, so
+    /// `/cost` after a run showed a real number while `/cost` in a conversation
+    /// showed `$0.0000` and `0` tokens after real, paid API calls.
+    ///
+    /// A command named *"Show token usage & cost breakdown"* that reports zero
+    /// usage is worse than no command: the user checks their bill, believes the
+    /// product, and is wrong.
+    #[test]
+    fn cost_reports_what_a_conversation_actually_cost() {
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("t".into(), config, ".".into());
+
+        state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            finish_reason: None,
+            usage: Some(crate::llm::provider::TokenUsage {
+                input_tokens: 1_000,
+                output_tokens: 500,
+                cached_input_tokens: 200,
+                reasoning_tokens: 0,
+            }),
+            cost_usd: 0.0123,
+        });
+
+        assert_eq!(state.input_tokens, 1_000, "input tokens must be counted");
+        assert_eq!(state.output_tokens, 500, "output tokens must be counted");
+        assert_eq!(
+            state.cache_read_tokens, 200,
+            "a cache hit is still a token the provider reported"
+        );
+        assert!(
+            state.cost > 0.0,
+            "and the turn must be priced: /cost said $0.0000 after a paid call, \
+             which is the whole defect"
+        );
+
+        // Two turns accumulate rather than replace: `/cost` says *Session*
+        // Economics.
+        state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            finish_reason: None,
+            usage: Some(crate::llm::provider::TokenUsage {
+                input_tokens: 1_000,
+                output_tokens: 500,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
+            }),
+            cost_usd: 0.0123,
+        });
+        assert_eq!(
+            state.input_tokens, 2_000,
+            "a second turn is added, not counted twice"
+        );
+        assert!(state.cost > 0.0123, "and the spend grows: {}", state.cost);
     }
 
     /// And it says something **before** the window runs out.
@@ -2658,6 +2729,7 @@ mod tests {
         // turn from the first one, which is the noise the threshold exists to
         // prevent, and nothing was checking for it.
         state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            cost_usd: 0.0,
             finish_reason: None,
             usage: Some(crate::llm::provider::TokenUsage {
                 input_tokens: 10,
@@ -2674,6 +2746,7 @@ mod tests {
         );
 
         state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            cost_usd: 0.0,
             finish_reason: None,
             usage: Some(usage),
         });
@@ -2694,6 +2767,7 @@ mod tests {
         // More turns must not repeat it.
         for _ in 0..3 {
             state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+                cost_usd: 0.0,
                 finish_reason: None,
                 usage: Some(usage),
             });
@@ -2721,6 +2795,7 @@ mod tests {
             });
         }
         state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            cost_usd: 0.0,
             finish_reason: None,
             usage: Some(crate::llm::provider::TokenUsage {
                 input_tokens: 500,

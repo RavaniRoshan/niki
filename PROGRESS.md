@@ -1801,3 +1801,37 @@ $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --lib → 1086 passed; 0 failed
 ```
+
+---
+
+## Iteration 8d — B9-04, `/cost` reported nothing
+
+B9-03 fixed the **context** gauge. `/cost` reads **different fields**, and
+nothing anywhere assigned any of them on the chat path — the pipeline assigns
+`self.cost` from the run record, so `/cost` after a **run** showed a real number
+while `/cost` in a **conversation** showed `$0.0000` and `0` tokens for ever,
+after real, paid API calls.
+
+Now the chat prices each turn where the provider name and model are both in
+scope, `ChatFinished` carries `cost_usd`, and the state accumulates all four
+fields across turns.
+
+**`cache_write_tokens` was removed rather than filled in.** Declared, zeroed, and
+never written — and `TokenUsage` has no cache-write concept, so it could never
+be populated. `/cost` printed it as a fifth zero.
+
+**Can-fail proven** for the accumulation. **And the gap is recorded rather than
+claimed**: pricing with `|_u| 0.0` instead of `compute_cost(provider, model, u)`
+leaves both tests **green**, because both drive `apply_display_event` with an
+explicit `cost_usd` and cannot see what `stream_reply` puts in it. That is the
+same gap B9-03 closed by extracting `consume_reply`, one level up, and it is
+recorded in `ROADMAP.md` as the next thing to fix rather than written around.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  421 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --lib → 1087 passed; 0 failed
+$ cargo test --test chat_conversation → 15 passed
+```

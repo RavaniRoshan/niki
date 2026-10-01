@@ -175,6 +175,10 @@ async fn stream_reply(
 ) -> Result<String, String> {
     let (provider, model) =
         build_provider(config).ok_or_else(|| NO_PROVIDER_MESSAGE.to_string())?;
+    // Kept for pricing after the request has taken the model name by value.
+    // Cloning a `String` once per turn is cheaper than being unable to say what
+    // the turn cost.
+    let priced_model = model.clone();
 
     let req = crate::llm::provider::CompletionRequest {
         model,
@@ -195,9 +199,16 @@ async fn stream_reply(
     };
 
     let (full, finish_reason, usage) = consume_reply(stream, tx, &submit.cancel).await?;
+    // Priced here because this is the only frame that has both the provider
+    // name and the model, and `compute_cost` needs the rate card.
+    let cost_usd = usage
+        .as_ref()
+        .map(|u| crate::cost::compute_cost(provider.provider_name(), &priced_model, u))
+        .unwrap_or(0.0);
     let _ = tx.send(DisplayEvent::ChatFinished {
         finish_reason,
         usage,
+        cost_usd,
     });
     Ok(full)
 }
@@ -727,11 +738,13 @@ pub async fn run_task_to_sink(
         // The pipeline billed this turn itself; re-counting it here would
         // double it. `None` means "not counted here", not "costed nothing".
         usage: None,
+        cost_usd: 0.0,
     });
     let _ = tx.send(DisplayEvent::ChatDelta { text: summary });
     let _ = tx.send(DisplayEvent::ChatFinished {
         finish_reason: None,
         usage: None,
+        cost_usd: 0.0,
     });
     Ok(())
 }

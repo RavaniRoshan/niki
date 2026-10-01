@@ -872,6 +872,41 @@ tests' fault:**
   a 100% one, and could not tell "never warn" from "warn at 100%" either. It now
   uses 95%, and asserts that a 15-token conversation says **nothing**.
 
+### B9-04 — `/cost` said `$0.0000` after every paid chat
+
+B9-03 fixed the **context** gauge. `/cost` reads **different fields** —
+`self.cost`, `self.input_tokens`, `self.output_tokens`, `self.cache_read_tokens`
+— and **nothing anywhere assigned any of them on the chat path.** The pipeline
+assigns `self.cost` from the run record (`state.rs:1714`), so:
+
+| | before |
+|---|---|
+| `/cost` after a **run** | a real number |
+| `/cost` in a **conversation** | `$0.0000`, `0` input, `0` output, for ever |
+
+A command named *"Show token usage & cost breakdown"* that reports zero usage
+is worse than no command: the user checks their bill, believes the product, and
+is wrong.
+
+Fixed: the chat prices each turn where the provider name and model are both in
+scope (`compute_cost` needs the rate card), `ChatFinished` carries `cost_usd`,
+and the state accumulates all four fields across turns.
+
+**`cache_write_tokens` was removed rather than filled in.** It was declared,
+initialised to 0, and never written by anything — and `TokenUsage` has no
+cache-write concept (`cached_input_tokens` is the only cache field), so it could
+never be populated. `/cost` printed it as a fifth zero. A field that reports a
+number nothing can produce is not a field.
+
+**Can-fail proven** for the accumulation (deleting it gives `left: 0, right:
+1000`), and **the gap is recorded rather than claimed**: pricing the turn with
+`|_u| 0.0` instead of `compute_cost(provider, model, u)` leaves both tests green,
+because both drive `apply_display_event` with an explicit `cost_usd` and cannot
+see what `stream_reply` puts in it. The pricing *call* is held by inspection and
+by `cost.rs`'s own tests; the *wiring* is not held by a test. That is the same
+gap B9-03 closed by extracting `consume_reply`, one level up, and it is the next
+thing to fix rather than something to write around.
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in

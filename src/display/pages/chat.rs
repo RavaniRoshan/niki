@@ -725,12 +725,11 @@ impl Page for ChatPage {
                         state.chat_log.push((
                             "system".to_string(),
                             format!(
-                                "Session Economics:\n  • Total Spend:       ${:.4} USD\n  • Input Tokens:      {}\n  • Output Tokens:     {}\n  • Cache Read Tokens: {}\n  • Cache Write Tokens: {}\n  • Model:             {}\n  • Context Limit:     {} tokens",
+                                "Session Economics:\n  • Total Spend:       ${:.4} USD\n  • Input Tokens:      {}\n  • Output Tokens:     {}\n  • Cache Read Tokens: {}\n  • Model:             {}\n  • Context Limit:     {} tokens",
                                 state.cost,
                                 state.input_tokens,
                                 state.output_tokens,
                                 state.cache_read_tokens,
-                                state.cache_write_tokens,
                                 state.model,
                                 state.context_limit
                             ),
@@ -2772,6 +2771,7 @@ mod tests {
 
         let after_pending = chat_content_hash(&state);
         state.apply_display_event(DisplayEvent::ChatFinished {
+            cost_usd: 0.0,
             usage: None,
             finish_reason: Some("max_tokens".to_string()),
         });
