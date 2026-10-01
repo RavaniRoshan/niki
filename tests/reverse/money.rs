@@ -179,18 +179,39 @@ fn the_coder_loop_bills_before_every_bail_out() {
         .unwrap_or(body.len());
     let body = &body[..end];
 
-    let bails = body.matches("return None;").count();
-    let bills = body.matches("record_loop_cost(").count();
-    assert_eq!(
-        bails, 2,
-        "expected the two failure returns (no artifact, invalid artifact); a \\
-         third would be an unbilled exit this test has not accounted for"
-    );
+    // The property is *every bail-out is billed*, so that is what is asserted.
+    //
+    // The first version hard-coded `bails == 2`. That is a snapshot of the code,
+    // not a rule about it, and it went red for the wrong reason when a third
+    // bail-out appeared — the loop-erroring one, which was genuinely unbilled.
+    // Fixing the code and then bumping the count to `3` would have left the
+    // original defect invisible forever, so the count is gone and what remains
+    // is a statement that cannot be satisfied by adding an unbilled exit.
+    let bails: Vec<usize> = body
+        .lines()
+        .enumerate()
+        .filter(|(_, l)| l.contains("return None;"))
+        .map(|(i, _)| i)
+        .collect();
     assert!(
-        bills >= bails,
-        "every `return None` in this function must be preceded by a bill. Found \
-         {bails} bail-outs and {bills} calls to record_loop_cost — a loop that \
-         explored for a dozen steps and produced nothing is the most expensive \\
-         case, not the cheapest."
+        !bails.is_empty(),
+        "the function has no bail-outs at all, so this test holds nothing"
     );
+    for line_no in &bails {
+        // A bill must appear *earlier* in the function than the exit it bills.
+        // Counting is not enough: three bills stacked at the top of the
+        // function satisfy `bills >= bails` while the last exit is unbilled.
+        let billed_before = body
+            .lines()
+            .take(*line_no)
+            .any(|l| l.contains("record_loop_cost(") || l.contains("record_loop_usage("));
+        assert!(
+            billed_before,
+            "the `return None` at body line {} has no bill before it. Every exit \
+             from this function must record what it spent — a loop that explored \
+             for a dozen steps and produced nothing is the most expensive case, \
+             not the cheapest.",
+            line_no + 1
+        );
+    }
 }

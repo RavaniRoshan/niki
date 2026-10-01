@@ -623,15 +623,35 @@ The third is a tool loop that explored for a dozen steps, spent real money, and
 then hit a transport error — the exact case the test's own comment calls "the
 most expensive case, not the cheapest".
 
-**Why it is not fixed here.** `record_loop_cost` takes `&LoopOutput`, and an
-errored loop has none: the accumulated `usage` dies inside `run_tool_loop_with`
-at `?`. Billing it properly means the loop surfaces its usage on the error path,
-which changes a public return type and every call site. Writing a
-zero-usage `LoopOutput` at the call site would make the test pass by recording
-a spend of zero, which is worse than the current honest omission.
+**FIXED in batch 8 (B8-04).** `LoopSpend` (`runtime/tools.rs`) is a running
+tally the caller keeps **whether the loop succeeds or fails**, mirrored onto
+every completed step rather than filled in on the way out — because everything
+after that point can exit through `?`. `run_tool_loop_spending` is a **new**
+entry point; `run_tool_loop_with` keeps its signature, throws the value away,
+and is correct to. Eleven call sites, none of which need this.
 
-**The test is left red on purpose.** It documents a real, measured defect, and
-weakening it to green would be the one thing this programme does not do.
+`record_loop_usage` is the usage-shaped sibling of `record_loop_cost`, because
+the tempting version — building an empty `LoopOutput` — records a spend of zero
+for a run that spent money, and a metric that says zero is believed where a
+missing one is noticed.
+
+**The test that was checking this could not see either bug.** It is source-level,
+and it was **green twice** against code that did not bill at all, and green
+again against code that billed a hard-coded `TokenUsage::default()`. The call is
+there; the call does nothing. So it now asserts *every `return None` has a
+billing call textually before it* — the count it used to hard-code (`== 2`) was
+a snapshot, and bumping it to `3` would have made the original defect invisible
+for ever — and a **behavioural** test, `a_loop_that_failed_still_reports_what_it
+_spent`, drives a provider that answers once and then fails and asserts the
+tally carries the 4 242 input tokens it was actually charged for. That one bites:
+mirroring only on the success path gives `left: 0, right: 4242`.
+
+**What is still not covered, measured not assumed:** replacing the pipeline's
+`&loop_spend.usage` with a hard-coded default leaves both the source-level check
+and the behavioural test green. The mechanism is held behaviourally; the one-line
+wiring is held only by the source check. Driving `run_coder_tool_loop` end to end
+would hold it properly — it is private, needs `AgenticDisplay` and a live
+registry, and is the next slice rather than this one.
 
 #### The gate gap itself
 

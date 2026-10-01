@@ -1653,7 +1653,11 @@ async fn run_coder_tool_loop(
     // user most needs to see progress from, was the one that reported none.
     display.agent_start(role);
 
-    let out = crate::runtime::run_tool_loop_with(
+    // The spending entry point, so the Err arm below can bill what the loop
+    // already spent. `run_tool_loop_with` throws the tally away, and this arm
+    // is precisely the case where it is needed.
+    let mut loop_spend = crate::runtime::LoopSpend::default();
+    let out = crate::runtime::run_tool_loop_spending(
         crate::runtime::LoopOptions {
             submit_artifact: Some(crate::runtime::submit_artifact_spec(schema_json)),
             validate_artifact: Some(validator),
@@ -1681,6 +1685,7 @@ async fn run_coder_tool_loop(
         },
         display.tui_tx(),
         None,
+        &mut loop_spend,
     )
     .await;
 
@@ -1701,6 +1706,25 @@ async fn run_coder_tool_loop(
             let msg = tool_loop_failure_notice(&e);
             tracing::warn!(target: "niki::pipeline", role = "coder", error = %e, "{}", msg);
             eprintln!("niki: {msg}");
+            // Bill what it spent before it failed.
+            //
+            // This arm used to return with no metric at all, which made a loop
+            // that explored for a dozen steps, spent real money and then hit a
+            // transport error look free. A run that reports `0.0000` for money
+            // it spent is worse than one that reports nothing, because it is
+            // believed — so this is only correct because the loop now hands
+            // back a tally that is current at the instant the error fired.
+            if loop_spend.steps > 0 {
+                record_loop_usage(
+                    role,
+                    llm,
+                    provider,
+                    model,
+                    &loop_spend.usage,
+                    start.elapsed().as_millis() as u64,
+                    metrics,
+                );
+            }
             return None;
         }
     };
@@ -1801,18 +1825,36 @@ pub fn record_loop_cost(
     latency_ms: u64,
     metrics: &mut Vec<StageMetric>,
 ) {
+    record_loop_usage(role, llm, provider, model, &out.usage, latency_ms, metrics);
+}
+
+/// [`record_loop_cost`] for a loop that **failed** and therefore has usage but
+/// no `LoopOutput`.
+///
+/// Separate rather than a defaulted `LoopOutput` because the tempting version —
+/// building an empty one — records a spend of zero for a run that spent money,
+/// and a metric that says zero is believed where a missing one is noticed.
+pub fn record_loop_usage(
+    role: AgentRole,
+    llm: &dyn crate::llm::provider::LlmProvider,
+    provider: &str,
+    model: &str,
+    usage: &crate::llm::provider::TokenUsage,
+    latency_ms: u64,
+    metrics: &mut Vec<StageMetric>,
+) {
     let served = llm.served_by();
     let served_provider: &str = served.as_deref().unwrap_or(provider);
     metrics.push(StageMetric {
         role,
         provider: served_provider.to_string(),
         model: model.to_string(),
-        input_tokens: out.usage.input_tokens,
-        output_tokens: out.usage.output_tokens,
-        cached_input_tokens: out.usage.cached_input_tokens,
-        reasoning_tokens: out.usage.reasoning_tokens,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cached_input_tokens: usage.cached_input_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
         latency_ms,
-        cost_usd: compute_cost(served_provider, model, &out.usage),
+        cost_usd: compute_cost(served_provider, model, usage),
         retry_count: 0,
         ttft_ms: 0,
     });
