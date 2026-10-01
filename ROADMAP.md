@@ -899,13 +899,25 @@ never be populated. `/cost` printed it as a fifth zero. A field that reports a
 number nothing can produce is not a field.
 
 **Can-fail proven** for the accumulation (deleting it gives `left: 0, right:
-1000`), and **the gap is recorded rather than claimed**: pricing the turn with
-`|_u| 0.0` instead of `compute_cost(provider, model, u)` leaves both tests green,
+1000`).
+
+**And the gap this slice recorded is now closed (B9-05).** Pricing the turn with
+`|_u| 0.0` instead of `compute_cost(provider, model, u)` left *both* tests green,
 because both drive `apply_display_event` with an explicit `cost_usd` and cannot
-see what `stream_reply` puts in it. The pricing *call* is held by inspection and
-by `cost.rs`'s own tests; the *wiring* is not held by a test. That is the same
-gap B9-03 closed by extracting `consume_reply`, one level up, and it is the next
-thing to fix rather than something to write around.
+see what `stream_reply` puts in it. The pricing is now `price_chat_turn`, a
+function a test can reach, and
+`a_chat_turn_is_priced_from_the_model_the_user_is_using` holds it — including
+that the **model name is the rate card**, since pricing from a constant returns
+the same number for two different models and the test says so.
+
+Both sabotages now bite: `0.0` instead of the computation, and
+`"claude-sonnet-4"` hard-coded in place of the model.
+
+The pattern across these two slices is worth stating once: a test that drives
+the *consumer* cannot see what the *producer* put in the event. B9-03 hit it
+with the usage, B9-04 with the cost. The fix is the same both times — extract
+the producer's step until a test can reach it — and it only happened twice
+because the first one was recorded rather than worked around.
 
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 

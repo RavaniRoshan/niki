@@ -1835,3 +1835,38 @@ $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --lib → 1087 passed; 0 failed
 $ cargo test --test chat_conversation → 15 passed
 ```
+
+---
+
+## Iteration 8e — B9-05, closing the gap the last slice recorded
+
+B9-04 ended by saying its pricing wiring was *"held by inspection"* and *"the
+next thing to fix rather than something to write around"*. This slice wrote
+around it for one turn and then fixed it.
+
+`price_chat_turn(provider, model, usage)` is now a function, and
+`a_chat_turn_is_priced_from_the_model_the_user_is_using` holds it — including
+the part that is easy to get subtly wrong: **the model name is the rate card.**
+Pricing from the provider alone, or from a constant, returns the same number for
+two different models, and the test compares two.
+
+Both sabotages bite:
+
+| Sabotage | Result |
+|---|---|
+| `0.0` instead of the computation | **RED** |
+| `"claude-sonnet-4"` hard-coded in place of the model | **RED** — `the model name is the rate card: 3 vs 3` |
+
+**The pattern across both slices, stated once.** A test that drives the
+*consumer* cannot see what the *producer* put in the event. B9-03 hit it with the
+usage, B9-04 with the cost. The fix is the same both times — extract the
+producer's step until a test can reach it. It happened twice because the first
+time was recorded instead of worked around, which is the only reason it was
+caught the second.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  422 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+```

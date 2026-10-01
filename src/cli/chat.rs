@@ -199,18 +199,26 @@ async fn stream_reply(
     };
 
     let (full, finish_reason, usage) = consume_reply(stream, tx, &submit.cancel).await?;
-    // Priced here because this is the only frame that has both the provider
-    // name and the model, and `compute_cost` needs the rate card.
-    let cost_usd = usage
-        .as_ref()
-        .map(|u| crate::cost::compute_cost(provider.provider_name(), &priced_model, u))
-        .unwrap_or(0.0);
+    let cost_usd = price_chat_turn(provider.provider_name(), &priced_model, usage.as_ref());
     let _ = tx.send(DisplayEvent::ChatFinished {
         finish_reason,
         usage,
         cost_usd,
     });
     Ok(full)
+}
+
+/// What one chat turn cost, in dollars.
+///
+/// Extracted so a test can reach it. `stream_reply` prices the turn inline, and a
+/// test that drives `AppState::apply_display_event` with an explicit `cost_usd`
+/// is **green whether or not the chat ever computes one** — measured in batch 9,
+/// where replacing this expression with `|_| 0.0` left every test passing while
+/// `/cost` went back to reporting $0.0000 after paid API calls.
+fn price_chat_turn(provider: &str, model: &str, usage: Option<&TokenUsage>) -> f64 {
+    usage
+        .map(|u| crate::cost::compute_cost(provider, model, u))
+        .unwrap_or(0.0)
 }
 
 /// Drain one reply stream into text, a finish reason, and its usage.
@@ -817,6 +825,45 @@ mod reply_stream_tests {
             "a provider that sent no Usage chunk reported none, which is not the \
              same as reporting zero: {usage:?}"
         );
+    }
+
+    /// A chat turn is priced, and the **model name is the rate card**.
+    ///
+    /// This is the layer the last slice recorded as uncovered. The
+    /// state-level test drives `apply_display_event` with an explicit
+    /// `cost_usd`, so it was green whether or not the chat computed one —
+    /// replacing the pricing with `|_| 0.0` left every test passing while
+    /// `/cost` went back to reporting `$0.0000` after paid API calls.
+    ///
+    /// Two things have to be right at once, and each breaks differently:
+    /// pricing with the *provider's own* name, and pricing with the *model the
+    /// user is actually talking to* rather than a hard-coded one.
+    #[test]
+    fn a_chat_turn_is_priced_from_the_model_the_user_is_using() {
+        let usage = TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cached_input_tokens: 0,
+            reasoning_tokens: 0,
+        };
+        // A million input tokens is not free at any known rate card.
+        let priced = price_chat_turn("anthropic", "claude-sonnet-4", Some(&usage));
+        assert!(
+            priced > 0.0,
+            "a chat turn must be priced; /cost said $0.0000 after a paid call"
+        );
+
+        // A different model, same usage: a different price. Pricing from the
+        // provider name alone, or from a constant, would return the same number
+        // and this would pass.
+        let other = price_chat_turn("anthropic", "claude-haiku-4", Some(&usage));
+        assert!(
+            (other - priced).abs() > f64::EPSILON,
+            "the model name is the rate card: {priced} vs {other}"
+        );
+
+        // And nothing reported is nothing charged.
+        assert_eq!(price_chat_turn("anthropic", "claude-sonnet-4", None), 0.0);
     }
 
     /// A cancelled reply says it was cancelled, and stops.
