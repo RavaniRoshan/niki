@@ -373,7 +373,22 @@ demonstrating: every defect in §1–§7 was found by *using* the product, and a
 new feature built on a surface that still has dead controls and lying help
 pages would inherit all of it. Ordering is recorded here so it survives.
 
-### T1 · Claude-style "living" working status — `src/display/`
+### T1 · Claude-style "living" working status — `src/display/` — **BUILT in batch 7
+(B7-19): `components/working_status.rs`, 11 tests.** Glyph bounce
+`['·','✢','✳','✶','✻','✽']` on a 120 ms frame, a rotating gerund, a live clock
+and a token count, resolving to `⎿ Thought for Xs · N tokens`. **Purely a
+function of `(elapsed, turn, tokens)` — it emits no event, so `--output-format
+json` is untouched by construction rather than by discipline.** Three decisions
+that differ from the original shape and why: the bounce is **ten** frames with
+each endpoint visited once (the twelve-frame version repeated the endpoints,
+which at 120 ms reads as a stutter on every turn); the gerund is a
+**deterministic rotation seeded by turn number**, not a random draw, because a
+random word makes every recorded visual frame unreproducible and an
+unreproducible frame is not a baseline; and **no token accounting prints no
+count**, because `↓ 0 tokens` claims an accounting that does not exist.
+**Not yet rendered** — wiring it into the live TUI is the next slice, and it
+is a baseline change for `tests/visual` and the VHS job, which must be blessed
+on the runner rather than locally.
 
 A pulsing glyph from `['·','✢','✳','✶','✻','✽']` on a bounce, a rotating
 gerund, a live elapsed counter and a token count, resolving to `⎿ Thought for

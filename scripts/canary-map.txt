@@ -426,3 +426,13 @@ bare-artifact-still-recovers | a_bare_artifact_still_recovers | the widened scan
 # B7-18 · §9.5: a stale path must not make the whole staging fail
 stale-path-dropped-before-staging | a_path_that_no_longer_exists_is_dropped_before_staging | one removed path failing `git add -N` and silently dropping every new file from the diff
 both-sandboxes-filter-absent-paths | both_sandboxes_filter_absent_paths_before_staging | one backend's existence check removed while the other's test stayed green
+# B7-19 · §8 T1: the working-status line
+bounce-visits-every-glyph-and-returns | a_bounce_visits_every_glyph_and_returns | a rotation where a bounce was specified, or a period that is not a full cycle
+bounce-has-no-duplicated-frame | a_bounce_has_no_duplicated_frame | the top of the bounce held for two frames, which stutters at 120ms
+glyph-is-not-an-agent-marker | the_glyph_does_not_reuse_an_agent_marker | a working glyph a user will read as an agent role
+glyph-is-time-not-call-count | the_glyph_is_a_function_of_time_not_of_call_count | a tick-driven animation that runs five times too fast at 60fps
+words-never-repeat-in-a-row | consecutive_turns_never_repeat_a_word | one word for every turn of a long run
+word-is-reproducible | the_word_is_reproducible | a random draw, which makes every visual baseline unreproducible
+elapsed-is-compact-and-honest | elapsed_is_compact_and_never_lies | an elapsed clock that rounds away or misreports
+no-token-accounting-prints-nothing | no_token_accounting_prints_no_count | `↓ 0 tokens` claiming an accounting that does not exist
+resolved-line-is-not-a-spinner | the_resolved_line_is_not_a_spinner | a spinner still spinning after the answer is in
