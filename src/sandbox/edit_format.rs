@@ -489,3 +489,180 @@ fn main() { println!("hi"); }
         assert_eq!(blocks[0].file.as_deref(), Some("src/main.rs"));
     }
 }
+
+/// Whether an edit's `replace` text is **already present** in `content`.
+///
+/// This is the "already done" test, and it exists because of a measured
+/// failure. A live run against `stealth/space-bunny-alpha` had the Coder use
+/// the `edit` tool — applying the change to the worktree — and then submit a
+/// `CodeDiff` describing the same change. The pipeline applies the submitted
+/// artifact on top of what the tools already did, so every block's `search`
+/// text was gone, every block went unmatched, and the run reported
+/// *"the patch did not apply — asking the Coder to rebuild it"*.
+///
+/// That message describes a different failure. The patch was not wrong; it was
+/// **already applied**, and a Coder that used the tools *and* submitted an
+/// artifact — which the protocol invites — produced an unapplicable artifact by
+/// construction.
+pub fn is_already_applied(content: &str, search: &str, replace: &str) -> bool {
+    // How much `replace` has to be for its presence to mean anything.
+    //
+    // The first version claimed "already applied" for a one-token replacement,
+    // and its own test caught it: after a real edit, the file legitimately
+    // contains `a + b` for reasons that have nothing to do with a later block
+    // asking to replace *that*. A short replace is exactly where a coincidental
+    // match is likely, and the consequence of being wrong is a silently
+    // dropped edit.
+    //
+    // So a small replacement is never claimed. Being wrong in that direction is
+    // the *safe* direction: it falls back to today's behaviour — reported as
+    // unmatched — rather than accepting something that was not done.
+    const MIN_SIGNIFICANT_CHARS: usize = 12;
+    let significant = replace.chars().filter(|c| !c.is_whitespace()).count();
+    if significant < MIN_SIGNIFICANT_CHARS && !replace.contains('\n') {
+        return false;
+    }
+    if !content.contains(replace) {
+        return false;
+    }
+    // If the search is *also* still present, the edit is ambiguous rather than
+    // done. Only claim "already applied" when the thing we were told to find is
+    // genuinely not there.
+    !content.contains(search)
+}
+
+/// Apply one search/replace pair to content, treating an already-applied edit
+/// as a success.
+///
+/// `None` still means "this block did not match and was not already done" —
+/// the same contract as `apply_single_edit_block`. The difference is only for
+/// the case the pipeline must not report as a failure.
+pub fn apply_edit_block_or_already_done(
+    content: &str,
+    search: &str,
+    replace: &str,
+) -> Result<Option<String>> {
+    if let Some(next) = apply_single_edit_block(content, search, replace)? {
+        return Ok(Some(next));
+    }
+    if is_already_applied(content, search, replace) {
+        return Ok(Some(content.to_string()));
+    }
+    Ok(None)
+}
+
+#[cfg(test)]
+mod already_applied_tests {
+    //! The "already done" test, and what it must not accept.
+    //!
+    //! Found by a live run: a Coder that used the `edit` tool and then
+    //! submitted a `CodeDiff` describing the same change. The pipeline applies
+    //! the artifact on top of what the tools already did, so the `search` text
+    //! was gone, every block went unmatched, and the run said *"the patch did
+    //! not apply"* — a failure that is not one.
+
+    use super::{apply_edit_block_or_already_done, is_already_applied};
+
+    const BEFORE: &str = "fn add(a: i32, b: i32) -> i32 {\n    a - b\n}\n";
+    const AFTER: &str = "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n";
+
+    /// The measured case: the change is in the file, the text it was told to
+    /// find is not. The `replace` is a whole signature rather than a token,
+    /// which is what the size rule requires.
+    #[test]
+    fn a_change_that_is_already_in_the_file_is_already_applied() {
+        let search = "fn add(a: i32, b: i32) -> i32 {\n    a - b\n}";
+        let replace = "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}";
+        assert!(
+            is_already_applied(AFTER, search, replace),
+            "the change is in the file and the thing it was told to find is not"
+        );
+        assert_eq!(
+            apply_edit_block_or_already_done(AFTER, search, replace).unwrap(),
+            Some(AFTER.to_string()),
+            "and it must succeed without changing the file a second time"
+        );
+    }
+
+    /// The ordinary case is untouched: a normal edit still applies.
+    #[test]
+    fn an_ordinary_edit_still_applies() {
+        let search = "fn add(a: i32, b: i32) -> i32 {\n    a - b\n}";
+        let replace = "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}";
+        assert_eq!(
+            apply_edit_block_or_already_done(BEFORE, search, replace).unwrap(),
+            Some(AFTER.to_string())
+        );
+    }
+
+    /// A search that is nowhere and a replace that is present: claimed as
+    /// already applied.
+    ///
+    /// That is the *intended* reading and the measured case, and it is worth
+    /// being explicit that the helper cannot do better. It cannot know whether
+    /// some earlier block wrote that text or whether it was always there; it
+    /// knows only that the thing it was told to find is gone and the thing it
+    /// was told to write is present, which is what "this was already done"
+    /// looks like. The size rule below keeps that from firing on a coincidence.
+    #[test]
+    fn a_vanished_search_with_a_present_replace_counts_as_done() {
+        let search = "a whole function that is not in this file at all";
+        let replace = "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}";
+        assert!(is_already_applied(AFTER, search, replace));
+    }
+
+    /// The ambiguous case: the `search` is *still in the file*, so nothing can
+    /// be said about whether the edit was done.
+    ///
+    /// Claiming "already applied" here would accept a block on the wrong
+    /// evidence, and the all-or-nothing guarantee the sandboxes rely on is
+    /// exactly what stops a stage writing half its changes.
+    #[test]
+    fn an_edit_whose_search_is_still_present_is_not_already_applied() {
+        let search = "fn add(a: i32, b: i32) -> i32 {\n    a - b\n}";
+        let replace = "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}";
+        let content = format!("{AFTER}\n// kept for reference:\n{search}\n");
+        assert!(
+            content.contains(search),
+            "the premise: the search is still there"
+        );
+        assert!(
+            !is_already_applied(&content, search, replace),
+            "with the search text still present this is ambiguous, not done"
+        );
+        let applied = apply_edit_block_or_already_done(&content, search, replace).unwrap();
+        assert!(
+            applied.is_some_and(|out| out != content),
+            "the ordinary matcher must still handle an ambiguous block"
+        );
+    }
+
+    /// A short replacement is never claimed, however much of it is present.
+    ///
+    /// This is the false positive the first version of the helper had: after a
+    /// real edit the file contains `a + b` for reasons that have nothing to do
+    /// with a later block asking to replace *that*. Claiming "already applied"
+    /// there would silently accept an edit that was never made.
+    #[test]
+    fn a_short_replacement_is_never_claimed_as_applied() {
+        assert!(
+            !is_already_applied(AFTER, "a text that is nowhere", "a + b"),
+            "a three-character replacement is far too likely to coincide"
+        );
+        assert_eq!(
+            apply_edit_block_or_already_done(AFTER, "a text that is nowhere", "a + b").unwrap(),
+            None
+        );
+    }
+
+    /// An empty `replace` is never claimed. A deletion whose search is absent
+    /// is indistinguishable from a typo, and accepting it would silently drop
+    /// a change that was asked for.
+    #[test]
+    fn an_empty_replacement_is_never_already_applied() {
+        assert!(
+            !is_already_applied(AFTER, "gone from here", ""),
+            "an empty replacement must not be treated as a done deletion"
+        );
+    }
+}

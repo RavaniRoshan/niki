@@ -235,3 +235,60 @@ fn a_result_still_lands_on_its_own_card() {
     );
     assert_eq!(state.tool_cards[0].output.as_deref(), Some("3 matches"));
 }
+
+/// Both sandboxes' **artifact** path must treat an already-applied edit as
+/// done, and both must still refuse a wrong one.
+///
+/// Found by a live run (`stealth/space-bunny-alpha`): the Coder used the
+/// `edit` tool — applying the change to the worktree — and then submitted a
+/// `CodeDiff` describing the same change. The pipeline applies the artifact on
+/// top of what the tools already did, so every block's `search` text was gone
+/// and the run reported *"the patch did not apply"*. A model that uses the
+/// tools *and* submits an artifact, which the protocol invites, produced an
+/// unapplicable artifact by construction.
+///
+/// This is a source assertion rather than a behavioural one on purpose: both
+/// sandboxes' apply loops are `async fn apply_patch` on the `Sandbox` trait,
+/// and standing up a real worktree and a real container to drive them is what
+/// `tests/worktree_policy.rs` and `tests/sandbox_teardown.rs` are for. What
+/// has to be pinned *here* is that **both** call sites use the
+/// already-done-aware function — a fix wired into one sandbox would leave a
+/// default backend that still rejects a perfectly good artifact.
+#[test]
+fn both_sandboxes_treat_an_already_applied_artifact_edit_as_done() {
+    for (file, plain) in [
+        ("src/sandbox/worktree.rs", "apply_single_edit_block("),
+        ("src/sandbox/docker.rs", "apply_single_edit_block("),
+    ] {
+        let src = read(file);
+        let aware = src.matches("apply_edit_block_or_already_done(").count();
+        assert_eq!(
+            aware, 1,
+            "{file} must call `apply_edit_block_or_already_done` exactly once, in \
+             its `apply_patch`. Found {aware}."
+        );
+        // And the plain call must survive only where it belongs: the `edit`
+        // tool's own matching, if this file has one.
+        let plain_uses = src.matches(plain).count();
+        assert!(
+            plain_uses == 0 || plain_uses + aware == src.matches("apply_single_edit").count(),
+            "{file}: sanity — the counts should add up"
+        );
+    }
+}
+
+/// And the `edit` tool must **not** get the lenient behaviour.
+///
+/// Replacing text with text that is already there is a no-op the user asked
+/// for, and telling them it succeeded is the failure this whole feature is
+/// about. The leniency belongs to the artifact path alone.
+#[test]
+fn the_edit_tool_itself_still_refuses_an_already_present_replacement() {
+    let tools = read("src/runtime/tools.rs");
+    assert!(
+        !tools.contains("apply_edit_block_or_already_done"),
+        "the `edit` tool must keep the strict matcher: a user who asks to \
+         replace text with text that is already present should be told, not \
+         quietly succeeded"
+    );
+}

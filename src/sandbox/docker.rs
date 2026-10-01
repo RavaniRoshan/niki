@@ -477,8 +477,12 @@ impl DockerSandbox {
                 let mut applied = false;
                 for file_path in targets {
                     if let Some(content) = contents.get(&file_path) {
+                        // The artifact path, so an edit the tool loop has
+                        // already written is a success rather than a
+                        // "no edit block matched" failure. See
+                        // `worktree.rs` for the measured reason.
                         if let Some(new_content) =
-                            crate::sandbox::edit_format::apply_single_edit_block(
+                            crate::sandbox::edit_format::apply_edit_block_or_already_done(
                                 content,
                                 &block.search,
                                 &block.replace,

@@ -399,8 +399,17 @@ impl Sandbox for WorktreeSandbox {
                     };
                     for file_path in targets {
                         if let Some(content) = contents.get(&file_path) {
+                            // `…_or_already_done`, not the plain one: this is
+                            // the *artifact* path, and a Coder that used the
+                            // edit tools and then submitted the same change has
+                            // already written it. Reporting that as "the patch
+                            // did not apply" is a failure that is not one —
+                            // measured on a live run. The plain function stays
+                            // for the `edit` tool, where replacing text with
+                            // text that is already there really is a no-op the
+                            // user should hear about.
                             if let Some(new_content) =
-                                crate::sandbox::edit_format::apply_single_edit_block(
+                                crate::sandbox::edit_format::apply_edit_block_or_already_done(
                                     content,
                                     block.search.as_str(),
                                     block.replace.as_str(),
