@@ -3551,7 +3551,8 @@ pub async fn run_tool_loop(
     display_tx: Option<std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>>,
     budget: Option<&mut crate::orchestrator::budget::RunBudget>,
 ) -> Result<LoopOutput> {
-    run_tool_loop_with(
+    let mut discarded = LoopSpend::default();
+    run_tool_loop_spending(
         LoopOptions::default(),
         provider,
         model,
@@ -3562,8 +3563,31 @@ pub async fn run_tool_loop(
         max_steps,
         display_tx,
         budget,
+        &mut discarded,
     )
     .await
+}
+
+/// What a tool loop spent, readable **even when it failed**.
+///
+/// The loop accumulates usage as it goes, and on the error path that
+/// accumulation died with the stack frame: a Coder that explored for a dozen
+/// steps, spent real money and then hit a transport error returned `Err` and
+/// the caller had nothing to bill. `money::the_coder_loop_bills_before_every_
+/// bail_out` is the test, and it was left red rather than satisfied by
+/// recording a spend of zero — a metric that says "0.0000" for a run that cost
+/// money is worse than no metric, because it is believed.
+///
+/// Additive rather than a new parameter on `run_tool_loop_with`: eleven call
+/// sites, none of which need this. The old entry point keeps its signature and
+/// throws the value away, which is correct for a caller that does not bill.
+#[derive(Debug, Clone, Default)]
+pub struct LoopSpend {
+    pub usage: crate::llm::provider::TokenUsage,
+    /// Steps actually completed. A step that never got a response cost
+    /// nothing, and counting it would bill a request that was never served.
+    pub steps: usize,
+    pub call_log: Vec<(String, bool)>,
 }
 
 /// Extra configuration for the tool loop.
@@ -3645,11 +3669,44 @@ pub async fn run_tool_loop_with(
     model: &str,
     registry: &ToolRegistry,
     ctx: &ToolContext,
+    messages: Vec<LoopMessage>,
+    bus: Option<&EventBus>,
+    max_steps: usize,
+    display_tx: Option<std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>>,
+    budget: Option<&mut crate::orchestrator::budget::RunBudget>,
+) -> Result<LoopOutput> {
+    let mut discarded = LoopSpend::default();
+    run_tool_loop_spending(
+        opts,
+        provider,
+        model,
+        registry,
+        ctx,
+        messages,
+        bus,
+        max_steps,
+        display_tx,
+        budget,
+        &mut discarded,
+    )
+    .await
+}
+
+/// [`run_tool_loop_with`], plus a running tally the caller keeps **whether the
+/// loop succeeds or fails**. See [`LoopSpend`] for why that is not a parameter
+/// on the old entry point.
+pub async fn run_tool_loop_spending(
+    opts: LoopOptions,
+    provider: &dyn LlmProvider,
+    model: &str,
+    registry: &ToolRegistry,
+    ctx: &ToolContext,
     mut messages: Vec<LoopMessage>,
     bus: Option<&EventBus>,
     max_steps: usize,
     display_tx: Option<std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>>,
     mut budget: Option<&mut crate::orchestrator::budget::RunBudget>,
+    spend: &mut LoopSpend,
 ) -> Result<LoopOutput> {
     let system_prompt = messages
         .iter()
@@ -3732,6 +3789,16 @@ pub async fn run_tool_loop_with(
         // correct *within* a single stream (see `agents::call_agent`), where a
         // provider may emit disjoint or cumulative usage chunks for one call.
         usage.accumulate(&response.usage);
+        // Mirror into the caller's tally *immediately*, not at the return.
+        //
+        // Everything after this line can fail — a tool that errors, a budget
+        // check that trips, a submit that is rejected — and any of those exits
+        // through `?` without passing a return statement. Updating here is the
+        // only place the tally is guaranteed to be current when one of them
+        // does, which is the whole reason this parameter exists.
+        spend.usage = usage;
+        spend.steps = steps;
+        spend.call_log = call_log.clone();
         last_content = response.content.clone();
         // The run's own ceiling, checked here so a loop cannot spend past it
         // between stage boundaries. Accounting stays with the run's budget
@@ -4262,6 +4329,127 @@ mod tests {
             !sent[1].contains("\n450\n"),
             "the middle of the sequence must actually be gone, not merely \
              annotated"
+        );
+    }
+
+    /// A provider that answers once, then fails — the shape of the Coder loop
+    /// that spent money and then hit a transport error.
+    struct FailsAfterOneStep {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl LlmProvider for FailsAfterOneStep {
+        fn provider_name(&self) -> &str {
+            "fake"
+        }
+
+        async fn complete(
+            &self,
+            _request: crate::llm::provider::CompletionRequest,
+        ) -> anyhow::Result<crate::llm::provider::CompletionResponse> {
+            let n = self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n == 0 {
+                Ok(crate::llm::provider::CompletionResponse {
+                    content: "let me look".into(),
+                    model: "fake".into(),
+                    usage: crate::llm::provider::TokenUsage {
+                        input_tokens: 4242,
+                        output_tokens: 111,
+                        cached_input_tokens: 0,
+                        reasoning_tokens: 0,
+                    },
+                    finish_reason: Some("stop".to_string()),
+                    tool_calls: vec![crate::llm::provider::ToolCall {
+                        id: "call_1".into(),
+                        name: "list".into(),
+                        arguments: serde_json::json!({"path": "."}),
+                    }],
+                })
+            } else {
+                anyhow::bail!(
+                    "error sending request for url (.../v1/chat/completions): connection error: Connection timed out (os error 110)"
+                )
+            }
+        }
+
+        async fn stream(
+            &self,
+            _request: crate::llm::provider::CompletionRequest,
+        ) -> anyhow::Result<Pin<Box<dyn Stream<Item = anyhow::Result<StreamChunk>> + Send>>>
+        {
+            unimplemented!()
+        }
+    }
+
+    fn failing_ctx(dir: std::path::PathBuf) -> ToolContext {
+        ToolContext {
+            agent_id: crate::mission::AgentId("a1".into()),
+            mission_id: crate::mission::MissionId("m1".into()),
+            role: "coder".into(),
+            project_path: dir,
+            permissions: HashMap::new(),
+            permission_mode: "auto".into(),
+            fail_closed_headless: false,
+            network_allowlist: Vec::new(),
+            task_store: None,
+            mcp: None,
+            human_input: None,
+        }
+    }
+
+    /// The spend must survive the failure.
+    ///
+    /// This is the test the source-level check in `tests/reverse/money.rs`
+    /// cannot be. That check reads the text of `run_coder_tool_loop` and asks
+    /// whether a billing call appears before each `return None;` — and it was
+    /// **green twice** against code that did not bill at all, and against code
+    /// that billed a hard-coded zero. Both sabotages pass it, because the call
+    /// is there and the call is doing nothing.
+    ///
+    /// What has to hold is that the caller's tally is current *at the instant
+    /// the error fires* — so it is mirrored on every completed step, not
+    /// filled in on the way out.
+    #[tokio::test]
+    async fn a_loop_that_failed_still_reports_what_it_spent() {
+        let provider = FailsAfterOneStep {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let registry = build_baseline_registry();
+        let ctx = failing_ctx(std::env::temp_dir());
+        let mut spend = crate::runtime::LoopSpend::default();
+
+        let result = run_tool_loop_spending(
+            LoopOptions::default(),
+            &provider,
+            "fake",
+            &registry,
+            &ctx,
+            vec![LoopMessage::User("look around".into())],
+            None,
+            5,
+            None,
+            None,
+            &mut spend,
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "the second request fails by construction; a green result here would \
+             mean the double never ran"
+        );
+        assert_eq!(
+            spend.usage.input_tokens, 4242,
+            "the tokens the first step was actually billed for must survive the \
+             failure — this is the spend a run was silently discarding"
+        );
+        assert_eq!(spend.usage.output_tokens, 111);
+        assert_eq!(
+            spend.steps, 1,
+            "one step completed; the failed request cost nothing"
         );
     }
 
