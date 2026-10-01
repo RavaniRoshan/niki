@@ -962,9 +962,47 @@ bypassing it — each `left: 200000, right: 8000`.
 | Four `AppState` fields (`background_tasks`, `chat_input`, `chat_cursor`, `voice`) are declared, initialised, and touched by nothing. `voice`'s doc says *"push-to-talk (Ctrl+Shift+V)"* and **no such keybinding exists** | `state.rs:977,1022,1024,1118` |
 | The permission modal presents four options and three scopes; `action_for` maps indices `0 | 1` both to `Allow`, so *"Allow once"* and *"Allow always"* are identical | `permissions/permission.rs:52-55` |
 
-The permission one is the same shape as `permission_mode` — *"cycling it changed
-a label and not a run"* (`cli/chat.rs:582`) — and is the most user-facing of the
-seven. It is the next slice after this one.
+### B9-07 — the permission modal: four options, two behaviours (BUILT)
+
+The permission modal offered `Allow once · Allow always · Deny · Deny always`,
+and `action_for` mapped indices `0 | 1` to `Allow` and `2 | 3` to `Deny`.
+`PermissionAction` is `enum { Allow, Deny }` — **there is no persistent variant
+in the protocol and nothing persisted anything.**
+
+So a user who deliberately picked **"Allow always"**, meaning *trust this command
+for the rest of the session*, silently got **"Allow once"**: the same command
+asked again on the next step, with nothing saying their choice had been
+reinterpreted. The modal was not four options with two behaviours — it was two
+options wearing four labels, one of which promised something the product cannot
+do.
+
+The scope selector was worse in kind: it rendered `Turn / Session / Project`
+with a selected marker, `Tab` cycled it, and `state.permission_scope` then
+reached **nothing** — the response carried `action_for(index)` and nothing else.
+Three labels of decoration on a blocking decision surface, one keypress away
+from implying the answer had been made more specific.
+
+Both are gone, and the options are now `Allow` and `Deny`.
+
+**Restoring persistence is a product decision, not a line to add.** It needs a
+field on `PermissionAction` and somewhere to put the answer; shipping half of it
+is what caused this. Recorded here rather than built.
+
+**Five tests were updated, none weakened** — they asserted four-row geometry and
+the old labels, and now assert the properties over the options that exist: click
+row *N* maps to index *N*, **a row past the last option is not an option** (with
+four options this could not be written), the hint row below is not one either, and
+the cursor wraps.
+
+**Two new tests, and one of them was itself vacuous first.**
+`every_option_resolves_to_a_distinct_action` is the canary: put "Allow always"
+back without the mechanism and it fails with *"a second label for one behaviour
+is a promise the product does not keep"*.
+`no_scope_is_offered_that_the_protocol_cannot_carry` first asserted
+`state.permission_scope == 0`, which is true whether or not a selector exists —
+**the fourth vacuous pass in this batch**. It now reads the rendered modal, which
+is where the promise was made to the user, and reinstating the selector turns it
+red.
 
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 

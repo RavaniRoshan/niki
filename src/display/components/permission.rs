@@ -2,7 +2,7 @@
 //!
 //! Claude Code–style layout:
 //!   tool line → blue separator → description → dotted separator → options → footer
-//! Options: Allow once · Allow always · Deny · Deny always
+//! Options: Allow · Deny
 //! Keybindings: ↑/↓ navigate · Enter/Y confirm · Esc/N cancel · Ctrl+E explanation · Ctrl+D raw params
 
 use ratatui::Frame;
@@ -18,10 +18,24 @@ use crate::display::theme;
 use crate::permissions::PermissionAction;
 
 /// Selectable options, in row order.
-pub const OPTIONS: [&str; 4] = ["Allow once", "Allow always", "Deny", "Deny always"];
-
-/// Permission scope labels.
-pub const SCOPES: [&str; 3] = ["Turn", "Session", "Project"];
+///
+/// **Two, not four.** It used to be
+/// `["Allow once", "Allow always", "Deny", "Deny always"]`, and
+/// [`action_for`] mapped indices `0 | 1` both to `Allow` and `2 | 3` both to
+/// `Deny`. `PermissionAction` is `enum { Allow, Deny }` — there is no persistent
+/// variant in the protocol, and nothing persisted anything.
+///
+/// So a user who deliberately picked **"Allow always"**, meaning *trust this
+/// command for the rest of the session*, got **"Allow once"**: the identical
+/// command asked again on the next step, with no indication that their choice
+/// had been reinterpreted. The modal was not four options with two behaviours —
+/// it was two options wearing four labels, one of which promised something the
+/// product cannot do.
+///
+/// The labels now match the behaviour. Restoring persistence is a product
+/// decision recorded in `ROADMAP.md`, not a line to add here: it needs a
+/// protocol field and a store, and shipping a half of it is what caused this.
+pub const OPTIONS: [&str; 2] = ["Allow", "Deny"];
 
 /// First option row inside the modal border, computed from the same layout
 /// the renderer emits (TUI-013). Base 12 rows (label, tool, separators,
@@ -47,11 +61,13 @@ pub fn cursor(state: &AppState) -> ListCursor {
 }
 
 /// The [`PermissionAction`] a given option row maps to.
-/// ("Allow always" / "Deny always" resolve to Allow/Deny here; persistent
-/// variants are a future enhancement — the protocol has no persistent flag yet.)
+///
+/// One row, one behaviour: index 0 is the only way to allow and index 1 the
+/// only way to deny. The old mapping let four rows collapse onto two actions,
+/// which is why the labels above are now two.
 pub fn action_for(index: usize) -> PermissionAction {
     match index {
-        0 | 1 => PermissionAction::Allow,
+        0 => PermissionAction::Allow,
         _ => PermissionAction::Deny,
     }
 }
@@ -107,7 +123,7 @@ pub fn click_index(
 ///   4. Description + hint
 ///   5. Scope selector (Turn/Session/Project)
 ///   6. Dotted separator (rgb 80,80,80)
-///   7. Options (Allow once · Allow always · Deny · Deny always)
+///   7. Options (Allow · Deny)
 ///   8. Footer hint
 pub fn render_permission_modal(
     frame: &mut Frame,
@@ -202,29 +218,18 @@ pub fn render_permission_modal(
         }
     }
 
-    // Scope selector
-    let scope_idx = state.permission_scope.min(SCOPES.len() - 1);
-    let scope_spans: Vec<Span> = SCOPES
-        .iter()
-        .enumerate()
-        .flat_map(|(i, scope)| {
-            let is_selected = i == scope_idx;
-            let style = if is_selected {
-                Style::default()
-                    .fg(theme::primary())
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme::text_dim())
-            };
-            vec![
-                Span::styled(if is_selected { "●" } else { "○" }, style),
-                Span::styled(format!(" {} ", scope), style),
-            ]
-        })
-        .collect();
-    lines.push(Line::from(Span::styled("  Scope:", theme::text_dim())));
-    lines.push(Line::from(scope_spans));
-    lines.push(Line::from(""));
+    // The scope selector is **gone**, and it is worth saying why it was there
+    // at all.
+    //
+    // It rendered `Turn / Session / Project` with a selected marker, and `Tab`
+    // cycled it — and `state.permission_scope` then reached **nothing**. The
+    // response carried `action_for(index)` and nothing else, so whichever scope
+    // was highlighted changed no behaviour. It was three labels of pure
+    // decoration on a blocking decision surface, one keypress away from
+    // implying that the user's answer had been made more specific.
+    //
+    // Scope returns when scope exists: a field on `PermissionAction`, and
+    // somewhere to put the answer. Until then the modal says what it does.
 
     lines.push(Line::from(Span::styled(
         format!("  {} options:", OPTIONS.len()),
@@ -319,10 +324,10 @@ pub fn handle_key(key: &KeyEvent, state: &mut AppState) -> bool {
             state.permission_selected = cursor.selected;
             true
         }
-        KeyCode::Tab => {
-            state.permission_scope = (state.permission_scope + 1) % SCOPES.len();
-            true
-        }
+        // `Tab` used to cycle the scope selector, which reached nothing — see
+        // the note where the selector used to be rendered. It now falls
+        // through to the caller, which is what a key that does nothing here
+        // should do.
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.show_permission_detail = !state.show_permission_detail;
             true
@@ -367,17 +372,16 @@ mod tests {
     #[test]
     fn render_permission_options_test() {
         let result = render_permission_options(0);
-        assert!(result.contains("● Allow once"));
-        assert!(result.contains("○ Allow always"));
+        assert!(result.contains("● Allow"));
         assert!(result.contains("○ Deny"));
-        assert!(result.contains("○ Deny always"));
+        assert!(result.contains("○ Deny"));
     }
 
     #[test]
     fn render_permission_options_selected_1() {
         let result = render_permission_options(1);
-        assert!(result.contains("○ Allow once"));
-        assert!(result.contains("● Allow always"));
+        assert!(result.contains("○ Allow"));
+        assert!(result.contains("● Deny"));
     }
 
     #[test]
@@ -399,17 +403,29 @@ mod tests {
             click_index(area, modal.x + 3, first + 1, &req, false),
             Some(1)
         );
+        // One row per option, and a row past the last one is **not** an option.
+        // With four options this could not be written; with two it is the
+        // boundary that matters, because a click below "Deny" must not resolve
+        // to `action_for(2)` — which is `Deny`, and would answer a question the
+        // user did not ask by clicking the padding.
         assert_eq!(
-            click_index(area, modal.x + 3, first + 2, &req, false),
-            Some(2)
+            click_index(area, modal.x + 3, first + OPTIONS.len() as u16, &req, false),
+            None
         );
-        assert_eq!(
-            click_index(area, modal.x + 3, first + 3, &req, false),
-            Some(3)
-        );
+
         // Rows above the options and the hint row below are not selectable.
         assert_eq!(click_index(area, modal.x + 3, first - 1, &req, false), None);
-        assert_eq!(click_index(area, modal.x + 3, first + 4, &req, false), None);
+        assert_eq!(
+            click_index(
+                area,
+                modal.x + 3,
+                first + OPTIONS.len() as u16 + 1,
+                &req,
+                false
+            ),
+            None,
+            "and the hint row below the options is not one either"
+        );
         // Border columns are not selectable.
         assert_eq!(click_index(area, modal.x, first, &req, false), None);
     }
@@ -431,8 +447,14 @@ mod tests {
         assert_eq!(first, modal.y + 1 + 19);
         assert_eq!(click_index(area, modal.x + 3, first, &req, true), Some(0));
         assert_eq!(
-            click_index(area, modal.x + 3, first + 3, &req, true),
-            Some(3)
+            click_index(
+                area,
+                modal.x + 3,
+                first + OPTIONS.len() as u16 - 1,
+                &req,
+                true
+            ),
+            Some(OPTIONS.len() - 1)
         );
         // Without the detail panel the rows move back up.
         let collapsed_modal = modal_rect(area, &req, false);
@@ -451,12 +473,16 @@ mod tests {
         state.permission_selected = 0;
         let mut c = cursor(&state);
         c.prev();
-        assert_eq!(c.selected, 3);
+        assert_eq!(
+            c.selected,
+            OPTIONS.len() - 1,
+            "the cursor wraps to the last option"
+        );
         assert!(matches!(action_for(c.selected), PermissionAction::Deny));
         c.next();
         assert_eq!(c.selected, 0);
         assert!(matches!(action_for(0), PermissionAction::Allow));
-        assert!(matches!(action_for(1), PermissionAction::Allow));
+        assert!(matches!(action_for(1), PermissionAction::Deny));
     }
 
     #[test]
@@ -486,7 +512,7 @@ mod tests {
             .iter()
             .map(|c| c.symbol().to_string())
             .collect();
-        assert!(text.contains("Allow once"), "{text}");
+        assert!(text.contains("Allow"), "{text}");
         assert!(text.contains("deletes everything"), "{text}");
     }
 
@@ -580,20 +606,104 @@ mod key_tests {
     #[test]
     fn arrows_move_the_cursor_and_enter_submits_the_highlighted_option() {
         let (mut state, rx) = state_with_request();
-        assert_eq!(state.permission_selected, 0);
-        handle_key(&key(KeyCode::Down), &mut state);
-        assert_eq!(state.permission_selected, 1);
-        // Option 1 is "Allow always", which resolves to Allow.
+        assert_eq!(state.permission_selected, 0, "Allow is highlighted first");
         handle_key(&key(KeyCode::Enter), &mut state);
         assert_eq!(rx.try_recv().unwrap(), PermissionAction::Allow);
 
         // Deny is reachable, not just allow.
         let (mut state, rx) = state_with_request();
         handle_key(&key(KeyCode::Down), &mut state);
-        handle_key(&key(KeyCode::Down), &mut state);
-        assert_eq!(state.permission_selected, 2, "third option is Deny");
+        assert_eq!(
+            state.permission_selected,
+            OPTIONS.len() - 1,
+            "the arrow moves to the only other option"
+        );
         handle_key(&key(KeyCode::Enter), &mut state);
         assert_eq!(rx.try_recv().unwrap(), PermissionAction::Deny);
+    }
+
+    /// **Every option must do something different.**
+    ///
+    /// This is the test that would have caught the defect rather than the fix.
+    /// The modal used to offer `Allow once / Allow always / Deny / Deny always`
+    /// and `action_for` mapped `0 | 1` to `Allow` and `2 | 3` to `Deny` — so a
+    /// user who picked **"Allow always"**, meaning *trust this for the rest of
+    /// the session*, silently got **"Allow once"**, and the same command asked
+    /// again on the next step.
+    ///
+    /// `PermissionAction` is `enum { Allow, Deny }`: there is no persistent
+    /// variant and nothing persisted anything. The fix was to say what the
+    /// product does; this is what keeps the next person from re-adding the
+    /// labels without the mechanism.
+    #[test]
+    fn every_option_resolves_to_a_distinct_action() {
+        let mut seen: Vec<PermissionAction> = Vec::new();
+        for (i, label) in OPTIONS.iter().enumerate() {
+            let action = action_for(i);
+            assert!(
+                !seen.contains(&action),
+                "`{label}` resolves to the same action as an earlier option: a \
+                 second label for one behaviour is a promise the product does not \
+                 keep"
+            );
+            seen.push(action);
+        }
+        assert_eq!(
+            seen.len(),
+            OPTIONS.len(),
+            "and every option is reachable by index"
+        );
+    }
+
+    /// No scope is offered that the protocol cannot carry.
+    ///
+    /// The selector rendered `Turn / Session / Project` and `Tab` cycled it, and
+    /// `state.permission_scope` then reached **nothing**: the response carried
+    /// `action_for(index)` and nothing else. Three labels of decoration on a
+    /// blocking decision surface.
+    ///
+    /// The first version of this test asserted `state.permission_scope == 0`,
+    /// which is true whether or not a selector exists — it was green against the
+    /// selector being reinstated, which is the fourth vacuous pass in this batch
+    /// alone. It now reads the **rendered modal**, because that is where the
+    /// promise was made to the user.
+    ///
+    /// If a scope ever comes back it should come back with a `PermissionAction`
+    /// that carries it; then this test is rewritten to check that the choice
+    /// reaches `action_for`, rather than deleted.
+    #[test]
+    fn no_scope_is_offered_that_the_protocol_cannot_carry() {
+        let (state, _rx) = state_with_request();
+        let req = PermissionRequest {
+            tool_name: "sandbox_exec".into(),
+            command: "rm -rf /".into(),
+            description: "deletes everything".into(),
+            params: Some("a\nb".into()),
+            response_tx: {
+                let (tx, _rx) = std::sync::mpsc::channel();
+                tx
+            },
+        };
+        let backend = ratatui::backend::TestBackend::new(100, 40);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| render_permission_modal(f, &req, f.area(), &state))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol().to_string())
+            .collect();
+        for scope in ["Scope:", "Turn", "Session", "Project"] {
+            assert!(
+                !text.contains(scope),
+                "the modal offers `{scope}`, which nothing can carry: the response \
+                 is `action_for(index)` and nothing else. A selector over a field \
+                 that reaches no behaviour is decoration on a blocking question."
+            );
+        }
     }
 
     #[test]

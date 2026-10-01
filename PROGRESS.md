@@ -1913,3 +1913,47 @@ $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --lib → 1090 passed; 0 failed
 ```
+
+---
+
+## Iteration 8g — B9-07, the permission modal
+
+Four options, two behaviours. `Allow once · Allow always · Deny · Deny always`,
+with `action_for` mapping `0 | 1` → `Allow` and `2 | 3` → `Deny`.
+`PermissionAction` is `enum { Allow, Deny }`: no persistent variant in the
+protocol, nothing persisted anything.
+
+So a user who picked **"Allow always"**, meaning *trust this for the rest of the
+session*, silently got **"Allow once"** — and the same command asked again on the
+next step, with nothing saying their choice had been reinterpreted.
+
+The scope selector was worse in kind: `Turn / Session / Project` rendered with a
+selected marker, `Tab` cycled it, and `state.permission_scope` reached **nothing**
+— the response carried `action_for(index)` and nothing else. Decoration on a
+blocking decision surface.
+
+Options are now `Allow` and `Deny`; the selector is gone. Restoring persistence
+needs a field on `PermissionAction` and somewhere to put the answer — a product
+decision, recorded in `ROADMAP.md` rather than built, because shipping half of it
+is what caused this.
+
+**Five tests updated, none weakened**: they asserted four-row geometry and the
+old labels, and now assert the properties over the options that exist — including
+**a row past the last option is not an option**, which with four options could not
+be written at all.
+
+**Two new tests. One of them was itself vacuous first.**
+`every_option_resolves_to_a_distinct_action` is the canary — put "Allow always"
+back without the mechanism and it fails with *"a second label for one behaviour is
+a promise the product does not keep"*.
+`no_scope_is_offered_that_the_protocol_cannot_carry` first asserted
+`state.permission_scope == 0`, which is true whether or not a selector exists:
+**the fourth vacuous pass in this batch**. It now reads the rendered modal.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  426 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --lib → 1092 passed; 0 failed
+```
