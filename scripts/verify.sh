@@ -177,7 +177,11 @@ if want G3; then
   # CI covers the rest.**
   #
   # Extend the list rather than replacing it with `cargo test`.
-  fast_lane="record_claims_are_pinned run_lifecycle agent_tool_loop reverse"
+  # `mcp_call_path` joined the lane in batch 11: `the_pipeline_holds_the_mcp_
+  # manager_beyond_discovery` had been **red** since a comment elsewhere grew
+  # the file by eighteen characters, and it was not in the list. A lane you do
+  # not extend is a lane that quietly stops covering.
+  fast_lane="record_claims_are_pinned run_lifecycle agent_tool_loop reverse mcp_call_path"
   for bin in $fast_lane; do
     [ -f "tests/$bin.rs" ] || { record G3 FAIL "fast lane names tests/$bin.rs, which does not exist"; continue; }
     run_capture G3 "g3-fast-$bin" cargo test --test "$bin" $CARGO_TEST_FLAGS

@@ -2271,3 +2271,46 @@ the programme's own files.
 ```
 ["run", "add", "a", "tally", "function", "that", "sums", "a", "slice"]
 ```
+
+---
+
+## Iteration 10a — B11-01, choosing slices by reading the record
+
+Batch 11's selection was **reading ROADMAP §6** rather than guessing, which is
+what batches 1–10 should have been doing. §6 came back drained but for one stale
+line — and following it turned up two things.
+
+**`McpToolAdapter::server_tool_name` returned the wrong name.** It gave
+`&self.tool.name` — the bare `echo` — while the tool is registered as
+`mcp__<server>__<tool>`. Dead, and dead in the worst way: a method that reads
+like "what is this tool called" and answers with a different name than the
+registry holds. The first caller would have sent `echo` to `call_tool` for a tool
+registered as `mcp__fixture__echo`, and failed with a not-found naming a string
+the user never configured. Deleted rather than corrected — the qualified name is
+the only name this type has in the product.
+
+**And `tests/mcp_call_path.rs` had a red test.** It asserts on a **fixed
+2600-character window** of `pipeline.rs`, and the `Arc` line it needs now sits at
+2618 — because a comment elsewhere grew the file by eighteen characters.
+
+The product was correct throughout. The test broke on a **comment** and would
+have passed on wrong **code**: the two failures swapped. The region now ends
+where the discovery block ends.
+
+**No gate ran that binary**, which is why it sat red. The G3 fast lane gains
+`mcp_call_path` — and the honest note is that a lane you do not extend is a lane
+that quietly stops covering.
+
+Can-fail proven: shrinking the window back below the `Arc` line goes red.
+Replacing `Some(Arc::new(mgr))` with `Some(mgr)` never reaches the assertion —
+**it fails to compile**, a different and stronger kind of catch, and stated as
+such rather than counted as a red test.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  434 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --lib → 1102 passed; 0 failed
+$ cargo test --test mcp_call_path → 13 passed
+```
