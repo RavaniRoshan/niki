@@ -16,6 +16,7 @@ pub mod context;
 pub mod events;
 pub mod mcp_tool;
 pub mod metrics;
+pub mod path_lock;
 pub mod policy;
 pub mod session;
 pub mod step;
