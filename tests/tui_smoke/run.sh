@@ -57,14 +57,25 @@ for cf in "${CASE_FILES[@]}"; do
   CASENAME="$(basename "$cf" .sh)"
   echo "=== $CASENAME ==="
   set +e
-  ( source "$cf"; run ); rc=$?
+  # The screen is captured from the EXIT trap, not from here.
+  #
+  # `tui_begin` installs `trap 'tui_kill; ...' EXIT` **inside** this subshell, so
+  # the moment `run` returns, the tmux server is dead — which is why the parent
+  # used to capture nothing (twelve failure logs, all 0 bytes, and §9.2a
+  # stalled with no screen to read). See `tui_finish` in lib.sh.
+  #
+  # Note what is deliberately *not* done here: `set +e` inside the subshell.
+  # That would look like a fix and is the opposite of one — a case whose third
+  # assertion fails and whose last command succeeds would report OK, and a
+  # suite that can be made green by disabling its own errexit is not a suite.
+  ( SMOKE_CASE="$CASENAME"; export SMOKE_CASE; source "$cf"; run )
+  rc=$?
   set -e
   if [ "$rc" -eq 0 ]; then PASS=$((PASS+1)); echo "  OK"
   elif [ "$rc" -eq 77 ]; then SKIP=$((SKIP+1)); echo "  SKIP"
   else
     FAIL=$((FAIL+1))
     echo "  FAIL (rc=$rc)"
-    tui_save_failure "$CASENAME" || true
   fi
 done
 

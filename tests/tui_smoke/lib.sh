@@ -106,15 +106,58 @@ tui_assert() {
   fi
 }
 
+# Install the EXIT trap: **capture the screen first, then tear down.**
+#
+# The order is the whole fix. `run.sh` runs each case in a subshell, so this
+# trap fires as soon as `run` returns — and if it kills tmux first, everything
+# after it has no screen left to photograph. Capturing inside the trap is the
+# last moment the pane still exists, and it needs no shell-option games.
+tui_install_trap() {
+  # shellcheck disable=SC2064  # expand SMOKE_PROJ now, not at trap time
+  trap "rc=\$?; tui_finish \$rc; ${TUI_TRAP_EXTRA:-tui_kill}" EXIT
+}
+
+# Called from the EXIT trap with the status the case is leaving with.
+#
+# Skips the capture on success (rc 0) and on a deliberate skip (77): a log
+# written for a case that passed is a log nobody will read, and a directory of
+# them is a directory that stops being read.
+tui_finish() {
+  local rc="$1"
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 77 ] && [ -n "${SMOKE_CASE:-}" ]; then
+    tui_save_failure "$SMOKE_CASE" \
+      || echo "  (failure capture came back empty for $SMOKE_CASE)" >&2
+  fi
+}
+
 tui_kill() {
   [ -n "${SMOKE_SOCK:-}" ] && tmux -L "$SMOKE_SOCK" kill-server 2>/dev/null || true
 }
 
 # Persist the current pane capture for post-mortem on CI.
+#
+# **Must be called while the tmux session is still alive.**
+#
+# Every case runs inside a subshell (`run.sh` does `( source "$cf"; run )`) and
+# `tui_begin` installs `trap 'tui_kill; ...' EXIT` *inside that subshell*. So the
+# session is already dead by the time the parent process reaches this function —
+# and `tui_capture` returns nothing. Measured: all twelve `.failure.txt` files
+# in `tui-smoke-logs/` were **0 bytes**, which is why §9.2a's next step ("read
+# the trace") had nothing to read.
+#
+# Hence the marker on an empty capture. A 0-byte log and a log saying "the
+# capture failed" are different facts, and only one of them is evidence.
 tui_save_failure() {
-  local case="$1"
+  local case="$1" out="$TUI_LOG_DIR/${1}.failure.txt"
   mkdir -p "$TUI_LOG_DIR"
-  tui_capture > "$TUI_LOG_DIR/${case}.failure.txt" 2>/dev/null || true
+  local cap
+  cap="$(tui_capture)"
+  if [ -z "$cap" ]; then
+    printf 'NO CAPTURE: the tmux session was already gone when this was written.\n' > "$out"
+    printf 'tmux -L %s has-session -t %s\n' "${SMOKE_SOCK:-?}" "${SMOKE_SESS:-?}" >> "$out"
+    return 1
+  fi
+  printf '%s\n' "$cap" > "$out"
 }
 
 # Per-case setup: isolated project dir, fresh session, dismiss onboarding,
@@ -122,7 +165,7 @@ tui_save_failure() {
 # and temp dir are always reclaimed.
 tui_begin() {
   SMOKE_PROJ="$(mktemp -d "${TMPDIR:-/tmp}/niki-tui.XXXXXX")"
-  trap 'tui_kill; rm -rf "$SMOKE_PROJ" 2>/dev/null || true' EXIT
+  tui_install_trap
   tui_require_tmux
   tui_new_session "$SMOKE_PROJ"
   tui_wait_for "Describe a change" 30
@@ -153,11 +196,12 @@ tui_begin_run() {
   # only explanation a failing case will have. Honoured here as well as in
   # `tui_new_session`, because a run's directory is where the evidence is.
   if [ "${TUI_KEEP_HOME:-0}" = "1" ]; then
-    trap 'tui_kill; tui_stop_mock' EXIT
+    TUI_TRAP_EXTRA="tui_kill; tui_stop_mock"
     echo "  (project kept at $SMOKE_PROJ)" >&2
   else
-    trap 'tui_kill; tui_stop_mock; rm -rf "$SMOKE_PROJ" 2>/dev/null || true' EXIT
+    TUI_TRAP_EXTRA="tui_kill; tui_stop_mock; rm -rf \"$SMOKE_PROJ\" 2>/dev/null || true"
   fi
+  tui_install_trap
 
   # A real repository. The pipeline creates a branch, and `git worktree add`
   # fails on anything that is not a repository — so a temp directory is not
