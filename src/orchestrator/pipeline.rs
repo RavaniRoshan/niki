@@ -1271,6 +1271,14 @@ async fn run_experimental_research(
     let mut registry = crate::runtime::build_baseline_registry();
     // Phase 5.4: bound tool-loop hooks by the same `[hooks] timeout_seconds`.
     registry.set_hook_timeout_secs(config.hooks.timeout_seconds);
+    // The research loop runs tools too, so a configured server's read-only
+    // tools belong in its registry as well. It is the loop most likely to
+    // *need* an external tool — a research assistant with no search is a
+    // research assistant that guesses.
+    if let Some(manager) = mcp.as_ref() {
+        let added = crate::runtime::mcp_tool::build_registry(&mut registry, manager.clone());
+        tracing::debug!(target: "niki::mcp", added, "MCP tools registered with the research loop");
+    }
     let ctx = crate::runtime::ToolContext {
         agent_id: crate::mission::AgentId(format!("research-{}", task.id)),
         mission_id: crate::mission::MissionId(task.id.to_string()),
