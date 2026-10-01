@@ -442,18 +442,34 @@ parts a user hits when a provider is slow, rate-limited or drops a connection.
 Neither was visible to any gate, and one had been red long enough that its cause
 was assumed to be something else.
 
-**Partly closed in batch 8 (B8-12).** G3 now has a **fast lane** that runs four
-integration binaries serially — `record_claims_are_pinned`, `run_lifecycle`,
-`agent_tool_loop`, `reverse` — in **~34 s** including link, and fails G3 with
-the binary name and a log path when any of them is red. Proven by re-introducing
-two of the three defects above: the failover one turns G3 red
-(`g3-fast-reverse.log`), the truncation one turns it red
-(`g3-fast-agent_tool_loop.log`). Neither was visible to any gate before.
+**Closed across batches 8 and 11: G3 now runs 69 of the 107 integration
+binaries, serially, warm cost 1m47.** A failure names the binary and its log.
 
-**What is still open:** the lane covers four binaries, and the suite still does
-not fit this machine. Everything else is CI's to catch. The statement above
-stands, narrowed rather than withdrawn — **this lane covers these four, and only
-CI covers the rest.** The lane is a named list in `scripts/verify.sh` to extend,
+It began at four, and grew only by **measuring**. Every binary was run and timed
+before being added, and the reason the original four were the only ones is now
+explicitly false: of the sixteen added in B11-02, **fifteen finished in 0.00 s**.
+
+**The measurement found four red tests that no gate could see**, and that is the
+real result:
+
+| Test | What it was |
+|---|---|
+| `state_layout::the_temp_patch_in_a_user_repo_is_git_ignored` | asserted a literal filename the writer stopped producing — and the property was already held twice, behaviourally |
+| `mcp_call_path::the_pipeline_holds_the_mcp_manager_beyond_discovery` | asserted on a fixed 2600-character window; a comment grew the file 18 characters past it |
+| `tui_q_goes_back::a_subpage_q_reaches_the_page_not_the_nav_layer` | pinned **two** literals from an earlier design, and compared a line in one render loop against a line in the other |
+| `resume_cli::test_cli_resume_command` | asserted the exact string batch 3 **removed as a lie** — *"Session state restored successfully"*, from a command that restored nothing |
+
+**Three of the four were tests asserting behaviour a previous batch had already
+fixed.** The tests outlived the decision they were written for and went on
+enforcing it. Every one is fixed now, and every fix asserts the *property*
+rather than a literal.
+
+**What is still open, and is not the same problem:** 38 binaries remain —
+pipelines, sandboxes, PTY, visual baselines and the benchmarks. Those are the
+ones `AGENTS.md` says this box cannot run together, and they are serialised in
+`.config/test-binary-groups` for CI. The statement above therefore stands,
+narrowed rather than withdrawn: **this lane covers these sixty-nine, and only CI
+covers the rest.** The lane is a named list in `scripts/verify.sh` to extend,
 not a `cargo test` that happens to be fast.
 
 **Live, as of batch 2:**
