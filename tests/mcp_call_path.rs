@@ -260,19 +260,31 @@ fn the_pipeline_holds_the_mcp_manager_beyond_discovery() {
         "shutdown must come before the result is returned, and not somewhere \
          near the discovery block at the top of a 4,000-line function"
     );
-    // And the registration itself: the gap between "the server is alive" and
-    // "the model can call it" is one call, and it is the one a reader skims.
-    let reg_start = pipeline
-        .find("MCP tools registered with the tool loop")
-        .expect("the Coder's loop must register the run's MCP tools");
-    let reg_region: String = pipeline[reg_start.saturating_sub(600)..reg_start]
-        .chars()
-        .collect();
-    assert!(
-        reg_region.contains("build_registry(&mut registry"),
-        "a live server nobody registered is a server the model cannot call — \
-         which is the state this whole feature was in. The region reads:\n{reg_region}"
+    // And the registration itself, in **both** loops that run tools. The gap
+    // between "the server is alive" and "the model can call it" is one call,
+    // and it is the one a reader skims — and wiring only the Coder's loop
+    // would leave a research assistant that cannot search, which is the loop
+    // most likely to need one.
+    //
+    // Counted, not grepped: two registrations, one per loop.
+    let registrations = pipeline
+        .match_indices("build_registry(&mut registry")
+        .count();
+    assert_eq!(
+        registrations, 2,
+        "both tool loops must register the run's MCP tools — the Coder's and \
+         the research loop's. Found {registrations}."
     );
+    for loop_name in [
+        "MCP tools registered with the tool loop",
+        "MCP tools registered with the research loop",
+    ] {
+        assert!(
+            pipeline.contains(loop_name),
+            "the {loop_name:?} registration is missing or renamed; if the \
+             wiring moved, this test should say so rather than go quiet"
+        );
+    }
 }
 
 /// And a graceful shutdown at the end of a run is reachable, which is what

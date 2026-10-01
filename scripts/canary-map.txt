@@ -384,3 +384,4 @@ mcp-tool-level-error-is-not-success | a_tool_level_error_is_not_reported_as_succ
 mcp-registration-is-wired | the_pipeline_holds_the_mcp_manager_beyond_discovery | the gap between "the server is alive" and "the model can call it"
 # B7-03 · the flag fired: the summary now says what is true, and the docs follow
 mcp-call-path-is-registered | the_call_path_is_registered_not_merely_present | the registration unwired while the summary still says "callable"
+mcp-both-loops-register | the_pipeline_holds_the_mcp_manager_beyond_discovery | one tool loop wired and the other not, so a research assistant cannot search
