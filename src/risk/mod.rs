@@ -3,6 +3,7 @@
 //! the spec, so it runs before any stage executes.
 
 pub mod classifier;
+pub mod hooks;
 pub mod input_probe;
 pub mod transcript;
 
