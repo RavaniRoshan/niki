@@ -833,6 +833,45 @@ written before the rename is not suddenly reported hollow.
 **Can-fail proven both ways:** restoring the `summary`-only read makes the clean
 approval fail; disabling the hollow branch makes a genuinely hollow verdict pass.
 
+### T4 was on the wrong path — **the chat's context, not the tool loop (B9-03)**
+
+Batch 8 shipped `runtime/transcript.rs` and wired it into `run_tool_loop_spending`.
+That is the tool loop — which is **off by default** (`config/types.rs:710`,
+`pipeline.rs:1267`, `docs/decisions/tool-loop.md` D1: *"In a default run, none of
+the twenty-two tools execute"*) and capped at 4 steps. So the one context that
+grows without bound in a default run was not the one being compressed.
+
+**The one that does is the chat.** The TUI builds `history` from the entire
+`chat_log` on every submission (`display/tui.rs:1727-1739`), unbounded. And the
+provider was **reporting what each turn cost** — `StreamChunk::Usage` exists —
+while `cli/chat.rs` matched it with `{}` and threw it away. So:
+
+- `token_count` never moved in a conversation;
+- the `ctx` gauge in the status bar read **0% for ever**;
+- `/context` reported *"Utilized: 0%"* while the model was being handed a
+  two-hundred-turn history on every request;
+- and nothing said anything before the provider rejected the request.
+
+Fixed: the reply stream's usage now reaches the surface, `ChatFinished` carries
+it, and the chat adds **one** system line at **90%** of the window naming
+`/context`, `/compact` and `/clear` — the three commands that already exist.
+`/clear` resets the flag and the counters.
+
+**It is a warning, not a truncation, and that is the point.** This is the chat
+surface: dropping the oldest turns to make room would trade a visible warning
+for invisible amnesia, which is the defect B2-01 was built to remove.
+`the_context_warning_keeps_every_earlier_turn` asserts it.
+
+**Two of the four sabotages did not bite on the first run, and both were the
+tests' fault:**
+
+- A test driving `apply_display_event` with a usage value was **green against
+  the defect** — it could not see whether `cli/chat.rs` ever produced one. The
+  stream loop is now extracted as `consume_reply` and tested from the stream.
+- A test using a **100%-full** conversation could not tell a 90% threshold from
+  a 100% one, and could not tell "never warn" from "warn at 100%" either. It now
+  uses 95%, and asserts that a 15-token conversation says **nothing**.
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in

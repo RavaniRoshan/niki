@@ -520,3 +520,5 @@ clean-approval-is-not-hollow | known_failing_invariants_are_still_failing | an a
 g3-fast-lane-runs-the-tests-the-gates-skipped | a_fallback_served_call_is_priced_by_the_fallback | G3 checking existence only, while a real defect sat red in tests/
 known-failing-list-is-actually-empty | known_failing_invariants_are_still_failing | a document claiming a list is empty, written by someone who had just edited it
 tool-loop-is-off-by-default | the_tool_loop_is_off_by_default_and_capped_at_four_steps | the streaming executor landing on a path most users never execute
+chat-carries-the-provider-usage | the_reply_streams_usage_back_to_the_caller | a context gauge that reads 0% for ever while the model is handed the whole conversation
+chat-warns-before-the-window-closes | the_chat_warns_once_before_the_window_runs_out | a full conversation failing with nothing said, or a warning on every turn

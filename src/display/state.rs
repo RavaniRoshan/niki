@@ -882,6 +882,12 @@ pub struct ResolvedRun {
 }
 
 /// The main application state — single source of truth for the UI.
+/// Fraction of the context window at which the chat says something.
+///
+/// 90%, not 100%: at 100% the request has already been rejected, so a warning
+/// that fires then is a post-mortem.
+pub const CONTEXT_WARN_RATIO: f64 = 0.9;
+
 #[derive(Debug)]
 /// Canonical application state — single source of truth for the TUI.
 pub struct AppState {
@@ -945,6 +951,16 @@ pub struct AppState {
     pub token_count: usize,
     /// Context limit (model-specific).
     pub context_limit: usize,
+    /// Fraction of the context window at which the chat says something.
+    ///
+    /// 90%, not 100%: at 100% the request has already been rejected, so a
+    /// warning that fires then is a post-mortem.
+    /// Whether this conversation has already been warned about its context.
+    ///
+    /// Set when the warning line is added and cleared by `/clear`. Without it
+    /// the warning would repeat on **every** turn for the rest of a long
+    /// conversation, and a message that repeats is a message nobody reads.
+    pub context_warned: bool,
     /// Total cost in USD.
     pub cost: f64,
     /// Model name.
@@ -1297,6 +1313,7 @@ impl AppState {
             context_usage: 0.0,
             token_count: 0,
             context_limit: 200_000,
+            context_warned: false,
             cost: 0.0,
             model: config.agents.coder.model.clone(),
             project_path,
@@ -1747,8 +1764,54 @@ impl AppState {
                     message,
                 ));
             }
-            DisplayEvent::ChatFinished { finish_reason } => {
+            DisplayEvent::ChatFinished {
+                finish_reason,
+                usage,
+            } => {
                 self.chat_pending = false;
+                // Count what the provider says this turn cost, then say
+                // something *before* the window runs out.
+                //
+                // The chat used to discard `StreamChunk::Usage` outright, so
+                // `token_count` never moved in a conversation — the `ctx` gauge
+                // in the status bar was decoration that read 0% for ever, and
+                // `/context` reported "Utilized: 0%" while the model was being
+                // handed a two-hundred-turn history on every request.
+                //
+                // The warning is deliberately **not** a truncation. This is the
+                // chat surface: dropping the oldest turns to make room would
+                // trade a visible warning for invisible amnesia, which is the
+                // defect B2-01 was built to remove. The user is told, and the
+                // three commands that already exist to help are named.
+                if let Some(u) = usage {
+                    self.token_count = self
+                        .token_count
+                        .saturating_add(u.input_tokens.saturating_add(u.output_tokens) as usize);
+                    if self.context_limit > 0 {
+                        self.context_usage =
+                            (self.token_count as f64) / (self.context_limit as f64);
+                    }
+                    if self.context_limit > 0
+                        && self.context_usage >= CONTEXT_WARN_RATIO
+                        && !self.context_warned
+                    {
+                        self.context_warned = true;
+                        let pct = (self.context_usage * 100.0).round() as u32;
+                        self.chat_log.push((
+                            "system".to_string(),
+                            format!(
+                                "Context is {pct}% full (~{} of {} tokens for {}). The next \
+                                 turns will be rejected when it reaches 100%. `/context` shows \
+                                 the numbers, `/compact` is {nw}, and `/clear` starts a \
+                                 new conversation.",
+                                self.token_count,
+                                self.context_limit,
+                                self.model,
+                                nw = crate::display::pages::chat::NOT_WIRED,
+                            ),
+                        ));
+                    }
+                }
                 let reason = finish_reason.as_deref().unwrap_or("");
                 self.chat_truncated = matches!(reason, "length" | "max_tokens" | "MAX_TOKENS");
                 // Commit the streamed text as a real turn.
@@ -2521,5 +2584,160 @@ mod tests {
         let mut s = state_for_stream();
         let tail = stream_after(&mut s, AgentRole::Coder, "short output — with a dash");
         assert_eq!(tail, "short output — with a dash");
+    }
+
+    /// The chat's context gauge is driven by what the provider reports.
+    ///
+    /// `cli/chat.rs` matched `StreamChunk::Usage` with `{}` and dropped it, so
+    /// `token_count` never moved in a conversation: the `ctx` gauge in the
+    /// status bar read 0% for ever and `/context` reported "Utilized: 0%" while
+    /// the model was being handed the entire history on every request.
+    ///
+    /// The gauge is not decoration — it is the only signal a user has that the
+    /// next turn might be rejected.
+    #[test]
+    fn a_chat_turn_counts_what_the_provider_says_it_cost() {
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("t".into(), config, ".".into());
+        state.context_limit = 1_000;
+        assert_eq!(state.token_count, 0);
+
+        state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            finish_reason: Some("stop".into()),
+            usage: Some(crate::llm::provider::TokenUsage {
+                input_tokens: 100,
+                output_tokens: 50,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
+            }),
+        });
+        assert_eq!(
+            state.token_count, 150,
+            "a turn the provider reported must move the counter"
+        );
+        assert!(
+            state.context_usage > 0.0,
+            "and the gauge with it, or the status bar is showing a number that \
+             means nothing: {}",
+            state.context_usage
+        );
+    }
+
+    /// And it says something **before** the window runs out.
+    ///
+    /// Once, not every turn: a message that repeats on every subsequent turn is
+    /// a message nobody reads, and a warning that fires at 100% is a
+    /// post-mortem — the request has already been rejected by then.
+    #[test]
+    fn the_chat_warns_once_before_the_window_runs_out() {
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("t".into(), config, ".".into());
+        state.context_limit = 1_000;
+        // 95% of the window, **not** 100%. The first draft used exactly 1000,
+        // which fires on `>= 1.0` as happily as on `>= 0.9` — so raising the
+        // threshold to "warn when it is full" left the test green, and a
+        // post-mortem warning is precisely the thing this test exists to rule
+        // out.
+        let usage = crate::llm::provider::TokenUsage {
+            input_tokens: 900,
+            output_tokens: 50,
+            cached_input_tokens: 0,
+            reasoning_tokens: 0,
+        };
+
+        let warnings = |s: &AppState| -> usize {
+            s.chat_log
+                .iter()
+                .filter(|(role, text)| role == "system" && text.contains("Context is"))
+                .count()
+        };
+
+        // **Below the threshold, it says nothing at all.** The first draft of
+        // this test only ever used a near-full conversation, so deleting the
+        // threshold outright left it green — the condition would fire on every
+        // turn from the first one, which is the noise the threshold exists to
+        // prevent, and nothing was checking for it.
+        state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            finish_reason: None,
+            usage: Some(crate::llm::provider::TokenUsage {
+                input_tokens: 10,
+                output_tokens: 5,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
+            }),
+        });
+        assert_eq!(
+            warnings(&state),
+            0,
+            "15 of 1000 tokens is not worth a warning; a warning on every turn \
+             is how a line stops being read"
+        );
+
+        state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            finish_reason: None,
+            usage: Some(usage),
+        });
+        assert_eq!(warnings(&state), 1, "a full conversation must say so");
+        let said = state
+            .chat_log
+            .iter()
+            .find(|(role, _)| role == "system")
+            .map(|(_, t)| t.clone())
+            .unwrap_or_default();
+        for cmd in ["/context", "/compact", "/clear"] {
+            assert!(
+                said.contains(cmd),
+                "the warning names {cmd}, which is a command that exists: {said}"
+            );
+        }
+
+        // More turns must not repeat it.
+        for _ in 0..3 {
+            state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+                finish_reason: None,
+                usage: Some(usage),
+            });
+        }
+        assert_eq!(
+            warnings(&state),
+            1,
+            "once is a warning; every turn is noise, and noise trains a reader \
+             to skip the line that mattered"
+        );
+    }
+
+    /// Nothing is dropped from the conversation. This is the whole reason the
+    /// warning exists instead of a truncation: the chat surface is where recall
+    /// is the product, and silent amnesia is the defect B2-01 removed.
+    #[test]
+    fn the_context_warning_keeps_every_earlier_turn() {
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("t".into(), config, ".".into());
+        state.context_limit = 100;
+        for i in 0..5 {
+            state.apply_display_event(crate::display::tui::DisplayEvent::ChatMessage {
+                role: "user".into(),
+                text: format!("question {i}"),
+            });
+        }
+        state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            finish_reason: None,
+            usage: Some(crate::llm::provider::TokenUsage {
+                input_tokens: 500,
+                output_tokens: 0,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
+            }),
+        });
+        for i in 0..5 {
+            assert!(
+                state
+                    .chat_log
+                    .iter()
+                    .any(|(role, text)| role == "user" && text == &format!("question {i}")),
+                "question {i} must survive the warning; the warning is not a \
+                 licence to forget"
+            );
+        }
     }
 }

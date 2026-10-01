@@ -1,11 +1,12 @@
 use anyhow::Result;
 use clap::Args;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::mpsc;
 
 use crate::config::NikiConfig;
 use crate::display::tui::{ChatSubmit, DisplayEvent};
-use crate::llm::provider::{LlmProvider, create_provider};
+use crate::llm::provider::{LlmProvider, StreamChunk, TokenUsage, create_provider};
 
 #[derive(Args, Clone, Default)]
 pub struct ChatArgs {
@@ -172,8 +173,6 @@ async fn stream_reply(
     config: &NikiConfig,
     submit: &ChatSubmit,
 ) -> Result<String, String> {
-    use futures::StreamExt;
-
     let (provider, model) =
         build_provider(config).ok_or_else(|| NO_PROVIDER_MESSAGE.to_string())?;
 
@@ -190,35 +189,59 @@ async fn stream_reply(
         history: submit.history.clone(),
     };
 
-    let mut stream = match provider.stream(req).await {
+    let stream = match provider.stream(req).await {
         Ok(s) => s,
         Err(e) => return Err(describe_error(&e)),
     };
 
+    let (full, finish_reason, usage) = consume_reply(stream, tx, &submit.cancel).await?;
+    let _ = tx.send(DisplayEvent::ChatFinished {
+        finish_reason,
+        usage,
+    });
+    Ok(full)
+}
+
+/// Drain one reply stream into text, a finish reason, and its usage.
+///
+/// Split out of [`stream_reply`] because **this is where the usage was thrown
+/// away** — `StreamChunk::Usage` was matched with `{}` — and a test that cannot
+/// reach the code that lost it proves nothing about the loss. A test that
+/// drives `AppState::apply_display_event` with a usage value is green whether
+/// or not this function ever produces one, and it was.
+async fn consume_reply(
+    mut stream: Pin<Box<dyn futures::Stream<Item = anyhow::Result<StreamChunk>> + Send>>,
+    tx: &mpsc::Sender<DisplayEvent>,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<(String, Option<String>, Option<TokenUsage>), String> {
+    use futures::StreamExt;
+
     let mut full = String::new();
     let mut finish_reason: Option<String> = None;
+    // `None` means the provider reported none — which is different from
+    // reporting zero, and the surface distinguishes the two.
+    let mut usage: Option<TokenUsage> = None;
     while let Some(chunk) = stream.next().await {
-        if submit.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             let _ = tx.send(DisplayEvent::ChatError {
                 message: "Cancelled — the request was stopped before it finished.".to_string(),
                 cancelled: true,
             });
-            return Ok(full);
+            return Ok((full, finish_reason, usage));
         }
         match chunk {
-            Ok(crate::llm::provider::StreamChunk::Text(t)) => {
+            Ok(StreamChunk::Text(t)) => {
                 full.push_str(&t);
                 let _ = tx.send(DisplayEvent::ChatDelta { text: t });
             }
-            Ok(crate::llm::provider::StreamChunk::Finish { reason }) => {
+            Ok(StreamChunk::Finish { reason }) => {
                 finish_reason = Some(reason);
             }
-            Ok(crate::llm::provider::StreamChunk::Usage(_)) => {}
+            Ok(StreamChunk::Usage(u)) => usage = Some(u),
             Err(e) => return Err(describe_error(&e)),
         }
     }
-    let _ = tx.send(DisplayEvent::ChatFinished { finish_reason });
-    Ok(full)
+    Ok((full, finish_reason, usage))
 }
 
 /// Name the failure, not the transport.
@@ -701,10 +724,126 @@ pub async fn run_task_to_sink(
     // skip the streaming path the rest of the surface already uses.
     let _ = tx.send(DisplayEvent::ChatFinished {
         finish_reason: None,
+        // The pipeline billed this turn itself; re-counting it here would
+        // double it. `None` means "not counted here", not "costed nothing".
+        usage: None,
     });
     let _ = tx.send(DisplayEvent::ChatDelta { text: summary });
     let _ = tx.send(DisplayEvent::ChatFinished {
         finish_reason: None,
+        usage: None,
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod reply_stream_tests {
+    use super::*;
+    use futures::Stream;
+
+    fn chunk_stream(
+        items: Vec<StreamChunk>,
+    ) -> Pin<Box<dyn Stream<Item = anyhow::Result<StreamChunk>> + Send>> {
+        Box::pin(futures::stream::iter(items.into_iter().map(Ok)))
+    }
+
+    /// The reply stream's **usage** reaches the caller.
+    ///
+    /// This is the code that lost it: `StreamChunk::Usage` was matched with
+    /// `{}`, so a chat conversation never moved `token_count`, the `ctx` gauge
+    /// in the status bar read 0% for ever, and `/context` reported
+    /// "Utilized: 0%" while the model was being handed the whole conversation
+    /// on every request.
+    ///
+    /// The first version of this test drove `AppState::apply_display_event`
+    /// with a usage value instead, and was **green against the defect** — it
+    /// could not see whether the chat ever produced one. This one starts at
+    /// the stream.
+    #[tokio::test]
+    async fn the_reply_streams_usage_back_to_the_caller() {
+        let (tx, _rx) = mpsc::channel();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let stream = chunk_stream(vec![
+            StreamChunk::Text("hello".into()),
+            StreamChunk::Usage(TokenUsage {
+                input_tokens: 1200,
+                output_tokens: 340,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
+            }),
+            StreamChunk::Finish {
+                reason: "stop".into(),
+            },
+        ]);
+
+        let (text, reason, usage) = consume_reply(stream, &tx, &cancel).await.unwrap();
+        assert_eq!(text, "hello");
+        assert_eq!(reason.as_deref(), Some("stop"));
+        let u = usage.expect(
+            "the provider reported usage and the stream dropped it — the context \
+             gauge is decoration that reads 0% for ever",
+        );
+        assert_eq!(u.input_tokens, 1200);
+        assert_eq!(u.output_tokens, 340);
+    }
+
+    /// A provider that reports no usage says so, rather than reporting zero.
+    #[tokio::test]
+    async fn no_usage_is_not_zero_usage() {
+        let (tx, _rx) = mpsc::channel();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let stream = chunk_stream(vec![
+            StreamChunk::Text("hi".into()),
+            StreamChunk::Finish {
+                reason: "stop".into(),
+            },
+        ]);
+        let (_, _, usage) = consume_reply(stream, &tx, &cancel).await.unwrap();
+        assert!(
+            usage.is_none(),
+            "a provider that sent no Usage chunk reported none, which is not the \
+             same as reporting zero: {usage:?}"
+        );
+    }
+
+    /// A cancelled reply says it was cancelled, and stops.
+    ///
+    /// The first draft of this asserted that the partial text is *returned*,
+    /// and it failed with `left: ""`. That was the test being wrong: the loop
+    /// checks the flag before accumulating, so a stream cancelled up front
+    /// yields no text — which is right. Text already streamed reached the user
+    /// as `ChatDelta` events and is on their screen; this function returning it
+    /// again would duplicate it.
+    ///
+    /// What matters, and is asserted here, is that cancelling is *visible* —
+    /// a silent stop would leave a user waiting for an answer that was never
+    /// coming.
+    #[tokio::test]
+    async fn a_cancelled_reply_says_so_and_stops() {
+        let (tx, rx) = mpsc::channel();
+        let cancel = std::sync::atomic::AtomicBool::new(true);
+        let stream = chunk_stream(vec![
+            StreamChunk::Text("partial".into()),
+            StreamChunk::Usage(TokenUsage {
+                input_tokens: 900,
+                output_tokens: 100,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
+            }),
+        ]);
+        let _ = consume_reply(stream, &tx, &cancel).await.unwrap();
+
+        let mut saw_cancel = false;
+        while let Ok(ev) = rx.try_recv() {
+            if let DisplayEvent::ChatError { cancelled, .. } = ev {
+                assert!(cancelled, "the event must be marked as a cancellation");
+                saw_cancel = true;
+            }
+        }
+        assert!(
+            saw_cancel,
+            "a cancelled reply must tell the user it was cancelled; a silent stop \
+             is indistinguishable from a hang"
+        );
+    }
 }
