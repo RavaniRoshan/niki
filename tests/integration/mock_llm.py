@@ -275,23 +275,58 @@ def _tool_result_seen(body):
 
 
 def seen_count(body):
-    """How many tool results the conversation carries, on either wire format.
+    """How many tool results the conversation carries, in the shape NIKI sends.
 
-    OpenAI sends a `{role: tool}` turn; Anthropic puts `tool_result` blocks in
-    a user turn. A scenario scripted on one provider and run on the other must
-    count the same, or the same script replays a call for ever.
+    Two wire formats, because a scenario must behave the same whichever the
+    provider is pointed at:
+
+    * OpenAI sends a `{role: "tool"}` turn.
+    * A spec-shaped server sends a `tool_result` content block.
+    * **NIKI's own Anthropic client sends neither.** `llm/anthropic.rs:65`
+      flattens the whole chain to `{"role": …, "content": "<string>"}`, so a
+      tool result arrives as a plain *user* turn of text.
+
+    That third case is why the scripted sequence replayed `ask_user` for ever
+    in a live run while every unit test passed: the counter only understood
+    the first two, saw zero results on every request, and re-served call 0.
+    From the outside that is indistinguishable from an agent asking the same
+    question twice — which is what `ROADMAP.md` §9.2a spent three slices
+    chasing.
+
+    The text form is counted as *exchanges*: a loop that has seen N results has
+    N extra user turns after the first, because the chain alternates
+    user/assistant with a user turn per exchange. That is a statement about
+    this harness's own protocol, and `mock_server_scripts_tool_calls.rs` pins
+    it against all three shapes rather than leaving it to a comment.
     """
     n = 0
     content = body.get("messages")
-    if isinstance(content, list):
-        for turn in content:
-            if turn.get("role") == "tool":
-                n += 1
-            blocks = turn.get("content")
-            if isinstance(blocks, list):
-                for block in blocks:
-                    if isinstance(block, dict) and block.get("type") == "tool_result":
-                        n += 1
+    if not isinstance(content, list):
+        return 0
+    for turn in content:
+        if turn.get("role") == "tool":
+            n += 1
+            continue
+        blocks = turn.get("content")
+        if isinstance(blocks, list):
+            for block in blocks:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    n += 1
+    text_turns = sum(
+        1
+        for turn in content
+        if isinstance(turn.get("content"), str) and turn.get("role") in ("user", "assistant")
+    )
+    # Only the *text* form contributes here; the two above are already counted
+    # and would double-count if this ran on the same conversation.
+    spec = sum(
+        1
+        for turn in content
+        if turn.get("role") == "tool"
+        or isinstance(turn.get("content"), list)
+    )
+    if spec == 0 and text_turns > 1:
+        n += (text_turns - 1) // 2
     return n
 
 
@@ -338,6 +373,16 @@ def openai_json_response(role, body):
     usage = {"prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 150}
 
     scripted = _next_scripted_call(body)
+    # Trace the result count this request reports. The scripted sequence is
+    # keyed on it, and a counter that does not advance replays the first call
+    # for ever — which reads, from the outside, exactly like a product that
+    # asks the same question twice.
+    if os.environ.get("MOCK_LLM_TRACE") == "1":
+        sys.stderr.write(
+            "[mock_llm] seen_results=%d next=%s tools=%d\n"
+            % (seen_count(body), (scripted or {}).get("name"), len(tools or []))
+        )
+        sys.stderr.flush()
     if scripted and tools:
         return _openai_tool_call(
             scripted["name"],
@@ -399,6 +444,16 @@ def anthropic_json_response(role, body):
     # A feature scripted on one provider and run on the other has to be tested
     # on both, or it is not a feature and it is a trap.
     scripted = _next_scripted_call(body)
+    # Trace the result count this request reports. The scripted sequence is
+    # keyed on it, and a counter that does not advance replays the first call
+    # for ever — which reads, from the outside, exactly like a product that
+    # asks the same question twice.
+    if os.environ.get("MOCK_LLM_TRACE") == "1":
+        sys.stderr.write(
+            "[mock_llm] seen_results=%d next=%s tools=%d\n"
+            % (seen_count(body), (scripted or {}).get("name"), len(tools or []))
+        )
+        sys.stderr.flush()
     if scripted and tools:
         return {
             "id": "msg_" + uuid.uuid4().hex[:24],

@@ -149,7 +149,15 @@ tui_begin_run() {
   command -v python3 >/dev/null 2>&1 || { tui_skip "python3 is needed to run the scripted model"; return 1; }
 
   SMOKE_PROJ="$(mktemp -d "${TMPDIR:-/tmp}/niki-tui-run.XXXXXX")"
-  trap 'tui_kill; tui_stop_mock; rm -rf "$SMOKE_PROJ" 2>/dev/null || true' EXIT
+  # `TUI_KEEP_HOME=1` keeps the project — and the mock's stderr, which is the
+  # only explanation a failing case will have. Honoured here as well as in
+  # `tui_new_session`, because a run's directory is where the evidence is.
+  if [ "${TUI_KEEP_HOME:-0}" = "1" ]; then
+    trap 'tui_kill; tui_stop_mock' EXIT
+    echo "  (project kept at $SMOKE_PROJ)" >&2
+  else
+    trap 'tui_kill; tui_stop_mock; rm -rf "$SMOKE_PROJ" 2>/dev/null || true' EXIT
+  fi
 
   # A real repository. The pipeline creates a branch, and `git worktree add`
   # fails on anything that is not a repository — so a temp directory is not
@@ -171,6 +179,7 @@ tui_begin_run() {
   # the reader to guess.
   MOCK_ERR="$SMOKE_PROJ/mock.stderr"
   MOCK_LLM_SCRIPT="$SMOKE_PROJ/script.json" MOCK_LLM_PORT="$MOCK_PORT" \
+    MOCK_LLM_TRACE="${MOCK_LLM_TRACE:-0}" \
     python3 "$HERE/../integration/mock_llm.py" >/dev/null 2>"$MOCK_ERR" &
   MOCK_PID=$!
   local deadline=$((SECONDS + 20))
