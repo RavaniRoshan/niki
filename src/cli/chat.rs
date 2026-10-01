@@ -256,7 +256,13 @@ const NO_PROVIDER_MESSAGE: &str = "No LLM provider is configured yet. Run `niki 
 
 /// Process a submitted user message: stream the reply back into the chat
 /// session as an assistant turn.
-fn process_message(
+///
+/// Public because it is the seam a property is asserted at, not because a test
+/// wanted it: "dispatching a message does not run the pipeline" is a claim
+/// about the product, and the only honest way to assert it is to call the
+/// dispatcher and look at what it left behind. The same convention
+/// `run_task_to_sink` follows, above.
+pub fn process_message(
     tx: &mpsc::Sender<DisplayEvent>,
     config: &NikiConfig,
     project_dir: &std::path::Path,
@@ -273,14 +279,38 @@ fn process_message(
             });
             return;
         }
-        run_task_from_chat(
-            tx,
-            config,
-            project_dir,
-            task.to_string(),
-            submit.cancel.clone(),
-            submit.permission_mode.clone(),
-        );
+        // On its own thread, so the chat keeps answering while a run is in
+        // flight.
+        //
+        // It used to run inline, and `run_task_from_chat` builds a runtime and
+        // `block_on`s the whole pipeline — so for the length of a run this
+        // function never returned, its caller's `on_submit_rx.recv()` loop
+        // never reached its next iteration, and **every message typed during a
+        // run sat in the channel** until the run finished, then was answered
+        // as if it had just been sent. A second `/run` waited behind the first
+        // with nothing on screen saying so.
+        //
+        // It was hard to see because the TUI is a different thread and kept
+        // reading keys: the *interface* stayed live and answered a question
+        // mid-run while the *chat* was deaf. `tests/chat_stays_responsive_
+        // during_a_run.rs` pins the cost of dispatch, which is where the two
+        // differ.
+        let run_tx = tx.clone();
+        let run_config = config.clone();
+        let run_project = project_dir.to_path_buf();
+        let run_cancel = submit.cancel.clone();
+        let run_mode = submit.permission_mode.clone();
+        let run_task = task.to_string();
+        std::thread::spawn(move || {
+            run_task_from_chat(
+                &run_tx,
+                &run_config,
+                &run_project,
+                run_task,
+                run_cancel,
+                run_mode,
+            );
+        });
         return;
     }
 

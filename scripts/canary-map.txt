@@ -402,3 +402,5 @@ mock-anthropic-format-too | a_scripted_sequence_works_on_the_anthropic_format_to
 # B7-08 · the loop's half of §9.2a, measured
 question-answer-reaches-the-loop | a_questions_answer_reaches_the_loop_and_it_moves_on | the loop never seeing the answer, so the agent asks the same question twice
 question-closes-when-answered | a_question_closes_when_it_is_answered | a question left on screen whose tool already returned
+# B7-11 · a run must not deafen the chat
+run-dispatch-costs-what-a-message-costs | dispatching_a_run_costs_about_what_dispatching_a_message_costs | the pipeline running inline on the thread that receives messages
