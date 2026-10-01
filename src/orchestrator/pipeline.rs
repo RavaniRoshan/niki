@@ -2711,8 +2711,19 @@ pub async fn execute_pipeline(
     // The manager is a local, so it drops at the end of this block; the stdio
     // children go with it via `kill_on_drop` in the client, because
     // `shutdown()` has no production caller either.
-    let mcp_tools: String = if bare {
-        String::new()
+    //
+    // The manager is now an `Arc` held for the **whole run**, not a local of
+    // this block. That is the actual reason the agent→server call path could
+    // not exist: `McpManager` dropped here, the `McpConnection`s went with it,
+    // and `kill_on_drop(true)` killed the stdio children — so every server was
+    // dead before the Planner's first token. `call_tool` was not merely
+    // unreachable, it had nothing left to reach.
+    //
+    // A server that is started and immediately killed is also worse than one
+    // that is never started: the user gets a summary naming tools that are
+    // already gone, and pays the spawn cost either way.
+    let mcp: Option<std::sync::Arc<crate::mcp::McpManager>> = if bare {
+        None
     } else if config.mcp.enabled {
         let mut mgr = crate::mcp::McpManager::new();
         if let Err(e) = mgr.connect_all().await {
@@ -2722,10 +2733,11 @@ pub async fn execute_pipeline(
         if !summary.is_empty() {
             display.notice(summary.clone(), true);
         }
-        summary
+        Some(std::sync::Arc::new(mgr))
     } else {
-        String::new()
+        None
     };
+    let mcp_tools: String = mcp.as_ref().map(|m| m.tools_summary()).unwrap_or_default();
 
     let event_tx = display.tui_tx().unwrap_or_else(|| {
         let (tx, _) = std::sync::mpsc::channel();
@@ -4386,6 +4398,16 @@ run_stage(
             "independently_reviewed": outcome.is_independently_reviewed(),
         }),
     )?;
+
+    // Shut the MCP servers down at the **end of the run**, gracefully, now
+    // that they live this long. `shutdown()` sends `shutdown`/`exit` and then
+    // kills the child; dropping the last `Arc` would kill it too, but by then
+    // the run's output is already returned and the servers would outlive the
+    // process's own bookkeeping by however long the caller takes to drop the
+    // result.
+    if let Some(m) = &mcp {
+        m.shutdown().await;
+    }
 
     Ok(PipelineResult {
         task_id: task.id,

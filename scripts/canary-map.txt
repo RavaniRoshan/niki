@@ -366,3 +366,11 @@ network-setting-follows-the-wildcard | the_network_setting_follows_the_wildcard 
 # B6-10 · the question modal gated on the payload, not on what is visible
 question-with-no-modal-does-not-swallow | a_question_with_no_visible_modal_does_not_swallow_keys | an invisible question answering itself and swallowing the key
 visible-modal-with-no-question-is-free | a_visible_modal_with_no_question_does_not_swallow_keys | a modal with nothing behind it claiming keys
+# B7-01 · the MCP call path, against a real MCP server over a real process
+mcp-tool-can-actually-be-called | a_discovered_mcp_tool_can_actually_be_called | a call path that answers itself instead of the server
+mcp-read-only-governance-refuses-a-write | read_only_governance_refuses_a_mutating_tool | the default posture letting a server it has never seen write
+mcp-unknown-tool-named | a_tool_the_server_never_advertised_is_refused_by_name | an unknown tool reaching the server, or hanging
+mcp-server-error-is-an-error | a_server_side_failure_is_an_error_not_an_empty_success | a server failure reaching the model as Success with nothing in it
+mcp-held-manager-stays-callable | a_held_manager_keeps_its_server_callable | the manager scoped to discovery, so the server dies before the run
+mcp-shutdown-is-reachable | shutdown_is_callable_on_a_manager_that_connected | servers that can never be reaped at the end of a run
+mcp-manager-outlives-discovery | the_pipeline_holds_the_mcp_manager_beyond_discovery | the original scope, back again
