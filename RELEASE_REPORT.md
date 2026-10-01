@@ -18,8 +18,8 @@ Run of 2026-09-30, after batch 2's last commit. Raw output in `EVIDENCE.md`.
 |---|---|---|
 | **G1** clean clone, install, README quick start | **PASS** | all scripts parse; every published download URL resolves; `niki 0.9.0 — README quick start commands accepted` |
 | **G2** build, lint | **PASS** | `cargo fmt --check`; `cargo clippy --all-targets -D warnings` warning-free; debug and release both build |
-| **G3** tests + can-fail map | **PASS** | lib **943**; `run_lifecycle` **14**; **217 can-fail entries** all resolve to a real test |
-| **G4** the core flow, for real | **PASS** | `run_lifecycle` 14; `chat_runs_the_pipeline`; `scripts/demo.sh`; the tmux suite **15/15** |
+| **G3** tests + can-fail map | **PASS** | lib **996**; `run_lifecycle` **14**; **317 can-fail entries** all resolve to a real test |
+| **G4** the core flow, for real | **PASS** | `run_lifecycle` 14; `chat_runs_the_pipeline`; `scripts/demo.sh`; the tmux suite **16/16**, including the first case that runs a pipeline |
 | **G5** security | **PASS** | `cargo deny check` ok; `cargo audit` ok (11 pre-existing allowed warnings); **no credentials in the tree or in history** |
 | **G6** failure paths | **PASS** | every failure path exits non-zero *and* says something a person can act on |
 | **G7** docs match reality | **PASS** | the audit's counts are re-derived from the tree; every README command parses against the real binary |
@@ -669,3 +669,78 @@ G8   PASS   manifest parity: ok                 ← this tree
 A red G8 on a local branch now says *what is wrong* rather than only *that
 something is*. It goes fully green on a push, which remains the owner's
 decision.
+
+### The run this section describes
+
+`scripts/verify.sh --update-evidence` at the end of batch 7, pasted into
+`EVIDENCE.md`: G1–G7 and G9 **PASS**, G8 **FAIL**, tmux **16/16**, lib
+**996**, **317** can-fail entries. G8's failure is the unpushed branch, and
+the one CI job it covers is green here via `scripts/manifest-parity.sh`.
+
+## 2g · Batch 7 — the call path, the salvaged diff, and a harness that runs
+
+Nine commits, `0e52610`…`aab7685`. Canary map 303 → 317. PTY 15 → 16.
+Lib tests 995 → 996.
+
+The ranked list was drained when batch 7 opened, so it worked the two items
+that were records rather than repairs — and found that both were hiding a
+defect underneath.
+
+### The MCP call path was pointing at corpses
+
+`ROADMAP.md` called it "a feature, not a repair", because the manager had to be
+held for the whole run. Measuring found the manager was a local of the
+**discovery block**: the connections dropped with it, `kill_on_drop(true)`
+killed the stdio children, and every configured server was dead before the
+Planner's first token. Not unreachable — dead.
+
+Which is worse than never starting: the user got a summary naming tools that
+were already gone, and paid the spawn cost either way. Four slices closed it,
+and the flag that existed to notice the closing **fired**.
+
+### §9.1 was two problems wearing one name
+
+`niki resume` says re-run the task, which spends the Planner and the Coder
+again and produces a *different* diff. Salvaged work was being thrown away for
+want of a way to look at it — and the blocker was not resuming the pipeline. It
+was that a failed run wrote the change as **JSON** while every surface that
+points at a diff points at `changes.patch`, which a failed run never wrote.
+
+A salvaged run now renders a real unified diff, in a scratch copy, with its
+own "UNREVIEWED" header. The working tree is never touched. The path rewriting
+took three attempts and only `git apply --check` caught the third: `git diff
+--no-index` concatenates its prefix with the path, so stripping the
+leading-separator form first leaves `asrc/lib.rs`.
+
+### What the new harness found on its first run
+
+Every pty case drove `niki chat`, which by §0a sends no tools — so
+`ask_user` and `approval` had no end-to-end coverage at all, and the mock's
+tool loop was two hardcoded calls so no test could drive anything else.
+
+The first execution of the new case found a crash: the mock's
+`anthropic_json_response` referenced `scripted` without computing it, raised
+`NameError`, and killed the connection. B7-06's own tests had only driven the
+OpenAI path and passed. A feature scripted on one provider and run on the
+other is tested on both, or it is a trap.
+
+### §9.2a, narrowed rather than guessed
+
+After an answer, the run does not reach a verdict. Two follow-up tests closed
+the obvious explanations: the **loop** asks once, feeds the answer back and
+produces its artifact; the **interface** closes the modal, takes the request,
+clears the field and hands the tool the text typed. So the remaining question
+is how `niki chat`'s event loop and a live run interleave — the one dimension
+no unit test covers.
+
+### Process failures, recorded because they cost time
+
+- **A commit shipped with a clippy failure**, because `| tail` made the
+  pipeline's exit status `tail`'s. Clippy was right about a real defect in the
+  same commit. *A pipe at the end of a gate hides the gate.*
+- **Five signature threads, five regex failures**, all caught by the compiler.
+  The roadmap's estimate was four signatures; it is five.
+- **Two harness lessons.** `tui_send` (key names) and `tui_type` (literal
+  characters) are different operations, and conflating them cost a run in each
+  direction. And the mock's stderr goes to a file, because a harness that
+  cannot explain its own failure teaches the reader to guess.

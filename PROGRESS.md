@@ -933,3 +933,138 @@ the owner's standing decision, not a failure to fix.
 - The 8-character container-name truncation is a known ~1-in-4·10⁹ collision
   window, chosen over a longer name for readability, and now asserted as a
   window rather than assumed away.
+
+## Iteration 7 — 2026-10-01 · batch 7, nine slices
+
+Commits `0e52610`…`aab7685`. Canary map 303 → 317. PTY suite 15 → 16 cases.
+Lib tests 995 → 996.
+
+Batch 6 ended with the ranked list drained and two items left that were
+records rather than repairs. Batch 7 closed §9.2, split §9.1 into a part that
+needed no decision and a part that does, and built the harness that made the
+remaining gap visible at all.
+
+| # | Commit | Slice |
+|---|---|---|
+| B7-01 | `0e52610` | The MCP servers were alive for four lines |
+| B7-02 | `df976ed` | A discovered tool is a `Tool` a model can call |
+| B7-03 | `c271956` | The summary stops denying what now works, and the flag fires |
+| B7-04 | `1f05172` | The research loop registers MCP tools too |
+| B7-05 | `ee7747b` | A salvaged run hands a human a diff, not JSON |
+| B7-06 | `dae43c9` | The mock server can script any tool call, in order |
+| B7-07 | `9592755` | The first pty case that runs a pipeline |
+| B7-08 | `e9bcdf2` | §9.2a's loop half, measured |
+| B7-09 | `aab7685` | §9.2a's interface half, so one explanation is left |
+
+### §9.2: the call path was pointing at corpses
+
+The roadmap said the agent→server call path "is still a feature, not a
+repair", because the manager was scoped to a block. Measuring found something
+worse than unreachable: **the manager was a local of the discovery block**, the
+connections dropped with it, and `kill_on_drop(true)` killed the stdio
+children. Every configured server was dead before the Planner's first token,
+and `call_tool` was not an unreachable function — it was pointing at corpses.
+
+A server that is started and immediately killed is *worse* than one never
+started: the user got a summary naming tools that were already gone, and paid
+the spawn cost either way.
+
+Four slices closed it. The manager is an `Arc` held for the run; a discovered
+tool becomes a `Tool` named `mcp__{server}__{tool}`, so a server's `bash`
+cannot shadow NIKI's; the permission mirrors the governance; and
+`isError: true` is a failure rather than a payload that reads like an answer.
+
+**The flag fired.** `the_missing_call_path_is_still_recorded_as_missing`
+existed so closing the gap would be a visible event; its assertion was
+`callers == 0`, and there are now callers. Its replacement pins the other
+side, because a feature that is wired can also be unwired quietly.
+
+### §9.1 was two things, not one
+
+`niki resume` tells a user to re-run the task — which spends the Planner and
+the Coder again and produces a *different* diff, because an LLM is not
+deterministic. So salvaged work was thrown away for want of a way to look at
+it, and the thing blocking that was not "resume mid-pipeline". It was that a
+failed run wrote the change as **JSON** while the Run page, the completion
+screen and `niki report` all point at `changes.patch`, which a failed run
+never wrote.
+
+`render_salvaged_patch` renders it in a scratch copy. The working tree is
+never touched, no branch is cut, and the patch carries its own warning. The
+path rewrite was wrong three times and only a real `git apply --check` caught
+it: `git diff --no-index` prints its prefix *concatenated* with the path, so
+stripping the leading-separator form first leaves `asrc/lib.rs` — the prefix
+welded to the file. Every intermediate version looked right, because the
+hunks were right.
+
+Resuming the pipeline partway stays a decision (§9.1), now with both halves
+named.
+
+### The harness, and what it immediately found
+
+Every pty case drove `niki chat`, which by §0a sends no tools — so
+`ask_user` and `approval` had **no** end-to-end coverage. The mock's tool
+loop was two hardcoded calls, so no test could drive any other tool.
+
+`16_agent_asks_the_user` runs the whole chain and found a crash on its first
+execution: the mock's `anthropic_json_response` referenced `scripted` without
+computing it, raised `NameError`, and killed the handler's connection. B7-06's
+own tests only drove the OpenAI path. **A feature scripted on one provider and
+run on the other is tested on both, or it is a trap.**
+
+### §9.2a, narrowed twice
+
+The case found that after an answer the run does not reach a verdict. Two
+follow-up tests closed the obvious explanations:
+
+| Test | Excludes |
+|---|---|
+| `a_questions_answer_reaches_the_loop_and_it_moves_on` | the tool loop — the question is asked once, the answer is in the conversation, the artifact is produced |
+| `a_question_closes_when_it_is_answered` | the interface's state machine — the modal closes, the request is taken, the field is cleared, focus returns, the tool gets the text typed |
+
+So what remains is how `niki chat`'s event loop and a live run interleave —
+the one dimension no unit test covers, because every unit test drives the
+state machine directly rather than through a running pipeline. Written down
+in §9.2a so the next reader does not re-run either.
+
+### Process failures in this batch, recorded because they cost time
+
+- **A commit shipped with a clippy failure.** `cargo clippy … | tail -2` makes
+  the pipeline's exit status `tail`'s, so the `&&` chain continued. Clippy was
+  right about a real defect: the mock's startup-timeout path leaked a python
+  process. *A pipe at the end of a gate hides the gate.*
+- **Every one of the five signature threads for the MCP manager was attempted
+  with a regex first**, and all five went wrong in ways the compiler caught —
+  misplaced arguments, a regex that reached into a macro, a `mcp` that landed
+  after the parameter it was meant to precede. Done by hand in the end. The
+  roadmap's estimate ("four signatures") was low; it is five.
+- **Two harness lessons, both paid for in runs.** `tui_send` and `tui_type`
+  are different operations: tmux parses a bare argument as a key *name*, so a
+  digit sent that way never arrived and the answer never reached the modal —
+  which reads exactly like a modal that ignores the keyboard. Making `-l` the
+  default then broke `Enter` in nine cases. And the mock's stderr now goes to
+  a file, because a harness that cannot explain its own failure teaches the
+  reader to guess.
+
+### Next
+
+§9.2a, from a narrowed position. §9.1 (resuming the pipeline) and §9.8
+(unpushed) are decisions, not repairs. `ROADMAP.md` §8 — the four
+Claude-architecture tasks — is queued and untouched, per the owner's ordering.
+
+### Blockers
+
+Unchanged; see `BLOCKERS.md`. **B1** (no push, so G8 stays red) remains the
+owner's standing decision, and the local `scripts/manifest-parity.sh` proves
+that the one job it covers is green on this tree.
+
+### Assumptions in force
+
+- One interface per process is what lets a single `HumanInput` channel stand
+  in for "whoever is driving this run"; two TUIs in one process would need a
+  per-run channel.
+- The container name's 8-character id truncation is a known ~1-in-4·10⁹
+  collision window, chosen over a longer name for readability, and now
+  asserted as a window rather than assumed away.
+- A salvaged run's recovery is inert by design. `render_salvaged_patch` makes
+  that a tested property rather than a comment.
