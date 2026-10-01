@@ -199,6 +199,55 @@ fn known_failing_invariants_are_still_failing() {
     // fires — otherwise the fixture has drifted into testing nothing.
     assert!(failing.contains("INV-ARTIFACT-SEMANTIC"));
 
+    // **`INV-STAGE-MANIFEST` was struck from `KNOWN_FAILING` in batch 8.**
+    //
+    // The entry said *"a SingleAgent run records no stage metrics at all"*.
+    // The cause was real — the last exit out of `run_coder_tool_loop`, the one
+    // where the loop **errored**, returned `None` with no bill — and it was
+    // fixed in batch 8. What this ratchet could never tell is whether the
+    // *product* meters a topology, because it only ever sees synthetic traces.
+    //
+    // So the proof is not here. `tests/run_lifecycle.rs` runs the real
+    // SingleAgent path against the real mock and reads `task.json` back:
+    // **metered roles `["planner", "coder"]`**. The entry was false against the
+    // product.
+    //
+    // What is left here is the check itself, in both directions.
+    let manifest_shape = |metrics: Value| invariants::RunTrace {
+        task_dir: PathBuf::from("/nonexistent-task-dir"),
+        record: Some(serde_json::json!({
+            "status": "Completed",
+            "topology": "singleagent",
+            "agent_metrics": metrics,
+        })),
+        artifacts: std::collections::BTreeMap::new(),
+        patch: Some("diff --git a/src/list.rs b/src/list.rs\n".to_string()),
+        report: None,
+    };
+    let manifest = |t: invariants::RunTrace| {
+        invariants::check(&t)
+            .into_iter()
+            .find(|(id, _, _)| *id == "INV-STAGE-MANIFEST")
+            .map(|(_, _, v)| v)
+    };
+
+    let metered = manifest(manifest_shape(serde_json::json!([{"role": "coder"}])))
+        .expect("the invariant is still registered");
+    assert!(
+        matches!(metered, Verdict::Pass),
+        "a SingleAgent run that metered its Coder must not be flagged: {}",
+        describe(&metered)
+    );
+
+    let silent =
+        manifest(manifest_shape(Value::Array(vec![]))).expect("the invariant is still registered");
+    assert!(
+        matches!(silent, Verdict::Fail(_)),
+        "a SingleAgent run that metered nothing must still be caught — \
+         otherwise striking the entry removed a check rather than a debt: {}",
+        describe(&silent)
+    );
+
     // **`INV-VERDICT-NOT-FABRICATED` was struck from `KNOWN_FAILING` in batch 8.**
     //
     // It named this defect: *"SingleAgent assigns `verdict = Verdict::Approved`

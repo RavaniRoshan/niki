@@ -534,7 +534,21 @@ pub fn invariants() -> Vec<Invariant> {
                             .collect()
                     })
                     .unwrap_or_default();
-                if topology.contains("Single") && executed.is_empty() {
+                // **Case-insensitively**, because that is what the product
+                // writes. `TopologyMode` is `#[serde(rename_all = "lowercase")]`
+                // (`src/config/types.rs:1168`), so a real run records
+                // `"singleagent"` — and `contains("Single")` never matched it.
+                //
+                // That made this check **dead in production**: the one thing it
+                // exists to catch, a SingleAgent run that metered nothing,
+                // could not be caught by a SingleAgent run. It only ever fired
+                // on the hand-built trace in `KNOWN_FAILING`, which is why the
+                // entry survived so long while describing a defect the product
+                // did not have.
+                //
+                // Both spellings are accepted so a hand-written or older record
+                // is still checked.
+                if topology.to_ascii_lowercase().contains("single") && executed.is_empty() {
                     return fail(
                         "topology is SingleAgent but no stage was metered. The fast path must \
                          still record that it ran, or a run can be indistinguishable from a no-op.",
@@ -575,10 +589,6 @@ pub const KNOWN_FAILING: &[(&str, &str)] = &[
     (
         "INV-ARTIFACT-SEMANTIC",
         "artifact schemas declare no minItems/minLength, so a no-op validates cleanly",
-    ),
-    (
-        "INV-STAGE-MANIFEST",
-        "a SingleAgent run records no stage metrics at all",
     ),
 ];
 
