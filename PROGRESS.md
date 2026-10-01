@@ -1068,3 +1068,102 @@ that the one job it covers is green on this tree.
   asserted as a window rather than assumed away.
 - A salvaged run's recovery is inert by design. `render_salvaged_patch` makes
   that a tested property rather than a comment.
+
+## Iteration 7b — 2026-10-01 · batch 7, the live half
+
+Commits `49c5c31`…`e7bba55`. Canary map 323 → 335. PTY 16 → 16.
+
+The first half of batch 7 closed the two ranked items that were records
+rather than repairs. This half is what a **real model** found, which no mock
+in this repository could: six defects, three of them in the Coder's tool loop,
+none of them reachable from a scripted server.
+
+| # | Commit | Slice |
+|---|---|---|
+| B7-14 | `49c5c31` | A model that finished the work is asked to submit it — **live-verified** |
+| B7-14b | `d522b82` | A failed run that never checkpointed said "os error 2" |
+| B7-15 | `d99ea03` | An artifact edit the tool loop already made is not a failure |
+| B7-16 | `89968ea` | A bare artifact in prose is recovered, even behind another brace |
+| B7-17 | `e7bba55` | A path the agent removed must not empty the whole diff |
+| B7-18 | `84827b5` | Batch 7's records and a full nine-gate run |
+
+### What a live model showed that no mock could
+
+The Coder's tool loop ran six steps — `read`, `edit`, `bash`, the edit applied
+and compiling — and then said *"The change is in place and compiles cleanly"*
+without ever calling `submit_artifact`. `recover_submission` found no JSON in
+the prose, returned `None`, and the caller **discarded the loop and re-ran the
+whole Coder one-shot**. The work was in the worktree the entire time.
+
+That is §9.3, and the loop now asks once — plainly, naming the tools already
+used — before it gives up. **Live-verified**: the same model and task then
+submitted in 36 s.
+
+Three more followed, each from the same run or its successors:
+
+- **§9.3b — a double-apply.** The Coder used the edit tools *and* submitted
+  an artifact, so the artifact re-applied what the tools had already written
+  and every block's `search` text was gone. My first reading — "a no-op edit
+  was accepted" — was **wrong**, and one grep corrected it: the validator
+  already rejects a no-op. Both sandboxes now treat an edit as already applied
+  when its `search` is absent, its `replace` is present, and the `replace` is
+  big enough for its presence to mean something. Not in the `edit` tool,
+  where a no-op is what the user asked for.
+- **§9.3c — a bare artifact in prose, dropped.** `first_json_object` took the
+  **first** `{` in the text, so a model whose prose contained a brace before
+  the artifact started the span in the wrong place. Writing the test also
+  found a pre-existing weakness: the "looks like an artifact" check was
+  `edits.is_some()`, so a *description* of the shape was taken at its word.
+- **§9.5 — a stale path emptied the diff.** The agent's file list accumulates
+  across revision rounds; one the Coder declared and a later revision removed
+  made `git add -N` fail for the **whole invocation**, so every genuinely new
+  file dropped out of the patch. The run warned "a brand-new file may be
+  missing". It may indeed have been.
+
+### Two models, two failures, and that is the point
+
+`stealth/space-bunny-alpha` runs the whole pipeline. `poolside/laguna-s-2.1:free`
+cannot finish a task at all — its Planner emits no conformant artifact — and
+*that* is what exposed the recovery path reporting `No such file or directory
+(os error 2)` on a run that had already failed for a perfectly good reason.
+
+A live model is not only a way to find defects on the happy path. **A model
+too weak to get through stage one still fails loudly and early**, which is how
+the failure paths get exercised for real.
+
+### The final run
+
+A full pipeline, release build, `--backend worktree`, and **no "the patch did
+not apply" anywhere** — including across a revision round, which is where
+§9.3b used to bite:
+
+| Stage | Result |
+|---|---|
+| Planner | 47s |
+| Coder | 90s — submitted |
+| Tester | 5/8 passed, 4 edge cases identified |
+| Reviewer | **Revision needed** — 2 critical, both correct |
+| Coder | 48s — the spurious file gone |
+| Tester | **7/7 passed** |
+| Reviewer | **Approved** — 10/10, 10/10, 9/10 |
+
+### Three times in two slices, a proof that did not run
+
+The recurring failure, and the reason §0 exists:
+
+- A can-fail entry whose test name did not match my filter: `0 passed`, which
+  reads like a pass unless you read the count.
+- A test that drove the shared helper and not the worktree backend's own
+  inline check, so removing the latter left everything green.
+- A test whose *premise* was broken by its own fixture — it named `src/lib.rs`
+  as a removed file, and `repo()` creates `src/lib.rs`.
+
+Each was found by reading the count, not by trusting the word "ok".
+
+### Blockers
+
+Unchanged, plus **B6**: `stepfun/step-3.7-flash` is unreachable on the
+supplied key (*"this account never purchased credits"*), and `:free` models are
+unevenly rate-limited. `poolside/laguna-s-2.1:free` and
+`stealth/space-bunny-alpha` answer consistently. The key is environment-only;
+G5's secret scan over the tree *and* git history passed before every commit.
