@@ -4038,6 +4038,20 @@ pub async fn run_tool_loop_with(
                     " If string match failed, re-read the target file to establish ground-truth context.",
                 );
             }
+            // §8 T2, the input probe. This is the last point at which tool
+            // output is NIKI's own to do something with, and the last point
+            // before the model reads it.
+            //
+            // It **marks**, never strips: a file with an injected line is
+            // still the file the model asked for, and removing the line would
+            // hand the model a file that does not exist. The marker says the
+            // content is data, the whole text follows, and the finding is
+            // reported so a user is not left wondering why a run paused.
+            let finding = crate::risk::input_probe::probe(&content);
+            if let Some(said) = crate::risk::input_probe::report(finding.as_ref()) {
+                tracing::warn!(target: "niki::risk", "{said}");
+            }
+            let content = crate::risk::input_probe::annotate(&content, finding.as_ref());
             messages.push(LoopMessage::ToolResult {
                 tool_call_id: tc.id.clone(),
                 content,
