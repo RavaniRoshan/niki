@@ -509,3 +509,4 @@ running-run-is-not-labelled-finished | a_running_run_does_not_also_draw_the_reso
 status-found-inside-a-wrapped-error | a_provider_status_is_wrapped_in_niki_s_own_prefix | failover and the agent loop both calling a 500 permanent
 failover-serves-the-fallback | a_fallback_served_call_is_priced_by_the_fallback | the chain not failing over, and the stage priced against the wrong card
 failed-loop-reports-its-spend | a_loop_that_failed_still_reports_what_it_spent | a Coder that explored, spent money, then errored — billed as free
+failed-coder-loop-leaves-a-bill | a_coder_loop_that_failed_still_leaves_a_bill_behind | the wiring billed, but billing something that is not what the model cost

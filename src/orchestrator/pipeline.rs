@@ -4651,6 +4651,148 @@ mod tests {
     };
     use crate::config::NikiConfig;
 
+    /// A provider that answers once, then fails the way a dropped connection
+    /// does. Two tokens figures the test asserts on by name.
+    struct CoderLoopFailsProvider {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::llm::provider::LlmProvider for CoderLoopFailsProvider {
+        fn provider_name(&self) -> &str {
+            "fake"
+        }
+
+        async fn complete(
+            &self,
+            _request: crate::llm::provider::CompletionRequest,
+        ) -> anyhow::Result<crate::llm::provider::CompletionResponse> {
+            let n = self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n == 0 {
+                Ok(crate::llm::provider::CompletionResponse {
+                    content: "looking".into(),
+                    model: "fake".into(),
+                    usage: crate::llm::provider::TokenUsage {
+                        input_tokens: 3131,
+                        output_tokens: 77,
+                        cached_input_tokens: 0,
+                        reasoning_tokens: 0,
+                    },
+                    finish_reason: Some("stop".to_string()),
+                    tool_calls: vec![crate::llm::provider::ToolCall {
+                        id: "call_1".into(),
+                        name: "list".into(),
+                        arguments: serde_json::json!({"path": "."}),
+                    }],
+                })
+            } else {
+                anyhow::bail!(
+                    "error sending request for url (.../v1/chat/completions): connection error: Connection timed out (os error 110)"
+                )
+            }
+        }
+
+        async fn stream(
+            &self,
+            _request: crate::llm::provider::CompletionRequest,
+        ) -> anyhow::Result<
+            std::pin::Pin<
+                Box<
+                    dyn futures::Stream<Item = anyhow::Result<crate::llm::provider::StreamChunk>>
+                        + Send,
+                >,
+            >,
+        > {
+            unimplemented!()
+        }
+    }
+
+    fn coder_loop_context() -> minijinja::Value {
+        minijinja::Value::from_serialize(serde_json::json!({
+            "input_artifacts": ["spec"],
+            "artifact_schema": "{}",
+            "current_files": [],
+            "revision_context": null,
+            "revision_round": false,
+            "project_knowledge": "",
+            "project_memory": "",
+            "mcp_tools": "",
+        }))
+    }
+
+    /// The wiring, end to end.
+    ///
+    /// `money::the_coder_loop_bills_before_every_bail_out` reads this function's
+    /// **text** and asks whether a billing call appears before each
+    /// `return None;`. That is a real check of structure and it caught the
+    /// unbailed arm — but it is blind to the bill being wrong. Measured: with
+    /// `&loop_spend.usage` replaced by `TokenUsage::default()`, that test is
+    /// still green, and so is the behavioural test in `runtime::tools`, because
+    /// both stop one layer short of the thing that turns a tally into a
+    /// `StageMetric`.
+    ///
+    /// This drives the real `run_coder_tool_loop` with a provider that answers
+    /// once and then fails, and asserts on the metrics the pipeline is left
+    /// holding. That is the last layer, and it is the only one that can see
+    /// whether the number a user is billed is the number the model cost.
+    #[tokio::test]
+    async fn a_coder_loop_that_failed_still_leaves_a_bill_behind() {
+        let provider = CoderLoopFailsProvider {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let dir = std::env::temp_dir().join("niki-billing-wiring");
+        std::fs::create_dir_all(&dir).expect("tempdir");
+        std::fs::write(dir.join("src.rs"), "fn main() {}\n").expect("write");
+
+        let mut display = crate::display::agent_stream::AgenticDisplay::new();
+        let mut metrics: Vec<StageMetric> = Vec::new();
+
+        let out = run_coder_tool_loop(
+            AgentRole::Coder,
+            &provider,
+            "fake",
+            "fake",
+            "coder.md",
+            coder_loop_context(),
+            "schemas/code_diff.schema.json",
+            &dir,
+            4096,
+            None,
+            None,
+            "auto",
+            false,
+            std::time::Duration::from_secs(30),
+            None,
+            Vec::new(),
+            None,
+            &mut display,
+            &mut metrics,
+        )
+        .await;
+
+        assert!(
+            out.is_none(),
+            "the loop's second request fails by construction; an artifact here \
+             would mean the double never ran"
+        );
+        assert_eq!(
+            metrics.len(),
+            1,
+            "one stage ran, so there is exactly one bill — a loop that spent a \
+             request and failed must not leave the run with no accounting at all: \
+             {metrics:?}"
+        );
+        assert_eq!(
+            metrics[0].input_tokens, 3131,
+            "and it must be the tokens the model was actually charged for, not \
+             a placeholder: {metrics:?}"
+        );
+        assert_eq!(metrics[0].output_tokens, 77);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn default_pipeline_includes_red_before_reviewer() {
         // Red/Blue is off by default — classic 4-stage pipeline:

@@ -1421,3 +1421,40 @@ failing over; a failed Coder loop billed as free) and one test that could not
 see a change. All three are fixed or corrected in batch 8, and the gate gap is
 now in `RELEASE_REPORT.md` §5 rather than left as knowledge someone has to
 rediscover.
+
+---
+
+## Iteration 7g — B8-07, the coverage gap closed
+
+Last slice left a measured hole: with the pipeline's `&loop_spend.usage`
+replaced by `TokenUsage::default()`, **both** the source-level check in
+`tests/reverse/money.rs` and the behavioural test in `runtime::tools` stayed
+green. Neither reaches the layer that turns a tally into a `StageMetric`.
+
+`a_coder_loop_that_failed_still_leaves_a_bill_behind` drives the real
+`run_coder_tool_loop` — private, so the test lives in `pipeline.rs` — with a
+provider that answers once and then fails, and asserts on the metrics the
+pipeline is left holding: exactly one, carrying the **3 131** input and **77**
+output tokens the model was actually charged for.
+
+| Sabotage | This test | source-level check |
+|---|---|---|
+| bill a hard-coded zero | **RED** (`left: 0, right: 3131`) | green |
+| skip billing entirely | **RED** (`left: 0, right: 1`) | green |
+
+**The test was wrong before the code was.** It passed
+`"code_diff.schema.json"` where the real caller passes
+`"schemas/code_diff.schema.json"`, so `load_asset` missed the embedded copy and
+the function returned `None` on its third line without spending anything — and
+the `metrics.len() == 1` assertion caught it rather than the test passing for
+the wrong reason. That is the *same class of bug* the function's own comment
+warns about: `load_asset` splits on the first `/`, a bare name misses the
+embedded lookup, and the caller reads `None` as "the loop never ran".
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  413 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS  no credentials in the tree or in history
+$ ./scripts/verify.sh --only G7 → PASS  every README command parses
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test -j 2 --lib → 1079 passed; 0 failed
+```
