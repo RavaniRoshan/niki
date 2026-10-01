@@ -261,7 +261,11 @@ dropped-mcp-server-does-not-live | a_dropped_mcp_server_does_not_outlive_the_run
 shutdown-still-graceful | shutdown_is_still_the_graceful_path | the backstop replacing the teardown rather than backing it up
 no-mcp-call-instruction | no_prompt_instructs_a_model_to_call_an_mcp_tool | a model told to use tools it cannot reach
 mcp-summary-states-what-is-true | the_mcp_summary_says_what_the_model_can_actually_call | a notice pointing the other way — the tools work and the summary denies it
-mcp-gap-still-recorded | the_missing_call_path_is_still_recorded_as_missing | the feature gap quietly considered done
+mcp-tool-is-callable | a_discovered_mcp_tool_can_actually_be_called | a discovered MCP tool advertised but not callable
+# The retired predecessor of the row above: `mcp-gap-still-recorded |
+# the_missing_call_path_is_still_recorded_as_missing`. It named a test deleted
+# the day the call path landed (B7-01), so the canary had been pointing at
+# nothing and G3 failed on it — the gate doing exactly its job.
 # B5-06 · the supply-chain gate has teeth and reasoned exceptions (§9.6)
 unsound-is-denied | unsound_advisories_are_denied_not_ignored | `unsound = "none"`: a new advisory as green as the tolerated ones
 exceptions-match-the-tool | every_unsound_advisory_is_named_with_a_reason | a hand-typed ignore list drifting from what audit reports

@@ -2780,20 +2780,28 @@ pub async fn execute_pipeline(
     // Connect configured servers and report what they offered.
     //
     // It used to say, in the agent's own prompt: *"Use these tools via the
-    // standard MCP tool call format."* The agent→server execution loop does
-    // not exist — `McpManager::call_tool` has no production caller, which is
-    // the follow-up this comment used to name — so that was an instruction the
-    // runtime could not honour, and the likeliest result was a model
-    // inventing a call and an answer. The same failure as `web_search`
-    // returning `Success` with nothing in it, aimed at the model.
+    // standard MCP tool call format."* **At the time, the agent→server
+    // execution loop did not exist** — so that was an instruction the runtime
+    // could not honour, and the likeliest result was a model inventing a call
+    // and an answer. The same failure as `web_search` returning `Success` with
+    // nothing in it, aimed at the model.
     //
-    // So the block now states the fact instead. The `mcp_tools` parameter is
-    // kept and the plumbing stays, so wiring the call loop is a change to
-    // `tools_summary` rather than a change to four signatures.
+    // So the block came to state the fact instead. The `mcp_tools` parameter
+    // was kept and the plumbing kept, so wiring the call loop would be a change
+    // to `tools_summary` rather than a change to four signatures.
     //
-    // The manager is a local, so it drops at the end of this block; the stdio
-    // children go with it via `kill_on_drop` in the client, because
-    // `shutdown()` has no production caller either.
+    // Two sentences this comment used to carry are **past tense on purpose**.
+    // They were true when written and are false now:
+    //
+    // * "`McpManager::call_tool` has no production caller" — false since the
+    //   agent→server path landed; the call is `src/runtime/mcp_tool.rs:192`.
+    // * "`shutdown()` has no production caller either" — false; it is
+    //   `pipeline.rs:4501`, at the end of the run.
+    //
+    // They are kept, marked, because the next reader who greps for a
+    // "no production caller" and finds one written in the past tense should
+    // learn that the sentence is a record and not a claim. A comment that has
+    // quietly become wrong is worse than one that was wrong and said so.
     //
     // The manager is now an `Arc` held for the **whole run**, not a local of
     // this block. That is the actual reason the agent→server call path could

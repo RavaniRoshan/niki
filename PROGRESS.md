@@ -1555,3 +1555,55 @@ against a measurement. The ratchet's scope was corrected on the way: the first
 draft generalised "every entry must fire on this trace", which failed on
 `INV-TERMINAL-SAFE` — reproduced by a *different* trace. A check written to be
 exhaustive rather than true drifts into demanding things nobody wanted.
+
+---
+
+## Iteration 7k — B8-11, records that outlived the thing they described
+
+Chasing a stale comment turned up four more, in three files, all the same shape:
+**a check kept a record alive after the record stopped being true.**
+
+**A pin pointing at a test that was deleted.** `tests/record_claims_are_pinned.rs`
+held the claim *"§9.2 · MCP has no agent→server call path"* pinned to
+`the_missing_call_path_is_still_recorded_as_missing`. That test was **retired the
+day the call path landed** (B7-01) — the pin was doing its job as a flag to
+close, and the flag was never cleared. `every_pinned_claim_names_a_test_that_exists`
+had been **red**, and the canary map carried `mcp-gap-still-recorded` pointing at
+the same deleted test, which is how **G3 failed** when I first ran it after the
+edit. The gate caught it; the record did not.
+
+Replaced with the true claim — *"§9.2 · MCP has an agent→server call path that
+works"* — pinned to `a_discovered_mcp_tool_can_actually_be_called` in
+`tests/mcp_call_path.rs`, which drives a real JSON-RPC server over stdio.
+
+**Seven numbered items nothing pinned.** §1.1, §1.2, §1.7 and §4.1–§4.4 all
+name a source (`file.rs:`) and so make checkable claims, and the pinning test
+demanded rows for them. §4.1–§4.4 carry their strike **inside** the cell
+(`| 4.1 | ~~Arbitrary host file write…~~ **DONE in batch 2** |`) rather than at
+the front, so the "struck items need no pin" rule did not recognise them. All
+seven now have pins to real holders, and all seven resolve to canary entries.
+
+**A comment that had quietly become wrong.** `pipeline.rs` said
+"`McpManager::call_tool` has no production caller" and "`shutdown()` has no
+production caller either". Both false: `mcp_tool.rs:192` and `pipeline.rs:4501`.
+They are now explicitly **past tense**, kept rather than deleted — so the next
+reader who greps for "no production caller" learns the sentence is a record, not
+a claim.
+
+**A roadmap line contradicting the row above it.** §9.3 ended with "Needs a live
+model to prove" — under a row whose every bullet was struck and whose own table
+already recorded a full live run (B7-14, B7-18). Struck.
+
+**A failure message restating a false cause** was fixed in B8-10; this slice's
+lesson is the same one from the other direction — the *checks* can keep a lie
+alive just as convincingly as a comment can.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  416 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --test record_claims_are_pinned → 3 passed
+$ cargo test --test reverse → 95 passed
+$ cargo test --test run_lifecycle → 14 passed
+```
