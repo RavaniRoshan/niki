@@ -227,9 +227,17 @@ one rather than a reason to wait.
 ## 6 · Coverage and hygiene (P5)
 
 - ~~19 of 28 CLI commands have no test at either level.~~ **Re-measured: 1 of 28** — only `dashboard`, closed in batch 5. The other 19 were closed by batches 1–4. `src/llm/google.rs` had **zero** tests; it has seven since B4-02.
-  **PARTLY CLOSED in batch 6** (B6-08): `sandbox/worktree.rs` (985 lines, the
-  recommended backend) now has 15 in-file unit tests. `sandbox/docker.rs`
-  (704 lines, the default) still has none — B6-09.
+  **CLOSED in batch 6** (B6-08, B6-09). `sandbox/worktree.rs` (985 lines, the
+  recommended backend) has 15 in-file unit tests and `sandbox/docker.rs`
+  (704 lines, the **default**) has 7. The docker ones cover what the
+  neighbouring `tests/docker_resource_caps.rs` does not: `build_host_config`
+  is tested on the value sent to the runtime, while the *name* a container is
+  created under and the *egress switch* were not. The name is `{:?}`-formatted
+  from an `AgentRole` and passed through no sanitiser, and Docker and Podman
+  both require `[a-zA-Z0-9][a-zA-Z0-9_.-]*` — so a role name that is not a
+  plain identifier would fail the run at create, with an error naming a string
+  the user never typed. It is now sanitised, and the 8-character id truncation
+  is recorded as the collision window it is.
   The worktree tests are where the fix for a silent no-op lives: the diff
   anchor's cheap O(n+m) walk scored a real near miss at 0.41 against a 0.5
   floor, so the "here is the closest line you meant" suggestion never

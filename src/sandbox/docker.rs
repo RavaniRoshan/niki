@@ -86,6 +86,46 @@ fn allowlist_allows_all(config: &DockerConfig) -> bool {
         .any(|s| s == "*" || s == "all")
 }
 
+/// The name a sandbox container is created under.
+///
+/// Extracted so it can be tested, because it is assembled from a `Debug`
+/// format — and the failure it can cause is not a compile error, it is a
+/// container runtime refusing the name and a run that fails at create with a
+/// message about a name the user never typed.
+///
+/// Docker and Podman both require `[a-zA-Z0-9][a-zA-Z0-9_.-]*`. The role is
+/// `{:?}`-formatted, so any role whose name is not a single lower-case
+/// identifier would land here verbatim.
+pub fn container_name(task_id: &uuid::Uuid, agent_role: &AgentRole) -> String {
+    let raw = format!("niki-{}-sandbox-{agent_role:?}", &task_id.to_string()[..8]);
+    sanitise_container_name(&raw)
+}
+
+/// Reduce a name to the character set a container runtime accepts.
+///
+/// The first character must be alphanumeric; the rest may also be `.`, `_` or
+/// `-`. Anything else is replaced, and a leading non-alphanumeric is replaced
+/// with `0` so the name is not rejected for starting with a dash.
+fn sanitise_container_name(raw: &str) -> String {
+    let mut out: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if out.is_empty() {
+        return "niki-sandbox".to_string();
+    }
+    if !out.starts_with(|c: char| c.is_ascii_alphanumeric()) {
+        out.insert(0, '0');
+    }
+    out.to_lowercase()
+}
+
 /// Build the container's `HostConfig`.
 ///
 /// Extracted from the create path so the four hardening settings can be
@@ -154,13 +194,7 @@ impl DockerSandbox {
         containers: ActiveContainers,
         event_tx: std::sync::mpsc::Sender<crate::display::tui::DisplayEvent>,
     ) -> Result<Self> {
-        let container_name = format!(
-            "niki-{}-{}-{:?}",
-            &task_id.to_string()[..8],
-            "sandbox",
-            agent_role
-        )
-        .to_lowercase();
+        let container_name = container_name(task_id, &agent_role);
         let workspace_path = PathBuf::from("/workspace");
 
         let binds = vec![format!(
@@ -700,5 +734,199 @@ impl Sandbox for DockerSandbox {
     }
     async fn destroy(&self) -> Result<()> {
         DockerSandbox::destroy(self).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The default backend, in the file.
+    //!
+    //! `tests/docker_resource_caps.rs` covers `build_host_config` on the value
+    //! actually sent to the runtime. What was untested is everything *around*
+    //! it — and the parts around it are where the user-visible failures are:
+    //! a name the runtime rejects, and an allowlist that quietly means
+    //! block-all.
+
+    use super::*;
+
+    /// Every role must produce a name a container runtime will accept.
+    ///
+    /// The name is `{:?}`-formatted, and `{:?}` of a variant is whatever the
+    /// variant is called. `SecurityAuditor` is fine; a role with a space or a
+    /// hyphen in it would not be, and the failure is a create error naming a
+    /// string the user never typed.
+    #[test]
+    fn every_role_produces_an_acceptable_container_name() {
+        let id = uuid::Uuid::parse_str("0f2c9a41-1111-2222-3333-444455556666").expect("uuid");
+        for role in [
+            AgentRole::Planner,
+            AgentRole::Coder,
+            AgentRole::Tester,
+            AgentRole::Reviewer,
+            AgentRole::Synthesizer,
+            AgentRole::SecurityAuditor,
+            AgentRole::Red,
+        ] {
+            let name = container_name(&id, &role);
+            assert!(
+                is_acceptable_container_name(&name),
+                "{role:?} produced {name:?}, which a runtime would reject"
+            );
+            // And it has to be findable: `niki status` and the cleanup paths
+            // look containers up by this name.
+            assert!(
+                name.starts_with("niki-") && name.contains(&id.to_string()[..8]),
+                "{name:?} must carry the run's id prefix and its first 8 \\
+                 characters, or a status query cannot find it"
+            );
+        }
+    }
+
+    /// The rule, as a table, since the interesting cases are the ones a real
+    /// role name does not contain.
+    #[test]
+    fn the_sanitiser_matches_the_runtimes_rule() {
+        // `(input, may pass through untouched)`. The second column is what
+        // makes the test more than a loop: a sanitiser that rewrote a
+        // perfectly good name would pass a bare "is it acceptable now?" check.
+        for (raw, untouched) in [
+            ("niki-0f2c9a41-sandbox-coder", true),
+            ("niki.a_b-c", true),
+            ("0leading", true),
+            ("-leading", false),
+            (".leading", false),
+            ("has space", false),
+            ("has/slash", false),
+            ("", false),
+        ] {
+            let out = sanitise_container_name(raw);
+            assert!(
+                is_acceptable_container_name(&out),
+                "{raw:?} sanitised to {out:?}, which a runtime would still reject"
+            );
+            if untouched {
+                assert_eq!(out, raw, "{raw:?} was already valid and must not change");
+            } else {
+                assert_ne!(
+                    out, raw,
+                    "{raw:?} was invalid and came back unchanged, so the \
+                     sanitiser is not doing anything"
+                );
+            }
+        }
+    }
+
+    /// An empty or all-illegal name must still be usable. A run that creates
+    /// no container is not a run.
+    #[test]
+    fn an_unusable_name_still_yields_a_usable_one() {
+        assert!(!sanitise_container_name("").is_empty());
+        assert!(is_acceptable_container_name(&sanitise_container_name(
+            "///"
+        )));
+    }
+
+    /// Two runs must not collide on a name, so `niki status` can tell two
+    /// containers apart.
+    #[test]
+    fn two_runs_get_different_names() {
+        let a = uuid::Uuid::parse_str("0f2c9a41-1111-2222-3333-444455556666").unwrap();
+        let b = uuid::Uuid::parse_str("a1b2c3d4-1111-2222-3333-444455556666").unwrap();
+        assert_ne!(
+            container_name(&a, &AgentRole::Coder),
+            container_name(&b, &AgentRole::Coder),
+            "two different runs produced the same container name"
+        );
+    }
+
+    /// The name is truncated to the id's first 8 characters, so that is a real
+    /// collision window — two ids sharing 8 leading hex digits, 1 in 4·10⁹ per
+    /// pair. Recorded rather than fixed: 32 characters is what fits a runtime's
+    /// name limit, and the window is small enough to prefer the readable name.
+    /// What matters is that it is a *known* window and not a surprise.
+    #[test]
+    fn ids_sharing_eight_leading_characters_do_collide() {
+        let a = uuid::Uuid::parse_str("0f2c9a41-1111-2222-3333-444455556666").unwrap();
+        let b = uuid::Uuid::parse_str("0f2c9a41-9999-2222-3333-444455556666").unwrap();
+        assert_eq!(
+            container_name(&a, &AgentRole::Coder),
+            container_name(&b, &AgentRole::Coder),
+            "if this ever stops being true, the name carries more than the \
+             first 8 characters and the collision window has closed — update \
+             this test and the claim above together"
+        );
+    }
+
+    /// `[*]`, `["all"]` and a mixed list all mean full egress; anything else
+    /// does not. This is the switch between "the container can fetch
+    /// dependencies" and "it cannot", so the wildcard has to be exactly the
+    /// wildcard.
+    #[test]
+    fn only_a_wildcard_opens_the_container_network() {
+        let mut c = DockerConfig::default();
+        assert!(
+            !allowlist_allows_all(&c),
+            "an empty allowlist must not open egress"
+        );
+        for list in [
+            vec!["*".to_string()],
+            vec!["all".to_string()],
+            vec!["api.anthropic.com".to_string(), "*".to_string()],
+        ] {
+            c.network_allowlist = list.clone();
+            assert!(
+                allowlist_allows_all(&c),
+                "{list:?} names the wildcard, so egress is meant to be open"
+            );
+        }
+        for list in [
+            vec!["api.anthropic.com".to_string()],
+            vec!["*".to_string().replace('*', "everything")],
+            vec![String::new()],
+        ] {
+            c.network_allowlist = list.clone();
+            assert!(
+                !allowlist_allows_all(&c),
+                "{list:?} is not the wildcard, so egress stays closed — a \\
+                 per-domain list is not implemented and must not read as one"
+            );
+        }
+    }
+
+    /// And the two halves have to agree, or the container gets network
+    /// `none` while `allowlist_allows_all` says otherwise.
+    #[test]
+    fn the_network_setting_follows_the_wildcard() {
+        let mut c = DockerConfig::default();
+        c.network_disabled = true;
+        assert_eq!(
+            build_host_config(&c, Vec::new(), 0, 0).network_mode,
+            Some("none".to_string()),
+            "a default install is offline"
+        );
+        c.network_allowlist = vec!["*".to_string()];
+        assert_eq!(
+            build_host_config(&c, Vec::new(), 0, 0).network_mode,
+            None,
+            "the wildcard is how a user asks for egress, so it must reach the \\
+             value sent to the runtime"
+        );
+        c.network_disabled = false;
+        c.network_allowlist = vec![];
+        assert_eq!(
+            build_host_config(&c, Vec::new(), 0, 0).network_mode,
+            None,
+            "turning `network_disabled` off is the other way to ask for egress"
+        );
+    }
+
+    /// Docker and Podman both require `[a-zA-Z0-9][a-zA-Z0-9_.-]*`.
+    fn is_acceptable_container_name(name: &str) -> bool {
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        first.is_ascii_alphanumeric()
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
     }
 }

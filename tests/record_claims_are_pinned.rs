@@ -48,11 +48,6 @@ const PINS: &[(&str, &str, &str)] = &[
         "tests/mcp_does_not_leak_or_lie.rs",
     ),
     (
-        "§6 · `sandbox/docker.rs` has no in-file unit tests",
-        "the_docker_backend_still_has_no_unit_tests",
-        "tests/the_record_had_moved.rs",
-    ),
-    (
         "§2 · the pipeline's tool cards render; the chat sends no tools",
         "the_chat_still_sends_no_tools",
         "tests/tool_cards_are_live.rs",

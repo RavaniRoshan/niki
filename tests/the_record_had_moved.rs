@@ -141,38 +141,3 @@ fn no_temporary_path_in_git_output_is_shared_between_runs() {
         );
     }
 }
-
-/// §6: `sandbox/docker.rs` still has no in-file unit tests.
-///
-/// This is the pin that is *meant* to fire. `sandbox/docker.rs` is 704 lines
-/// and it is the **default** backend — a run with no `--backend` flag uses it —
-/// and it has no `#[cfg(test)]` module. The §6 bullet is true of it.
-///
-/// The slices that add in-file unit tests will turn this red, and that is the
-/// point: a test that fails because the work landed is the signal to strike
-/// the bullet in the same commit, which is the half of the cycle this
-/// programme has been missing.
-///
-/// It was written as "the two sandbox files" and narrowed to one when B6-08
-/// gave `worktree.rs` its 15. A pin that stops describing reality is a lie
-/// with an `assert!` on it, and this file is registered in
-/// `tests/record_claims_are_pinned.rs`, so the registry is what caught it.
-#[test]
-fn the_docker_backend_still_has_no_unit_tests() {
-    let source = read("src/sandbox/docker.rs");
-    let count = source
-        .lines()
-        .filter(|l| {
-            let t = l.trim();
-            t.starts_with("#[test]") || t.starts_with("#[tokio::test")
-        })
-        .count();
-    assert_eq!(
-        count, 0,
-        "`src/sandbox/docker.rs` now has {count} in-file unit test(s), so \
-         ROADMAP.md §6's claim that it has none is stale — it is the DEFAULT \
-         backend, so the claim mattered. Strike the bullet in this commit, \
-         drop this test, and drop its row in \
-         `tests/record_claims_are_pinned.rs` together."
-    );
-}
