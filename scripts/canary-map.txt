@@ -464,3 +464,11 @@ marker-cannot-be-closed-early | the_marker_does_not_end_up_inside_the_content | 
 prohibition-is-not-an-instruction | a_prohibition_is_not_an_instruction | a probe firing on the runbooks that tell you not to do the thing
 dropping-the-negation-refires | dropping_the_negation_makes_the_line_fire_again | the suppression being the whole rule rather than the negation
 injected-result-marked-before-the-model | an_injected_tool_result_is_marked_before_the_model_sees_it | tool output reaching the model unmarked, which is the whole attack
+# B7-23 · §8 T2: the classifier gate — err toward blocking, escalate, never argue
+classifier-allow-passes-deny-stops | a_allow_passes_and_a_deny_stops | the gate not reflecting the classifier's answer
+classifier-that-cannot-answer-denies | a_classifier_that_cannot_answer_denies | a gate that fails open, which is not a gate
+classifier-never-shown-the-injection | the_classifier_is_never_shown_the_injection | the injection reaching the layer meant to be immune to it
+three-consecutive-denials-stop | three_consecutive_denials_stop_the_run | the run asking a model that has already said no three times
+twenty-denials-in-total-stop | twenty_denials_in_total_stop_the_run | the total reset by an allow, so nagging never ends
+allow-resets-only-consecutive | an_allow_resets_only_the_consecutive_count | the two counters conflated
+classifier-prompt-asks-one-question | the_prompt_asks_one_question_and_shows_the_action | a prompt drifting from the decision it is about

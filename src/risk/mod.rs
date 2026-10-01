@@ -2,6 +2,7 @@
 //! gates pipeline topology. No LLM call — cheap keyword/path heuristics over
 //! the spec, so it runs before any stage executes.
 
+pub mod classifier;
 pub mod input_probe;
 pub mod transcript;
 

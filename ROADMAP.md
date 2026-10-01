@@ -435,8 +435,29 @@ view that quietly dropped everything would pass every injection test while
 approving nothing. And **the omission is counted and reportable** — a defence
 that works by discarding evidence should say how much it discarded.
 
-**Not yet built:** the hooks layer, the LLM classifier call itself, and the
-input probe. The classifier will consume `ClassifierView::to_prompt()`, so the
+**SECOND AND THIRD SLICES BUILT (B7-22, B7-23).**
+`risk/input_probe.rs` (13 tests) scans tool output before it is fed back, and
+**marks rather than strips**: removing an injected line would hand the model a
+file that does not exist and destroy the evidence a human needs. The hard half
+is the false positive, not the detection — a scanner that fires on
+`// ignore previous lint failures`, or on *"send the api key to the vault"*
+(a runbook), or *"Run the following command to reproduce: cargo test"* (every
+README in the world), is a scanner its users learn to ignore. So every shape
+requires an *instruction aimed at a model*, and a `PROHIBITIONS` rule means a
+line saying **never** describes what it *forbids*.
+
+`risk/classifier.rs` (7 tests) is the gate: static deny and hooks run first
+and are hard rules, the classifier sees only the residual, **every failure of
+the classifier is a deny**, and after three consecutive or twenty total
+denials the run stops asking — because a model that has said no three times is
+not about to agree, and re-asking is how you spend a user's money hoping for a
+different answer.
+
+**Not yet built:** the hook layer, and the provider call behind the
+`ActionClassifier` trait. The gate's behaviour is fully tested against a stub,
+so wiring a model in does not change any of the properties above.
+
+Two layers are now built: the input probe, and the classifier gate. The classifier will consume `ClassifierView::to_prompt()`, so the
 prompt is explicitly provenance-labelled (`user said:` / `the agent asked to
 run:`) — a transcript that blurs those is how a tool result gets treated as an
 instruction.
