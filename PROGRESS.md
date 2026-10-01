@@ -2356,3 +2356,46 @@ $ ./scripts/verify.sh --only G5 → PASS
 $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 ```
+
+---
+
+## Iteration 10c — B11-03, thirty more binaries, and another stale closure test
+
+Thirty more measured and added. **All but one green**, and the red one is a §1
+navigation item batches 1–3 supposedly closed.
+
+**The product is right.** Both render loops gate their nav block on
+`sub_page_owns(key, &state)` — the *page's* answer to "is this key mine" — which
+is strictly better than the old `key.code != KeyCode::Char('q')`: a page that
+answers `q` keeps its handler, and one that *declines* it falls through to the
+confirm modal, which the letter gate could not express. The test pinned a
+literal from an earlier design, and putting it back would forbid the fix.
+
+Two more weaknesses surfaced while making it bite:
+
+- it compared a line in `run_tui` against a line in `run_chat` with a
+  whole-file `find` — **two render loops in one file**, so it reported an
+  ordering that did not exist. The second assertion had never been reached
+  while the first was red, which is how it survived.
+- even scoped per loop it checked only the **first** `intent_from_key`. There are
+  two page-refusal gates per loop — the nav block's and the global keybinding's
+  — and removing the second left it green.
+
+It now walks **every** nav block and counts at least two refusal gates per loop.
+Both sabotages bite.
+
+**The lane: 5 binaries → 56 of 107.** Warm **1m30**; the first run was 6m40
+because nineteen binaries had never been linked here. Fifty-one remain, and
+`RELEASE_REPORT.md` §5 is narrowed to match: **this lane covers these
+fifty-six, and only CI covers the rest.**
+
+Three red tests have now been found by measuring binaries no gate ran. That is
+the argument for the measurement, and it was not available a batch ago.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  435 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --test tui_q_goes_back → 3 passed
+```
