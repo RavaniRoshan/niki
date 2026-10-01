@@ -739,8 +739,30 @@ whose `agent_metrics` is emptied goes red on `run_lifecycle`.
 
 ### `INV-ARTIFACT-SEMANTIC` — the last entry, struck in batch 8 (B8-10)
 
-`KNOWN_FAILING` is now **empty**. Every one of the four entries has been struck
-against a measurement rather than an opinion.
+`KNOWN_FAILING` is now **empty** — after batch 9, not batch 8. Every one of the
+four entries has been struck against a measurement rather than an opinion.
+
+> **Correction (B9-01).** B8-10 wrote that the list was empty after striking
+> **three** of the four, and did not check. The survivor was
+> `INV-TERMINAL-SAFE`, whose named defect — *"raw model tokens are print!-ed to
+> the terminal (`display/agent_stream.rs:319`)"* — is fixed: the streaming path
+> prints `sanitize_for_terminal(token)` at `:343`.
+>
+> The residual is a **different** thing and is recorded rather than papered over.
+> `report.md`, `changes.patch` and the artifacts are written with raw bytes —
+> `util::write_restricted` is atomic and `0600`, not sanitising — so a hostile
+> model response can put a terminal escape **into a file**. NIKI never prints
+> those files' contents (`display/completion.rs` prints their **paths**), so
+> nothing reaches a terminal through the product; a user who `cat`s one can
+> still be hit.
+>
+> It is deliberately **not** fixed by sanitising at write time: stripping ESC
+> from `changes.patch` would corrupt the patch. The invariant stays registered
+> and still fires on a hostile trace.
+>
+> The emptiness claim is now a **test**
+> (`known_failing_invariants_are_still_failing`), so it cannot drift again
+> without going red.
 
 **The stated cause was false.** The entry said *"artifact schemas declare no
 minItems/minLength, so a no-op validates cleanly"*. Measured against the shipped

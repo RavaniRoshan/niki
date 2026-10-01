@@ -183,6 +183,26 @@ fn known_failing_invariants_are_still_failing() {
         .map(|(id, _, _)| *id)
         .collect();
 
+    // **`KNOWN_FAILING` is empty, and this asserts it rather than claiming it.**
+    //
+    // Batch 8 wrote "KNOWN_FAILING is now empty" in `ROADMAP.md`,
+    // `RELEASE_REPORT.md` and `PROGRESS.md` after striking **three** of the four
+    // entries. The fourth was still there. A record asserting a list is empty,
+    // made by someone who had just edited the list, and never checked — that is
+    // the whole failure mode this programme keeps finding, and this time it was
+    // me.
+    //
+    // So the claim is now a test. If an entry is ever added back, this fails and
+    // says what the entry is; and if one is added without a reason, it fails
+    // there rather than in a document nobody re-reads.
+    assert!(
+        KNOWN_FAILING.is_empty(),
+        "KNOWN_FAILING claims to be empty in ROADMAP.md, RELEASE_REPORT.md and \
+         PROGRESS.md, and it is not: {:?}. Either strike the entry against a \
+         measurement, or correct those three documents.",
+        KNOWN_FAILING
+    );
+
     // This fixture was built to reproduce two defects, and both are fixed in
     // batch 8, so it must now carry **no** debt.
     //

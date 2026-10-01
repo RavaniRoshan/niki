@@ -589,10 +589,28 @@ pub const LAYERS: &[&str] = &[
 /// Invariants that are known to fail against the current code. Each is a real,
 /// open defect with a written rule; removing an entry requires fixing the
 /// defect, not relaxing the invariant.
-pub const KNOWN_FAILING: &[(&str, &str)] = &[(
-    "INV-TERMINAL-SAFE",
-    "raw model tokens are print!-ed to the terminal (display/agent_stream.rs:319)",
-)];
+///
+/// **Empty as of batch 8 (B9-01).** All four entries were struck, each against
+/// a measurement rather than an opinion. The last was `INV-TERMINAL-SAFE`,
+/// listed as *"raw model tokens are print!-ed to the terminal
+/// (`display/agent_stream.rs:319`)"*. Measured: the streaming path prints
+/// `sanitize_for_terminal(token)` (`agent_stream.rs:343`), and the line number
+/// has moved. The named defect is fixed.
+///
+/// **What remains, and it is a different thing.** `report.md`, `changes.patch`
+/// and the artifacts are written with raw bytes — `util::write_restricted` is
+/// atomic and `0600`, not sanitising — so a hostile model response can put a
+/// terminal escape *into a file*. NIKI never prints those files'
+/// contents (`display/completion.rs` prints their **paths**), so nothing reaches
+/// a terminal through the product. A user who runs `cat report.md` on one can
+/// still be hit, and that is worth saying out loud.
+///
+/// It is deliberately **not** fixed by sanitising at write time: stripping ESC
+/// from `changes.patch` would corrupt the patch. The invariant stays registered
+/// and still fires on a hostile trace — `a_model_emitting_osc52_trips_the_
+/// terminal_invariant` asserts exactly that. What was removed is a debt entry
+/// that described a defect which does not exist, not a check.
+pub const KNOWN_FAILING: &[(&str, &str)] = &[];
 
 /// Find the first dangerous terminal sequence in `body`.
 ///

@@ -1001,9 +1001,25 @@ third assertion fails and whose last command succeeds report **OK**. A probe cas
 written to fail midway and then `true` confirmed it. The shipped design captures
 from inside the EXIT trap instead.
 
-### `KNOWN_FAILING` is now empty
+### `KNOWN_FAILING` is now empty — after batch 9, not batch 8
 
-All four entries struck, each against a measurement. Two of them were the same
+All four entries struck, each against a measurement. **Batch 8 wrote this line
+after striking three of the four, and did not check.** The survivor,
+`INV-TERMINAL-SAFE`, named a defect that is fixed — the streaming path prints
+`sanitize_for_terminal(token)` at `agent_stream.rs:343`, not the line 319 the
+entry cited. What remains is a *different* thing: `report.md`, `changes.patch`
+and the artifacts are written with raw bytes, so a hostile response can put a
+terminal escape into a file. NIKI never prints those files' contents
+(`display/completion.rs` prints their **paths**), so nothing reaches a terminal
+through the product; a user who `cat`s one can still be hit. It is deliberately
+not fixed by sanitising at write time, because stripping ESC from
+`changes.patch` would corrupt the patch.
+
+The claim is now a **test** — `known_failing_invariants_are_still_failing`
+asserts the list is empty — so it cannot drift again without going red. The
+invariant itself stays registered and still fires on a hostile trace.
+
+Two of the other entries were the same
 shape of lie:
 
 - `INV-STAGE-MANIFEST` asked `topology.contains("Single")`, but
