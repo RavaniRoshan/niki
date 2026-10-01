@@ -331,3 +331,66 @@ fn a_run_with_no_checkpoint_says_so_rather_than_naming_an_errno() {
         "and it must name what is missing, in words a person can act on: {err}"
     );
 }
+
+/// A path that no longer exists must not be handed to git.
+///
+/// Measured on a live run, and the consequence is worse than the warning it
+/// produced. The agent's file list accumulates across revision rounds: the
+/// first Coder declared creating `src/lib.rs`, the Reviewer rejected it, the
+/// revision removed it — and the final staging still named it. `git add -N`
+/// treats an unmatched pathspec as fatal for the **whole invocation**, so every
+/// genuinely new file lost its intent-to-add and dropped out of the diff, and
+/// the run finished with "A brand-new file may be missing from the diff" — on a
+/// run that had in fact been approved.
+///
+/// The warning is not the defect. The defect is that the diff was short.
+#[test]
+fn a_path_that_no_longer_exists_is_dropped_before_staging() {
+    let (dir, root) = repo();
+    std::fs::write(root.join("src/real_new.rs"), "// a genuinely new file\n").expect("write");
+
+    let declared = vec![
+        // Not `src/lib.rs` — the `repo()` fixture creates that one, so naming
+        // it as the removed file would test nothing.
+        "src/removed_last_round.rs".to_string(), // round 1 declared it; round 2 removed it
+        "src/real_new.rs".to_string(),           // round 2's actual new file
+    ];
+    let kept = niki::output::git::existing_paths(&root, &declared);
+
+    assert!(
+        !kept.contains(&"src/removed_last_round.rs".to_string()),
+        "a path that does not exist cannot appear in a diff, and leaving it in \\
+         makes the whole `git add -N` fail"
+    );
+    assert_eq!(
+        kept,
+        vec!["src/real_new.rs".to_string()],
+        "and the file that does exist must survive — dropping it is the same \\
+         silent omission one level down"
+    );
+    let _ = dir;
+}
+
+/// Both sandboxes must filter, not just the helper the test above drives.
+///
+/// The first version of this pinned `output::git::existing_paths` and nothing
+/// else, so removing the *worktree* backend's own existence check left every
+/// test green — the same false negative as a filter that matches no test name.
+/// The worktree filter is inline, not a call to the helper, so it needs its
+/// own assertion.
+#[test]
+fn both_sandboxes_filter_absent_paths_before_staging() {
+    for (file, marker) in [
+        ("src/sandbox/worktree.rs", "wt.join(s).exists()"),
+        ("src/sandbox/docker.rs", "test -e /workspace/"),
+    ] {
+        let src =
+            std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file))
+                .unwrap_or_else(|e| panic!("{file} must be readable: {e}"));
+        assert!(
+            src.contains(marker),
+            "{file} must check that a declared path still exists before \
+             handing it to git. Found no `{marker}`."
+        );
+    }
+}

@@ -474,9 +474,14 @@ impl Sandbox for WorktreeSandbox {
         // into the worktree and then discarded, so the work was not just
         // unreported, it was gone.
         let wt = self.worktree_path.clone();
+        // Publishable **and still present**. A path the agent declared and
+        // then removed — which happens whenever a revision undoes an earlier
+        // round — makes `git add -N` fail for the whole invocation, so every
+        // real new file loses its intent-to-add and drops out of the diff.
         let files: Vec<String> = agent_files
             .iter()
             .filter(|s| crate::output::git::is_publishable_path(s))
+            .filter(|s| wt.join(s).exists())
             .cloned()
             .collect();
         tokio::task::spawn_blocking(move || -> Result<String> {

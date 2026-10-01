@@ -170,6 +170,31 @@ pub fn working_tree_diff_scoped(repo_path: &Path, agent_files: &[String]) -> Res
 }
 
 /// True when `path` (repo-relative) is untracked in the host repo.
+/// Drop paths that no longer exist, before they reach `git`.
+///
+/// Measured on a live run. The agent's file list accumulates across revision
+/// rounds: the first Coder declared creating `src/lib.rs`, the Reviewer
+/// rejected it, and the revision removed it — so the list handed to the final
+/// staging still named a file that was not there. `git add -N` treats that as
+/// fatal for the **whole invocation**, so every genuinely new file lost its
+/// intent-to-add and vanished from the diff, and the run finished warning that
+/// a brand-new file "may be missing".
+///
+/// It may indeed have been missing. The warning is the only clue, and it
+/// arrives on a run that otherwise succeeded — the worst place for a silent
+/// omission.
+///
+/// A path that does not exist cannot appear in a diff of the current tree, so
+/// dropping it loses nothing. Both sandboxes do this, because both were handing
+/// the raw list to git.
+pub fn existing_paths(root: &Path, files: &[String]) -> Vec<String> {
+    files
+        .iter()
+        .filter(|f| root.join(f).exists())
+        .cloned()
+        .collect()
+}
+
 fn is_untracked(repo_path: &Path, path: &str) -> bool {
     let out = std::process::Command::new("git")
         .args(["ls-files", "--others", "--exclude-standard", "--", path])
