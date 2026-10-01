@@ -23,7 +23,7 @@ Run of 2026-09-30, after batch 2's last commit. Raw output in `EVIDENCE.md`.
 | **G5** security | **PASS** | `cargo deny check` ok; `cargo audit` ok (11 pre-existing allowed warnings); **no credentials in the tree or in history** |
 | **G6** failure paths | **PASS** | every failure path exits non-zero *and* says something a person can act on |
 | **G7** docs match reality | **PASS** | the audit's counts are re-derived from the tree; every README command parses against the real binary |
-| **G8** CI green | **FAIL — by construction** | the branch is committed locally and **not pushed**, per the owner's decision. The last *pushed* run's one red job is `Manifest parity`, the version skew this branch fixes. |
+| **G8** CI green | **FAIL — by construction, and now diagnosable** | the branch is committed locally and **not pushed**, per the owner's decision. The last *pushed* run's one red job is `Manifest parity`. That job is now `scripts/manifest-parity.sh`, extracted from the workflow so it runs here too, and on **this** tree it reports `manifest parity: ok` — all six release URLs resolve. |
 | **G9** no dead code, no fake features | **PASS** | no `todo!`/`unimplemented!` in production code; no `assert!(true)`; every subcommand appears in the README |
 
 **Eight of nine pass locally. G8 is red because the branch has not been pushed**,
@@ -641,3 +641,31 @@ that passed with the exact table switched **off**; two docker tests that
 could not fail by construction. One check I wrote was simply *wrong* — it
 flagged a struck bullet carrying a live sub-claim — and was deleted rather
 than made to fit.
+
+### What G8's red actually is, measured rather than assumed
+
+The last *pushed* CI run (36665173960, branch `fix/trust-and-demo`, 2026-09-30)
+has one red job: **Manifest parity**, step 3, "Check manifest download URLs
+resolve". It was a real failure — three package manifests pointed at
+`releases/download/v0.9.0`, the newest published release was v0.8.0, and
+`Cargo.toml` was already at 0.9.0, so `brew install niki`, the headline
+install command in the README, resolved to a 404.
+
+**On this tree all six URLs resolve.** So the red is the version skew this
+branch fixes, seen from a run of a branch that is gone.
+
+That was a claim, and the way to know is to run the thing. The job lived
+inline in `.github/workflows/ci.yml`, which meant the only place the rule
+could be exercised was a push — so a dead install URL could not be caught
+before it shipped, and was not. It is now `scripts/manifest-parity.sh`, with
+the workflow and `verify.sh` G8 both calling it, and G8 reports the two
+answers separately:
+
+```
+G8   FAIL   rc=1 — see .evidence/g8-ci.log      ← the last pushed run
+G8   PASS   manifest parity: ok                 ← this tree
+```
+
+A red G8 on a local branch now says *what is wrong* rather than only *that
+something is*. It goes fully green on a push, which remains the owner's
+decision.
