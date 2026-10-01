@@ -2142,3 +2142,42 @@ claim attached to it.
 **Two rules, written once into `ROADMAP.md` §0** rather than repeated in twelve
 commit messages: drive the producer, not the constructor; and when a number starts
 being reported, find every reader of it.
+
+---
+
+## Iteration 9a — B10-01, a zero printed as though it were a measurement
+
+`frame_mean_ms` / `frame_p95_ms` are written by `run_tui` from the frame engine's
+stats. `run_chat` has its own render loop and never touched that engine, so both
+stayed at `0.0` for a whole chat session — and the Cost page, reachable from
+chat with a `]`, showed `frame 0.0/0.0ms mean/p95`.
+
+Two fixes, because either alone leaves something false on screen:
+
+1. **`run_chat` measures itself.** `FrameStats` is a standalone recorder, so the
+   chat loop records into the same one rather than porting to the engine — a
+   change to how every frame is scheduled — and the two surfaces publish
+   comparable numbers.
+2. **The page says when it has nothing.** A real frame is never `0.0` ms, so
+   printing the number prints the *absence* of one. `frame_samples` makes the
+   difference and the footer reads `no frames measured`.
+
+**The canary covers the second; the sabotage on the first does not bite — and
+that is right.** Removing the chat loop's publication leaves `frame_samples == 0`,
+so the page honestly says it has measured nothing. The user-visible defect is
+closed by either half, and a test demanding both would be asserting an
+implementation detail rather than a promise.
+
+**Not covered, stated rather than implied:** that `run_chat` calls `record` at
+all. It blocks on a terminal, so no unit test drives it.
+
+`cost_footer_shows_frame_stats` set the numbers by hand and could not have seen
+any of this — the batch-9 pattern, sixth sighting, in the same file.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  432 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --lib → 1100 passed; 0 failed
+```

@@ -1101,6 +1101,7 @@ fn run_tui(
             let frame_ms = stats.mean().as_secs_f64() * 1000.0;
             state.frame_mean_ms = frame_ms;
             state.frame_p95_ms = stats.p95().as_secs_f64() * 1000.0;
+            state.frame_samples = stats.count() as u32;
             frame_no += 1;
             if crate::display::debug::enabled() {
                 let target = match target {
@@ -1565,6 +1566,9 @@ pub fn run_chat(
         needs_render = true;
     }
 
+    // Rolling frame timing, published to `AppState` each frame below.
+    let mut frame_stats = crate::display::engine::FrameStats::new();
+
     loop {
         if needs_render {
             state.tick();
@@ -1585,7 +1589,27 @@ pub fn run_chat(
             // user typed and nothing happened, indefinitely. `run_tui` already
             // breaks on a draw error; the chat surface, which is the one every
             // user lands on, had the weaker loop.
+            // Frame timing for the Cost page, which this surface can reach with
+            // a `]`.
+            //
+            // `run_tui` publishes `frame_mean_ms` / `frame_p95_ms` from the
+            // frame engine's stats. `run_chat` has its own loop and never
+            // touched that engine, so both fields stayed at their initial 0.0
+            // for the whole of a chat session — and the Cost page, reachable
+            // from here, showed `0.0/0.0 ms` as though the interface had never
+            // drawn a frame.
+            //
+            // `FrameStats` is a standalone recorder, so the chat loop measures
+            // itself rather than porting to the engine. Same numbers, same
+            // rolling window, one fewer reason for the two loops to drift.
+            let frame_started = std::time::Instant::now();
             let drew = terminal.draw(|f| render(f, &state, &router, &command_palette));
+            frame_stats.record(frame_started.elapsed());
+            if drew.is_ok() {
+                state.frame_mean_ms = frame_stats.mean().as_secs_f64() * 1000.0;
+                state.frame_p95_ms = frame_stats.p95().as_secs_f64() * 1000.0;
+                state.frame_samples = frame_stats.count() as u32;
+            }
             if let Err(e) = drew {
                 // `RestoreGuard` releases raw mode, the alternate screen, the
                 // mouse and bracketed paste when this function returns, so

@@ -1122,6 +1122,14 @@ pub struct AppState {
     /// Rolling render-frame mean/p95 in milliseconds (TUI-00D). Updated by
     /// the TUI loop after each draw; surfaced on the Cost page.
     pub frame_mean_ms: f64,
+    /// How many frames have actually been timed.
+    ///
+    /// `frame_mean_ms` starts at `0.0` and a real frame is never 0.0 ms, so the
+    /// two are indistinguishable — and the Cost page printed `frame 0.0/0.0ms`
+    /// in every chat session, which reads as a measurement rather than the
+    /// absence of one. Counting the samples is what lets the page say it has
+    /// none.
+    pub frame_samples: u32,
     pub frame_p95_ms: f64,
     /// Resolved global keybindings + user-layer conflicts (TUI-003).
     pub keybindings: crate::display::keybindings::KeyBindings,
@@ -1371,8 +1379,9 @@ impl AppState {
             tool_detail_scroll: crate::display::scroll::ScrollState::new(),
             expanded_tools: std::collections::HashSet::new(),
             current_tool_index: None,
-            frame_mean_ms: 0.0,
             frame_p95_ms: 0.0,
+            frame_mean_ms: 0.0,
+            frame_samples: 0,
             keybindings,
             keybinding_conflicts,
             keybinding_overrides,

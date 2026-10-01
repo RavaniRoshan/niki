@@ -28,7 +28,14 @@ pub struct FrameStats {
 }
 
 impl FrameStats {
-    fn new() -> Self {
+    /// Public because a second render loop measures itself with it.
+    ///
+    /// `run_tui` has the engine and got its stats for free; `run_chat` has its
+    /// own loop and would otherwise report `0.0` frames for ever. Rather than
+    /// port the chat loop to the engine — a change to how every frame is
+    /// scheduled — the chat loop records into the same recorder, so the two
+    /// surfaces publish comparable numbers.
+    pub fn new() -> Self {
         Self {
             samples: [Duration::ZERO; 120],
             write: 0,
@@ -36,7 +43,21 @@ impl FrameStats {
         }
     }
 
-    fn record(&mut self, d: Duration) {
+    /// How many frames have been recorded.
+    ///
+    /// Public for the same reason `new` is, and because a surface that has
+    /// measured nothing must be able to say so: `mean()` and `p95()` both
+    /// return `Duration::ZERO` when there are no samples, which is
+    /// indistinguishable from a frame that took no time at all.
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    /// Record one frame's duration.
+    ///
+    /// Public for the same reason `new` is: `run_chat` has no engine and
+    /// measures itself.
+    pub fn record(&mut self, d: Duration) {
         self.samples[self.write] = d;
         self.write = (self.write + 1) % 120;
         if self.count < 120 {
@@ -96,6 +117,14 @@ impl FrameStats {
     /// Whether no samples have been collected yet.
     pub fn is_empty(&self) -> bool {
         self.count == 0
+    }
+}
+
+/// `Default` cannot be derived: `[Duration; 120]` has no `Default`, and clippy
+/// is right to ask for one now that `new` is `pub` and used outside the engine.
+impl Default for FrameStats {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

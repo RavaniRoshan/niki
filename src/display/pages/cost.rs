@@ -286,11 +286,23 @@ impl Page for CostPage {
         frame.render_widget(Paragraph::new(bar_lines).block(bar_block), chunks[4]);
 
         // Footer (TUI-00D: rolling frame stats published by the TUI loop).
-        let footer = Line::from(vec![Span::styled(
+        //
+        // **A surface with no measurements says so.** `frame_mean_ms` starts at
+        // 0.0 and a real frame is never 0.0 ms, so printing the number is
+        // printing the absence of a number — and `run_chat`, the surface most
+        // people land on, never published any at all, so this read
+        // `frame 0.0/0.0ms` for the whole of a chat session. That looks like a
+        // measurement and is not one.
+        let frame_text = if state.frame_samples == 0 {
+            "frame —/—ms mean/p95 (no frames measured)".to_string()
+        } else {
             format!(
-                " [Esc] back · frame {:.1}/{:.1}ms mean/p95",
+                "frame {:.1}/{:.1}ms mean/p95",
                 state.frame_mean_ms, state.frame_p95_ms
-            ),
+            )
+        };
+        let footer = Line::from(vec![Span::styled(
+            format!(" [Esc] back · {frame_text}"),
             Style::default().fg(theme::fg_dim()),
         )]);
         frame.render_widget(Paragraph::new(footer), chunks[5]);
@@ -343,7 +355,29 @@ mod tests {
         let mut state = AppState::new("t".to_string(), NikiConfig::default(), ".".into());
         state.frame_mean_ms = 3.25;
         state.frame_p95_ms = 5.75;
+        state.frame_samples = 120;
         let text = buffer_text(100, 30, &state);
         assert!(text.contains("frame 3.2/5.8ms mean/p95"), "{text}");
+    }
+
+    /// A surface that measured nothing must say so.
+    ///
+    /// The first version of this file set the numbers by hand and could not see
+    /// that `run_chat` — the surface most people land on — never published any:
+    /// `frame_mean_ms` and `frame_p95_ms` stayed at their initial `0.0` for a
+    /// whole chat session, and the Cost page, reachable from it, printed
+    /// `frame 0.0/0.0ms` as though that were a measurement.
+    #[test]
+    fn the_cost_footer_does_not_print_a_zero_it_never_measured() {
+        let state = AppState::new("t".to_string(), NikiConfig::default(), ".".into());
+        let text = buffer_text(100, 30, &state);
+        assert!(
+            text.contains("no frames measured"),
+            "an unmeasured surface must say it has measured nothing: {text}"
+        );
+        assert!(
+            !text.contains("frame 0.0/0.0ms"),
+            "and must not print a number that reads like one: {text}"
+        );
     }
 }
