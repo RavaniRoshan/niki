@@ -1607,3 +1607,41 @@ $ cargo test --test record_claims_are_pinned → 3 passed
 $ cargo test --test reverse → 95 passed
 $ cargo test --test run_lifecycle → 14 passed
 ```
+
+---
+
+## Iteration 7l — B8-12, G3 runs the tests the gates were skipping
+
+**`cargo test --lib` was the whole of G3's test run.** The canary map greps
+`tests/` and `src/` for a name and stops at existence — so a test in `tests/`
+could be red and every gate would still say PASS. That is how two real defects
+sat unnoticed: the failover chain that did not fail over, and the Coder loop
+that spent money and was billed as free.
+
+G3 now has a **fast lane**: four integration binaries run serially, one thread,
+`CARGO_BUILD_JOBS=2` — `record_claims_are_pinned`, `run_lifecycle`,
+`agent_tool_loop`, `reverse`. **~34 s** including link, measured.
+
+Proven by putting the defects back:
+
+| Reintroduced | G3 |
+|---|---|
+| the anchored `http_status_in` (failover does not fail over) | **FAIL** — `rc=101`, `.evidence/g3-fast-reverse.log` |
+| `feedback_turns` asserted as 99 (the truncation count) | **FAIL** — `rc=101`, `.evidence/g3-fast-agent_tool_loop.log` |
+
+A failure names the binary and the log, so "which suite" is never the question.
+
+**What this does not close, stated plainly.** The lane covers four binaries and
+the suite still does not fit this machine. `RELEASE_REPORT.md` §5 is narrowed,
+not withdrawn: **this lane covers these four, and only CI covers the rest.** The
+lane is a named list to extend, not a `cargo test` that happens to be fast.
+
+This is a gate change, so the reasoning is on the record: it can only ever turn a
+green run red, it costs 34 s, and both of its can-fail proofs are defects that
+were real.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  417 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+```
