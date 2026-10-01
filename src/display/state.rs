@@ -973,8 +973,6 @@ pub struct AppState {
     pub tick: usize,
     /// Whether the pipeline is paused.
     pub paused: bool,
-    /// Background task count.
-    pub background_tasks: usize,
     /// Pipeline stages (flat — the canonical stage list).
     pub stages: Vec<StageInfo>,
     /// Run state for page view.
@@ -1018,10 +1016,6 @@ pub struct AppState {
     /// exactly that sentence and was never drawn; this is the state it needed.
     pub resolved_run: Option<ResolvedRun>,
     // --- Chat view state (ported from pages::AppState) ---
-    /// Current chat input text.
-    pub chat_input: String,
-    /// Chat input cursor position.
-    pub chat_cursor: usize,
     /// Whether chat copy mode is active (v key).
     pub chat_copy_mode: bool,
     /// Anchor position for selection.
@@ -1114,8 +1108,6 @@ pub struct AppState {
     pub output_tokens: usize,
     /// Total session cache-read tokens.
     pub cache_read_tokens: usize,
-    /// Push-to-talk voice input state (Ctrl+Shift+V).
-    pub voice: crate::display::voice::VoiceState,
     // --- Tool execution cards (Claude Code / Kimi Code parity) ---
     /// Tool call cards accumulated during the current run.
     pub tool_cards: Vec<crate::display::components::tool_card::ToolCard>,
@@ -1318,7 +1310,6 @@ impl AppState {
             branch_name: String::new(),
             tick: 0,
             paused: false,
-            background_tasks: 0,
             stages: Vec::new(),
             run_state: RunState::Idle,
             revision_round: 0,
@@ -1335,8 +1326,6 @@ impl AppState {
             finished: false,
             start_time: None,
             resolved_run: None,
-            chat_input: String::new(),
-            chat_cursor: 0,
             chat_copy_mode: false,
             chat_sel_anchor: None,
             chat_cursor_pos: (0, 0),
@@ -1377,7 +1366,6 @@ impl AppState {
             input_tokens: 0,
             output_tokens: 0,
             cache_read_tokens: 0,
-            voice: crate::display::voice::VoiceState::new(),
             tool_cards: Vec::new(),
             tool_detail_index: None,
             tool_detail_scroll: crate::display::scroll::ScrollState::new(),

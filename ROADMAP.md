@@ -986,7 +986,7 @@ bypassing it — each `left: 200000, right: 8000`.
 | `StageInfo.retry_count` is a literal `0` and `StageDone` has no such field, so the transcript's `retry n/3` is always `retry 0/3` — while the pipeline's own `StageMetric` carries the real count | `state.rs:1583`, `tui.rs:59-66` |
 | ~~ACP drops `DisplayEvent::Notice` in its replay~~ **DONE in batch 9 (B9-11)**. Note the sweep's examples were wrong — nothing emits *"spend cap exceeded"*; the two producers are the **MCP tool summary** and the **blocked-branch reason**. The defect was real and the same shape as the rest of the batch: `emit` buffers unconditionally so a headless driver can replay progress, and the replay's `_ => continue` then threw the notices away at the last step. | `acp/server.rs` |
 | `frame_mean_ms` / `frame_p95_ms` are written only by `run_tui`, never by `run_chat`, so the Cost page footer reads `0.0/0.0` in a chat session | `tui.rs:1090`, `cost.rs:292` |
-| Four `AppState` fields (`background_tasks`, `chat_input`, `chat_cursor`, `voice`) are declared, initialised, and touched by nothing. `voice`'s doc says *"push-to-talk (Ctrl+Shift+V)"* and **no such keybinding exists** | `state.rs:977,1022,1024,1118` |
+| ~~Four dead `AppState` fields~~ **DONE in batch 9 (B9-12)**. `background_tasks`, `chat_input`, `chat_cursor` and `voice` are deleted. `voice`'s doc said *"push-to-talk (Ctrl+Shift+V)"* and **no such binding exists** — while `/voice` itself already told users the truth, that voice is the separate `niki voice` subcommand. The sweep also called `voice` dead with two references; it has twenty, because `display::voice` is a real module behind that subcommand. What was dead was the *field*. | `src/display/state.rs` |
 | The permission modal presents four options and three scopes; `action_for` maps indices `0 | 1` both to `Allow`, so *"Allow once"* and *"Allow always"* are identical | `permissions/permission.rs:52-55` |
 
 ### B9-07 — the permission modal: four options, two behaviours (BUILT)
@@ -1113,6 +1113,35 @@ structural fix — but it forces a decision on all 16 others, several of which a
 IDE client arguably *needs* (permission prompts, `ask_user`, tool cards, chat
 deltas). That is a product call about what an editor should see, and it is
 recorded here rather than taken.
+
+### B9-12 — a doc promising a keybinding that does not exist
+
+Four `AppState` fields were declared, initialised and touched by nothing:
+`background_tasks`, `chat_input`, `chat_cursor`, `voice`. All four are deleted.
+
+`voice`'s doc comment read *"Push-to-talk voice input state (Ctrl+Shift+V)"* —
+and there is **no `Ctrl+Shift+V` binding anywhere in the codebase**. Nothing read
+or wrote the field, and `/voice` itself already told the truth: voice input is
+the separate `niki voice` subcommand, which records through ffmpeg and
+transcribes via the provider's STT endpoint.
+
+So the code claimed a shortcut NIKI does not have, on a field nothing used,
+while the command the user actually types said something different.
+
+**The sweep got the field wrong too** — it reported `voice` with two references
+and dead. It has twenty, because `display::voice` is a real module behind the
+subcommand. The *field* was dead; the module is not, and the module stays.
+
+**Can-fail proven**, and the first version of the test did not: it asserted
+`/voice` *mentions* `niki voice`, which a message saying *"press Ctrl+Shift+V to
+talk. `niki voice` records…"* satisfies. The negative half — the message must
+**not** name a binding that does not exist — is what makes it a canary.
+
+**Not provable by a test, stated rather than implied:** that a `pub` field is
+*unused* cannot be checked from inside the crate — Rust will not warn on a public
+field of a public struct, and there is no way to enumerate them. Re-adding
+`voice` would not fail anything. G9 and clippy do not catch it either. The only
+mechanism is review, and this entry is the record.
 
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 

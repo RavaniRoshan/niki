@@ -2428,6 +2428,39 @@ mod tests {
     /// It matters because the status bar shows a percentage of `context_limit`.
     /// A user who types `/model gpt-4` and watches "ctx" keep reporting against
     /// a 200k window is being shown a number about a model they are not using.
+    /// `/voice` names the command that exists.
+    ///
+    /// `AppState` carried a `voice: VoiceState` field whose doc comment read
+    /// *"Push-to-talk voice input state (Ctrl+Shift+V)"*. There is no
+    /// `Ctrl+Shift+V` binding anywhere in the codebase, nothing read or wrote
+    /// the field, and `/voice` itself already told the truth — that voice is the
+    /// separate `niki voice` subcommand.
+    ///
+    /// So the doc claimed a keybinding the product does not have, on a field
+    /// nothing used, while the command the user actually types said something
+    /// different. The field is gone; this holds the part a user can see.
+    #[test]
+    fn voice_points_at_the_command_that_exists() {
+        let mut state = base_state();
+        state.input_state.mode = crate::display::state::InputMode::Command;
+        state.input_state.buffer = "/voice".to_string();
+        state.input_state.cursor_pos = "/voice".len();
+        let mut page = ChatPage::new();
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::empty());
+        assert!(page.handle_key(enter, &mut state));
+
+        let said = state
+            .chat_log
+            .iter()
+            .find(|(role, text)| role == "system" && text.contains("Voice"))
+            .map(|(_, t)| t.clone())
+            .expect("/voice must answer");
+        assert!(
+            said.contains("niki voice"),
+            "and name the command that exists, not a keybinding that does not: {said}"
+        );
+    }
+
     #[test]
     fn switching_model_moves_the_context_window() {
         let mut state = base_state();
