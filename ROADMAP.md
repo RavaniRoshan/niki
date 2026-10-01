@@ -985,7 +985,7 @@ bypassing it — each `left: 200000, right: 8000`.
 | `/cost` after `/run` in the chat shows real dollars beside `0` tokens, because `StageDone` writes only per-stage fields | `state.rs:1618-1657` |
 | `StageInfo.retry_count` is a literal `0` and `StageDone` has no such field, so the transcript's `retry n/3` is always `retry 0/3` — while the pipeline's own `StageMetric` carries the real count | `state.rs:1583`, `tui.rs:59-66` |
 | ~~ACP drops `DisplayEvent::Notice` in its replay~~ **DONE in batch 9 (B9-11)**. Note the sweep's examples were wrong — nothing emits *"spend cap exceeded"*; the two producers are the **MCP tool summary** and the **blocked-branch reason**. The defect was real and the same shape as the rest of the batch: `emit` buffers unconditionally so a headless driver can replay progress, and the replay's `_ => continue` then threw the notices away at the last step. | `acp/server.rs` |
-| `frame_mean_ms` / `frame_p95_ms` are written only by `run_tui`, never by `run_chat`, so the Cost page footer reads `0.0/0.0` in a chat session | `tui.rs:1090`, `cost.rs:292` |
+| ~~Frame stats written by one loop, read by a page both can reach~~ **DONE in batch 10 (B10-01)**. `run_chat` now records into the same `FrameStats` the engine uses, and the Cost page **says it has measured nothing** rather than printing `frame 0.0/0.0ms`. | `tui.rs:1503`, `cost.rs:288` |
 | ~~Four dead `AppState` fields~~ **DONE in batch 9 (B9-12)**. `background_tasks`, `chat_input`, `chat_cursor` and `voice` are deleted. `voice`'s doc said *"push-to-talk (Ctrl+Shift+V)"* and **no such binding exists** — while `/voice` itself already told users the truth, that voice is the separate `niki voice` subcommand. The sweep also called `voice` dead with two references; it has twenty, because `display::voice` is a real module behind that subcommand. What was dead was the *field*. | `src/display/state.rs` |
 | The permission modal presents four options and three scopes; `action_for` maps indices `0 | 1` both to `Allow`, so *"Allow once"* and *"Allow always"* are identical | `permissions/permission.rs:52-55` |
 
@@ -1142,6 +1142,39 @@ talk. `niki voice` records…"* satisfies. The negative half — the message mus
 field of a public struct, and there is no way to enumerate them. Re-adding
 `voice` would not fail anything. G9 and clippy do not catch it either. The only
 mechanism is review, and this entry is the record.
+
+### B10-01 — the Cost page printed a zero it had never measured
+
+`frame_mean_ms` and `frame_p95_ms` are written by `run_tui` from the frame
+engine's stats. `run_chat` has its own render loop and never touched that
+engine — so both fields stayed at their initial `0.0` for the whole of a chat
+session, and the Cost page, reachable from chat with a `]`, showed
+`frame 0.0/0.0ms mean/p95`.
+
+Two fixes, because either alone leaves something false on screen:
+
+1. **`run_chat` measures itself.** `FrameStats` is a standalone recorder, so
+   the chat loop records into the same one rather than porting to the engine —
+   a change to how every frame is scheduled — and the two surfaces publish
+   comparable numbers.
+2. **The page says when it has nothing.** `frame_mean_ms` starts at `0.0` and a
+   real frame is never `0.0` ms, so printing the number is printing the *absence*
+   of a number. `AppState::frame_samples` makes the difference, and the footer
+   reads `frame —/—ms mean/p95 (no frames measured)`.
+
+**The canary covers the second, and the sabotage on the first does not bite** —
+which is right, not weak. Removing the chat loop's publication leaves
+`frame_samples == 0`, so the page *honestly* says it has measured nothing. The
+user-visible defect is closed by either half, and a test that demanded both
+would be asserting an implementation detail rather than a promise.
+
+**Not covered, stated rather than implied:** that `run_chat` calls `record` at
+all. `run_chat` blocks on a terminal, so no unit test drives it; that hop is held
+by the code and by this entry.
+
+The existing `cost_footer_shows_frame_stats` test set the numbers by hand and
+could not have seen any of this — the batch-9 pattern once more, in the one place
+this batch has now seen it six times.
 
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
