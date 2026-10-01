@@ -339,7 +339,6 @@ agent-loop-uses-shared-predicate | the_agent_loop_uses_the_shared_predicate | a 
 coder-loop-reports-its-failure | the_coder_loop_reports_its_failure | `.ok()?` again, so a network failure is a silent fallback
 git-temp-paths-are-run-scoped | no_temporary_path_in_git_output_is_shared_between_runs | a temp path shared by every run on the machine
 # B6-07 · the record gets teeth: an open claim is pinned, and the pin is real
-docker-backend-still-has-no-unit-tests | the_docker_backend_still_has_no_unit_tests | a §6 bullet left open after the work landed
 # B6-08 · the recommended backend had no in-file tests; the scoring is why
 greedy-falls-where-the-table-does-not | the_greedy_walk_scores_below_the_floor_where_the_table_does_not | the cheap walk back in charge, so a near miss scores 0.20 and the feature silently does nothing
 near-miss-clears-the-floor | a_near_miss_clears_the_floor | a real near miss under the 0.5 floor
@@ -356,3 +355,11 @@ short-file-is-skipped | a_file_shorter_than_the_anchor_is_skipped | an out-of-ra
 empty-needle-matches-nothing | an_empty_needle_matches_nothing | an empty anchor matching something
 task-dir-rule-is-exact | a_directory_belongs_to_a_task_only_by_the_exact_rule | the loose `<id>-` prefix, so Ctrl+C deletes a directory belonging to other work
 teardown-spares-other-work | teardown_takes_this_task_and_its_siblings_and_nothing_else | the loose rule, on disk rather than in the predicate
+# B6-09 · the default backend gets in-file tests
+role-names-are-runtime-safe | every_role_produces_an_acceptable_container_name | a `{:?}` role name a container runtime rejects, failing the run at create
+sanitiser-matches-the-runtime-rule | the_sanitiser_matches_the_runtimes_rule | a sanitiser that rewrites valid names, or rewrites nothing
+unusable-name-stays-usable | an_unusable_name_still_yields_a_usable_one | a run that creates no container
+two-runs-differ-by-name | two_runs_get_different_names | two runs colliding, so `niki status` cannot tell them apart
+eight-char-prefix-window | ids_sharing_eight_leading_characters_do_collide | the truncation window changing without the record noticing
+only-a-wildcard-opens-egress | only_a_wildcard_opens_the_container_network | a per-domain list reading as implemented when it is block-all
+network-setting-follows-the-wildcard | the_network_setting_follows_the_wildcard | the two halves of the egress switch disagreeing
