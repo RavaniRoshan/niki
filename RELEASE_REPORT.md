@@ -18,8 +18,8 @@ Run of 2026-09-30, after batch 2's last commit. Raw output in `EVIDENCE.md`.
 |---|---|---|
 | **G1** clean clone, install, README quick start | **PASS** | all scripts parse; every published download URL resolves; `niki 0.9.0 — README quick start commands accepted` |
 | **G2** build, lint | **PASS** | `cargo fmt --check`; `cargo clippy --all-targets -D warnings` warning-free; debug and release both build |
-| **G3** tests + can-fail map | **PASS** | lib **996**; `run_lifecycle` **14**; **317 can-fail entries** all resolve to a real test |
-| **G4** the core flow, for real | **PASS** | `run_lifecycle` 14; `chat_runs_the_pipeline`; `scripts/demo.sh`; the tmux suite **16/16**, including the first case that runs a pipeline |
+| **G3** tests + can-fail map | **PASS** | lib **1002**; `run_lifecycle` **14**; **335 can-fail entries** all resolve to a real test |
+| **G4** the core flow, for real | **PASS** | `run_lifecycle` 14; `chat_runs_the_pipeline`; `scripts/demo.sh`; the tmux suite **16/16**; and a **live** pipeline on `stealth/space-bunny-alpha` — Approved 10/10, §2h |
 | **G5** security | **PASS** | `cargo deny check` ok; `cargo audit` ok (11 pre-existing allowed warnings); **no credentials in the tree or in history** |
 | **G6** failure paths | **PASS** | every failure path exits non-zero *and* says something a person can act on |
 | **G7** docs match reality | **PASS** | the audit's counts are re-derived from the tree; every README command parses against the real binary |
@@ -744,3 +744,59 @@ no unit test covers.
   characters) are different operations, and conflating them cost a run in each
   direction. And the mock's stderr goes to a file, because a harness that
   cannot explain its own failure teaches the reader to guess.
+
+## 2h · Batch 7, the live half — what a real model found
+
+Seven commits, `49c5c31`…`e7bba55`. Canary map 323 → 335. PTY 16 → 16.
+
+The first half of batch 7 closed the ranked items that were records rather
+than repairs. This half is what a **real model** found — six defects, three of
+them in the Coder's tool loop, none reachable from a scripted server.
+
+### §9.3 — a model that finished the work never submitted it
+
+Six steps: `read`, `edit`, `bash`, the edit applied and compiling. Then: *"The
+change is in place and compiles cleanly"* — and no `submit_artifact`.
+`recover_submission` found no JSON, returned `None`, and the caller
+**discarded the loop and re-ran the whole Coder one-shot**. The work was in the
+worktree the entire time.
+
+The loop now asks once before giving up: stop exploring, only
+`submit_artifact` becomes part of the result, call it now. **Live-verified** —
+the same model and task then submitted in 36 s.
+
+### Three more, from the same runs
+
+| | Defect | The wrong first reading |
+|---|---|---|
+| §9.3b | The artifact re-applies edits the tool loop already wrote, so every `search` is gone | "a no-op edit was accepted" — wrong; the validator already rejects those. One grep corrected it. |
+| §9.3c | `first_json_object` took the **first** `{` in the text, so an artifact behind a brace in prose was never parsed | — and the test found a pre-existing weakness: `edits.is_some()` accepted a *description* of the shape |
+| §9.5 | One stale path in a round-accumulated file list made `git add -N` fail for the **whole invocation**, so every new file dropped out of the diff | "the run warned about a missing file" — the warning was not the defect. **The diff was short.** |
+
+### Two models, and why both were needed
+
+`stealth/space-bunny-alpha` runs the whole pipeline. `poolside/laguna-s-2.1:free`
+cannot finish a task — its Planner emits no conformant artifact — and *that* is
+what exposed the recovery path reporting `No such file or directory (os error
+2)` on a run that had already failed for a perfectly good reason.
+
+**A model too weak to get through stage one still fails loudly and early**,
+which is how the failure paths get exercised for real.
+
+### The final run
+
+Release build, `--backend worktree`, and **no "the patch did not apply"
+anywhere** — including across the revision round, which is where §9.3b used to
+bite:
+
+Planner 47s → Coder 90s → Tester 5/8 → Reviewer **revision needed** (2
+critical, both correct) → Coder 48s → Tester **7/7** → Reviewer **Approved,
+10/10 · 10/10 · 9/10**.
+
+### Three times in two slices, a proof that did not run
+
+A can-fail entry whose test name did not match my filter (`0 passed` reads
+like a pass). A test that drove the shared helper and not the backend's own
+inline check. A test whose premise was broken by its own fixture. Each found
+by reading the **count**, not by trusting the word "ok" — and the last is why
+`ROADMAP.md` §0 exists.
