@@ -523,6 +523,36 @@ scheduler that decides which ready tools run together. The lock is what makes
 that safe, and it is the part whose absence would be a data-loss bug rather
 than a slowdown.
 
+**The concurrency half was measured before it was built, and it is not worth
+building.** §8 promises *"reads parallel, writes exclusive … this will make
+NIKI feel 2-3x faster"*. Measured on this codebase — three `read` calls through
+the real `ToolRegistry::execute`, on three 400-line files:
+
+| | 3 reads |
+|---|---|
+| sequential | **1.62 ms** |
+| joined concurrently | **0.88 ms** |
+
+**0.74 ms saved per turn**, on a turn whose model request takes seconds. The
+schedulable set is smaller than it looks: `bash` has no path and so is
+exclusive by construction, `web_fetch` has no `path` argument and is likewise
+exclusive, and `grep`/`glob` take no single path — which leaves *reads of
+different files*, at roughly half a millisecond each.
+
+So the executor as §8 describes it would restructure ~170 lines of the hottest
+code in the repository — the block that emits `ToolStarted`, runs the tool,
+probes the output and pushes the result — to buy less than a frame. **The
+latency in §8 is in the streaming, not in the parallelism**, and streaming
+needs the loop to call `provider.stream()` instead of `provider.complete()`
+(`tools.rs:3727`). That is a real change with real risk, and it is not this
+slice. Both the measurement and this conclusion are recorded so the idea is not
+re-derived from §8's estimate later.
+
+**This closes the concurrency half of T3 on evidence rather than on effort.**
+The lock and the scheduler stay: they are the safety content, they are tested,
+and the lock is what a future streaming executor needs. Neither is wired into
+the loop, and that is stated plainly rather than left to be discovered.
+
 T3 · Streaming tool executor — `src/orchestrator/`, `src/runtime/`
 
 Begin a tool when its `tool_use` block finishes streaming rather than after
