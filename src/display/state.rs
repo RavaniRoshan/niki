@@ -2021,18 +2021,52 @@ impl AppState {
     }
 
     /// Get total tokens across all pipeline stages.
+    /// Session totals: **pipeline stages *and* chat turns**.
+    ///
+    /// It used to sum `StageInfo` only, and a chat conversation creates no
+    /// `StageInfo` — so `/status` and `/usage` reported `$0.0000` and `0`
+    /// tokens for a conversation that had spent real money, **in the same
+    /// session where `/cost` reported the true figure**. Three commands, one
+    /// conversation, opposite answers; two of them were the ones the product
+    /// points users at (`/status` is in `/help`).
+    ///
+    /// Cost is `max(self.cost, the stage sum)` — **not** their sum, and not
+    /// either alone.
+    ///
+    /// They are two views of the same spend, so adding them double-counts every
+    /// run: the pipeline **assigns** `self.cost` from the record's
+    /// `total_cost_usd`, and the per-stage `cost_usd` values add up to the same
+    /// money. Taking the larger is "use whichever one we have":
+    ///
+    /// * a run whose record arrived — `self.cost` carries it, plus any chat
+    ///   turns on top;
+    /// * a run whose record did **not** arrive (a crash, or a stage run outside
+    ///   the record writer) — the stage sum is the only evidence there is, and
+    ///   reporting `$0.0000` while four stages carry real costs is exactly the
+    ///   defect this function had;
+    /// * a conversation with no run — the stage sum is zero and `self.cost` is
+    ///   the chat's.
+    ///
+    /// Latency is stage-only: a chat turn's latency is not recorded per turn, and
+    /// inventing one from the stream would be a number nobody measured.
     pub fn totals(&self) -> (u32, u32, f64, u64) {
         let mut in_t = 0u32;
         let mut out_t = 0u32;
-        let mut cost = 0.0f64;
         let mut ms = 0u64;
         for s in &self.stages {
             in_t += s.input_tokens;
             out_t += s.output_tokens;
-            cost += s.cost_usd;
             ms += s.latency_ms;
         }
-        (in_t, out_t, cost, ms)
+        let chat_in: u32 = u32::try_from(self.input_tokens).unwrap_or(u32::MAX);
+        let chat_out: u32 = u32::try_from(self.output_tokens).unwrap_or(u32::MAX);
+        let stage_cost: f64 = self.stages.iter().map(|s| s.cost_usd).sum();
+        (
+            in_t.saturating_add(chat_in),
+            out_t.saturating_add(chat_out),
+            self.cost.max(stage_cost),
+            ms,
+        )
     }
 
     /// Alias for apply_display_event (compatibility with tui.rs).
@@ -2733,6 +2767,68 @@ mod tests {
                 .iter()
                 .any(|(r, t)| r == "system" && t.contains("Context is")),
             "7 500 of 8 000 is 94% of the window and must be said out loud"
+        );
+    }
+
+    /// `/cost`, `/status` and `/usage` must not contradict each other.
+    ///
+    /// They did. `totals()` summed `StageInfo`, and a chat conversation creates
+    /// no `StageInfo` — so `/cost` (fixed in B9-04, reading the chat's own
+    /// counters) reported a real figure while `/status` and `/usage` reported
+    /// `$0.0000` and `0` tokens **for the same conversation**. Three commands,
+    /// one session, opposite answers, and `/status` is the one the product lists
+    /// in `/help`.
+    ///
+    /// The assertion is that the three agree, not that any particular number is
+    /// right: a user who is told `$0.0417` by one command and `$0.0000` by the
+    /// next one concludes that the product does not know.
+    #[test]
+    fn every_spending_command_reports_the_same_number() {
+        let mut state = AppState::new(
+            "t".into(),
+            crate::config::types::NikiConfig::default(),
+            ".".into(),
+        );
+        // One paid chat turn.
+        state.apply_display_event(crate::display::tui::DisplayEvent::ChatFinished {
+            cost_usd: 0.25,
+            finish_reason: None,
+            usage: Some(crate::llm::provider::TokenUsage {
+                input_tokens: 3_000,
+                output_tokens: 1_000,
+                cached_input_tokens: 0,
+                reasoning_tokens: 0,
+            }),
+        });
+
+        let (in_t, out_t, cost, _) = state.totals();
+        assert_eq!(in_t, 3_000, "totals must include the chat's tokens");
+        assert_eq!(out_t, 1_000);
+        assert!((cost - 0.25).abs() < 1e-9, "and the chat's spend: {cost}");
+
+        // Now a run on top of it: the stages and the record describe the same
+        // money, and adding them must not double it.
+        state.stages.push(StageInfo {
+            role: crate::artifacts::types::AgentRole::Coder,
+            status: StageStatus::Done,
+            stream: String::new(),
+            full_transcript: String::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: 0.5,
+            latency_ms: 0,
+            summary: vec![],
+            start: None,
+            completed_at: None,
+            prompt_file: None,
+            retry_count: 0,
+            error_message: None,
+        });
+        let (_, _, with_stage, _) = state.totals();
+        assert!(
+            (with_stage - 0.5).abs() < 1e-9,
+            "a stage's cost and the session's spend are two views of the same \
+             money; the larger wins and they are never added: {with_stage}"
         );
     }
 

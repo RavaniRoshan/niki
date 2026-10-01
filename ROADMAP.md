@@ -1034,6 +1034,34 @@ Closing it needs a pipeline-level test that runs a stage — which is the same
 "drive the producer, not the constructor" rule, one level further out, and is
 recorded rather than written around.
 
+### B9-09 — three commands, one conversation, opposite answers (BUILT)
+
+`totals()` summed `StageInfo`, and a chat conversation creates **no
+`StageInfo`** — so `/status` and `/usage` reported `$0.0000` and `0` tokens for a
+conversation that had spent real money, **in the same session where `/cost`
+reported the true figure.** `/cost` was fixed in B9-04; the other two were left
+contradicting it, and `/status` is the one the product lists in `/help`.
+
+A user told `$0.0417` by one command and `$0.0000` by the next concludes that
+the product does not know. They would be right.
+
+`totals()` is now session-wide: stages **and** chat turns.
+
+**Cost is `max(self.cost, the stage sum)` — neither alone and never their sum.**
+They are two views of the same money: the pipeline *assigns* `self.cost` from
+the record's `total_cost_usd`, and the per-stage `cost_usd` values add up to the
+same amount, so adding them double-counts every run. Taking the larger is "use
+whichever one we have" — the record when it arrived, the stage sum when it did
+not (a crash, or a stage run outside the record writer), and `self.cost` alone
+for a conversation with no run.
+
+Latency stays stage-only: a chat turn's latency is not recorded per turn, and
+inventing one from the stream would be a number nobody measured.
+
+Can-fail proven both ways: dropping the chat counters gives `left: 0, right:
+3000`; summing instead of maxing gives *"two views of the same money … never
+added: 0.75"*.
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in
