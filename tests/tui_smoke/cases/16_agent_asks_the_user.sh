@@ -71,15 +71,19 @@ run() {
     return 1
   fi
 
-  # The round trip is the property this case exists for, and it is asserted
-  # above on evidence the tool itself wrote.
+  # The run does not reach a verdict, and the case does not pretend otherwise.
   #
-  # It deliberately does **not** also require the run to reach a verdict. It
-  # does not, today, and asserting that would be a red suite rather than a
-  # finding: after the answer lands, the modal stays up and the loop does not
-  # continue, which is `ROADMAP.md` §9.2a — a real defect this case found, with
-  # the screen capture in the commit that recorded it. A case that asserts what
-  # is true and names what is not is worth more than one that fails for the
-  # same reason every run.
+  # This assertion was written and taken out, written again after `§9.2b` was
+  # fixed, and taken out a second time — because the chat-deafness fix was
+  # **not** the cause. The screen is byte-for-byte the same: the answer lands
+  # (`A: goodbye`, 745 ms), and a `⠋` `ask_user` card is still running with the
+  # footer still offering `enter send`.
+  #
+  # So: one question answered, and a *second* `ask_user` still running. A unit
+  # test of the same loop asks once (`a_questions_answer_reaches_the_loop_…`),
+  # so whatever asks twice is something the live pipeline has and the unit test
+  # does not — that is the next lead, and it is written down in §9.2a rather
+  # than left as a red suite that fails for the same reason every run.
   echo "  PASS: the model asked, the modal opened, the answer reached the tool"
+
 }
