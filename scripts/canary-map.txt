@@ -441,3 +441,12 @@ resolved-line-renders | a_resolved_line_says_it_is_finished | the finished form 
 working-line-draws-in-a-small-frame | the_widget_draws_in_a_small_frame | a panic in a small terminal, which is the bar every overlay here is held to
 no-visual-tape-starts-a-pipeline | no_visual_tape_starts_a_pipeline | a tape growing a `/run`, which renders the activity line and needs runner-side re-blessing
 every-tape-launches-chat | every_visual_tape_launches_the_chat_surface | a tape driving another surface, which may render the line
+# B7-21 · §8 T2: the reasoning-blind view — the security property T2 rests on
+injection-cannot-reach-the-classifier | an_injection_in_a_tool_result_cannot_reach_the_classifier | a prompt injection in tool output voting on the next approval
+not-even-a-fragment-reaches-it | not_even_a_fragment_of_a_tool_result_reaches_the_view | 99% of an injection surviving, which is an injection it has seen
+view-carries-the-action | the_view_carries_the_action_being_approved | a view that drops everything passing every injection test while approving nothing
+assistant-prose-withheld | assistant_prose_is_withheld_too | prose read as an argument for the thing it was argued into
+omission-is-reportable | the_omission_is_reportable | a defence that works by discarding evidence, saying nothing about how much
+prompt-labels-provenance | the_prompt_labels_what_each_line_is | a call mistakable for an instruction
+empty-transcript-is-empty | an_empty_transcript_is_an_empty_view | a placeholder that reads like evidence
+multi-call-turn-is-fully-visible | every_call_in_a_multi_call_turn_is_visible | excluding the prose starting to exclude the actions
