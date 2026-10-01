@@ -156,6 +156,33 @@ if want G3; then
   printf '\n\033[1mG3 · tests + can-fail map\033[0m\n'
   run_capture G3 g3-lib cargo test --lib $CARGO_TEST_FLAGS
 
+  # ── G3 fast lane · the cheap integration binaries ──────────────────────
+  #
+  # **`cargo test --lib` was the whole of G3's test run**, and the integration
+  # binaries were checked only for *existence* — the canary map greps
+  # `tests/` and `src/` for a name and stops there. So a test in `tests/` could
+  # be red and every gate would still say PASS.
+  #
+  # Measured in batch 8, not assumed: three tests were red on this branch while
+  # G1–G7 and G9 all reported green. Two were real defects —
+  # `cost::a_fallback_served_call_is_priced_by_the_fallback` (the failover chain
+  # did not fail over) and `money::the_coder_loop_bills_before_every_bail_out`
+  # (a Coder that spent money and then errored was billed as free) — and both
+  # are in the paths a user hits when a provider is slow or drops a connection.
+  #
+  # These four run serially, on one thread, in **~34 s** including link. The
+  # whole suite still does not fit this machine (`AGENTS.md`), which is why this
+  # is a named lane rather than `cargo test` — and why the honest statement in
+  # `RELEASE_REPORT.md` §5 is unchanged: **this lane covers these four, and only
+  # CI covers the rest.**
+  #
+  # Extend the list rather than replacing it with `cargo test`.
+  fast_lane="record_claims_are_pinned run_lifecycle agent_tool_loop reverse"
+  for bin in $fast_lane; do
+    [ -f "tests/$bin.rs" ] || { record G3 FAIL "fast lane names tests/$bin.rs, which does not exist"; continue; }
+    run_capture G3 "g3-fast-$bin" cargo test --test "$bin" $CARGO_TEST_FLAGS
+  done
+
   # Every DO NOW feature must name the test that proves it can fail. A feature
   # with no entry is a feature nothing is checking.
   mapfile="$ROOT/scripts/canary-map.txt"

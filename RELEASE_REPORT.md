@@ -442,12 +442,19 @@ parts a user hits when a provider is slow, rate-limited or drops a connection.
 Neither was visible to any gate, and one had been red long enough that its cause
 was assumed to be something else.
 
-**What this means for you, concretely:** before trusting a green gate run here,
-run the suite in CI. G3 tells you the canaries *exist*; it does not tell you they
-*pass*. Closing this properly means a fast lane in `scripts/verify.sh` that runs
-the cheap integration binaries (`reverse`, `agent_tool_loop`, `run_lifecycle`)
-serially — that is a gate change, and gates are not something to add at the end
-of a batch without the owner agreeing to the runtime cost.
+**Partly closed in batch 8 (B8-12).** G3 now has a **fast lane** that runs four
+integration binaries serially — `record_claims_are_pinned`, `run_lifecycle`,
+`agent_tool_loop`, `reverse` — in **~34 s** including link, and fails G3 with
+the binary name and a log path when any of them is red. Proven by re-introducing
+two of the three defects above: the failover one turns G3 red
+(`g3-fast-reverse.log`), the truncation one turns it red
+(`g3-fast-agent_tool_loop.log`). Neither was visible to any gate before.
+
+**What is still open:** the lane covers four binaries, and the suite still does
+not fit this machine. Everything else is CI's to catch. The statement above
+stands, narrowed rather than withdrawn — **this lane covers these four, and only
+CI covers the rest.** The lane is a named list in `scripts/verify.sh` to extend,
+not a `cargo test` that happens to be fast.
 
 **Live, as of batch 2:**
 
