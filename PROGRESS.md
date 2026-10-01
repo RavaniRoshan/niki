@@ -1458,3 +1458,40 @@ $ ./scripts/verify.sh --only G7 → PASS  every README command parses
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test -j 2 --lib → 1079 passed; 0 failed
 ```
+
+---
+
+## Iteration 7h — B8-08, a KNOWN_FAILING entry that was no longer failing
+
+`KNOWN_FAILING` listed `INV-VERDICT-NOT-FABRICATED` as *"SingleAgent assigns
+`verdict = Verdict::Approved` without a Reviewer (`pipeline.rs:2395)`"* — a line
+number that has moved, for code that no longer says what the entry claims. The
+product now emits `RunOutcome::SelfVerified`, derives the final verdict from
+the outcome, and gates `Reviewed` on `reviewer_ran && verdict_source.is_some()`.
+A **real** run asserts it: `tests/run_lifecycle.rs` reads `task.json` back and
+checks `outcome.outcome == "self_verified"`.
+
+So the entry was reporting a defect no run produces, and the ratchet was
+pinning the programme to a **synthetic** failure. Struck — and the strike held
+in both directions: the shape the product writes must pass, the shape the
+invariant forbids must still fail. Both proven by sabotage, plus deleting the
+registration entirely.
+
+**The replacement assertion was vacuous the first time it ran.**
+`is_completed()` looks for `"Completed"` with a capital C; the draft used
+`"completed"`, so every check returned `pass()` at the top — including the one
+that appeared to prove the strike was safe.
+
+That is worth the record. The usual failure this programme hunts is a red test
+that should be green. This one was the reverse: **a green test that proved
+nothing**, and the only reason it was caught is that the second half of the same
+assertion was supposed to fail and did not. If the fabricated trace had been
+written first and the honest one second, both would have passed and the strike
+would have shipped with the check effectively deleted.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  414 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+```

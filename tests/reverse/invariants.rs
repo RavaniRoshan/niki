@@ -569,10 +569,6 @@ pub const LAYERS: &[&str] = &[
 /// defect, not relaxing the invariant.
 pub const KNOWN_FAILING: &[(&str, &str)] = &[
     (
-        "INV-VERDICT-NOT-FABRICATED",
-        "SingleAgent assigns `verdict = Verdict::Approved` without a Reviewer (pipeline.rs:2395)",
-    ),
-    (
         "INV-TERMINAL-SAFE",
         "raw model tokens are print!-ed to the terminal (display/agent_stream.rs:319)",
     ),
