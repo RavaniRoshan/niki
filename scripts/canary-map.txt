@@ -488,3 +488,12 @@ no-known-path-runs-alone | a_call_with_no_known_path_runs_alone | `bash` beside 
 unknown-tool-is-a-write | an_unrecognised_tool_is_treated_as_a_write | a misread write gaining parallelism it must not have
 results-in-the-order-asked | results_are_delivered_in_the_order_the_model_asked | a model reading its own actions out of order
 mixed-turn-plans-sensibly | a_mixed_turn_is_planned_into_sensible_batches | the plan no longer being a function of the call list
+shrunk-transcript-is-reported | a_shrunk_transcript_is_never_silent | context removed with nothing in the log saying so
+strategies-run-in-order | the_strategies_run_in_that_order | the cheap exact strategies reordered, or an unrun one reported
+duplicate-systems-snipped | duplicate_system_messages_are_dropped_and_the_first_is_kept | a repeated system prompt inflating the context it repeats
+long-result-keeps-head-and-tail | a_long_result_keeps_its_head_and_its_tail | a file read trimmed to nothing the model can use
+only-tool-results-compressed | only_tool_results_are_compressed | user instructions or the model's own reasoning elided away
+nothing-to-do-reports-nothing | a_transcript_with_nothing_to_compress_reports_nothing | a compression line printed on every turn, which trains a reader to skip it
+report-accounts-for-everything | the_report_accounts_for_exactly_what_was_removed | a report that is a story rather than a tally of what left
+marker-quoting-content-compressed | content_that_quotes_the_marker_is_still_compressed | a file faking "already compressed" to carry payload through untouched
+loop-compresses-its-transcript | an_oversized_tool_result_is_compressed_before_the_next_request | a compressor nothing calls, which is a component that does nothing

@@ -1167,3 +1167,74 @@ supplied key (*"this account never purchased credits"*), and `:free` models are
 unevenly rate-limited. `poolside/laguna-s-2.1:free` and
 `stealth/space-bunny-alpha` answer consistently. The key is environment-only;
 G5's secret scan over the tree *and* git history passed before every commit.
+
+---
+
+## Iteration 7c — §8 T4, context compression (B7-22)
+
+### What was measured first
+
+Two compressors already existed and **neither touches the conversation the
+model is in**:
+
+| Existing | Operates on | Callers in `src/` |
+|---|---|---|
+| `memory/compression.rs` | knowledge between stages, writes a block to disk | one — `let _ = compress_context(…)` at `pipeline.rs:2450`, result **discarded** |
+| `runtime/compaction.rs` | a `ContextStore` of typed `Fragment`s | **zero** |
+
+`grep -rn "ContextCompactor" src/` returns nothing outside that module's own
+tests. So the loop's `Vec<LoopMessage>` grew unbounded and nothing noticed.
+
+### What shipped
+
+`src/runtime/transcript.rs` — the first compressor that operates on the loop's
+own transcript, called at `src/runtime/tools.rs:4055` after a tool result is
+pushed and before the next request. Named for what it compresses, not for
+`compaction`, which is a different thing with no callers.
+
+Three strategies, in §8's order: snip duplicate system messages (lossless),
+microcompact long tool results (head+tail, marks the middle gone), collapse
+long file reads (head/tail lines). `Summarise` is **deliberately unbuilt** — it
+needs a model call and loses detail — and a test pins that no run ever reports
+it.
+
+Two decisions that are not obvious from the code:
+- **Only `ToolResult` turns are compressed.** Eliding assistant prose leaves the
+  model reasoning about a conversation it no longer has; eliding a user
+  instruction is a task that changed with nobody deciding it should.
+- **The trigger is content size, not §8's 95%-of-window.** The loop has no
+  context-window figure. Inventing one would put a number in the code that
+  looks authoritative and is not.
+
+### Evidence
+
+```
+$ cargo test -j 2 --lib -- --test-threads=1
+test result: ok. 1068 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ cargo clippy --all-targets -j 2 -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 35.57s
+
+$ ./scripts/verify.sh --only G3    → PASS  400 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5    → PASS  no credentials in the tree or in history
+$ ./scripts/verify.sh --only G7    → PASS  every README command parses
+$ ./scripts/verify.sh --only G9    → PASS  no todo!/unimplemented! in production code
+```
+
+**8/8 sabotages bit** (9 with the call site): the report emptied while the
+transcript shrank; the strategies reordered; duplicates kept; elision emptying
+the body; user turns compressed; a line printed when nothing happened; a report
+overcounting by one character; a file quoting the marker skipping compression;
+and the `compress()` call deleted from the loop.
+
+The eighth did not bite on the first run — the guard had been added to *one* of
+the two elision strategies, so the other still dropped the middle and the test
+stayed green. Guarding both made it red. That is the eighth time in this
+programme a sabotage has needed a second look, and the reason §0 says to read
+the count and to ask whether the *sabotage* was wrong before assuming the test
+was.
+
+Two of my own tests were wrong before they were ever run: one asserted a marker
+appears exactly once when the content itself quoted it, and the other compared
+the second request against the wrong direction. Both were rewritten to assert
+something true, not weakened.

@@ -533,7 +533,8 @@ parallel writes to one file is a lost update, and "reads are safe" is only
 true if a read cannot observe a half-applied write. The executor needs a
 per-path lock, not a read/write classification alone.
 
-### T4 · Context compression at a budget — `src/memory/`
+### T4 · Context compression at a budget — **FIRST SLICE BUILT (B7-22):
+`src/runtime/transcript.rs`, wired at `src/runtime/tools.rs:4055`**
 
 Above 95% of the context window, fire in priority order: snip duplicate
 system messages, microcompact recent tool results, collapse long file reads,
@@ -545,6 +546,46 @@ this codebase has no data for.
 counted and reported in the transcript, so a run that lost context says which
 strategy took it — the same rule B2-01 through B2-12 have been applying to
 every other silent degradation in this codebase.
+
+**What was measured before anything was written.** Two compressors already
+existed and **neither touches the conversation the model is in**:
+
+| Existing | What it operates on | Callers in `src/` |
+|---|---|---|
+| `memory/compression.rs` | knowledge between stages; writes a block to disk | one, and it is `let _ = compress_context(…)` at `pipeline.rs:2450` — the result is **discarded** |
+| `runtime/compaction.rs` | a `ContextStore` of typed `Fragment`s | **zero** — `grep -rn ContextCompactor src/` returns nothing outside the module's own tests |
+
+So the loop's `Vec<LoopMessage>` grew without bound and nothing in the
+repository noticed. `runtime/transcript.rs` is the first compressor that
+operates on it, and it is named for what it compresses rather than for
+`compaction`/`memory::compression`, which are two other things.
+
+**Three strategies, not four, and the fourth is deliberately absent.**
+`SnipDuplicateSystem` (lossless — identical text), then `MicrocompactToolResults`
+(head+tail, marks the middle gone), then `CollapseFileReads` (head/tail lines).
+`Summarise` **needs a model call and loses detail**, so it is last by rank and
+unbuilt by choice; `the_strategies_run_in_that_order` pins the exact list, so a
+report that ever names a strategy which did not run fails the test rather than
+the user.
+
+**Only `ToolResult` turns are compressed, and that is a decision with a
+reason.** Assistant prose is the model's own reasoning about the work —
+eliding it leaves it reasoning about a conversation it no longer has. An
+elided user instruction is a task that changed with nobody deciding it should.
+
+**The trigger is content size, not §8's 95% of a token budget.** The loop has
+no context-window figure to compare against, and inventing one would put a
+number in the code that looks authoritative and is not. Size is measurable and
+is what actually grows. The constant is recorded here rather than left in as
+an unused `TRIGGER_RATIO`.
+
+**Not built, recorded as not built:**
+- the `Summarise` strategy's provider call;
+- `runtime/compaction.rs`'s `ContextCompactor`, which still has zero callers
+  and now competes with a compressor that is actually wired. It is either a
+  second real path (wire `ContextStore` into the loop) or dead code to delete,
+  and that is a decision, not a slice;
+- a token-budget trigger, per the paragraph above.
 
 ## 9 · Still open after batch 4
 

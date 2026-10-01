@@ -4056,6 +4056,23 @@ pub async fn run_tool_loop_with(
                 tool_call_id: tc.id.clone(),
                 content,
             });
+            // §8 T4, the transcript compressor. This is the only thing in the
+            // loop that shrinks what the model is about to be sent, and it is
+            // here — after the result is in the vector, before the next
+            // request — because that is the only place both are true at once.
+            //
+            // It fires on content size rather than on a token budget. The loop
+            // has no context-window figure to compare against, and inventing
+            // one would mean a number that looks authoritative and is not.
+            // Size is measurable, and it is what actually grows.
+            //
+            // Every pass is reported. A run that lost context says which
+            // strategy took it, because a model reasoning from a conversation
+            // it no longer has cannot tell that this happened to it.
+            let compression = crate::runtime::transcript::compress(&mut messages);
+            if let Some(line) = compression.to_line() {
+                tracing::warn!(target: "niki::runtime", "{line}");
+            }
             if let Some(tx) = &display_tx {
                 let output = result.data.to_feedback_text();
                 let capped: String = output.chars().take(2000).collect();
@@ -4127,6 +4144,126 @@ pub async fn run_tool_loop_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §8 T4's call site.
+    ///
+    /// The compressor has its own unit tests and they all pass against a
+    /// module that is never called — which is exactly what a dead component
+    /// looks like from the outside, and it has already happened twice in this
+    /// repository. So this provider keeps what it was actually sent, and the
+    /// test below reads the second request.
+    struct RecordingToolProvider {
+        calls: std::sync::atomic::AtomicUsize,
+        sent: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl LlmProvider for RecordingToolProvider {
+        fn provider_name(&self) -> &str {
+            "fake"
+        }
+
+        async fn complete(
+            &self,
+            request: crate::llm::provider::CompletionRequest,
+        ) -> anyhow::Result<crate::llm::provider::CompletionResponse> {
+            self.sent.lock().unwrap().push(request.user_message.clone());
+            let n = self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n == 0 {
+                Ok(crate::llm::provider::CompletionResponse {
+                    content: String::new(),
+                    model: "fake".into(),
+                    usage: crate::llm::provider::TokenUsage::default(),
+                    finish_reason: Some("stop".to_string()),
+                    // `seq 1 900` is ~3.7 kB over ~900 lines: over both of the
+                    // compressor's thresholds, so this is a file read at the
+                    // size a real Coder's transcript is full of.
+                    tool_calls: vec![crate::llm::provider::ToolCall {
+                        id: "call_1".into(),
+                        name: "bash".into(),
+                        arguments: serde_json::json!({"command": "seq 1 900"}),
+                    }],
+                })
+            } else {
+                Ok(crate::llm::provider::CompletionResponse {
+                    content: "done".into(),
+                    model: "fake".into(),
+                    usage: crate::llm::provider::TokenUsage::default(),
+                    finish_reason: Some("stop".to_string()),
+                    tool_calls: vec![],
+                })
+            }
+        }
+
+        async fn stream(
+            &self,
+            _request: crate::llm::provider::CompletionRequest,
+        ) -> anyhow::Result<Pin<Box<dyn Stream<Item = anyhow::Result<StreamChunk>> + Send>>>
+        {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn an_oversized_tool_result_is_compressed_before_the_next_request() {
+        let provider = RecordingToolProvider {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            sent: std::sync::Mutex::new(Vec::new()),
+        };
+        let registry = build_baseline_registry();
+        let ctx = ToolContext {
+            agent_id: crate::mission::AgentId("a1".into()),
+            mission_id: crate::mission::MissionId("m1".into()),
+            role: "coder".into(),
+            project_path: std::env::temp_dir(),
+            permissions: HashMap::new(),
+            permission_mode: "auto".into(),
+            fail_closed_headless: false,
+            network_allowlist: Vec::new(),
+            task_store: None,
+            mcp: None,
+            human_input: None,
+        };
+        run_tool_loop(
+            &provider,
+            "fake",
+            &registry,
+            &ctx,
+            vec![LoopMessage::User("run seq 1 900".into())],
+            None,
+            5,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let sent = provider.sent.lock().unwrap();
+        assert!(
+            sent.len() >= 2,
+            "the loop must have asked twice: {} requests",
+            sent.len()
+        );
+        assert!(
+            sent[1].contains("elided by context compression"),
+            "the second request must carry the compressed transcript, not the \
+             raw tool output: {}",
+            &sent[1][sent[1].len().saturating_sub(400)..]
+        );
+        assert!(
+            sent[1].len() < 2000,
+            "900 lines of `seq` output must not reach the provider whole: \
+             {} bytes",
+            sent[1].len()
+        );
+        assert!(
+            !sent[1].contains("\n450\n"),
+            "the middle of the sequence must actually be gone, not merely \
+             annotated"
+        );
+    }
 
     #[test]
     fn tool_id_unique() {
