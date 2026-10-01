@@ -86,7 +86,21 @@ pub fn content_height(request: &AskRequest) -> u16 {
 pub fn handle_key(key: &ratatui::crossterm::event::KeyEvent, state: &mut AppState) -> bool {
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
+    // Gated on the same flag the permission modal uses, not on whether a
+    // request happens to be present.
+    //
+    // The two can disagree — a payload left behind by a path that cleared the
+    // flag, or a flag set before the payload arrived — and then a handler
+    // gated on the *payload* takes the key, answers a question the user
+    // cannot see, and reports `Consumed` for it. Gating on the flag means the
+    // visible state is what decides, which is the only thing the user can
+    // reason about.
+    if !state.show_ask_modal {
+        return false;
+    }
     let Some(request) = state.ask_request.take() else {
+        // The modal is up with no question behind it: take nothing, answer
+        // nothing, and let the key through to whatever is below.
         return false;
     };
 
@@ -456,6 +470,42 @@ mod tests {
         let config = crate::config::NikiConfig::default();
         let mut state = AppState::new("t".to_string(), config, ".".into());
         assert!(!handle_key(&key(KeyCode::Char('a')), &mut state));
+    }
+
+    /// The two flags can disagree, and the *visible* one has to win.
+    ///
+    /// A payload with no modal is the dangerous direction: the handler would
+    /// take the key, answer a question nobody can see, and report it as
+    /// consumed — so the key is swallowed and nothing on screen explains why.
+    #[test]
+    fn a_question_with_no_visible_modal_does_not_swallow_keys() {
+        let (mut state, rx) = state_with_request(&[], None);
+        state.show_ask_modal = false;
+        assert!(
+            !handle_key(&key(KeyCode::Enter), &mut state),
+            "an invisible question must not consume Enter and answer itself"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "and must not have sent an answer to anyone"
+        );
+        assert!(
+            state.ask_request.is_some(),
+            "the payload stays put, so a later modal can still show it"
+        );
+    }
+
+    /// The other direction is not a silent trap: a modal with no question
+    /// behind it draws nothing to answer, so it must not claim a key either.
+    #[test]
+    fn a_visible_modal_with_no_question_does_not_swallow_keys() {
+        let config = crate::config::NikiConfig::default();
+        let mut state = AppState::new("t".to_string(), config, ".".into());
+        state.show_ask_modal = true;
+        assert!(
+            !handle_key(&key(KeyCode::Char('a')), &mut state),
+            "there is nothing to answer, so the key belongs to the page"
+        );
     }
 
     #[test]
