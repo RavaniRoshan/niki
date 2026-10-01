@@ -398,6 +398,33 @@ impl McpManager {
     /// Call a tool on a connected server end to end (`tools/call`).
     /// Governance (`check_tool_call`) runs before the call; untrusted or
     /// unconnected servers error instead of connecting implicitly.
+    /// Shut every connected server down, gracefully where possible.
+    ///
+    /// `McpConnection::shutdown` had no production caller — only a test — so
+    /// the stdio children were killed by `kill_on_drop` the moment the manager
+    /// dropped, which was at the end of the *discovery block*, before the run
+    /// began. A run-level teardown belongs here, where the connections are.
+    ///
+    /// Best-effort by design: a server that will not close cleanly must not
+    /// fail a run that has already produced its result. A dead server is
+    /// waste, not corruption.
+    pub async fn shutdown(&self) {
+        for (name, conn) in &self.connections {
+            let mut guard = conn.lock().await;
+            if let Err(e) = guard.shutdown().await {
+                tracing::debug!(target: "niki::mcp", server = %name, "shutdown: {e}");
+            }
+        }
+    }
+
+    /// How many servers currently hold a live connection.
+    ///
+    /// Exposed so a caller — and a test — can tell a connected server from one
+    /// that was configured but never reached.
+    pub fn connected_servers(&self) -> usize {
+        self.connections.len()
+    }
+
     pub async fn call_tool(
         &self,
         server_name: &str,
