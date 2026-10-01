@@ -372,7 +372,7 @@ mod tests {
         assert!(
             matches!(&messages[0], LoopMessage::User(u) if *u == user),
             "user text must be untouched: {:?}",
-            &messages[0]
+            messages[0]
         );
         match &messages[1] {
             LoopMessage::Assistant { content: c, .. } => assert_eq!(

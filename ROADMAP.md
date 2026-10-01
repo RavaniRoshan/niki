@@ -369,7 +369,13 @@ one rather than a reason to wait.
   `report_relative_to_baseline` compares a second run against the first in the
   same process (`tests/tui_perf.rs:111-118`). Only the module doc at
   `tests/tui_perf.rs:5` still describes the old scheme.
-- **`tests/headless_tui.py` has never run in any CI job** — re-measured in
+- ~~**`tests/headless_tui.py` has never run in any CI job**~~ **STALE —
+re-measured in batch 12 (2026-10-01).** CI *does* install it, via
+`requirements-dev.txt` in the "Install PTY test dependencies" step. The suite
+therefore runs, and on its **first ever run** one case fails:
+`test_h_and_l_navigate_like_the_arrows` — `TuiTimeoutError: screen did not
+stabilise within 5s (quiet_ms=200)`. Original claim retained below —
+re-measured in
   batch 6, and it is worse than the entry said. `tests/headless_tui.py:31` is a
   module-level `pytest.importorskip("tuiwright")`, and `tuiwright` is in no
   requirements file, so collection stops there and neither in-body

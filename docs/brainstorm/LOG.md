@@ -14,3 +14,4 @@ Blocked on two gates, neither technical:
 2. OK on the eval-provenance fix (a code change to NIKI, which this session forbids).
 
 Findings so far are recorded above and need no further input.
+- 2026-10-01 · Phase B complete → docs/brainstorm/PHASE_B.md. 12 failure modes scored; two axes argued (false-done rate, cost per accepted change); pass^k rejected as arithmetic-without-a-mechanism.
