@@ -30,6 +30,33 @@ signal to strike the bullet in the same commit. Claims that cannot be checked
 — a product decision, a paid account, an unverifiable external service — are
 not pinned, and say why where they live (§7, §8, `BLOCKERS.md`).
 
+### Two rules batch 9 paid for five times each
+
+**Drive the producer, not the constructor.** A test that builds the thing itself
+proves the *consumer* works and nothing about where the value came from. Five
+times in batch 9 a test written that way was **green against the defect it was
+written for** — the chat's token usage, its cost, the model behind the context
+window, the permission scope, the retry count. Each was caught only because a
+*second* assertion in the same place was supposed to fail and did not.
+
+If a test names a field, a number or a message, ask **who fills it in**, and
+drive that. If the producer is a private function inside a large `async fn`,
+that is the finding: extract it until a test can reach it, or record the hop as
+uncovered rather than implying it is held.
+
+**When a number starts being reported, find every reader of it.** Fixing `/cost`
+alone made the surface *worse*: `/status` and `/usage` still read a different
+source, so there went from one command reporting the truth to two reporting
+contradictions. A number that is now correct in one place and still wrong in the
+next is not a fix.
+
+And the pair of them explains most of what batch 9 found: **a value produced
+correctly, then dropped at a boundary** — `StreamChunk::Usage` matched with
+`{}`, `self.cost` never assigned on the chat path, `update_context_limit_for_model`
+with zero callers, `StageInfo.retry_count` a literal `0`, `state.totals()`
+summing only one of two sources. None of them threw, none of them was loud, and
+every one of them produced a number a user would believe.
+
 ## 1 · Navigation and the dead controls (P2)
 
 **The largest quality-of-life cluster, and the one being worked now.** Not
