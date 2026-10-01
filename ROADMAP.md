@@ -227,8 +227,18 @@ one rather than a reason to wait.
 ## 6 · Coverage and hygiene (P5)
 
 - ~~19 of 28 CLI commands have no test at either level.~~ **Re-measured: 1 of 28** — only `dashboard`, closed in batch 5. The other 19 were closed by batches 1–4. `src/llm/google.rs` had **zero** tests; it has seven since B4-02.
-  **zero** tests. `sandbox/worktree.rs` (853 lines, the recommended backend) and
-  `sandbox/docker.rs` (634 lines, the default) have no unit tests.
+  **PARTLY CLOSED in batch 6** (B6-08): `sandbox/worktree.rs` (985 lines, the
+  recommended backend) now has 15 in-file unit tests. `sandbox/docker.rs`
+  (704 lines, the default) still has none — B6-09.
+  The worktree tests are where the fix for a silent no-op lives: the diff
+  anchor's cheap O(n+m) walk scored a real near miss at 0.41 against a 0.5
+  floor, so the "here is the closest line you meant" suggestion never
+  appeared and nothing said so. A feature that produces nothing is invisible,
+  so the score is asserted directly rather than through a caller that returns
+  `None` either way. Writing them also found a defect: `cleanup_worktrees_
+  for_task` matched any directory starting `<id>-`, so a Ctrl+C for one task
+  deleted `<id>-backup`; a sibling is always `<id>-<digits>`, and the rule is
+  now that.
 - ~~`tests/multi_provider.rs` — 8 of 26 assert `create_provider(X).provider_name()
   == X`; two are *named* endpoint tests and never read the endpoint.~~
   **STALE — re-measured in batch 6.** The file has **28** tests, and every

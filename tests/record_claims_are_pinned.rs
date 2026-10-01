@@ -48,8 +48,8 @@ const PINS: &[(&str, &str, &str)] = &[
         "tests/mcp_does_not_leak_or_lie.rs",
     ),
     (
-        "§6 · `sandbox/worktree.rs` and `sandbox/docker.rs` have no in-file unit tests",
-        "the_two_sandbox_files_still_have_no_unit_tests",
+        "§6 · `sandbox/docker.rs` has no in-file unit tests",
+        "the_docker_backend_still_has_no_unit_tests",
         "tests/the_record_had_moved.rs",
     ),
     (
