@@ -25,7 +25,7 @@ both measured:
 
 | Model | Result |
 |---|---|
-| `stealth/space-bunny-alpha` | Full pipeline. **§9.3 found here** — a Coder that did the work and narrated it instead of submitting; fixed and live-verified against the same model. |
+| `stealth/space-bunny-alpha` | Full pipeline, **Approved 10/10** end to end (B7-18), after a real revision round. **§9.3 found here** — a Coder that did the work and narrated it instead of submitting; fixed and live-verified against the same model. |
 | `poolside/laguna-s-2.1:free` | Answers, but its **Planner emits no conformant artifact** — `Failed to parse artifact JSON: expected value at line 1 column 1`. The run failed in stage one, which is where **§9.4** came from: a failed run reported `No such file or directory (os error 2)` from its own recovery path. |
 
 Two models, two different failures, and the second one is only reachable

@@ -435,7 +435,28 @@ every other silent degradation in this codebase.
 
 **A second model, `poolside/laguna-s-2.1:free`, found a different one.** Its Planner emits no conformant artifact at all (`Failed to parse artifact JSON: expected value at line 1 column 1`), so the run failed in stage one — and the recovery path then reported **`No such file or directory (os error 2)`**, an errno rather than a situation, stacked on top of a perfectly good failure message. A run that fails before its first checkpoint is the *normal* case, not an edge. Fixed (B7-15).
 
-**Two further findings from the space-bunny run, both open:**
+**LIVE-VERIFIED, both fixes, together** (B7-18). A full run on
+`stealth/space-bunny-alpha`, release build, `--backend worktree`, and **no
+"the patch did not apply" anywhere in it** — including across a revision round,
+which is where §9.3b bit before:
+
+| Stage | Result |
+|---|---|
+| Planner | 47s — 1 file to modify |
+| Coder | 90s — submitted (2 files; one spurious) |
+| Tester | 5/8 passed, 4 edge cases identified |
+| Reviewer | **Revision needed** — 2 critical: the spurious `src/lib.rs`, and that `cargo test` cannot run because the fixture repo has no `Cargo.toml` |
+| Coder | 48s — 1 file, the spurious one gone |
+| Tester | **7/7 passed** |
+| Reviewer | **Approved** — correctness 10/10, quality 10/10, coverage 9/10 |
+
+The result is exactly right: `src.rs` carries the comment and `a + b`, the
+spurious file does not exist, and a `niki/<id>` branch was cut. The Reviewer's
+objection was correct and the revision answered it — the loop working, on a
+real model, end to end.
+
+**Two further findings from the space-bunny run:**
+- **§9.5 — a stale path in the diff-staging list errors git on a successful run.** The first Coder declared creating `src/lib.rs`; the Reviewer rejected it and the revision removed it. The final staging step still listed it, so git said `fatal: pathspec 'src/lib.rs' did not match any files` and the run finished with *"A brand-new file may be missing from the diff"* — a warning on a run that in fact approved, and correctly so. The list should skip paths that no longer exist rather than hand git a pathspec that cannot match. 
 - **The submitted artifact is applied **on top of edits the loop already made**. The log said *"the patch did not apply — asking the Coder to rebuild it"*, and the first reading — that a no-op edit had been submitted — is **wrong**: `artifacts::validate::check_semantics` already rejects an edit whose `search` and `replace` are identical, with a message written for the model. So the artifact *passed* validation and still would not apply, which means the file it searched for had **already been changed**. The Coder's tool loop ran `edit` and applied the change to the worktree; the artifact it then submitted re-applies the same change, so its `search` text is gone and every block goes unmatched. A model that uses the edit tools **and** submits an artifact, which the protocol invites, produces an artifact that cannot apply by construction. That is `FeedbackCause::UnappliablePatch` (`pipeline.rs:666`) — the message the live run printed. **DONE in batch 7** (B7-16). `edit_format::apply_edit_block_or_already_done` treats an edit as already applied when its `search` is absent, its `replace` is present, **and** the `replace` is big enough for its presence to mean something (≥12 non-whitespace characters, or multi-line). That last condition is not decoration: the first version claimed "already applied" for a three-token replacement, and its own test caught it — after a real edit the file legitimately contains `a + b` for reasons unrelated to a later block asking to replace *that*. A short replacement is never claimed, because being wrong that way falls back to today's behaviour (reported unmatched) rather than silently accepting an unmade edit.
 
 Wired into `apply_patch` in **both** sandboxes — the `Sandbox` trait method the pipeline applies a submitted artifact through — and deliberately **not** into the `edit` tool, where replacing text with text that is already there is a no-op the user asked to hear about.
