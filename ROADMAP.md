@@ -541,12 +541,53 @@ different files*, at roughly half a millisecond each.
 
 So the executor as §8 describes it would restructure ~170 lines of the hottest
 code in the repository — the block that emits `ToolStarted`, runs the tool,
-probes the output and pushes the result — to buy less than a frame. **The
-latency in §8 is in the streaming, not in the parallelism**, and streaming
-needs the loop to call `provider.stream()` instead of `provider.complete()`
-(`tools.rs:3727`). That is a real change with real risk, and it is not this
-slice. Both the measurement and this conclusion are recorded so the idea is not
-re-derived from §8's estimate later.
+probes the output and pushes the result — to buy less than a frame.
+
+### T3's streaming half — **CLOSED in batch 9 (B9-02): not feasible, and not worth it either**
+
+**First, a correction to this file.** Batch 8 concluded: *"The latency in §8 is
+in the streaming, not in the parallelism."* **That was an assertion, not a
+measurement**, and nothing in the repository supports it. It is struck because
+it was unsupported — not because it was shown wrong. The measurement below does
+not rehabilitate it.
+
+**Mid-stream dispatch is not implementable against the current `StreamChunk`.**
+
+| Blocker | Where |
+|---|---|
+| `StreamChunk` has **no tool-call variant** — only `Text`, `Usage`, `Finish` | `src/llm/provider.rs:14-34` |
+| **Every provider's `stream()` omits `tools`** from the request payload, so a streaming request cannot elicit a tool call at all | `anthropic.rs:189-196`, `openai.rs:250-259`, `ollama.rs:141-149`, `google.rs:166+` — contrast each provider's `complete()`, which does build `payload["tools"]` |
+| **Every stream parser discards the tool protocol**: Anthropic reads only `delta["text"]`, never `content_block_start` (the tool's `id`/`name`) nor `input_json_delta` (the partial arguments); OpenAI reads only `choice.delta.content` | `anthropic.rs:254-257`, `openai.rs:358-361` |
+| `ToolCall.arguments` is a **parsed** `serde_json::Value` with no fragment or offset, so it cannot represent a half-arrived argument | `provider.rs:436-441` |
+
+Building it means five layers: extend `StreamChunk`; parse the incremental
+protocol in four providers; send `tools` on the stream path in four providers;
+accumulate partial JSON keyed by tool-call id; and write a
+`CompletionResponse`-from-stream assembler — **which exists nowhere today**,
+every `CompletionResponse` in production being built inside a provider's
+`complete()`.
+
+**And the assembler is the safety part, not the plumbing.** Two behaviours depend
+on `finish_reason` and must survive it: the truncation re-ask
+(`tools.rs:3838-3867`) and the refusal to execute tool calls out of a truncated
+response (`tools.rs:3950-3980`) — a `write` tool with half a path is the exact
+danger. Mid-stream dispatch makes this **harder**: "the tool call finished" is not
+proof the arguments are complete, only that the provider stopped sending.
+
+**The benefit ceiling, measured where it can be measured.** Tool execution is
+~0.5 ms per call (above); the loop is capped at **4 steps**
+(`config/types.rs:716-718`) and is **off by default** (`config/types.rs:710`,
+`pipeline.rs:1267` — *"In a default run, none of the twenty-two tools execute"*,
+`docs/decisions/tool-loop.md:14-24`). Even perfect dispatch overlaps a few
+milliseconds of work on a path most users never execute.
+
+**What dispatch would actually overlap, stated honestly:** not a "stream tail" —
+a model that has emitted its `tool_use` blocks has stopped generating, so nothing
+follows them. It would overlap tool *n* with the streaming of tool *n+1*. With
+≤4 steps at ~0.5 ms each, that is worth about a millisecond.
+
+**Not built.** Both the measurement and this conclusion are recorded so the idea
+is not re-derived from §8's estimate later.
 
 **This closes the concurrency half of T3 on evidence rather than on effort.**
 The lock and the scheduler stay: they are the safety content, they are tested,

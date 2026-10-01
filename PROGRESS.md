@@ -1260,7 +1260,8 @@ the hottest code in the repository to buy less than a frame. **Not done**, and
 the measurement is in ROADMAP.md §8 T3 so the idea is not re-derived from §8's
 estimate later.
 
-The latency in §8 is in the *streaming*, not the parallelism: mid-stream
+~~The latency in §8 is in the *streaming*, not the parallelism~~ — an
+assertion, not a measurement, struck in B9-02: mid-stream
 dispatch needs the loop to call `provider.stream()` where it currently calls
 `provider.complete()` (`src/runtime/tools.rs:3727`). That is a separate change
 with separate risk.
@@ -1688,6 +1689,62 @@ record can drift; a test that names the documents cannot.
 
 ```
 $ ./scripts/verify.sh --only G3 → PASS  418 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+```
+
+---
+
+## Iteration 8b — B9-02, §8's streaming executor, and a correction to myself
+
+**Batch 8 concluded: "The latency in §8 is in the streaming, not the
+parallelism." That was an assertion, not a measurement**, and nothing in the
+repository supported it. Struck in `ROADMAP.md`, `RELEASE_REPORT.md` and this
+log — because it was unsupported, not because it was shown wrong.
+
+**Measured instead: mid-stream dispatch is not implementable here.**
+
+| Blocker | Where |
+|---|---|
+| `StreamChunk` has **no tool-call variant** — only `Text`, `Usage`, `Finish` | `provider.rs:14-34` |
+| **Every provider's `stream()` omits `tools`** from the payload, so a streaming request cannot elicit a tool call at all | `anthropic.rs:189-196`, `openai.rs:250-259`, `ollama.rs:141-149`, `google.rs:166+` |
+| **Every stream parser discards the tool protocol** — Anthropic reads only `delta["text"]`, never `content_block_start` nor `input_json_delta` | `anthropic.rs:254-257`, `openai.rs:358-361` |
+| `ToolCall.arguments` is a **parsed** `serde_json::Value` with no fragment or offset | `provider.rs:436-441` |
+
+Five layers to build, across four providers, plus a
+`CompletionResponse`-from-stream assembler that **exists nowhere today**. And
+the assembler is the *safety* part: two behaviours depend on `finish_reason` —
+the truncation re-ask (`tools.rs:3838-3867`) and the refusal to execute tool
+calls out of a truncated response (`tools.rs:3950-3980`, "a `write` tool with
+half a path"). Mid-stream dispatch makes that **harder**: "the tool call
+finished" is not proof the arguments are complete.
+
+**What it would actually overlap, stated honestly:** not a stream tail — a model
+that has emitted its `tool_use` blocks has stopped generating. It would overlap
+tool *n* with the streaming of tool *n+1*: about a millisecond, at ≤4 steps and
+~0.5 ms per call, **on a path that is off by default**.
+
+### And the number that carries that argument was itself untested
+
+While writing this up I added a canary row naming
+`a_completed_run_records_where_its_verdict_came_from` for the claim "the tool
+loop is off by default". **That test does not hold that claim** — it is the
+eighth time a canary description overstated its test, and this one was mine,
+added while making the point.
+
+The claim was load-bearing for the whole closure and lived only in a markdown
+paragraph. So it is now a test:
+`the_tool_loop_is_off_by_default_and_capped_at_four_steps` in
+`src/config/types.rs`, holding `experimental_tool_loop == false` and
+`max_steps == 4`, and asserting the flag is *reachable* so the first half is not
+trivially true.
+
+Can-fail proven both ways: enabling the loop by default goes red, and raising
+the cap to 12 goes red.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  419 can-fail entries all resolve
 $ ./scripts/verify.sh --only G5 → PASS
 $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean

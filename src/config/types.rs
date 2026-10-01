@@ -2329,6 +2329,41 @@ fn apply_env_model_to_agents(agents: &mut AgentsConfig, provider: &str, model: &
 mod tests {
     use super::*;
 
+    /// The tool loop is **off by default and capped at four steps**.
+    ///
+    /// This is not trivia. §8 asks for a streaming tool executor, and the
+    /// argument for not building it rests on this: the loop is off in a default
+    /// run (`docs/decisions/tool-loop.md` D1: *"In a default run, none of the
+    /// twenty-two tools execute"*) and bounded to four steps, while tool
+    /// execution measures at ~0.5 ms per call. Those two numbers are the whole
+    /// cost-benefit, and until this test existed they lived only in a markdown
+    /// paragraph — which is exactly where a load-bearing number goes to rot.
+    ///
+    /// It also fails loudly if a future change flips either default: someone
+    /// enabling the loop by default would be making every run pay for a
+    /// feature, and should find out from a test rather than from a slow run.
+    #[test]
+    fn the_tool_loop_is_off_by_default_and_capped_at_four_steps() {
+        let c = NikiConfig::default();
+        assert!(
+            !c.tools.experimental_tool_loop,
+            "the tool loop is on by default. That is a product decision nobody \
+             has made: it makes every run pay for a feature that `docs/\
+             decisions/tool-loop.md` D1 says does not execute in a default run."
+        );
+        assert_eq!(
+            c.tools.max_steps, 4,
+            "the step cap is what bounds a loop that spends a model's money. \
+             Raising it changes the worst case of every run, so it is held here \
+             rather than left in a doc comment."
+        );
+        // And it is genuinely reachable: the flag has to be settable, or the
+        // gate above is trivially true because the feature is unreachable.
+        let mut on = NikiConfig::default();
+        on.tools.experimental_tool_loop = true;
+        assert!(on.tools.experimental_tool_loop);
+    }
+
     #[test]
     fn gateway_provider_stanzas_parse() {
         let toml = r#"

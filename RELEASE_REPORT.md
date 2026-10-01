@@ -906,7 +906,7 @@ What is left is reads of different files, at about half a millisecond each.
 
 Wiring the scheduler into `run_tool_loop` would restructure ~170 lines of the
 hottest code in the repository to buy less than a frame. **Not built.** The
-latency in §8 is in the *streaming*, not the parallelism — mid-stream dispatch
+~~latency in §8 is in the *streaming*, not the parallelism~~ — **an assertion, not a measurement; struck in B9-02.** Mid-stream dispatch
 needs the loop to call `provider.stream()` where it currently calls
 `provider.complete()` (`src/runtime/tools.rs:3727`), which is a separate change
 with separate risk.
@@ -975,7 +975,7 @@ transcript grew without bound until the provider rejected the request.
 model request in seconds — and `bash`, `web_fetch`, `grep` and `glob` are all
 exclusive by construction. The 170-line refactor of the hottest code in the
 repository would have bought less than a frame. The latency is in the streaming,
-not the parallelism.
+not the parallelism — **also an assertion, and struck in B9-02**; see `ROADMAP.md` §8 T3.
 
 ### Three tests were red while every gate said PASS
 
