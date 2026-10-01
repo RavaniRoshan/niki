@@ -2429,3 +2429,38 @@ expensive ones — pipelines, sandboxes, PTY, visual baselines, benchmarks — w
 
 **Four red tests found by measuring binaries no gate ran**, and **three of them
 were tests asserting behaviour a previous batch had already fixed.**
+
+---
+
+## Iteration 10e — B11-06, the full nine-gate run with 69 binaries in G3
+
+```
+G3  PASS  436 can-fail entries all resolve   (and 69 integration binaries)
+G4  PASS  RESULT pass=16 fail=0 skip=0        (the pty suite)
+G5  PASS  no credentials in the tree or in history
+G6  PASS  every failure path exits non-zero with a message a person can act on
+G7  PASS  every README command parses
+G8  FAIL  rc=1 — the branch is unpushed
+G9  PASS
+```
+
+The gate run went from 4m to 5m30 with 65 more binaries in it, which is the
+price of the four red tests it now sees instead of the four it could not.
+
+---
+
+## Where batch 11 stands
+
+Five slices, and the batch's finding is a single sentence long:
+
+> **Three of the four red tests it found were tests asserting behaviour a
+> previous batch had already fixed.**
+
+The tests outlived the decision they were written for and went on enforcing it —
+one of them asserting the exact string batch 3 removed as a lie
+(*"Session state restored successfully"*, from a command that restored nothing).
+None was visible to any gate, because no gate ran those binaries.
+
+The lane is now 69 of 107, warm 1m47, and every binary in it was **measured**
+before being added. Of the sixteen added first, fifteen finished in 0.00 s — so
+the reason the original four were the only ones was never cost.
