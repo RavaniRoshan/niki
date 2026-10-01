@@ -339,4 +339,20 @@ agent-loop-uses-shared-predicate | the_agent_loop_uses_the_shared_predicate | a 
 coder-loop-reports-its-failure | the_coder_loop_reports_its_failure | `.ok()?` again, so a network failure is a silent fallback
 git-temp-paths-are-run-scoped | no_temporary_path_in_git_output_is_shared_between_runs | a temp path shared by every run on the machine
 # B6-07 · the record gets teeth: an open claim is pinned, and the pin is real
-sandbox-files-still-have-no-unit-tests | the_two_sandbox_files_still_have_no_unit_tests | a §6 bullet left open after the work landed
+docker-backend-still-has-no-unit-tests | the_docker_backend_still_has_no_unit_tests | a §6 bullet left open after the work landed
+# B6-08 · the recommended backend had no in-file tests; the scoring is why
+greedy-falls-where-the-table-does-not | the_greedy_walk_scores_below_the_floor_where_the_table_does_not | the cheap walk back in charge, so a near miss scores 0.20 and the feature silently does nothing
+near-miss-clears-the-floor | a_near_miss_clears_the_floor | a real near miss under the 0.5 floor
+identical-anchor-scores-one | an_identical_anchor_scores_one | "close" indistinguishable from "this"
+unrelated-lines-score-low | unrelated_lines_score_below_the_floor | a suggestion firing on unrelated code, teaching the model to ignore it
+greedy-close-to-exact | the_greedy_fallback_is_close_to_the_exact_answer | the table limit moving somewhere a short anchor reaches
+lcs-is-the-longest-subsequence | the_lcs_table_is_the_longest_common_subsequence | a subtly wrong table that still returns a number
+truncation-keeps-both-ends | truncation_keeps_both_ends_of_a_long_string | truncation dropping the end the difference is in
+short-string-is-not-truncated | a_short_string_is_not_truncated | a marker on a short anchor, teaching the model to distrust it
+impossible-limit-does-not-panic | an_impossible_limit_does_not_panic | a panic in a suggestion, taking down a run that was only failing to apply an edit
+truncation-keeps-characters-whole | truncation_does_not_split_a_character | half a character in what the model is told to copy
+lookup-returns-its-file | the_lookup_returns_the_best_window_and_its_file | a score with no path, so the model cannot know what to re-read
+short-file-is-skipped | a_file_shorter_than_the_anchor_is_skipped | an out-of-range window, i.e. a panic
+empty-needle-matches-nothing | an_empty_needle_matches_nothing | an empty anchor matching something
+task-dir-rule-is-exact | a_directory_belongs_to_a_task_only_by_the_exact_rule | the loose `<id>-` prefix, so Ctrl+C deletes a directory belonging to other work
+teardown-spares-other-work | teardown_takes_this_task_and_its_siblings_and_nothing_else | the loose rule, on disk rather than in the predicate

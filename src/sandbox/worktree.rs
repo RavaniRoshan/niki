@@ -204,6 +204,30 @@ pub fn ensure_git_excluded(repo: &Path, dir: &str) -> std::io::Result<bool> {
     Ok(true)
 }
 
+/// Whether a directory name under `.niki-worktrees/` belongs to `task_id`.
+///
+/// The exact id, or the id followed by `-` and **only digits**.
+///
+/// A sibling is `<id>-<attempt>`, where `attempt` counts 1..=100
+/// (`WorktreeSandbox::new`, the retry that suffixes on a lost race). Matching
+/// the bare `<id>-` prefix instead took anything that started that way, so a
+/// dir called `<id>-backup` — from a hand-run `niki run`, an editor, or a
+/// future suffix scheme — would be deleted by Ctrl+C for a task that had
+/// nothing to do with it. Inside NIKI's own directory the looseness is
+/// unlikely to bite, which is exactly why it is worth closing rather than
+/// documenting: the tight rule and the loose one cost the same to write.
+fn belongs_to_task(name: &str, task_id: &str) -> bool {
+    if name == task_id {
+        return true;
+    }
+    match name.strip_prefix(task_id) {
+        Some(rest) => rest
+            .strip_prefix('-')
+            .is_some_and(|n: &str| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())),
+        None => false,
+    }
+}
+
 /// Remove every worktree dir belonging to `task_id`: the exact
 /// `.niki-worktrees/<id>` dir plus suffixed parallel-coder siblings
 /// (`<id>-1`, …). Used by the Ctrl+C/SIGTERM handlers, which cannot track
@@ -213,11 +237,10 @@ pub fn cleanup_worktrees_for_task(source_repo: &Path, task_id: &str) -> usize {
     let Ok(entries) = std::fs::read_dir(&base) else {
         return 0;
     };
-    let suffixed = format!("{task_id}-");
     let mut removed = 0;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if name != task_id && !name.starts_with(&suffixed) {
+        if !belongs_to_task(&name, task_id) {
             continue;
         }
         let path = entry.path();
@@ -982,4 +1005,322 @@ fn truncate_middle(s: &str, max: usize) -> String {
     let head: String = s.chars().take(max * 2 / 3).collect();
     let tail: String = s.chars().skip(len - max / 3).collect();
     format!("{head}\n… {len} characters omitted …\n{tail}")
+}
+
+#[cfg(test)]
+mod tests {
+    //! The diff-anchor scoring, in the file, where the fix lives.
+    //!
+    //! `tests/sandbox_teardown.rs` covers the worktree lifecycle and
+    //! `tests/worktree_dir_is_not_committed.rs` the git exclude. Neither
+    //! touches this, and it is the part that used to do nothing at all
+    //! without saying so.
+    //!
+    //! The regression is written down at `similarity`: the cheap O(n+m) greedy
+    //! walk "cannot re-match an earlier character, and on a two-line anchor
+    //! that cost it most of the score: a real near miss scored 0.41, under the
+    //! 0.5 floor, so the suggestion never appeared — the feature silently did
+    //! nothing." A feature that produces nothing is invisible, so the score
+    //! has to be asserted directly, not through a caller that happens to
+    //! return `None` either way.
+
+    use super::*;
+
+    const FLOOR: f64 = 0.5;
+
+    /// The property the exact table exists for, on the smallest input that
+    /// shows it.
+    ///
+    /// The comment on `similarity` records the original failure — a real near
+    /// miss scoring 0.41 against a 0.5 floor — but not the input that produced
+    /// it, so this is not a replay of that case. It is the same *shape*: the
+    /// greedy walk cannot re-match an earlier character, so if the anchor's
+    /// first character occurs only at the end of the file's line, it consumes
+    /// the cursor and everything after it goes unmatched. Here that is 0.80
+    /// against 0.20 — one side of the floor, the other side.
+    ///
+    /// A fragment copied in the wrong order is a real thing a model does when
+    /// it assembles an anchor from memory, which is why the shape is a
+    /// rotation rather than a synthetic string.
+    #[test]
+    fn the_greedy_walk_scores_below_the_floor_where_the_table_does_not() {
+        // The same tokens in the opposite order. The needle opens with a `}`
+        // the file only has at its end, so the walk spends the whole cursor on
+        // the first character and matches nothing after it.
+        let needle = ["} self.total"];
+        let in_file = ["self.total }"];
+        let a: Vec<char> = needle[0].chars().collect();
+        let b: Vec<char> = in_file[0].chars().collect();
+        assert_eq!(a.len(), b.len(), "the test needs equal-length anchors");
+
+        let exact_score = 2.0 * lcs_len(&a, &b) as f64 / (a.len() + b.len()) as f64;
+        let greedy_score = 2.0 * greedy_match_len(&a, &b) as f64 / (a.len() + b.len()) as f64;
+        assert!(
+            exact_score >= FLOOR,
+            "the exact table must clear the floor, or the table is not the fix:              {exact_score:.2}"
+        );
+        assert!(
+            greedy_score < FLOOR,
+            "and the greedy walk must fall below it, or this test has stopped              demonstrating the thing it exists for: {greedy_score:.2}"
+        );
+
+        // And through the public path, so the two are connected: the function
+        // chooses the table, and the score is what a caller judges.
+        let score = similarity(&needle, &in_file);
+        assert!(
+            score >= FLOOR,
+            "`similarity` chose the greedy walk and scored {score:.2}, so the              feature would silently do nothing on this anchor"
+        );
+    }
+
+    /// A model searches for a line it mis-remembered by a word. That is the
+    /// case the whole feature exists for.
+    #[test]
+    fn a_near_miss_clears_the_floor() {
+        let searched = vec!["let total = items.iter().sum::<i32>();", "return total;"];
+        let actual = vec![
+            "let total = items.iter().map(|i| i * 2).sum::<i32>();",
+            "return total;",
+        ];
+        let score = similarity(&searched, &actual);
+        assert!(
+            score >= FLOOR,
+            "a real near miss scored {score:.2}, under the {FLOOR} floor, so the \
+             suggestion never appeared and the feature silently did nothing"
+        );
+        assert!(
+            score < 1.0,
+            "and it must not claim to be an exact match: {score:.2}"
+        );
+    }
+
+    /// An identical anchor is a 1.0, so a caller can tell "close" from "this".
+    #[test]
+    fn an_identical_anchor_scores_one() {
+        let lines = vec!["fn main() {", "    println!(\"hi\");", "}"];
+        assert!((similarity(&lines, &lines) - 1.0).abs() < 1e-9);
+    }
+
+    /// Nothing in common must not clear the floor. A suggestion that fires on
+    /// unrelated code teaches the model to ignore the suggestion.
+    #[test]
+    fn unrelated_lines_score_below_the_floor() {
+        let searched = vec!["impl fmt::Display for Report {"];
+        let actual = vec!["pub fn cleanup_stale_worktrees(repo: &Path) -> usize {"];
+        assert!(
+            similarity(&searched, &actual) < FLOOR,
+            "unrelated code must not be offered as the closest lines"
+        );
+    }
+
+    /// The cheap walk is a *fallback*, not the answer. It is kept for runs
+    /// past the table's limit, and the table is what short anchors get — so
+    /// the two must agree closely enough that the limit is invisible.
+    #[test]
+    fn the_greedy_fallback_is_close_to_the_exact_answer() {
+        let a: Vec<char> = "let total = items.iter().sum::<i32>();\nreturn total;"
+            .chars()
+            .collect();
+        let b: Vec<char> = "let total = items.iter().map(|i| i * 2).sum::<i32>();\nreturn total;"
+            .chars()
+            .collect();
+        let exact = lcs_len(&a, &b);
+        let greedy = greedy_match_len(&a, &b);
+        assert!(
+            exact >= greedy,
+            "the exact table can only do at least as well as the greedy walk: \
+             exact {exact}, greedy {greedy}"
+        );
+        // And the gap that caused the bug must stay small for short anchors.
+        let gap = exact as f64 - greedy as f64;
+        assert!(
+            gap <= 4.0,
+            "a {gap}-character gap on a {}-character anchor is what pushed the \
+             near miss under the floor",
+            a.len()
+        );
+    }
+
+    /// The LCS is the definition, checked against cases whose answer is not in
+    /// doubt. A subtly wrong table would still return *a* number, and the
+    /// score is only ever used through it.
+    #[test]
+    fn the_lcs_table_is_the_longest_common_subsequence() {
+        assert_eq!(lcs_len(&['a', 'b', 'c'], &['a', 'b', 'c']), 3);
+        assert_eq!(lcs_len(&['a', 'b', 'c'], &['x', 'y', 'z']), 0);
+        assert_eq!(lcs_len(&[], &['a']), 0);
+        assert_eq!(lcs_len(&['a'], &[]), 0);
+        // Order matters: "ab" and "ba" share both characters but only one in
+        // order, so a set-intersection implementation would say 2.
+        assert_eq!(lcs_len(&['a', 'b'], &['b', 'a']), 1);
+    }
+
+    /// `truncate_middle` is fed model output, so its inputs are arbitrary.
+    /// Two of these were panics before anyone looked: a `max` of 0, and a
+    /// `max` smaller than the head it takes.
+    #[test]
+    fn truncation_keeps_both_ends_of_a_long_string() {
+        let long = "a".repeat(100);
+        let out = truncate_middle(&long, 10);
+        assert!(out.starts_with("a"), "the head must survive: {out}");
+        assert!(out.ends_with('a'), "and so must the tail: {out}");
+        assert!(out.contains("characters omitted"), "and say what it did");
+    }
+
+    /// A string at or under the limit is returned untouched — no marker, no
+    /// truncation. A caller that saw a marker on a short anchor would learn
+    /// to distrust it.
+    #[test]
+    fn a_short_string_is_not_truncated() {
+        assert_eq!(truncate_middle("short", 400), "short");
+        // 10 characters exactly, so `len <= max` and nothing is dropped.
+        assert_eq!(truncate_middle("0123456789", 10), "0123456789");
+    }
+
+    /// A limit too small to split as asked must still return something and
+    /// must not panic. `max * 2 / 3` is 0 at `max < 2`, and
+    /// `len - max / 3` can exceed `len` at `max > 3 * len` — both are
+    /// reachable from a caller, and a panic in a diff-anchor suggestion takes
+    /// down the run that was merely failing to apply an edit.
+    #[test]
+    fn an_impossible_limit_does_not_panic() {
+        for max in [0usize, 1, 2, 3] {
+            for input in ["", "x", "a longer string than the limit"] {
+                let out = truncate_middle(input, max);
+                assert!(
+                    out.chars().count() <= input.chars().count().max(out.chars().count()),
+                    "max {max} on {input:?} produced something impossible: {out:?}"
+                );
+            }
+        }
+    }
+
+    /// A multi-byte string must not be cut mid-character. Taking `chars` is
+    /// the whole reason the function counts in chars rather than bytes.
+    #[test]
+    fn truncation_does_not_split_a_character() {
+        let emoji = "🌍".repeat(50);
+        let out = truncate_middle(&emoji, 12);
+        assert!(
+            out.chars().all(|c| c == '🌍'
+                || c == '\n'
+                || c == '…'
+                || c == ' '
+                || c.is_ascii_alphanumeric()
+                || c == '.'),
+            "a character was cut in half: {out:?}"
+        );
+    }
+
+    /// The lookup: the best window across every file, with the path it came
+    /// from. Returning the score without the path would make the suggestion
+    /// unusable, since the model needs to know which file to re-read.
+    #[test]
+    fn the_lookup_returns_the_best_window_and_its_file() {
+        let mut contents = std::collections::HashMap::new();
+        let wanted = std::path::PathBuf::from("src/target.rs");
+        let other = std::path::PathBuf::from("src/other.rs");
+        contents.insert(
+            wanted.clone(),
+            "fn a() {}\nlet total = items.iter().sum::<i32>();\nreturn total;\n".to_string(),
+        );
+        contents.insert(other.clone(), "fn b() {}\nfn c() {}\n".to_string());
+        let paths = vec![other, wanted.clone()];
+
+        let hit = nearest_lines(
+            &["let total = items.iter().sum::<i32>();", "return total;"],
+            &contents,
+            &paths,
+        )
+        .expect("an exact window must be found");
+        assert!(
+            (hit.0 - 1.0).abs() < 1e-9,
+            "an exact match must score 1.0, got {:.2}",
+            hit.0
+        );
+        assert_eq!(hit.2, wanted.display().to_string(), "and name its file");
+    }
+
+    /// A file with fewer lines than the anchor cannot contain it, and must be
+    /// skipped rather than scored — an out-of-range window here is a panic.
+    #[test]
+    fn a_file_shorter_than_the_anchor_is_skipped() {
+        let mut contents = std::collections::HashMap::new();
+        contents.insert(std::path::PathBuf::from("a.rs"), "one line\n".to_string());
+        let paths = vec![std::path::PathBuf::from("a.rs")];
+        assert!(
+            nearest_lines(&["a", "b", "c", "d"], &contents, &paths).is_none(),
+            "a two-line window cannot hold a four-line anchor"
+        );
+    }
+
+    /// An empty anchor is not an anchor.
+    #[test]
+    fn an_empty_needle_matches_nothing() {
+        let mut contents = std::collections::HashMap::new();
+        contents.insert(std::path::PathBuf::from("a.rs"), "anything\n".to_string());
+        let paths = vec![std::path::PathBuf::from("a.rs")];
+        assert!(nearest_lines(&[], &contents, &paths).is_none());
+    }
+
+    /// The rule, stated as a table, because the loose version of it silently
+    /// deleted a directory that had nothing to do with the run.
+    #[test]
+    fn a_directory_belongs_to_a_task_only_by_the_exact_rule() {
+        for (name, belongs) in [
+            ("task-1", true),     // the task itself
+            ("task-1-1", true),   // a parallel-coder sibling
+            ("task-1-100", true), // the last attempt the retry loop can reach
+            ("task-10", false),   // a different task sharing a prefix
+            ("task-1-backup", false),
+            ("task-1-", false), // a bare dash is not an attempt number
+            ("task-1-1a", false),
+            ("task", false),
+            ("", false),
+        ] {
+            assert_eq!(
+                belongs_to_task(name, "task-1"),
+                belongs,
+                "{name:?} against task-1"
+            );
+        }
+    }
+
+    /// And the teardown follows that rule on disk, not just in the predicate.
+    ///
+    /// The first version of this test asserted the loose contract — that
+    /// anything sharing the `<id>-` prefix is swept — and passed, because the
+    /// loose contract is what the code did. The rule was the defect: a sibling
+    /// is always `<id>-<digits>`.
+    #[test]
+    fn teardown_takes_this_task_and_its_siblings_and_nothing_else() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = dir.path();
+        let base = repo.join(WORKTREE_DIR);
+        for name in ["task-1", "task-1-1", "task-1-2"] {
+            std::fs::create_dir_all(base.join(name)).unwrap();
+        }
+        // Other work that must survive: another task sharing the prefix, and a
+        // directory that merely looks like a sibling.
+        for name in ["task-10", "task-1-backup"] {
+            std::fs::create_dir_all(base.join(name)).unwrap();
+        }
+
+        assert_eq!(
+            cleanup_worktrees_for_task(repo, "task-1"),
+            3,
+            "the task and its two siblings, and nothing else"
+        );
+        let mut left: Vec<String> = std::fs::read_dir(&base)
+            .expect("the base survives")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            vec!["task-1-backup".to_string(), "task-10".to_string()],
+            "other work must survive a Ctrl+C for an unrelated task"
+        );
+    }
 }
