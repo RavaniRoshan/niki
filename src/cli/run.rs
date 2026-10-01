@@ -1318,6 +1318,49 @@ fn salvage_partial_run(
     }
 
     let coder_survived = names.iter().any(|n| n.starts_with("coder"));
+
+    // Render the Coder's change as a real unified diff, so the salvaged work is
+    // something a human can *read*.
+    //
+    // Before this, a failed run left the change as JSON — search/replace blocks
+    // in `artifacts/coder.json` — while the TUI's Run page, the completion
+    // screen and `niki report` all point at `changes.patch`, a file a failed run
+    // never wrote. So the one thing a person needs in order to review
+    // unreviewed work was the one thing the failure path did not produce.
+    //
+    // The working tree is not touched: the render happens in a scratch copy, no
+    // branch is cut, and the patch's own header says it has not been reviewed.
+    let mut patch_note = String::new();
+    if coder_survived {
+        match std::fs::read_to_string(artifacts_dir.join("coder.json"))
+            .ok()
+            .and_then(|json| serde_json::from_str::<crate::artifacts::types::CodeDiff>(&json).ok())
+        {
+            Some(diff) => {
+                match crate::orchestrator::deliver::render_salvaged_patch(project_dir, &diff) {
+                    Ok(patch) => {
+                        std::fs::write(task_dir.join("changes.patch"), &patch)
+                            .map_err(|e| e.to_string())?;
+                        patch_note = format!(
+                            "  As a diff:  `{}` (unreviewed — read it before applying)\n",
+                            task_dir.join("changes.patch").display()
+                        );
+                    }
+                    Err(e) => {
+                        // Not fatal. The artifacts are still there, and a run that
+                        // failed must not be reported as having failed *twice*
+                        // because its recovery could not be rendered.
+                        patch_note = format!("  As a diff:  could not be rendered — {e}\n");
+                    }
+                }
+            }
+            None => {
+                patch_note = "  As a diff:  the Coder's artifact did not parse, so no \
+                              diff could be rendered.\n"
+                    .to_string();
+            }
+        }
+    }
     let note = format!(
         "# This run failed, and its partial work was recovered.\n\n\
          The pipeline stopped at `{}` after {}. Everything listed below was \
@@ -1328,6 +1371,7 @@ fn salvage_partial_run(
          Recovered artifacts:\n{}\n\n\
          The full transcript and the stage-by-stage record are in \
          `events.jsonl` and `manifest.json` in this directory.\n\
+         {}\n\
          Re-run with `/run <task>` from the chat, or `niki run \"<task>\"`, to \
          get a reviewed result.\n",
         crate::display::theme::role_name(cp.current_role),
@@ -1337,6 +1381,11 @@ fn salvage_partial_run(
             .map(|n| format!("  - `artifacts/{n}`"))
             .collect::<Vec<_>>()
             .join("\n"),
+        if patch_note.is_empty() {
+            String::new()
+        } else {
+            format!("A readable diff of the Coder's change is in `changes.patch`:\n{patch_note}")
+        },
     );
     crate::util::write_restricted(&task_dir.join("SALVAGED.md"), &note)
         .map_err(|e| e.to_string())?;

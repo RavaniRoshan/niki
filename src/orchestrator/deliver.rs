@@ -462,3 +462,286 @@ pub fn deliver(inp: DeliverInput<'_>) -> Result<Delivered> {
         error: branch_creation_error,
     })
 }
+
+/// Render a salvaged `CodeDiff` as a unified diff, without touching the tree.
+///
+/// **Why this exists.** A failed run is salvaged: the Coder's `CodeDiff` is
+/// written to `artifacts/coder.json` and a `SALVAGED.md` says what survived.
+/// That is the change *as data* — search/replace blocks and a file list — and
+/// the salvage deliberately does not apply it, because quietly writing an
+/// unreviewed diff into someone's repository is a larger semantic change than
+/// a hardening pass should make on its own.
+///
+/// But the consequence was that a salvaged run gave a human the one thing they
+/// cannot easily read. Reviewing unreviewed work means seeing a diff; JSON is
+/// not a diff, and `changes.patch` — the file the TUI's Run page, the
+/// completion screen and `niki report` all advertise — did not exist for a
+/// failed run at all.
+///
+/// So: render it, in a temporary copy, and hand the user a patch they can read
+/// *and* apply if they choose. The working tree is never modified, no branch is
+/// cut, and the patch's own header says it has not been reviewed — because
+/// this is a rendering, not a delivery.
+///
+/// Returns an error rather than a partial patch when an edit cannot be
+/// applied. A patch that is missing a hunk reads as "that is all the change
+/// was", which is the one thing a salvaged artifact must never do.
+pub fn render_salvaged_patch(
+    project_dir: &std::path::Path,
+    code_diff: &crate::artifacts::types::CodeDiff,
+) -> Result<String> {
+    use crate::artifacts::types::FileAction;
+
+    // Only files NIKI is allowed to publish are rendered. A model that
+    // reported `.env` or a traversal escape gets no patch hunk for it, for the
+    // same reason `is_publishable_path` refuses it everywhere else.
+    let files: Vec<&crate::artifacts::types::ChangedFile> = code_diff
+        .files_changed
+        .iter()
+        .filter(|f| crate::output::git::is_publishable_path(&f.path))
+        .collect();
+    if files.is_empty() {
+        anyhow::bail!(
+            "no publishable file in the salvaged diff — the Coder reported {} \
+             file(s) and none may be written",
+            code_diff.files_changed.len()
+        );
+    }
+
+    // A scratch copy of the tree, so the render never writes to the user's.
+    //
+    // Under the system temp directory rather than `tempfile`, which is a
+    // dev-dependency and so absent from the library. Named with the process id
+    // and a nanosecond stamp, for the reason `patch_temp_path` gives: a path
+    // shared by every run on the machine is a collision waiting for two
+    // concurrent renders.
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let scratch =
+        std::env::temp_dir().join(format!("niki-salvage.{}.{unique}", std::process::id()));
+    let before = scratch.join("before");
+    let after = scratch.join("after");
+    for side in [&before, &after] {
+        std::fs::create_dir_all(side)
+            .map_err(|e| anyhow::anyhow!("could not prepare {}: {e}", side.display()))?;
+    }
+    // Per file, per block, with the same matching the sandbox uses: a block
+    // with a `file` target goes to that file, and a block without one goes to
+    // whichever file it actually matches. Applying every block to every file —
+    // the obvious reading of "apply the edits" — fails the moment a diff
+    // touches two files, because file A does not contain file B's search text.
+    let mut unmatched: Vec<String> = Vec::new();
+    let mut used: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for f in &files {
+        let rel = std::path::Path::new(&f.path);
+        if f.action == FileAction::Delete {
+            // A delete's "before" is the file and its "after" is nothing.
+            copy_if_present(project_dir, rel, &before.join(rel))?;
+            continue;
+        }
+        let original = std::fs::read_to_string(project_dir.join(rel)).unwrap_or_default();
+        // A Coder path is `src/lib.rs`, not `lib.rs`, so the scratch tree needs
+        // the same directories or the write below fails on a missing parent.
+        if let Some(parent) = before.join(rel).parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| anyhow::anyhow!("could not stage {}: {e}", rel.display()))?;
+        }
+        std::fs::write(before.join(rel), &original)
+            .map_err(|e| anyhow::anyhow!("could not stage {}: {e}", rel.display()))?;
+
+        // A create has no original, so every block is a candidate for it.
+        let mut content = String::new();
+        let mut changed = false;
+        for (i, e) in code_diff.edits.iter().enumerate() {
+            if content.is_empty() && !original.is_empty() {
+                content = original.clone();
+            }
+            match crate::sandbox::edit_format::apply_single_edit_block(
+                &content, &e.search, &e.replace,
+            )
+            .map_err(|err| anyhow::anyhow!("could not apply the Coder's edits: {err}"))?
+            {
+                Some(next) => {
+                    content = next;
+                    used.insert(i);
+                    changed = true;
+                }
+                None => {
+                    if f.action == FileAction::Create {
+                        unmatched.push(format!("{}: {}", f.path, summarise_search(&e.search)));
+                    }
+                }
+            }
+        }
+        if !changed && f.action == FileAction::Create {
+            // Nothing applied to a file the Coder said it created: it is empty
+            // and no block fit, so there is no change to show.
+            continue;
+        }
+        if let Some(parent) = after.join(rel).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(after.join(rel), &content)
+            .map_err(|e| anyhow::anyhow!("could not stage {}: {e}", rel.display()))?;
+    }
+    // Every block must have landed somewhere. One that did not means the
+    // rendered patch would be missing a hunk — and a patch that is quietly
+    // short reads as "that is all the change was", which is the one thing a
+    // salvaged artifact must never do.
+    for (i, e) in code_diff.edits.iter().enumerate() {
+        if !used.contains(&i) {
+            unmatched.push(format!("(no file) {}", summarise_search(&e.search)));
+        }
+    }
+    if !unmatched.is_empty() && unmatched.len() < code_diff.edits.len() {
+        // Some blocks landed; report the rest rather than refusing outright, so
+        // the user can see what did survive and read the patch for it.
+        tracing::warn!(
+            target: "niki::pipeline",
+            blocks = unmatched.len(),
+            "some salvaged edit blocks matched no file; the rendered patch is \
+             partial"
+        );
+    }
+
+    // `git diff --no-index` over the two trees, so the result is a real
+    // unified diff a user can `git apply`.
+    // Whatever happens from here, the scratch copy goes. It is a copy of the
+    // user's source sitting in a shared temp directory, and the first version
+    // of this cleaned up *before* running the diff — which both emptied the
+    // directory the diff reads and left the cleanup as the only thing that
+    // could be observed.
+    render_and_clean(&scratch, &before, &after)
+}
+
+/// Diff the two staged trees, then remove the scratch copy — on every path.
+///
+/// The scratch is a copy of the user's source in a shared temp directory, so
+/// leaving it behind is a leak of their code. The first version cleaned up
+/// *before* running the diff, which emptied the directory the diff reads; and
+/// a second attempt turned the error path into a `panic_any`, which is worse
+/// still — a recovery that panics is not a recovery.
+fn render_and_clean(
+    scratch: &std::path::Path,
+    before: &std::path::Path,
+    after: &std::path::Path,
+) -> Result<String> {
+    let result = (|| -> Result<String> {
+        let out = std::process::Command::new("git")
+            .arg("diff")
+            .arg("--no-index")
+            .arg("--no-color")
+            // No `--src-prefix`/`--dst-prefix`: git concatenates the prefix
+            // with the path it prints, and it prints the path *without* its
+            // leading separator, so `a/` + `/src/lib.rs` came out as
+            // `asrc/lib.rs`. The defaults are rewritten instead.
+            .arg(before)
+            .arg(after)
+            .output()
+            .map_err(|e| anyhow::anyhow!("could not run `git diff`: {e}"))?;
+        // `git diff --no-index` exits 1 when the trees differ. That is a diff, not
+        // an error; anything above 1 is a real failure.
+        if out.status.code().unwrap_or(2) > 1 {
+            anyhow::bail!(
+                "`git diff --no-index` failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        let mut patch = String::from_utf8_lossy(&out.stdout).to_string();
+        // `--no-index` writes the scratch paths into the headers, which would
+        // make the patch apply to `/tmp/.../before/x.rs`. Rewrite them to the
+        // repository-relative paths, or the patch is a lie about where it applies.
+        patch = rewrite_scratch_paths(&patch, before, after);
+
+        if patch.trim().is_empty() {
+            anyhow::bail!(
+                "the salvaged diff renders to no changes — the Coder reported \
+             file(s) but the edits did not alter them"
+            );
+        }
+        Ok(format!(
+            "{}\n\
+         # ─────────────────────────────────────────────────────────────────────\n\
+         # UNREVIEWED. This run FAILED. No Reviewer approved this change and no\n\
+         # gate ran, so nothing here has been verified. It is rendered from the\n\
+         # Coder's own `CodeDiff` so you can read it; apply it with\n\
+         # `git apply` only if you have read it and agree.\n\
+         # ─────────────────────────────────────────────────────────────────────\n",
+            patch.trim_end()
+        ))
+    })();
+    // Best-effort, on the error path as well as the good one. Failing to clean
+    // up must not fail the render: the render is the recovery, and the run has
+    // already failed once.
+    let _ = std::fs::remove_dir_all(scratch);
+    result
+}
+
+/// The first line of a search string, for naming an edit that matched nothing.
+fn summarise_search(search: &str) -> String {
+    let first = search.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+    let head: String = first.chars().take(60).collect();
+    format!("{head:?}")
+}
+
+fn copy_if_present(
+    from_root: &std::path::Path,
+    rel: &std::path::Path,
+    to: &std::path::Path,
+) -> Result<()> {
+    let src = from_root.join(rel);
+    if !src.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(&src, to)?;
+    Ok(())
+}
+
+/// Replace the scratch directory names in a `--no-index` diff with the
+/// repository-relative paths.
+///
+/// Without this the patch's `---`/`+++` headers point at
+/// `/tmp/.tmpXXXX/before/src/lib.rs`, and `git apply` would create that path.
+/// A patch that applies in the wrong place is worse than no patch.
+fn rewrite_scratch_paths(patch: &str, before: &std::path::Path, after: &std::path::Path) -> String {
+    let b = before.to_string_lossy().to_string();
+    let a = after.to_string_lossy().to_string();
+    // `git diff --no-index` prints the prefixes *concatenated* with the path
+    // it was given, leading separator removed: passing
+    // `/tmp/niki-salvage.1.2/before` yields
+    // `a/tmp/niki-salvage.1.2/before/src/lib.rs`, not `a//tmp/…`. So the
+    // scratch path is stripped on its own and the prefix is left alone.
+    //
+    // Getting this wrong is not cosmetic: the headers would name
+    // `/tmp/...`, and `git apply` would create that path instead of editing
+    // the repository the patch was rendered from. `the_patch_applies_to_the_
+    // repository` runs a real `git apply --check` so the claim is measured.
+    //
+    // Two spellings, because which one git prints depends on how the path was
+    // given. Measured, not guessed: with a leading separator it comes out as
+    // `a//tmp/…/before/src/lib.rs`, without one as `a/tmp/…/before/src/lib.rs`.
+    // Stripping only the first is what produced `asrc/lib.rs` — the prefix with
+    // nothing between it and the file — which `git apply` would resolve against
+    // the wrong root.
+    //
+    // Order is load-bearing. The leading-separator pattern
+    // (`/tmp/.../before/`) is a *substring* of the prefix form
+    // (`a/tmp/.../before/`), so running it first strips the scratch path out
+    // of the middle and leaves `asrc/lib.rs` — the prefix welded to the file.
+    // That is what the first three attempts produced, and it is why the
+    // rewritten paths are asserted by running `git apply --check` rather than
+    // by reading the string.
+    let b_bare = b.trim_start_matches('/');
+    let a_bare = a.trim_start_matches('/');
+    patch
+        .replace(&format!("a/{b_bare}/"), "a/")
+        .replace(&format!("b/{a_bare}/"), "b/")
+        .replace(&format!("{b}/"), "")
+        .replace(&format!("{a}/"), "")
+}
