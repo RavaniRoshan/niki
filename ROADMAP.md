@@ -347,8 +347,13 @@ one rather than a reason to wait.
   `niki.example.toml` both claimed MCP tools were injected into agent prompts.
   They are not — `tools_summary` says `NOT YET CALLABLE` and routes the line
   to a display notice, never to a model. Two new tests hold both.
-  **Still undecided:** wire MCP into the tool registry, or say so in the row.
-  That is a product decision, not a repair.
+  ~~**Still undecided:** wire MCP into the tool registry, or say so in the
+  row.~~ **STALE — re-measured in batch 11 (B11-01).** It is wired: `McpToolAdapter`
+  calls `call_tool` (`mcp_tool.rs:192`), `build_registry` registers each
+  discovered tool into the agent's registry at **two** sites
+  (`pipeline.rs:1279`, `:1599`), and `README.md:286` already states the
+  qualified name format, which `tests/mcp_call_path.rs` pins. The §9.2 pin
+  covers the call path; this line had simply outlived the work.
   ~~`web_search` returns `ToolStatus::Success` with "not yet wired".~~ **DONE in
   batch 4** (`54b64a2`): it now returns `Failed` with no
   `WebSearchResults` payload at all, and says what to do instead — an empty
@@ -1176,6 +1181,41 @@ by the code and by this entry.
 The existing `cost_footer_shows_frame_stats` test set the numbers by hand and
 could not have seen any of this — the batch-9 pattern once more, in the one place
 this batch has now seen it six times.
+
+### B11-01 — a dead method that would have named the wrong tool, and a red test nobody ran
+
+**`McpToolAdapter::server_tool_name` is gone.** It returned `&self.tool.name` —
+the **bare** name, `echo` — while the tool is registered as
+`mcp__<server>__<tool>` (`qualified_name`, used at construction). Dead, and dead
+in the worst way: a method that reads like "what is this tool called" and answers
+with a different name than the registry holds. The first caller would have sent
+`echo` to `call_tool` for a tool registered as `mcp__fixture__echo`, and failed
+with a not-found naming a string the user never configured. Deleted rather than
+corrected — the qualified name is the only name this type has in the product, and
+leaving a second one to be reached for is what produced the bug.
+
+**And `tests/mcp_call_path.rs` had a red test.** Running the batch-11 selection —
+reading §6 rather than guessing — surfaced it:
+`the_pipeline_holds_the_mcp_manager_beyond_discovery` asserts on a **fixed
+2600-character window** of `pipeline.rs`, and the `Arc` line it needs now sits at
+2618, because a comment elsewhere grew the file by eighteen characters.
+
+The product was correct throughout. The test had been red since then, and **no
+gate ran that binary**, so nothing said so.
+
+A fixed window is a test that fails when a *comment* changes and passes when the
+*code* is wrong — the two failures swapped. The region now ends where the
+discovery block ends, which tracks the thing it is about.
+
+**The fast lane gains `mcp_call_path`**, and the reason is the finding rather
+than the fix: a lane you do not extend is a lane that quietly stops covering.
+A lane you do not extend is a lane that quietly stops covering, and the way this
+was found was by choosing slices by *reading §6*, which is what batches 1–10
+should have been doing.
+
+Can-fail proven: shrinking the window back below the `Arc` line goes red.
+Replacing `Some(Arc::new(mgr))` with `Some(mgr)` does not reach the assertion at
+all — **it fails to compile**, which is a different and stronger kind of catch.
 
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 

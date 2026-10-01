@@ -150,10 +150,19 @@ impl McpToolAdapter {
         }
     }
 
-    /// The tool's name on its own server, which is what `call_tool` wants.
-    pub fn server_tool_name(&self) -> &str {
-        &self.tool.name
-    }
+    // `server_tool_name` used to live here and returned `&self.tool.name` — the
+    // **bare** name, `echo`, while the tool is registered as
+    // `mcp__<server>__<tool>` (`qualified_name`, used at construction below).
+    //
+    // It was dead, and dead in the worst way: a method that reads like "what is
+    // this tool called" and answers with a different name than the registry
+    // holds. The first caller would have sent `echo` to `call_tool` for a tool
+    // registered as `mcp__fixture__echo`, and failed with a not-found naming a
+    // string the user never configured.
+    //
+    // Deleted rather than corrected: the qualified name is the only name this
+    // type has in the product, and leaving a second one to be reached for is
+    // what produced the bug.
 }
 
 #[async_trait::async_trait]

@@ -229,7 +229,21 @@ fn the_pipeline_holds_the_mcp_manager_beyond_discovery() {
     // window stopped inside the comment and never reached the thing it was
     // checking for — the same trap as the `ToolCall` arm in batch 6, and the
     // reason a window is never sized by eye.
-    let region: String = pipeline[start..].chars().take(2600).collect();
+    // The region ends where the discovery block ends, **not** at a fixed
+    // character count.
+    //
+    // It was `chars().take(2600)`, and the `Arc` line the assertion needs now
+    // sits at 2618 — because a comment elsewhere in the file grew by eighteen
+    // characters. The product was correct throughout; the test had been red
+    // since then, and no gate ran this binary, so nothing said so.
+    //
+    // A fixed window is a test that fails when a *comment* changes and passes
+    // when the *code* is wrong. Anchoring the end to the line that closes the
+    // block makes it track the thing it is about.
+    let end = pipeline
+        .find("let mcp_tools: String = mcp.as_ref()")
+        .expect("the discovery block must publish its tool summary");
+    let region: String = pipeline[start..end].to_string();
 
     // The invariant is the **shape of the block's value**, not the absence of
     // a local. The first version asserted the manager was not a local, which
