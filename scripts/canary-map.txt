@@ -398,3 +398,4 @@ salvaged-unmatched-edit-is-reported | an_unmatched_edit_is_reported_rather_than_
 mock-scripted-sequence-followed | a_scripted_tool_call_sequence_is_followed_in_order | the sequence ignored, so no leg can drive a tool the harness hardcodes
 mock-script-runs-out | the_script_runs_out_rather_than_repeating | a sequence that replays, walking a loop off the end of a list
 mock-no-script-untouched | with_no_script_the_built_in_story_is_untouched | an empty script read as "call nothing ever", changing every existing consumer at once
+mock-anthropic-format-too | a_scripted_sequence_works_on_the_anthropic_format_too | a scripted feature tested on one wire format and broken on the other, crashing the server

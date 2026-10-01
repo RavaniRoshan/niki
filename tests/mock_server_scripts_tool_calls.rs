@@ -187,6 +187,89 @@ fn a_scripted_tool_call_sequence_is_followed_in_order() {
     );
 }
 
+/// The same script, on the **Anthropic** wire format.
+///
+/// This is the half that was broken. `anthropic_json_response` referenced
+/// `scripted` without ever computing it, so the first scripted call raised
+/// `NameError` and the handler died — taking the whole server's connection
+/// with it. The end-to-end leg saw `connection closed before message
+/// completed`; the mock's own stderr had the traceback, and nothing in the
+/// suite looked. Only the OpenAI path had a test.
+///
+/// So a feature scripted on one provider and run on the other is tested on
+/// both, and the crash is the failure this pins: before the fix the second
+/// turn raised and the assert never ran.
+#[test]
+fn a_scripted_sequence_works_on_the_anthropic_format_too() {
+    let mock = start(serde_json::json!([
+        {"name": "ask_user", "arguments": {"question": "Which greeting?"}},
+        {"name": "submit_artifact"},
+    ]));
+
+    let first = ask_messages(mock.port, 0);
+    assert_eq!(
+        first["content"][0]["name"], "ask_user",
+        "turn 0 must call the first scripted tool, got {first}"
+    );
+    assert_eq!(
+        first["content"][0]["input"]["question"], "Which greeting?",
+        "and the question must survive: {first}"
+    );
+    let second = ask_messages(mock.port, 1);
+    assert_eq!(
+        second["content"][0]["name"], "submit_artifact",
+        "turn 1 must call the second scripted tool: {second}"
+    );
+}
+
+/// One turn of the Anthropic conversation, with `results` `tool_result` blocks
+/// already in it.
+fn ask_messages(port: u16, results: usize) -> serde_json::Value {
+    let mut messages = vec![serde_json::json!({"role": "user", "content": "go"})];
+    for i in 0..results {
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": format!("t{i}"),
+                         "name": "ask_user", "input": {"question": "q"}}],
+        }));
+        messages.push(serde_json::json!({
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": format!("t{i}"),
+                         "content": "an answer"}],
+        }));
+    }
+    let body = serde_json::json!({
+        "model": "mock-model", "max_tokens": 100, "messages": messages,
+        "tools": [{"name": "ask_user", "description": "d",
+                   "input_schema": {"type": "object"}}],
+    });
+    let payload = serde_json::to_vec(&body).expect("json");
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .expect("timeout");
+    let head = format!(
+        "POST /v1/messages HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+         Content-Type: application/json\r\nanthropic-version: 2023-06-01\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n",
+        payload.len()
+    );
+    stream.write_all(head.as_bytes()).expect("write head");
+    stream.write_all(&payload).expect("write body");
+    stream.flush().expect("flush");
+
+    let mut raw = String::new();
+    // A handler that raised mid-request closes the connection with no response
+    // at all, which is what the `NameError` looked like from the client. The
+    // read error *is* the finding, so it is reported as one.
+    stream
+        .read_to_string(&mut raw)
+        .unwrap_or_else(|e| panic!("the Anthropic path closed without answering: {e}"));
+    let body = raw.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or(&raw);
+    serde_json::from_str(body.trim())
+        .unwrap_or_else(|e| panic!("the server did not answer with JSON ({e}); it said: {raw}"))
+}
+
 /// The sequence is bounded. Past the end the server must stop calling tools,
 /// or a loop with a step budget walks off the end of a list.
 #[test]
