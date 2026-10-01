@@ -1223,6 +1223,7 @@ fn appstate_apply_event_stage_done() {
         role: AgentRole::Planner,
     });
     state.apply_event(DisplayEvent::StageDone {
+        retry_count: 0,
         role: AgentRole::Planner,
         summary: vec!["done".to_string()],
         input_tokens: 100,

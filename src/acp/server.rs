@@ -112,6 +112,8 @@ async fn run_prompt(
                 output_tokens,
                 cost_usd,
                 latency_ms,
+
+                retry_count,
             } => (
                 "stage.done",
                 serde_json::json!({
@@ -121,6 +123,11 @@ async fn run_prompt(
                     "output_tokens": output_tokens,
                     "cost_usd": cost_usd,
                     "latency_ms": latency_ms,
+                    // An IDE client gets the retry count too. It was carried in
+                    // every task record and every budget and reached the TUI's
+                    // own `StageDone` handler as an unused binding — the number
+                    // existed everywhere except where a human could see it.
+                    "retry_count": retry_count,
                 }),
             ),
             crate::display::tui::DisplayEvent::StageFailed { role, error } => (

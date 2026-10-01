@@ -1957,3 +1957,45 @@ $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --lib → 1092 passed; 0 failed
 ```
+
+---
+
+## Iteration 8h — B9-08, `retry n/3` never rendered
+
+`StageInfo.retry_count` was a literal `0` and the renderer draws the line only
+`if s.retry_count > 0` — so it **never appeared**. A stage that took three
+retries: three failed requests, three sets of tokens, three times the latency —
+was drawn exactly like one that succeeded first time.
+
+The pipeline always knew. `agents/mod.rs` increments it, it lands in
+`StageMetric.retry_count`, and every budget and record reads it. It reached
+nowhere a human could see it: `DisplayEvent::StageDone` had no field,
+`agent_done` had no parameter, the call site had nothing to pass. The ACP
+`stage.done` payload carries it now too.
+
+**Three hops, two covered, the third named rather than claimed:**
+
+| hop | covered by |
+|---|---|
+| `agent_done` → event → `StageInfo` | drives `attach_sink` → `agent_start` → `agent_done` → `AppState` |
+| `StageDone` → `StageInfo` | `a_stage_that_retried_says_so_in_the_transcript` |
+| **`pipeline.rs` → `agent_done`** | **inspection only** |
+
+The uncovered one is recorded as such: `let retry_count =
+metrics.last().map(|m| m.retry_count).unwrap_or(0);` returning `0` leaves every
+test green, because the test calls `agent_done` itself. Closing it needs a
+pipeline-level test — the same "drive the producer, not the constructor" rule one
+level further out.
+
+**That rule has now been learned five times in this batch**, each time by a test
+that was green against the defect: the usage, the cost, the model, the scope, the
+retry count. It is written into `ROADMAP.md` rather than left as five separate
+lessons.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  427 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --lib → 1095 passed; 0 failed
+```
