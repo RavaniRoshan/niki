@@ -536,3 +536,4 @@ no-zero-measured-as-a-number | the_cost_footer_does_not_print_a_zero_it_never_me
 resume-prints-a-pasteable-command | the_command_resume_prints_survives_a_shell | a recovery page handing back a command for a different task
 mcp-manager-outlives-discovery | the_pipeline_holds_the_mcp_manager_beyond_discovery | the Arc dropping at the end of the block, killing every stdio child
 subpage-key-reaches-the-page | a_subpage_q_reaches_the_page_not_the_nav_layer | the nav layer claiming q before the page, in either render loop
+resume-says-nothing-was-rerun | test_cli_resume_command | a recovery page claiming "state restored successfully" and restoring nothing
