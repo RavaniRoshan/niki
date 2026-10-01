@@ -399,3 +399,5 @@ mock-scripted-sequence-followed | a_scripted_tool_call_sequence_is_followed_in_o
 mock-script-runs-out | the_script_runs_out_rather_than_repeating | a sequence that replays, walking a loop off the end of a list
 mock-no-script-untouched | with_no_script_the_built_in_story_is_untouched | an empty script read as "call nothing ever", changing every existing consumer at once
 mock-anthropic-format-too | a_scripted_sequence_works_on_the_anthropic_format_too | a scripted feature tested on one wire format and broken on the other, crashing the server
+# B7-08 · the loop's half of §9.2a, measured
+question-answer-reaches-the-loop | a_questions_answer_reaches_the_loop_and_it_moves_on | the loop never seeing the answer, so the agent asks the same question twice
