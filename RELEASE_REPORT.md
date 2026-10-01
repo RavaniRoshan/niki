@@ -1049,3 +1049,65 @@ not usually catch:
 
 Both were caught only because a *second* assertion in the same place was
 supposed to fail and did not.
+
+---
+
+## 2k · Batch 9 — one shape, eleven times
+
+Twelve slices. One idea underneath all of them, and the reason it took a sweep to
+find: **a value produced correctly, then dropped at a boundary.**
+
+None of them threw. None of them was loud. Every one of them produced a number a
+user would believe.
+
+| # | What was dropped | What the user saw |
+|---|---|---|
+| B9-03 | `StreamChunk::Usage` matched with `{}` | a `ctx` gauge reading **0%** while the model was handed a 200-turn history |
+| B9-04 | nothing assigned `self.cost` on the chat path | `/cost` saying **`$0.0000`** after paid API calls |
+| B9-06 | `update_context_limit_for_model` had **zero callers** | a warning gated at 180 000 tokens — **never** firing on an 8k model |
+| B9-07 | `PermissionAction` has no persistent variant | **"Allow always" silently meaning "allow once"** |
+| B9-08 | `StageInfo.retry_count` a literal `0` | a stage that took three retries drawn like one that succeeded |
+| B9-09 | `totals()` summed one of two sources | `/cost`, `/status` and `/usage` giving **opposite answers** |
+| B9-11 | no `Notice` arm in the ACP replay | an IDE client never told a branch was blocked |
+| B9-12 | a doc claiming `Ctrl+Shift+V` | a shortcut NIKI does not have, on a field nothing used |
+
+And B9-01 struck a `KNOWN_FAILING` entry I had already written a **false claim
+about** — "the list is now empty" after striking three of four.
+
+### The two rules, paid for five times each
+
+**Drive the producer, not the constructor.** Five times a test that built the
+thing itself was green against the defect it was written for. Each was caught
+only because a *second* assertion in the same place was supposed to fail and did
+not.
+
+**When a number starts being reported, find every reader of it.** Fixing `/cost`
+alone made the surface *worse*: there went from one command reporting the truth to
+two reporting contradictions.
+
+Both are now in `ROADMAP.md` §0, written once rather than repeated in twelve
+commit messages.
+
+### Where the batch started
+
+B9-03 also found that the compressor shipped in batch 8 was on the **tool loop**,
+which is off by default and capped at four steps — so the context that actually
+grows in a default run was not the one being compressed.
+
+### Three corrections to my own records
+
+1. "`KNOWN_FAILING` is now empty" — it was not; three of four, not four.
+2. "The latency in §8 is in the streaming, not the parallelism" — an assertion,
+   never measured. B9-02 measured it: mid-stream dispatch is **not implementable
+   here**, because `StreamChunk` has no tool-call variant and every provider's
+   `stream()` omits `tools` from the payload.
+3. A canary row added in B9-02 named a test that did not hold the claim attached
+   to it — the eighth mislabelled canary in the programme, and the first I wrote
+   while making that exact point.
+
+### The one that hurt most
+
+B9-06 invalidated work shipped two slices earlier. The 90% context warning
+arrived in B9-03 and **could never fire**, because the number it divides by was a
+constant. A sweep for a pattern I had been applying all batch found it. The
+warning shipped; the sweep said it was gated on a number nobody had set.

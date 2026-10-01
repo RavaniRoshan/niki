@@ -2109,3 +2109,36 @@ $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --lib → 1099 passed; 0 failed
 ```
+
+---
+
+## Iteration 8l — batch 9, twelve slices, one shape
+
+B9-01 … B9-12. Full records in `RELEASE_REPORT.md` §2k and per-slice entries
+above; the batch's finding is a single sentence long:
+
+> **A value produced correctly, then dropped at a boundary.** None of them threw,
+> none was loud, and every one produced a number a user would believe.
+
+The context gauge reading 0%. `/cost` reading $0.0000. A warning that could
+never fire because the number it divides by was a constant. "Allow always"
+meaning "allow once". A stage that took three retries drawn like one that
+succeeded. Two commands giving opposite answers. An IDE client never told a
+branch was blocked. A doc promising a shortcut that does not exist.
+
+**The one that hurt most** is B9-06: it invalidated work shipped two slices
+earlier in the same batch. The 90% context warning arrived in B9-03 and could
+never fire, because `update_context_limit_for_model` had zero callers and
+`context_limit` was a hard-coded 200 000. A sweep for a pattern I had been
+applying all batch is what found it — I had written a warning, checked that it
+fired, and never asked where its number came from.
+
+**Three corrections to my own records**, all recorded rather than quietly fixed:
+"KNOWN_FAILING is now empty" (it was three of four); "the latency is in the
+streaming" (an assertion, never measured — B9-02 measured it and the feature is
+not implementable here); and a canary row naming a test that did not hold the
+claim attached to it.
+
+**Two rules, written once into `ROADMAP.md` §0** rather than repeated in twelve
+commit messages: drive the producer, not the constructor; and when a number starts
+being reported, find every reader of it.
