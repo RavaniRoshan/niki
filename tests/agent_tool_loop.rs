@@ -2160,3 +2160,86 @@ async fn a_questions_answer_reaches_the_loop_and_it_moves_on() {
          stops the run is not an answer"
     );
 }
+
+/// A model that did the work and *narrated* it must be asked to submit.
+///
+/// Measured against a live provider (`stealth/space-bunny-alpha`, B7-14): the
+/// Coder ran `read`, `edit`, `bash` — the edit applied and compiled — and then
+/// said *"The change is in place and compiles cleanly"* without ever calling
+/// `submit_artifact`. The loop found no JSON in the prose, returned no
+/// artifact, and the caller **discarded the whole loop and re-ran the Coder
+/// one-shot**. The work was in the worktree the entire time.
+///
+/// So the loop asks, once, before it gives up: stop exploring, call the submit
+/// tool. A model that will not submit after being told plainly will not submit
+/// on the fourth turn either — it will narrate again, more expensively.
+#[tokio::test]
+async fn a_model_that_narrates_its_finished_work_is_asked_to_submit() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+    std::fs::write(dir.path().join("src/lib.rs"), "old\n").expect("write");
+
+    // Turn 1: do the work. Turn 2: narrate it, with no tool call — which is
+    // what the live model did. Turn 3: the one the harness asked for.
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let agent = ScriptedAgent {
+        script: vec![
+            Some((
+                "read_file".into(),
+                serde_json::json!({"path": "src/lib.rs"}),
+            )),
+            None, // prose: "the change is in place"
+            Some(("submit_artifact".into(), artifact())),
+        ],
+        turn: AtomicUsize::new(0),
+        seen_prompts: seen.clone(),
+    };
+
+    let registry = build_baseline_registry();
+    let mut c = ctx(dir.path());
+    c.permission_mode = "bypass".into();
+
+    let out = run_tool_loop_with(
+        LoopOptions {
+            reasoning_effort: None,
+            cost_ceiling_usd: None,
+            submit_artifact: Some(submit_artifact_spec(serde_json::json!({
+                "type": "object",
+                "properties": artifact(),
+                "required": ["edits", "files_changed"],
+            }))),
+            validate_artifact: None,
+        },
+        &agent,
+        "m",
+        &registry,
+        &c,
+        vec![LoopMessage::User("change a - b to a + b".into())],
+        None,
+        8,
+        None,
+        None,
+    )
+    .await
+    .expect("the loop runs");
+
+    let prompts = seen.lock().expect("lock").clone();
+    assert!(
+        prompts
+            .iter()
+            .any(|p| p.contains("submit_artifact") && p.contains("stop exploring")),
+        "the loop must ask the model to submit before abandoning the work it \
+         already did. The turns were:\n{}",
+        prompts.join("\n---\n")
+    );
+    assert!(
+        out.artifact.is_some(),
+        "and the artifact it then submitted must be kept — otherwise the ask \
+         is just another step in a loop that throws the result away"
+    );
+    assert!(
+        out.steps <= 8,
+        "and it must not cost the whole budget to collect: {} steps",
+        out.steps
+    );
+}
