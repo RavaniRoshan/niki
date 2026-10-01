@@ -167,6 +167,15 @@ pub enum DisplayEvent {
         /// `None` when the provider reports no usage, which is different from
         /// reporting zero — the same distinction `RunningStage::tokens` makes.
         usage: Option<crate::llm::provider::TokenUsage>,
+        /// What that turn cost, in dollars, priced where the provider and model
+        /// are both known.
+        ///
+        /// `state.cost` was never assigned on the **chat** path — the pipeline
+        /// assigns it from the run record, so `/cost` after a run showed a real
+        /// number while `/cost` in a conversation showed **$0.0000** after real,
+        /// paid API calls. Pricing has to happen where the rate card is; the
+        /// surface has a model name and no idea what it costs.
+        cost_usd: f64,
     },
     /// Total token/cost info for the status line.
     StageTotals {

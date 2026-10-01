@@ -219,6 +219,7 @@ fn streamed_fragments_become_exactly_one_committed_turn() {
     assert_eq!(s.chat_stream, "Hi, how can I help?");
 
     s.apply_display_event(DisplayEvent::ChatFinished {
+        cost_usd: 0.0,
         usage: None,
         finish_reason: Some("end_turn".to_string()),
     });
@@ -242,6 +243,7 @@ fn a_reply_cut_off_at_the_token_limit_is_flagged_as_incomplete() {
     s.apply_display_event(DisplayEvent::ChatFinished {
         finish_reason: Some("max_tokens".to_string()),
         usage: None,
+        cost_usd: 0.0,
     });
     assert!(
         s.chat_truncated,
@@ -253,6 +255,7 @@ fn a_reply_cut_off_at_the_token_limit_is_flagged_as_incomplete() {
         s.apply_display_event(DisplayEvent::ChatFinished {
             finish_reason: Some(reason.to_string()),
             usage: None,
+            cost_usd: 0.0,
         });
         assert!(s.chat_truncated, "{reason} is a truncation, not a stop");
     }
@@ -328,6 +331,7 @@ fn an_assistant_reply_renders_markdown_rather_than_its_source() {
         text: "Here it is:\n\n```rust\nfn main() {}\n```\n\nThat is the whole change.".to_string(),
     });
     s.apply_display_event(DisplayEvent::ChatFinished {
+        cost_usd: 0.0,
         usage: None,
         finish_reason: None,
     });
