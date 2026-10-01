@@ -1495,3 +1495,35 @@ $ ./scripts/verify.sh --only G5 → PASS
 $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 ```
+
+---
+
+## Iteration 7i — B8-09, a KNOWN_FAILING entry whose check was dead
+
+`INV-STAGE-MANIFEST` said *"a SingleAgent run records no stage metrics at all"*.
+The cause was real (fixed in B8-04), but the entry was false against the
+product — and proving that turned up something worse.
+
+**A real run meters both stages.** `tests/run_lifecycle.rs` now drives the
+pinned `topology = "singleagent"` path against the real mock and reads
+`task.json` back: metered roles **`["planner", "coder"]`**. The ratchet could
+never have established this — it only sees synthetic traces, and a synthetic
+trace cannot say whether the pipeline meters a topology it has never run.
+
+**The invariant could never fire.** It asked
+`topology.contains("Single") && executed.is_empty()`. `TopologyMode` is
+`#[serde(rename_all = "lowercase")]`, so a real run records `"singleagent"` and
+the capital-S comparison never matched. The check existed to catch a SingleAgent
+run that metered nothing and was structurally unable to catch one by a SingleAgent
+run — it only ever fired on the hand-built trace that justified keeping it. That
+is the whole entry: a check held open by its own reproduction.
+
+Now case-insensitive, held in both directions, and can-fail proven: restoring
+the capital-S comparison goes red, and a real run with `agent_metrics` emptied
+goes red.
+
+**A note on how the first version of this assertion was worthless.** It asserted
+that `agent_metrics` was non-empty on the fast path, and it passed — because the
+Planner's metric alone makes it non-empty, so it said nothing about the Coder.
+Disabling the Coder's billing entirely did **not** turn it red. The version
+shipped asks for the `coder` role by name, and that one bites.

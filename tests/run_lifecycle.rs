@@ -386,6 +386,41 @@ async fn output_envelope_json_mode_pure_stdout_and_single_patch() {
         assert_eq!(json_val["outcome"]["outcome"], "self_verified");
         assert_ne!(json_val["verdict"], "Approved");
     }
+    // **A fast-path run still has to be metered.**
+    //
+    // `INV-STAGE-MANIFEST` was listed in `KNOWN_FAILING` as *"a SingleAgent run
+    // records no stage metrics at all"*. The cause was real — the last exit out
+    // of `run_coder_tool_loop`, the one where the loop **errored**, returned
+    // `None` with no bill — and it was fixed in batch 8.
+    //
+    // What the ratchet could never tell is whether the *product* meters a
+    // topology, because it only ever sees synthetic traces. So this runs the
+    // real SingleAgent path against the real mock and reads `task.json` back:
+    // **metered roles `["planner", "coder"]`**. The entry was false against the
+    // product, and striking it rests on this line, not on a trace someone built
+    // to fail.
+    //
+    // The record is where metrics live — the envelope is not.
+    let record = read_task_record(&project);
+    let roles: Vec<String> = record
+        .get("agent_metrics")
+        .and_then(|m| m.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.get("role").and_then(|r| r.as_str()))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    if json_val["outcome"]["outcome"] == "self_verified" {
+        assert!(
+            roles.iter().any(|r| r == "coder"),
+            "a SingleAgent run recorded no metric for the Coder it ran: the fast \
+             path is indistinguishable from a no-op in every report that reads \
+             task.json. Metered roles: {roles:?} — record: {record:?}"
+        );
+    }
+
     if reviewed != Some(true) {
         // The self-verification must carry a reason, so a user reading only the
         // envelope can tell what kind of not-a-review this was.

@@ -511,3 +511,4 @@ failover-serves-the-fallback | a_fallback_served_call_is_priced_by_the_fallback 
 failed-loop-reports-its-spend | a_loop_that_failed_still_reports_what_it_spent | a Coder that explored, spent money, then errored — billed as free
 failed-coder-loop-leaves-a-bill | a_coder_loop_that_failed_still_leaves_a_bill_behind | the wiring billed, but billing something that is not what the model cost
 self-approval-not-a-review | known_failing_invariants_are_still_failing | SingleAgent's own record shape, in both directions: honest must pass, fabricated must fail
+fast-path-run-meters-its-coder | output_envelope_json_mode_pure_stdout_and_single_patch | a SingleAgent run indistinguishable from a no-op in every report reading task.json

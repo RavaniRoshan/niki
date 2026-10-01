@@ -708,6 +708,35 @@ prove the strike was safe. The green was the absence of a check. Worth writing
 down because the second failure mode is worse than the first: it is not a red
 test, it is a green one that proves nothing.
 
+### `INV-STAGE-MANIFEST` — struck in batch 8 (B8-09), **and the check behind it was dead**
+
+The entry said *"a SingleAgent run records no stage metrics at all"*. The cause
+was real — the last exit out of `run_coder_tool_loop`, the one where the loop
+**errored**, returned `None` with no bill (fixed in B8-04). But the entry was
+false against the product, and proving that is what turned up the real defect.
+
+**A real run meters both stages.** `tests/run_lifecycle.rs` drives the pinned
+`topology = "singleagent"` path against the real mock and reads `task.json`
+back: **metered roles `["planner", "coder"]`**. The ratchet could never have
+told us this — it only sees synthetic traces, and a synthetic trace cannot say
+whether the pipeline meters a topology it has never run.
+
+**The invariant could never fire.** It asked
+`topology.contains("Single") && executed.is_empty()`. But `TopologyMode` is
+`#[serde(rename_all = "lowercase")]` (`src/config/types.rs:1168`), so a real run
+records **`"singleagent"`** — lowercase — and `contains("Single")` never matched
+it. The check existed to catch a SingleAgent run that metered nothing, and it
+was structurally unable to catch one by a SingleAgent run. It only ever fired on
+the hand-built trace in `KNOWN_FAILING`, which is exactly why the entry survived
+so long while describing a defect the product did not have.
+
+Now case-insensitive (both spellings accepted, so older or hand-written records
+are still checked), and held in both directions: a metered fast path passes, an
+unmetered one still fails.
+
+**Can-fail proven:** restoring the capital-S comparison goes red, and a real run
+whose `agent_metrics` is emptied goes red on `run_lifecycle`.
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in
