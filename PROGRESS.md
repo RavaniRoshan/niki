@@ -1550,8 +1550,11 @@ Now reads `overall_assessment`, keeping `summary` as a fallback. Proven both
 ways: restoring the `summary`-only read makes a clean approval fail; disabling
 the hollow branch makes a genuinely hollow verdict pass.
 
-**`KNOWN_FAILING` is now empty.** All four entries struck in batch 8, each
-against a measurement. The ratchet's scope was corrected on the way: the first
+**`KNOWN_FAILING` is now empty — after batch 9, not batch 8.** B8-10 wrote
+this after striking **three** of the four, and did not check. The survivor,
+`INV-TERMINAL-SAFE`, named a defect that is fixed (`agent_stream.rs:343`
+sanitises). All four are now struck, each against a measurement, and the claim
+is a test rather than a sentence. The ratchet's scope was corrected on the way: the first
 draft generalised "every entry must fire on this trace", which failed on
 `INV-TERMINAL-SAFE` — reproduced by a *different* trace. A check written to be
 exhaustive rather than true drifts into demanding things nobody wanted.
@@ -1644,4 +1647,48 @@ were real.
 $ ./scripts/verify.sh --only G3 → PASS  417 can-fail entries all resolve
 $ ./scripts/verify.sh --only G5 → PASS
 $ ./scripts/verify.sh --only G7 → PASS
+```
+
+---
+
+## Iteration 8a — B9-01, and a false claim of my own
+
+**I wrote "`KNOWN_FAILING` is now empty" in three documents after striking three
+of the four entries.** The survivor was `INV-TERMINAL-SAFE`. Nobody noticed for
+a batch, because nothing checked.
+
+That is the exact failure this programme exists to catch, and it was mine: a
+record asserting a list is empty, made by someone who had just edited that list,
+and never verified. Batch 8's whole theme was *records that outlived the thing
+they described* — and the record that did not survive was one I had just written.
+
+**The survivor, measured.** The entry named *"raw model tokens are print!-ed to
+the terminal (`display/agent_stream.rs:319`)"*. The streaming path prints
+`sanitize_for_terminal(token)` at `:343`, and the line has moved. The named
+defect is fixed.
+
+**The residual is a different thing, and it is recorded rather than papered
+over.** `report.md`, `changes.patch` and the artifacts are written with raw
+bytes — `util::write_restricted` is atomic and `0600`, not sanitising — so a
+hostile model response can put a terminal escape **into a file**. NIKI never
+prints those files' contents (`display/completion.rs` prints their **paths**), so
+nothing reaches a terminal through the product; a user who `cat`s one can still
+be hit.
+
+It is deliberately **not** fixed by sanitising at write time: stripping ESC from
+`changes.patch` would corrupt the patch, which is the whole point of the file.
+The invariant stays registered and still fires on a hostile trace —
+`a_model_emitting_osc52_trips_the_terminal_invariant` asserts exactly that. What
+was removed is a debt entry describing a defect that does not exist, not a check.
+
+**And the claim is now a test.** `known_failing_invariants_are_still_failing`
+asserts `KNOWN_FAILING.is_empty()` and names all three documents that assert it.
+Re-adding an entry turns G3 red — proven by doing exactly that. A sentence in a
+record can drift; a test that names the documents cannot.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  418 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
 ```

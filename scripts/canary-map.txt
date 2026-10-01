@@ -518,3 +518,4 @@ self-approval-not-a-review | known_failing_invariants_are_still_failing | Single
 fast-path-run-meters-its-coder | output_envelope_json_mode_pure_stdout_and_single_patch | a SingleAgent run indistinguishable from a no-op in every report reading task.json
 clean-approval-is-not-hollow | known_failing_invariants_are_still_failing | an audit-style check that flags a perfect review, which trains a reader to ignore it
 g3-fast-lane-runs-the-tests-the-gates-skipped | a_fallback_served_call_is_priced_by_the_fallback | G3 checking existence only, while a real defect sat red in tests/
+known-failing-list-is-actually-empty | known_failing_invariants_are_still_failing | a document claiming a list is empty, written by someone who had just edited it
