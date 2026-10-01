@@ -534,10 +534,18 @@ impl McpManager {
     /// returning `Success` with nothing in it, aimed at the model rather than
     /// the user.
     ///
-    /// So the listing no longer goes to the model. It goes to whoever ran the
-    /// command, through a notice: the servers really did connect and their
-    /// tools really were discovered, and NIKI cannot yet route a call to one.
-    /// That is useful information about a configured feature, and it is true.
+    /// So the listing stopped going to the model, and went to whoever ran the
+    /// command instead. That was right while the call path did not exist: the
+    /// servers connected, their tools were discovered, and NIKI could not yet
+    /// route a call to one — all true, and worth saying.
+    ///
+    /// **As of batch 7 it can.** `runtime::mcp_tool` puts one `Tool` per
+    /// discovered tool into the Coder's registry, under `mcp__{server}__{tool}`,
+    /// and the loop dispatches them like any other. So the summary now says
+    /// what the model can call, because that is the fact — and a notice that
+    /// still said NOT YET CALLABLE would be the same lie in the opposite
+    /// direction: a user reading that would configure a server and then wonder
+    /// why nothing used it.
     pub fn tools_summary(&self) -> String {
         let allowed = self.allowed_tools();
         if allowed.is_empty() {
@@ -547,14 +555,15 @@ impl McpManager {
         servers.sort_unstable();
         servers.dedup();
         format!(
-            "MCP: {} tool(s) discovered on {} — NOT YET CALLABLE. NIKI lists \
-             them but has no agent→server call path yet, so they are not in the \
-             model's tool list and cannot be invoked. Tools: {}",
+            "MCP: {} tool(s) on {} are callable. The agent loop was given them \
+             under namespaced names, so it can invoke them directly: {}. Tools \
+             the servers offer but that are not read-only stay out of the loop \
+             unless [mcp] read_only is turned off.",
             allowed.len(),
             servers.join(", "),
             allowed
                 .iter()
-                .map(|t| t.name.as_str())
+                .map(|t| format!("{}__{}", t.server_name, t.name))
                 .collect::<Vec<_>>()
                 .join(", ")
         )

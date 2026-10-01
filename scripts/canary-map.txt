@@ -260,7 +260,7 @@ perf-claims-no-cache-it-lacks | the_perf_test_does_not_claim_a_cache_it_does_not
 dropped-mcp-server-does-not-live | a_dropped_mcp_server_does_not_outlive_the_run | a stdio child outliving the run, one per configured server
 shutdown-still-graceful | shutdown_is_still_the_graceful_path | the backstop replacing the teardown rather than backing it up
 no-mcp-call-instruction | no_prompt_instructs_a_model_to_call_an_mcp_tool | a model told to use tools it cannot reach
-mcp-summary-states-the-limit | the_mcp_summary_states_that_the_tools_are_not_callable | a prompt listing MCP tools unqualified
+mcp-summary-states-what-is-true | the_mcp_summary_says_what_the_model_can_actually_call | a notice pointing the other way — the tools work and the summary denies it
 mcp-gap-still-recorded | the_missing_call_path_is_still_recorded_as_missing | the feature gap quietly considered done
 # B5-06 · the supply-chain gate has teeth and reasoned exceptions (§9.6)
 unsound-is-denied | unsound_advisories_are_denied_not_ignored | `unsound = "none"`: a new advisory as green as the tolerated ones
@@ -330,7 +330,7 @@ permission-outranks-question | a_permission_prompt_outranks_a_question | the sec
 no-question-no-new-consumption | no_question_means_no_new_consumption | the ladder swallowing keys when nothing is open
 permission-survives-a-tiny-terminal | a_tiny_terminal_does_not_break_the_permission_modal | a panic on resize, with a command waiting on the answer
 # B6-05 · four of §6's five claims had rotted; the fifth was two doc lies
-readme-does-not-advertise-mcp | the_readme_does_not_advertise_mcp_as_something_agents_can_use | a feature-table row promising a half-built feature
+readme-mcp-row-matches-the-code | the_readme_mcp_row_matches_what_the_code_does | a feature-table row and the code disagreeing, in either direction
 example-config-does-not-claim-mcp-prompt-injection | the_example_config_does_not_claim_mcp_tools_reach_the_agent | a config comment telling a user their tools reach the model
 # B6-06 · §4.5, §5 and §9.3/§9.4 were four claims the code had already fixed
 provider-500-502-are-transient | a_500_or_502_from_a_provider_is_transient | the agent loop's weaker matcher, so a 502 got less resilience for having a second retry layer
@@ -382,3 +382,5 @@ mcp-undocumented-tool-says-so | an_undocumented_tool_says_so | a blank descripti
 mcp-permission-mirrors-governance | the_permission_mirrors_the_governance | a mutating third-party tool quietly Allowed
 mcp-tool-level-error-is-not-success | a_tool_level_error_is_not_reported_as_success | `isError: true` reaching the model as a payload that reads like an answer
 mcp-registration-is-wired | the_pipeline_holds_the_mcp_manager_beyond_discovery | the gap between "the server is alive" and "the model can call it"
+# B7-03 · the flag fired: the summary now says what is true, and the docs follow
+mcp-call-path-is-registered | the_call_path_is_registered_not_merely_present | the registration unwired while the summary still says "callable"

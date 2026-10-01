@@ -92,9 +92,19 @@ fn no_prompt_instructs_a_model_to_call_an_mcp_tool() {
     }
 }
 
-/// And the replacement must say the fact rather than omit it.
+/// And the summary must say the fact — which changed in batch 7.
+///
+/// This asserted `NOT YET CALLABLE` for two batches, and it was right: a
+/// summary listing MCP tools with no qualification reads as a capability, and
+/// a model given a capability it lacks will try to use it. The error was never
+/// the qualification, it was the *direction*.
+///
+/// The tools are callable now, so a summary still saying NOT YET CALLABLE is
+/// the same lie pointing the other way: a user reads it, configures a server,
+/// watches the agent ignore it, and concludes the feature is broken. This test
+/// follows the behaviour, and its failure names both directions.
 #[test]
-fn the_mcp_summary_states_that_the_tools_are_not_callable() {
+fn the_mcp_summary_says_what_the_model_can_actually_call() {
     let src = read("src/mcp/mod.rs");
     let summary = src
         .split("pub fn tools_summary(")
@@ -102,10 +112,14 @@ fn the_mcp_summary_states_that_the_tools_are_not_callable() {
         .and_then(|r| r.split("\n    }").next())
         .expect("tools_summary must exist");
     assert!(
-        summary.contains("NOT YET CALLABLE"),
-        "the summary must state the limitation. A prompt that lists MCP tools \\
-         with no qualification reads as a capability, and a model given a \\
-         capability it lacks will try to use it."
+        !summary.contains("NOT YET CALLABLE"),
+        "the tools ARE callable now, and a notice that says otherwise sends a \
+         user looking for a fault that is not there: {summary}"
+    );
+    assert!(
+        summary.contains("callable"),
+        "and the summary must say what is true — that these tools reach the \
+         agent loop: {summary}"
     );
     assert!(
         !src.contains("pub fn tools_for_prompt("),
@@ -115,21 +129,18 @@ fn the_mcp_summary_states_that_the_tools_are_not_callable() {
     );
 }
 
-/// The gap itself must stay *recorded*, so a future reader does not have to
-/// rediscover it — and so the feature is not quietly considered done.
+/// The flag that watched for this to close. It **fired** in batch 7, which is
+/// the mechanism working: it existed so that closing the gap would be a
+/// visible event rather than a quiet one.
+///
+/// Its replacement pins the *other* side, because a feature that is wired can
+/// also be unwired without anybody noticing: if the registration goes away,
+/// the summary would still say "callable" and the model would have no such
+/// tool — the same failure as a summary that was right once and then drifted.
 #[test]
-fn the_missing_call_path_is_still_recorded_as_missing() {
-    // `call_tool` still has no production caller. That is the feature gap, and
-    // this test fails when it is closed, at which point the honest summary can
-    // be replaced by real tools in the registry.
+fn the_call_path_is_registered_not_merely_present() {
     let mut callers = 0;
-    for rel in [
-        "src/orchestrator/pipeline.rs",
-        "src/runtime/tools.rs",
-        "src/cli/chat.rs",
-        "src/cli/run.rs",
-        "src/display/tui.rs",
-    ] {
+    for rel in ["src/runtime/mcp_tool.rs", "src/orchestrator/pipeline.rs"] {
         let src = read(rel);
         for (i, line) in src.lines().enumerate() {
             if line.contains("call_tool(") && !line.trim_start().starts_with("//") {
@@ -138,11 +149,10 @@ fn the_missing_call_path_is_still_recorded_as_missing() {
             }
         }
     }
-    assert_eq!(
-        callers, 0,
-        "`McpManager::call_tool` now has {callers} production caller(s), so MCP \\
-         tools can be invoked. `ROADMAP.md` §9.2 can be closed and the honest \\
-         'NOT YET CALLABLE' summary replaced with real registry tools — this \\
-         test is the flag that says so."
+    assert!(
+        callers > 0,
+        "nothing calls `McpManager::call_tool` again, so no MCP tool can be \
+         invoked — and the summary would still tell the user they can be. \
+         This is the inverse of the flag that fired when the gap closed."
     );
 }

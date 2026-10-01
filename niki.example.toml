@@ -201,11 +201,11 @@ network_disabled = true
 
 # MCP (Model Context Protocol) — connect to external tool servers.
 #
-# Servers are discovered, and a run prints a notice naming the tools it found
-# on them. Their tools are NOT yet callable: no agent can invoke one, and
-# nothing is injected into any agent prompt. There is no subcommand for MCP at
-# all, so the run notice is the only place this surfaces. The README feature
-# table carries the same caveat.
+# A connected server's tools are given to the agent loop, under namespaced
+# names: `mcp__<server>__<tool>`. Only tools the server marks read-only are
+# offered unless `read_only` is turned off below — a third-party tool that can
+# write is not something an agent should reach for unattended. There is no
+# subcommand for MCP; a run prints a notice naming what it found.
 #
 # [mcp]
 # read_only = true  # Governance: agents can only call read-only MCP tools

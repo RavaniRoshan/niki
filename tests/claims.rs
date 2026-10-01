@@ -670,21 +670,20 @@ fn backticked_niki_commands(text: &str) -> Vec<String> {
     out
 }
 
-/// A feature table row that promises a working feature must not survive the
-/// feature being half-built.
+/// The README's MCP row must agree with what the code does — in **both**
+/// directions.
 ///
-/// `ROADMAP.md` §6 said MCP "is a documented Advanced feature that is a stub",
-/// and offered "either wire them or remove the README rows". Four of that
-/// section's five claims turned out to be **stale** when re-measured — the
-/// code had moved on and the record had not. This is the one place the record
-/// and the code agreed, and they agreed on something a user hits first: the
-/// README's feature table.
+/// Batch 6-05 wrote this the other way: the row advertised a half-built
+/// feature, so the test demanded a hedge. Batch 7 wired the feature, so the
+/// same row became a lie in reverse — a user reads "cannot call their tools
+/// yet", configures a server, watches the agent ignore it, and concludes the
+/// product is broken.
 ///
-/// The honest row is not "MCP: removed". Servers are discovered, the config
-/// parses, and `mcp list` reports them; what does not happen is an agent
-/// *calling* one. So the row has to say that.
+/// A one-directional honesty test is a test that has to be rewritten every time
+/// the feature moves. So this one asks the question directly: is the call path
+/// registered, and does the row say so?
 #[test]
-fn the_readme_does_not_advertise_mcp_as_something_agents_can_use() {
+fn the_readme_mcp_row_matches_what_the_code_does() {
     let readme = read("README.md");
     let mcp_rows: Vec<&str> = readme
         .lines()
@@ -692,21 +691,28 @@ fn the_readme_does_not_advertise_mcp_as_something_agents_can_use() {
         .collect();
     assert!(
         !mcp_rows.is_empty(),
-        "MCP should still be mentioned in the README — a row removed outright \
-         is a different lie from a row that overstates it"
+        "MCP should still be in the README's feature table"
     );
-    for row in mcp_rows {
-        let lower = row.to_lowercase();
-        // A row in a feature table reads as "this works". The words that say
-        // otherwise have to be in the row, not in a footnote three sections
-        // down.
-        let qualifies = ["not yet", "not callable", "discovered", "no", "planned"]
-            .iter()
-            .any(|w| lower.contains(w));
+
+    // Is the feature actually there? Counted, not grepped for a phrase: the
+    // question is whether a discovered tool becomes one the loop can dispatch.
+    let pipeline = read("src/orchestrator/pipeline.rs");
+    let wired = pipeline.contains("build_registry(&mut registry");
+    let row = mcp_rows[0].to_lowercase();
+
+    if wired {
         assert!(
-            qualifies,
-            "this README row advertises MCP without saying the agents cannot \
-             call it, which is the one thing a reader needs: {row:?}"
+            !row.contains("not yet") && !row.contains("cannot call"),
+            "the loop registers MCP tools now, so a row saying they are not \
+             callable sends a user looking for a fault that is not there: {:?}",
+            mcp_rows[0]
+        );
+    } else {
+        assert!(
+            row.contains("not yet") || row.contains("cannot call"),
+            "the loop does NOT register MCP tools, so a row advertising them \
+             as usable is the original defect: {:?}",
+            mcp_rows[0]
         );
     }
 }
@@ -728,6 +734,9 @@ fn the_example_config_does_not_claim_mcp_tools_reach_the_agent() {
         "the [mcp] section must still be documented — it is real config"
     );
     for lie in [
+        // Batch 6-05. Still true in batch 7: the tools reach the *tool loop*,
+        // not an agent's system prompt, and nothing is concatenated into a
+        // prompt anywhere.
         "injected into agent prompts",
         "extending their capabilities",
         // A command that does not exist. A user who copies it gets a usage
