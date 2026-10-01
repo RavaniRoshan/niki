@@ -385,3 +385,12 @@ mcp-registration-is-wired | the_pipeline_holds_the_mcp_manager_beyond_discovery 
 # B7-03 · the flag fired: the summary now says what is true, and the docs follow
 mcp-call-path-is-registered | the_call_path_is_registered_not_merely_present | the registration unwired while the summary still says "callable"
 mcp-both-loops-register | the_pipeline_holds_the_mcp_manager_beyond_discovery | one tool loop wired and the other not, so a research assistant cannot search
+# B7-05 · a salvaged run hands a human something they can read
+salvaged-change-renders-as-a-diff | a_salvaged_change_renders_as_a_readable_diff | the change surviving only as JSON, which is not reviewable
+salvaged-patch-applies-to-the-repo | the_patch_applies_to_the_repository | headers naming /tmp, so `git apply` edits the wrong root
+salvaged-patch-carries-its-warning | the_patch_carries_its_own_warning | a patch of unreviewed work from a failed run with no warning in it
+salvaged-render-does-not-touch-the-tree | rendering_does_not_touch_the_working_tree | recovery applying an unreviewed diff into someone's repository
+salvaged-render-leaves-no-scratch | a_render_leaves_no_scratch_copy_behind | a copy of the user's source left in a shared temp directory
+salvaged-create-renders-as-new-file | a_created_file_renders_as_a_new_file | a created file rendering as nothing
+salvaged-unpublishable-path-refused | an_unpublishable_path_is_refused_rather_than_rendered | a recovered artifact rendering `.env` or a traversal escape
+salvaged-unmatched-edit-is-reported | an_unmatched_edit_is_reported_rather_than_rendering_a_short_patch | a quietly short patch, which reads as "that is all the change was"
