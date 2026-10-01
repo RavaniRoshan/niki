@@ -43,9 +43,50 @@ const PINS: &[(&str, &str, &str)] = &[
         "tests/resume_tells_the_truth.rs",
     ),
     (
-        "§9.2 · MCP has no agent→server call path",
-        "the_missing_call_path_is_still_recorded_as_missing",
-        "tests/mcp_does_not_leak_or_lie.rs",
+        "§9.2 · MCP has an agent→server call path that works",
+        "a_discovered_mcp_tool_can_actually_be_called",
+        "tests/mcp_call_path.rs",
+    ),
+    // §4.1–§4.4 carry their strike **inside** the cell — `| 4.1 | ~~Arbitrary
+    // host file write from model output.~~ **DONE in batch 2** |` — rather than
+    // at the front, so `a_new_numbered_item_with_a_source_reference_is_accounted_
+    // for` did not recognise them as struck and demanded pins. They are all
+    // real batch-2 closures with real holders, so they get pins rather than a
+    // carve-out.
+    (
+        "§4.1 · model output cannot write outside the worktree",
+        "a_create_edit_cannot_write_outside_the_worktree",
+        "tests/diff_scope.rs",
+    ),
+    (
+        "§4.2 · `niki doctor` redaction is a real check, not a hard Pass",
+        "the_doctor_check_reads_the_same_corpus_the_tests_do",
+        "tests/secret_redaction.rs",
+    ),
+    (
+        "§4.3 · the `git` tool runs the permission check and has a timeout",
+        "the_git_tool_itself_refuses_a_denied_subcommand",
+        "tests/tool_contracts.rs",
+    ),
+    (
+        "§4.4 · a backend that auto-approves says so, on both backends",
+        "both_backends_report_a_headless_auto_approval_on_stderr",
+        "tests/permission_visibility.rs",
+    ),
+    (
+        "§1.1 · `j`/`k` move a cursor a page actually renders",
+        "j_scrolls_a_page_whose_footer_says_it_does",
+        "tests/tui_jk_reaches_the_page.rs",
+    ),
+    (
+        "§1.2 · `h` reaches History and `l` reaches TestLog on every sub-page",
+        "no_page_letter_is_claimed_by_the_navigator",
+        "tests/tui_page_letters_win.rs",
+    ),
+    (
+        "§1.7 · every digit reaches the page the order claims",
+        "each_digit_reaches_the_page_the_order_claims",
+        "tests/tui_page_numbers_are_discoverable.rs",
     ),
     (
         "§2 · the pipeline's tool cards render; the chat sends no tools",
