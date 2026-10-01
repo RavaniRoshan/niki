@@ -53,3 +53,37 @@ default_model = "stealth/space-bunny-alpha"
 # per-agent provider/model, reasoning_effort = "high"
 ./target/release/niki run '<task>' --backend worktree --quiet --project <dir>
 ```
+
+## B7 · The classifier's model is the owner's decision (2026-10-01)
+
+§8's third layer is built except for the part that talks to a model. `risk::`
+has the `ActionClassifier` trait, the gate, the escalation limits, the
+reasoning-blind `ClassifierView`, the input probe and now the hook layer — but
+**nothing implements the trait against a real provider**, so the classifier
+layer is exercised only by stubs in its own tests.
+
+What is needed, and why it is not a slice I can just take:
+
+1. **Which model answers the safety question.** §8 suggests "a cheap model
+   (`claude-sonnet-4` or `gpt-4o-mini`)". NIKI is BYOK, so the classifier cannot
+   pick one: it has to come from config, and the default has to be something
+   every user has credentials for.
+2. **What it costs.** A classifier call per *unlisted* tool call, on top of the
+   model's own calls. On this key the cheapest answering models are the `:free`
+   ones, which are the same ones B6 records as upstream-rate-limited — so the
+   classifier would inherit exactly the flakiness that made B6 necessary.
+3. **What happens when it is unavailable.** The gate already fails closed (any
+   classifier failure is a deny), which is the right default for safety and the
+   wrong one for availability: a user whose classifier provider is rate-limited
+   gets a run that denies every unlisted tool and fails after twenty. Failing
+   closed should be a *configurable* posture, and the default is a product
+   decision, not a safety one.
+
+**Meanwhile**, nothing is wired into the loop — so this layer is currently
+inert in the product, exactly like `runtime/compaction.rs` and `ContextStore`
+were. That is stated here rather than left to be discovered, and the layer is
+not claimed as shipped.
+
+**What I need from the owner:** (a) a model id and provider for the classifier,
+or a config key to read it from with no default; (b) whether fail-closed is the
+default; (c) whether the classifier is on by default at all, or opt-in.
