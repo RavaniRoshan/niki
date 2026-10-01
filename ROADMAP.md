@@ -919,6 +919,53 @@ with the usage, B9-04 with the cost. The fix is the same both times — extract
 the producer's step until a test can reach it — and it only happened twice
 because the first one was recorded rather than worked around.
 
+### B9-06 — the sweep found that B9-03's warning was gated on a constant
+
+A sweep for the shape that produced B9-03/04/05 — *a value produced correctly,
+then dropped at the boundary* — found six more instances and one of them
+**invalidates the warning this batch shipped two slices ago**.
+
+`AppState::update_context_limit_for_model` had **zero callers**. `context_limit`
+was the hard-coded `200_000` in every run, for every model. The chat warns at
+90% of the window, so on a model with an 8k window it fired at **180 000** —
+never. The user's request was rejected by the provider with nothing having said
+anything was running out. **A warning gated on a permanently-wrong number is
+not a warning.**
+
+Fixed with `AppState::set_model`, which assigns and re-derives; both production
+writers of `state.model` (`/model` and session restore) now go through it. One
+setter rather than a call at each site, because two copies of one rule is how
+they come to disagree.
+
+**The table itself is a guess and says so now.** It is substring-matched, it
+says `gpt-4` is 8 000 where the real figure is 8 192, and an unknown model falls
+through to 200 000. That is strictly better than the constant — before, *every*
+model was 200 000 — but a model with a smaller real window than the fallback is
+still not warned about.
+
+**Third time, the first version of the test was green against the defect.**
+`switching_model_moves_the_context_window` first called `state.set_model(...)`
+directly, so it could not see whether `/model` routed through the setter or
+wrote the field itself. It now drives `/model gpt-4` through the page's key
+handler. Both sabotages bite: the setter not re-deriving, and `/model`
+bypassing it — each `left: 200000, right: 8000`.
+
+### The rest of the sweep, recorded and not built
+
+| Finding | Where |
+|---|---|
+| `/status` and `/usage` read `state.totals()` (a sum of `StageInfo`), so on a pure chat they report `$0.0000` — **contradicting the `/cost` this batch fixed** | `chat.rs:856`, `chat.rs:953`, `state.rs:1979` |
+| `/cost` after `/run` in the chat shows real dollars beside `0` tokens, because `StageDone` writes only per-stage fields | `state.rs:1618-1657` |
+| `StageInfo.retry_count` is a literal `0` and `StageDone` has no such field, so the transcript's `retry n/3` is always `retry 0/3` — while the pipeline's own `StageMetric` carries the real count | `state.rs:1583`, `tui.rs:59-66` |
+| ACP drops `DisplayEvent::Notice` in its replay (`_ => continue`), so an IDE client never sees *"spend cap exceeded"* or *"the Coder produced nothing"* | `acp/server.rs:137` |
+| `frame_mean_ms` / `frame_p95_ms` are written only by `run_tui`, never by `run_chat`, so the Cost page footer reads `0.0/0.0` in a chat session | `tui.rs:1090`, `cost.rs:292` |
+| Four `AppState` fields (`background_tasks`, `chat_input`, `chat_cursor`, `voice`) are declared, initialised, and touched by nothing. `voice`'s doc says *"push-to-talk (Ctrl+Shift+V)"* and **no such keybinding exists** | `state.rs:977,1022,1024,1118` |
+| The permission modal presents four options and three scopes; `action_for` maps indices `0 | 1` both to `Allow`, so *"Allow once"* and *"Allow always"* are identical | `permissions/permission.rs:52-55` |
+
+The permission one is the same shape as `permission_mode` — *"cycling it changed
+a label and not a run"* (`cli/chat.rs:582`) — and is the most user-facing of the
+seven. It is the next slice after this one.
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in

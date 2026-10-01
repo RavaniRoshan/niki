@@ -1870,3 +1870,46 @@ $ ./scripts/verify.sh --only G5 → PASS
 $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 ```
+
+---
+
+## Iteration 8f — B9-06, a sweep that invalidated this batch's own work
+
+I swept for the shape that produced B9-03/04/05 — *a value produced correctly,
+then dropped at the boundary* — expecting one or two more. It found six, and one
+of them **invalidates the warning this batch shipped two slices ago**.
+
+`AppState::update_context_limit_for_model` had **zero callers**.
+`context_limit` was the hard-coded `200_000` in every run, for every model. The
+chat warns at 90% of the window, so on an 8k model it fired at **180 000** —
+never. The request was rejected by the provider with nothing having said anything
+was running out. **A warning gated on a permanently-wrong number is not a
+warning.**
+
+`AppState::set_model` now assigns and re-derives, and both production writers of
+`state.model` — `/model` and session restore — go through it. One setter rather
+than a call at each site, because two copies of one rule is how they come to
+disagree.
+
+The table itself is a guess — substring-matched, `gpt-4` as 8 000 where the real
+figure is 8 192, unknown models falling through to 200 000 — and its doc says so
+now. It is strictly better than the constant, because before, *every* model was
+200 000.
+
+**Third time, the first version of the test was green against the defect.** It
+called `state.set_model(...)` directly and could not see whether `/model`
+routed through the setter. It now drives `/model gpt-4` through the page's key
+handler. Both sabotages bite with `left: 200000, right: 8000`.
+
+Seven further findings are tabulated in `ROADMAP.md` rather than built. The most
+user-facing is next: the permission modal presents four options and three
+scopes, and `action_for` maps indices `0 | 1` both to `Allow` — so *"Allow once"*
+and *"Allow always"* are the same thing.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  424 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --lib → 1090 passed; 0 failed
+```
