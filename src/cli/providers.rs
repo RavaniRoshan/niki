@@ -94,11 +94,21 @@ async fn handle_models(provider: Option<&str>, plain: bool) -> Result<()> {
                 any = true;
                 if plain {
                     for m in &models {
-                        println!("{name}\t{}", m.id);
+                        let safe_id: String = m
+                            .id
+                            .chars()
+                            .map(|c| if c.is_control() { '�' } else { c })
+                            .collect();
+                        println!("{name}\t{}", safe_id);
                     }
                 } else {
                     println!("\n{name} — {} model(s):", models.len());
                     for m in &models {
+                        let safe_id: String = m
+                            .id
+                            .chars()
+                            .map(|c| if c.is_control() { '�' } else { c })
+                            .collect();
                         let mut notes: Vec<String> = Vec::new();
                         if m.traits
                             .contains(&crate::cli::catalogue::ModelTrait::Reasoning)
@@ -112,9 +122,9 @@ async fn handle_models(provider: Option<&str>, plain: bool) -> Result<()> {
                             notes.push(format!("${p}/Mtok in"));
                         }
                         if notes.is_empty() {
-                            println!("  {}", m.id);
+                            println!("  {}", safe_id);
                         } else {
-                            println!("  {}  [{}]", m.id, notes.join(", "));
+                            println!("  {}  [{}]", safe_id, notes.join(", "));
                         }
                     }
                 }
