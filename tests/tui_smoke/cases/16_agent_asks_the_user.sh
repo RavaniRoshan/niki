@@ -73,17 +73,24 @@ run() {
 
   # The run does not reach a verdict, and the case does not pretend otherwise.
   #
-  # This assertion was written and taken out, written again after `§9.2b` was
-  # fixed, and taken out a second time — because the chat-deafness fix was
-  # **not** the cause. The screen is byte-for-byte the same: the answer lands
-  # (`A: goodbye`, 745 ms), and a `⠋` `ask_user` card is still running with the
-  # footer still offering `enter send`.
+  # This assertion has been written and taken out three times: after §9.2b
+  # (the chat's dispatch) and after B7-12 (a dropped tool result) were fixed,
+  # and the screen came back byte-for-byte identical both times.
   #
-  # So: one question answered, and a *second* `ask_user` still running. A unit
-  # test of the same loop asks once (`a_questions_answer_reaches_the_loop_…`),
-  # so whatever asks twice is something the live pipeline has and the unit test
-  # does not — that is the next lead, and it is written down in §9.2a rather
-  # than left as a red suite that fails for the same reason every run.
+  # What is left is narrow, and it is **probably not a product defect**. The
+  # screen shows one `ask_user` completed (`✓`, `A: goodbye`) and a *second*
+  # still running (`⠋`) with the modal up — which is correct behaviour for a
+  # second question, and a question the user simply has not answered yet. The
+  # mock's scripted sequence is `[ask_user, submit_artifact]`, so a second
+  # `ask_user` means the mock's result counter is not advancing: it is
+  # replaying call 0 because it does not recognise the tool result in the
+  # shape NIKI actually sends.
+  #
+  # That is a harness bug, and it would mean §9.2a was never the product
+  # defect it looked like. The check is one experiment — have the mock log the
+  # result count it computes per request — and it is written down rather than
+  # guessed at, because five exclusions have already turned two confident
+  # readings of this screen into wrong ones.
   echo "  PASS: the model asked, the modal opened, the answer reached the tool"
 
 }
