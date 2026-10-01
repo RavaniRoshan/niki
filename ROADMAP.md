@@ -563,6 +563,45 @@ parallel writes to one file is a lost update, and "reads are safe" is only
 true if a read cannot observe a half-applied write. The executor needs a
 per-path lock, not a read/write classification alone.
 
+### T2's hook layer — **BUILT (B7-26): `src/risk/hooks.rs`, 7 tests**
+
+§8's ordering is **static deny → hooks → classifier**, and the reason it insists
+on that order is this layer's entire reason to exist: *"anything allow/deny-listed
+in settings is hard rule; classifier only sees residual."*
+
+So the property to hold is not "the hooks deny things". It is **"the classifier
+is never consulted once the hooks have decided."** A hook layer that is right
+most of the time is not this layer. That is the first test, and it is the one
+that took the most sabotage attempts to make bite.
+
+**No new rule format.** The rules come from `permissions::PermissionConfig`,
+which `niki.toml` already deserialises into and `PermissionChecker` already
+enforces. A second parallel rule format would be a second thing to configure and
+a second answer to "why was this allowed". `Permission::Ask` is deliberately
+**not** a decision — mapping it to "allow, the user wrote it down" would switch
+the layer off for exactly the commands somebody took the trouble to write a
+rule about.
+
+A hard denial does **not** charge the model's denial tally. A user's own rules
+denying twenty commands in a row must not trip the escalation limits and fail
+the run: that would blame the model for the user's policy.
+
+**Two of the seven tests were wrong and had to be rewritten before they could
+prove anything:**
+- A determinism test that built the same `Hooks` twice and compared cannot fail
+  when the sort is removed, because `HashMap` order is *stable within a
+  process*. It now asserts the outcome the sort produces — the
+  lexicographically-first pattern wins — which is the property, and it fails
+  against a reversed order every time.
+- A test that called the `pending()` helper directly could not fail when its
+  caller stopped calling it. It now drives `adjudicate` end to end, so the
+  sabotage "the hooks read nothing" is caught.
+
+**Still not built:** an `ActionClassifier` backed by a real provider. The trait,
+the gate, the escalation limits and the reasoning-blind view are all built and
+tested; what is missing is the thing that talks to a model, which needs a
+provider and a model choice — a decision, not a slice.
+
 ### T4 · Context compression at a budget — **FIRST SLICE BUILT (B7-22):
 `src/runtime/transcript.rs`, wired at `src/runtime/tools.rs:4055`**
 

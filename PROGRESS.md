@@ -1268,3 +1268,53 @@ with separate risk.
 `runtime/path_lock.rs` and `runtime/scheduler.rs` stay — they are the safety
 content, both are can-fail proven, and neither is wired into the loop. That is
 stated rather than left to be discovered.
+
+---
+
+## Iteration 7d — §8 T2's hook layer (B7-26)
+
+`src/risk/hooks.rs`, 7 tests, 7/7 can-fail proven.
+
+§8's order is **static deny → hooks → classifier**, and the reason it insists on
+that order is the whole reason this layer exists. So the property to hold is not
+"the hooks deny things" — it is **"the classifier is never consulted once the
+hooks have decided."** That is the first test, and it needed the most work to
+make bite.
+
+No new rule format: the rules come from `permissions::PermissionConfig`, which
+`niki.toml` already deserialises into. `Ask` is deliberately not a decision.
+A hard denial does not charge the model's denial tally — a user's own rules
+denying twenty commands must not trip the escalation limits and fail the run.
+
+### Two tests were wrong before they proved anything
+
+- A determinism test that built the same `Hooks` twice and compared **cannot**
+  fail when the sort is removed: `HashMap` order is stable within a process. It
+  now asserts the outcome the sort produces — the lexicographically-first
+  pattern wins — and fails against a reversed order every time.
+- A test that called the `pending()` helper directly **cannot** fail when its
+  caller stops calling it, which is the sabotage that would leave the hooks
+  deciding nothing while every other test stayed green. It now drives
+  `adjudicate` end to end.
+
+Both were found by reading "1 passed" on a sabotage and asking what the
+sabotage actually did, rather than accepting the green.
+
+### Evidence
+
+```
+$ cargo test -j 2 --lib -- --test-threads=1 risk::hooks
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 1068 filtered out
+
+$ cargo clippy --all-targets -j 2 -- -D warnings    → clean
+$ ./scripts/verify.sh --only G3 → PASS  407 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS  no credentials in the tree or in history
+$ ./scripts/verify.sh --only G7 → PASS  every README command parses
+```
+
+### Not built
+
+An `ActionClassifier` backed by a real provider. The trait, the gate, the
+escalation limits and the reasoning-blind view are built and tested; what is
+missing is the thing that talks to a model, which needs a provider and a model
+choice — a decision for the owner, not a slice.

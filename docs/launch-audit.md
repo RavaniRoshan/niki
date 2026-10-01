@@ -43,7 +43,7 @@ date above. Where a number is a judgement rather than a count, it says so.
 |---|---|---|
 | Crate version | 0.9.0 | `Cargo.toml:3` |
 | Edition / MSRV | 2024 / 1.88 | `Cargo.toml:4-5` |
-| Rust source files | 202 | `find src -name '*.rs'` |
+| Rust source files | 203 | `find src -name '*.rs'` |
 | Rust lines in `src/` | ~85,700 | `find src -name '*.rs' -exec cat {} + \| wc -l` |
 | Module directories | 29 | `ls -d src/*/` |
 | CLI subcommands | 22 | `enum Commands` in `src/main.rs` |
