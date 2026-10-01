@@ -501,6 +501,22 @@ then grows for the life of the run, which is the exact leak the first
 version's own doc comment claimed it did not have. With a `Weak` there is no
 cleanup path to get wrong, because there is no cleanup path.
 
+**SECOND SLICE BUILT (B7-25): `runtime/scheduler.rs`, 8 tests.** The lock
+makes a concurrent call *safe*; the scheduler decides what is *worth* doing, and
+**order is not cosmetic**: tool results go back to the model in the order it
+asked for them, and a model that receives them out of order is reading a
+conversation where it did something it had not yet requested.
+
+Two calls may share a batch unless they conflict — two writes to one path, a
+read against a write of the same path, or **anything at all** against a call
+that touches no known path. `bash` has no file to lock, so it runs alone: a
+model running `bash` beside a `write` is editing a file while a script rewrote
+the same one, and no per-path lock can see it.
+
+An unrecognised tool is classified as a **write**, and the asymmetry is the
+point — calling a read a write costs a little parallelism, and calling a write
+a read costs correctness.
+
 **Not yet built:** the streaming dispatch itself — beginning a tool when its
 `tool_use` block finishes streaming rather than after the whole turn, and the
 scheduler that decides which ready tools run together. The lock is what makes
