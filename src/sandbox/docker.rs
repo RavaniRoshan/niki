@@ -571,6 +571,26 @@ impl DockerSandbox {
         if files.is_empty() {
             return Ok(String::new());
         }
+        // Publishable **and still present**, for the reason in
+        // `sandbox/worktree.rs`: a path the agent declared and then removed
+        // makes `git add -N` fail for the whole invocation, so every real new
+        // file silently drops out of the diff.
+        //
+        // Probed one at a time because inside a container the check is a
+        // `test -e` per path, not a host-side `Path::exists`.
+        let mut present: Vec<&str> = Vec::new();
+        for f in files {
+            let probe = self
+                .exec(&["sh", "-c", &format!("test -e /workspace/{f}")])
+                .await;
+            if probe.map(|o| o.exit_code == 0).unwrap_or(false) {
+                present.push(f);
+            }
+        }
+        let files = present;
+        if files.is_empty() {
+            return Ok(String::new());
+        }
         let quoted: Vec<String> = files
             .iter()
             .map(|f| format!("'{}'", f.replace('\'', "'\\''")))

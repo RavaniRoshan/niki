@@ -423,3 +423,6 @@ artifact-behind-a-brace-in-prose | an_artifact_behind_a_brace_in_prose_is_still_
 later-artifact-beats-an-earlier-span | a_later_artifact_beats_an_earlier_brace_span | stopping at the first parseable span when a real artifact follows it
 prose-about-json-is-not-an-artifact | prose_about_json_is_not_an_artifact | a description of the shape taken at its word
 bare-artifact-still-recovers | a_bare_artifact_still_recovers | the widened scan breaking the case that already worked
+# B7-18 · §9.5: a stale path must not make the whole staging fail
+stale-path-dropped-before-staging | a_path_that_no_longer_exists_is_dropped_before_staging | one removed path failing `git add -N` and silently dropping every new file from the diff
+both-sandboxes-filter-absent-paths | both_sandboxes_filter_absent_paths_before_staging | one backend's existence check removed while the other's test stayed green
