@@ -13,11 +13,24 @@ both measured:
   non-management key with `limit: null` — but those models are not free-tier
   and the account has `total_credits: 0`. The model named for this work needs
   a purchase.
-- **`:free` models are upstream-rate-limited.** `qwen/qwen3.8-27b:free` and
-  `inclusionai/ling-3.0-flash-sante:free` return 429
-  *"temporarily rate-limited upstream … shared_pool"*, intermittently, on a
-  shared pool. `stealth/space-bunny-alpha` answered 3/3 attempts and is what
-  the live run used.
+- **`:free` models are upstream-rate-limited, individually.** On this key,
+  measured: `qwen/qwen3.8-27b:free` and
+  `inclusionai/ling-3.0-flash-sante:free` return 429 *"temporarily
+  rate-limited upstream … shared_pool"* intermittently, while
+  `poolside/laguna-s-2.1:free` and `stealth/space-bunny-alpha` answer
+  consistently. `poolside/laguna-xs-2.1:free` did not answer. So the free
+  pool is usable — one has to find which entries are live rather than assume.
+
+**What each model showed**, because "works" is not the same question twice:
+
+| Model | Result |
+|---|---|
+| `stealth/space-bunny-alpha` | Full pipeline. **§9.3 found here** — a Coder that did the work and narrated it instead of submitting; fixed and live-verified against the same model. |
+| `poolside/laguna-s-2.1:free` | Answers, but its **Planner emits no conformant artifact** — `Failed to parse artifact JSON: expected value at line 1 column 1`. The run failed in stage one, which is where **§9.4** came from: a failed run reported `No such file or directory (os error 2)` from its own recovery path. |
+
+Two models, two different failures, and the second one is only reachable
+because a model too weak to finish a task still fails *loudly and early* —
+which is the other half of what a live model is for.
 
 **What this changes.** Live-model behaviour is now *measurable*, and the first
 thing measured was a defect no mock reproduced — `ROADMAP.md` §9.3, a Coder
