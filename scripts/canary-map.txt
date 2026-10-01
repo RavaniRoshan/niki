@@ -450,3 +450,17 @@ omission-is-reportable | the_omission_is_reportable | a defence that works by di
 prompt-labels-provenance | the_prompt_labels_what_each_line_is | a call mistakable for an instruction
 empty-transcript-is-empty | an_empty_transcript_is_an_empty_view | a placeholder that reads like evidence
 multi-call-turn-is-fully-visible | every_call_in_a_multi_call_turn_is_visible | excluding the prose starting to exclude the actions
+# B7-22 · §8 T2: the input probe, before tool output reaches the model
+every-injection-shape-is-caught | every_injection_shape_is_caught | a shape whose matcher never fires, which looks identical to a clean result
+finding-names-the-line | the_finding_names_the_line_so_a_user_can_go_and_look | a finding with no line, which a user cannot dismiss in one look
+ordinary-code-is-not-flagged | ordinary_source_code_is_not_flagged | a probe firing on source comments and changelogs, so users learn to ignore it
+docs-and-prose-are-not-flagged | real_documentation_and_prose_are_not_flagged | a probe firing on runbooks and SECURITY.md
+long-line-is-not-scanned | a_very_long_line_is_not_scanned | minified JS and lockfiles matching by accident
+annotating-preserves-content | annotating_preserves_the_whole_content | stripping the injected line, breaking the run and destroying the evidence
+annotating-says-it-is-data | annotating_says_the_content_is_data | unmarked text that reads as an instruction
+clean-content-untouched | clean_content_is_passed_through_untouched | a marker added to content that was fine
+finding-becomes-an-actionable-sentence | a_finding_becomes_a_sentence_a_user_can_act_on | a finding reported as a pattern name and nothing else
+marker-cannot-be-closed-early | the_marker_does_not_end_up_inside_the_content | a file quoting our marker to have the rest read as trusted
+prohibition-is-not-an-instruction | a_prohibition_is_not_an_instruction | a probe firing on the runbooks that tell you not to do the thing
+dropping-the-negation-refires | dropping_the_negation_makes_the_line_fire_again | the suppression being the whole rule rather than the negation
+injected-result-marked-before-the-model | an_injected_tool_result_is_marked_before_the_model_sees_it | tool output reaching the model unmarked, which is the whole attack
