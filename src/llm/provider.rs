@@ -269,16 +269,43 @@ where
 /// arbitrary response bodies, and a body that happens to contain it would make
 /// a permanent 400 look transient. The anchor is the `HTTP ` prefix the
 /// providers themselves write.
+///
+/// **The status is found anywhere in the message, not only at the front.**
+/// Every provider's own text starts with it, but the message that reaches
+/// this function is usually the one NIKI built around it:
+/// `LLM provider error (anthropic): HTTP 500 Internal Server Error: {…}`.
+/// Anchored to position zero, this returned `None` for the real string — and
+/// since *both* call sites (the agent loop and the failover chain) classify
+/// whole error messages, a 500 was classified as permanent at both of them and
+/// the chain did not fail over. `cost::a_fallback_served_call_is_priced_by_the
+/// _fallback` is what caught it, and it had been red on this branch while no
+/// gate runs the full suite.
+///
+/// What this does **not** weaken: a bare number is still not a status
+/// (`"quota exceeded: 429 requests per minute"` is `None`), because a bare
+/// number has no `HTTP ` in front of it. And the **first** occurrence wins, so a
+/// body mentioning another code cannot override the real one.
 pub fn http_status_in(message: &str) -> Option<u16> {
-    let rest = message.trim_start();
-    let rest = rest
-        .strip_prefix("HTTP ")
-        .or_else(|| rest.strip_prefix("http "))?;
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if digits.len() != 3 {
-        return None;
+    const ANCHOR: &str = "http ";
+    let lower = message.to_ascii_lowercase();
+    let mut from = 0usize;
+    while let Some(offset) = lower[from..].find(ANCHOR) {
+        let at = from + offset + ANCHOR.len();
+        let digits: String = lower[at..].chars().take(3).collect();
+        // Exactly three digits: `HTTP 5000` is not a 500, and `HTTP 50` is not
+        // a code at all.
+        let followed_by_digit = lower[at + digits.len()..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit());
+        if digits.len() == 3 && !followed_by_digit {
+            if let Ok(code) = digits.parse() {
+                return Some(code);
+            }
+        }
+        from = at;
     }
-    digits.parse().ok()
+    None
 }
 
 /// Whether a status code is transient, for tests.

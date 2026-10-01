@@ -563,6 +563,83 @@ parallel writes to one file is a lost update, and "reads are safe" is only
 true if a read cannot observe a half-applied write. The executor needs a
 per-path lock, not a read/write classification alone.
 
+### Two tests were red on this branch and every gate said PASS — batch 8 (B8-03)
+
+**The gates do not run the full test suite.** G3 checks the can-fail map, not the
+tests. So a red test in `tests/` is invisible to it — and two were red, one of
+them for an unknown number of runs.
+
+#### The failover chain did not fail over
+
+`cost::a_fallback_served_call_is_priced_by_the_fallback` — a wiremock primary
+that answers 500, a fallback that answers 200. The chain returned the primary's
+error instead of trying the fallback.
+
+**Root cause.** `http_status_in` anchored at position zero:
+
+```rust
+let rest = message.trim_start();
+let rest = rest.strip_prefix("HTTP ").or_else(|| rest.strip_prefix("http "))?;
+```
+
+Every provider writes `HTTP 500: …` at the front of *its own* text. What
+arrives is that text inside NIKI's:
+
+```
+LLM provider error (anthropic): HTTP 500 Internal Server Error: {"error":…}
+```
+
+so the anchor never matched, `is_retryable_code` never ran, and a 500 was
+classified **permanent**. Both call sites were affected — `failover.rs:180` and
+`agents/mod.rs:162` — because both classify whole error messages. **A 502 was
+the case batch 6 measured and recorded as fixed; it was fixed for the
+prefix-anchored shape only, which is the shape the wire does not produce.**
+
+The fix finds the first `HTTP <exactly three digits>` **anywhere** in the
+message. What it deliberately does not weaken: a bare number is still not a
+status (`"quota exceeded: 429 requests per minute"` is `None`, because a bare
+number has no `HTTP ` in front of it), and the first occurrence wins, so a body
+mentioning `502` cannot override a real `404`.
+
+**The test that let it through used the shape the wire does not produce.**
+`every_site_agrees_on_a_real_provider_message` fed in
+`"HTTP 502: upstream connect error…"` — correct, and not what a provider sends.
+The new `a_provider_status_is_wrapped_in_niki_s_own_prefix` uses the real
+message and fails against the anchored form.
+
+#### An errored Coder loop is never billed
+
+`money::the_coder_loop_bills_before_every_bail_out` asserts `bails == 2` and
+there are now **three**. Measured, at `src/orchestrator/pipeline.rs` in
+`run_coder_tool_loop`:
+
+| bail-out | billed? |
+|---|---|
+| no artifact | yes (`record_loop_cost` before the return) |
+| invalid artifact | yes |
+| **the loop itself returned `Err`** | **no** |
+
+The third is a tool loop that explored for a dozen steps, spent real money, and
+then hit a transport error — the exact case the test's own comment calls "the
+most expensive case, not the cheapest".
+
+**Why it is not fixed here.** `record_loop_cost` takes `&LoopOutput`, and an
+errored loop has none: the accumulated `usage` dies inside `run_tool_loop_with`
+at `?`. Billing it properly means the loop surfaces its usage on the error path,
+which changes a public return type and every call site. Writing a
+zero-usage `LoopOutput` at the call site would make the test pass by recording
+a spend of zero, which is worse than the current honest omission.
+
+**The test is left red on purpose.** It documents a real, measured defect, and
+weakening it to green would be the one thing this programme does not do.
+
+#### The gate gap itself
+
+`scripts/verify.sh` G3 verifies that every can-fail entry names a test that
+exists. It does not run the suite, because the suite does not fit this machine.
+That is a real constraint, and the consequence is that **the canary map cannot
+tell you the suite is green** — only CI can. Recorded in `RELEASE_REPORT.md` §5.
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in

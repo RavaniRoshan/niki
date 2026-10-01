@@ -506,3 +506,5 @@ hard-denial-not-charged-to-model | a_hard_denial_does_not_charge_the_models_tall
 decision-reads-the-call | the_decision_comes_from_the_call_in_the_view | hooks reading nothing while every other test stays green
 finished-run-draws-its-resolution | a_finished_run_draws_what_the_working_line_resolved_into | a built-and-tested component that nothing draws
 running-run-is-not-labelled-finished | a_running_run_does_not_also_draw_the_resolved_line | "Thought for 12s" under a run still going
+status-found-inside-a-wrapped-error | a_provider_status_is_wrapped_in_niki_s_own_prefix | failover and the agent loop both calling a 500 permanent
+failover-serves-the-fallback | a_fallback_served_call_is_priced_by_the_fallback | the chain not failing over, and the stage priced against the wrong card
