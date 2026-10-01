@@ -1373,3 +1373,51 @@ $ ./scripts/verify.sh --only G7 → PASS  every README command parses
 
 **Two probes in one slice**, and the second one is the point: the first version
 of this fix would have made a failing suite green.
+
+---
+
+## Iteration 7f — B8-04, B8-06, and the gate gap
+
+### B8-04 · the errored Coder loop is now billed
+
+`LoopSpend` is a running tally the caller keeps whether the loop succeeds or
+fails, mirrored onto **every completed step** rather than filled in on the way
+out — everything after that point can exit through `?`. `run_tool_loop_spending`
+is a new entry point; `run_tool_loop_with` keeps its signature and discards the
+value, which is correct for a caller that does not bill.
+
+**The test that was checking this could not see either bug.** Source-level, and
+**green twice** against code that did not bill at all, and green again against
+code that billed a hard-coded zero. The call is there; the call does nothing.
+So the hard-coded `bails == 2` is gone (a snapshot — bumping it to 3 would have
+hidden the defect for ever), replaced by "every `return None` has a billing call
+before it", plus a behavioural test that drives a provider which answers once
+and then fails and asserts the tally carries the **4 242** input tokens it was
+charged for. Bites: mirroring only on the success path gives `left: 0, right:
+4242`.
+
+**Measured, not assumed:** replacing the pipeline's `&loop_spend.usage` with a
+hard-coded default leaves both tests green. The mechanism is held behaviourally;
+the one-line wiring is held only by the source check. Recorded as B8-05.
+
+### B8-06 · the third red test
+
+`a_truncation_that_never_resolves_is_reported_as_truncation` counted *requests
+containing* the truncation notice rather than notices *issued* — and the notice
+is appended to the conversation, so every later request carries it in its
+history. It now asserts `out.feedback_turns == 1`, which is the count, and bites
+correctly: `MAX_TRUNCATED_ANSWER_RETRIES = 2` gives `left: 2, right: 1`. The
+old version could not have detected that.
+
+### The finding underneath all three
+
+**No gate runs the test suite.** G3 checks that each canary entry names a test
+that exists; it does not run the tests, because the suite does not fit this
+machine. So the canary map cannot tell you the suite is green — only CI can.
+
+Running two suites by hand found **three red tests** while every gate reported
+PASS: two real defects in the resilience and accounting paths (failover not
+failing over; a failed Coder loop billed as free) and one test that could not
+see a change. All three are fixed or corrected in batch 8, and the gate gap is
+now in `RELEASE_REPORT.md` §5 rather than left as knowledge someone has to
+rediscover.

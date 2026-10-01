@@ -1101,10 +1101,23 @@ fn a_truncation_that_never_resolves_is_reported_as_truncation() {
         out.truncated,
         "and the caller has to be able to tell this from a model that simply declined"
     );
+    assert_eq!(
+        out.feedback_turns, 1,
+        "exactly one retry: a model that cannot fit the artifact in the budget \
+         will not start fitting it on the fourth attempt."
+    );
+    // The count is `feedback_turns`, not the prompts, and the difference is
+    // this test's bug.
+    //
+    // The first version counted *requests containing the notice*, which is not
+    // the same thing: the notice is appended to the conversation, so every
+    // later request carries it in its history. It also counted as a change
+    // detector — it fires whenever the loop learns to ask anything else after a
+    // truncation, which is a correct change — and it was red on this branch
+    // while every gate reported PASS, because G3 does not run the suite.
     assert!(
-        prompts.iter().filter(|p| p.contains("cut off")).count() == 1,
-        "exactly one retry: a model that cannot fit the artifact in the budget will not \
-         start fitting it on the fourth attempt. {prompts:?}"
+        prompts.iter().any(|p| p.contains("cut off")),
+        "and the model was actually told why: {prompts:?}"
     );
 }
 

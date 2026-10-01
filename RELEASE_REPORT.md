@@ -420,6 +420,35 @@ switched off. They are worth more than the six real defects.
 
 ## 5 · Honest known limitations
 
+**Batch 8, and it is the largest limitation on this page:**
+
+**No gate runs the test suite.** G3 verifies that every entry in
+`scripts/canary-map.txt` names a test that *exists*. It does not run the tests,
+because the suite does not fit this machine (`AGENTS.md`: never run it here).
+So **the canary map cannot tell you the suite is green — only CI can.**
+
+This was not theoretical. Running `tests/reverse/` and `tests/agent_tool_loop/`
+by hand in batch 8 found **three tests red on the branch** while G1–G7 and G9
+all reported PASS:
+
+| Test | What it was |
+|---|---|
+| `cost::a_fallback_served_call_is_priced_by_the_fallback` | a **real product defect**: a 500 wrapped in NIKI's own error prefix was classified permanent at both call sites, so the failover chain did not fail over. Fixed in batch 8. |
+| `money::the_coder_loop_bills_before_every_bail_out` | a **real product defect** behind a stale hard-coded count. Fixed in batch 8. |
+| `a_truncation_that_never_resolves_is_reported_as_truncation` | a **test defect**: it counted requests *containing* the notice rather than notices *issued*, and history accumulates. Corrected in batch 8. |
+
+Two of the three were real defects in the resilience and accounting paths — the
+parts a user hits when a provider is slow, rate-limited or drops a connection.
+Neither was visible to any gate, and one had been red long enough that its cause
+was assumed to be something else.
+
+**What this means for you, concretely:** before trusting a green gate run here,
+run the suite in CI. G3 tells you the canaries *exist*; it does not tell you they
+*pass*. Closing this properly means a fast lane in `scripts/verify.sh` that runs
+the cheap integration binaries (`reverse`, `agent_tool_loop`, `run_lifecycle`)
+serially — that is a gate change, and gates are not something to add at the end
+of a batch without the owner agreeing to the runtime cost.
+
 **Live, as of batch 2:**
 
 1. **G8 has not run.** Nothing here has been on CI. The most likely CI-only
