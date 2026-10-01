@@ -2250,3 +2250,24 @@ measurement rather than from an estimate.
 ```
 $ ./scripts/verify.sh --only G3 → PASS  433 can-fail entries all resolve
 ```
+
+---
+
+## Iteration 9d — batch 10, three slices
+
+B10-01 the Cost page printed `frame 0.0/0.0ms`, a zero it never measured — and now
+says "no frames measured" instead. B10-02 `niki resume` printed a command a shell
+reads as eight arguments, so the recovery page handed back a **different task**.
+B10-03 the tool-card role: measured, conditional on a non-default configuration,
+cosmetic, and not built.
+
+**And a record problem, in my own records.** The B10-03 finding was in a commit
+message and in `PROGRESS.md` but never made it into `ROADMAP.md` — where a reader
+actually looks. That is the failure this programme exists to catch, arriving in
+the programme's own files.
+
+`niki resume`'s sabotage output is the user experience exactly:
+
+```
+["run", "add", "a", "tally", "function", "that", "sums", "a", "slice"]
+```
