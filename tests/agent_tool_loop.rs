@@ -2049,3 +2049,114 @@ fn the_production_tool_contexts_carry_the_interface() {
         );
     }
 }
+
+/// An agent that asks the user a question must get the answer **back into the
+/// loop** and move on to its next call.
+///
+/// This is the defect `tests/tui_smoke/cases/16_agent_asks_the_user.sh` found
+/// end to end: the modal opened, the typed answer reached the tool — the card
+/// showed `A: goodbye` — and then the run did not continue. The screen showed
+/// a *second*, unanswered question, which is what an agent that never saw the
+/// first answer does.
+///
+/// The screenshot suggested that; this is the measurement. The scripted agent
+/// asks, then submits. If the loop feeds the answer back, the second call is
+/// `submit_artifact`. If it does not, the second call is `ask_user` again —
+/// the same question, asked twice, which is the defect.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_questions_answer_reaches_the_loop_and_it_moves_on() {
+    use niki::runtime::tools::HumanInput;
+    use std::time::Duration;
+
+    // Whoever is driving the run, answering the first question.
+    let (human_tx, human_rx) = std::sync::mpsc::channel();
+    let ui = std::thread::spawn(move || {
+        use niki::display::tui::DisplayEvent;
+        let mut asked: Vec<String> = Vec::new();
+        while let Ok(event) = human_rx.recv_timeout(Duration::from_secs(30)) {
+            if let DisplayEvent::AskUser {
+                question,
+                response_tx,
+                ..
+            } = event
+            {
+                asked.push(question);
+                let _ = response_tx.send(niki::display::components::ask_user::AskAnswer {
+                    text: "postgres".into(),
+                    cancelled: false,
+                });
+            }
+        }
+        asked
+    });
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+    std::fs::write(dir.path().join("src/lib.rs"), "old\n").expect("write");
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let agent = ScriptedAgent {
+        script: vec![
+            Some((
+                "ask_user".into(),
+                serde_json::json!({"question": "Which database?"}),
+            )),
+            Some(("submit_artifact".into(), artifact())),
+        ],
+        turn: AtomicUsize::new(0),
+        seen_prompts: seen.clone(),
+    };
+
+    let registry = build_baseline_registry();
+    let mut c = ctx(dir.path());
+    c.human_input = Some(HumanInput::new(human_tx, Duration::from_secs(20)));
+    c.permission_mode = "bypass".into();
+
+    let out = run_tool_loop_with(
+        LoopOptions {
+            reasoning_effort: None,
+            cost_ceiling_usd: None,
+            submit_artifact: Some(submit_artifact_spec(serde_json::json!({
+                "type": "object",
+                "properties": artifact(),
+                "required": ["edits", "files_changed"],
+            }))),
+            validate_artifact: None,
+        },
+        &agent,
+        "m",
+        &registry,
+        &c,
+        vec![LoopMessage::User("use a database".into())],
+        None,
+        8,
+        None,
+        None,
+    )
+    .await
+    .expect("the loop runs");
+    drop(c);
+    let asked = ui.join().expect("the interface thread must not panic");
+
+    assert_eq!(
+        asked,
+        vec!["Which database?".to_string()],
+        "the question is asked once. Asked twice means the loop never saw the \\
+         first answer — which is the defect the end-to-end leg found."
+    );
+
+    let prompts = seen.lock().expect("lock").clone();
+    assert!(
+        prompts
+            .iter()
+            .any(|p| p.contains("Which database?") && p.contains("postgres")),
+        "the answer must be fed back into the conversation the model sees. \\
+         The turns were:\\n{}",
+        prompts.join("\\n---\\n")
+    );
+    assert!(
+        out.artifact.is_some(),
+        "and the loop must carry on to its artifact — an answered question that \\
+         stops the run is not an answer"
+    );
+}
