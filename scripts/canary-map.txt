@@ -418,3 +418,8 @@ ambiguous-search-is-not-claimed | an_edit_whose_search_is_still_present_is_not_a
 empty-replacement-never-claimed | an_empty_replacement_is_never_already_applied | a typo'd deletion accepted as accomplished
 both-sandboxes-use-the-lenient-path | both_sandboxes_treat_an_already_applied_artifact_edit_as_done | the fix in one backend, leaving the other rejecting a good artifact
 edit-tool-stays-strict | the_edit_tool_itself_still_refuses_an_already_present_replacement | the lenient path leaking into the `edit` tool, where a no-op must be reported
+# B7-17 · §9.3c: a bare artifact in prose must be recovered
+artifact-behind-a-brace-in-prose | an_artifact_behind_a_brace_in_prose_is_still_recovered | recovery taking the first brace, so an artifact after an aside is never found
+later-artifact-beats-an-earlier-span | a_later_artifact_beats_an_earlier_brace_span | stopping at the first parseable span when a real artifact follows it
+prose-about-json-is-not-an-artifact | prose_about_json_is_not_an_artifact | a description of the shape taken at its word
+bare-artifact-still-recovers | a_bare_artifact_still_recovers | the widened scan breaking the case that already worked
