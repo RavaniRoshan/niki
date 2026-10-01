@@ -98,6 +98,7 @@ fn ctx(dir: &std::path::Path) -> niki::runtime::ToolContext {
         // Empty = block-all, the shipped default.
         network_allowlist: Vec::new(),
         task_store: None,
+        mcp: None,
         human_input: None,
     }
 }

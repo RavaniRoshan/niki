@@ -72,6 +72,10 @@ pub enum ToolCategory {
     Human,
     Knowledge,
     Vcs,
+    /// A tool offered by a configured MCP server. Never used by a baseline
+    /// tool — it exists so an MCP tool can say what it is in a status line
+    /// rather than being filed under `research` or `execute`.
+    Mcp,
 }
 
 impl fmt::Display for ToolCategory {
@@ -85,6 +89,7 @@ impl fmt::Display for ToolCategory {
             ToolCategory::Human => write!(f, "human"),
             ToolCategory::Knowledge => write!(f, "knowledge"),
             ToolCategory::Vcs => write!(f, "vcs"),
+            ToolCategory::Mcp => write!(f, "mcp"),
         }
     }
 }
@@ -185,6 +190,13 @@ pub struct ToolResult {
 pub enum ToolData {
     /// No structured data (simple text result).
     None,
+    /// Free text from a tool whose result is not one of the shapes below.
+    ///
+    /// An MCP tool's answer is whatever the server chose: a list of content
+    /// blocks, a bare object, a string. Filing it under `BashOutput` or
+    /// `WebFetchResult` would invent a shape the server never sent, and the
+    /// first consumer of a fake shape is a test that agrees with the fake.
+    Text { text: String },
     /// File content with line numbers.
     FileContent {
         path: String,
@@ -274,6 +286,11 @@ impl ToolData {
     pub fn to_feedback_text(&self) -> String {
         let raw = match self {
             ToolData::None => String::new(),
+            // Free text, already the shape the model should see. A server's
+            // answer is passed through rather than re-shaped, and the cap
+            // below still applies — a tool that can return a megabyte must
+            // not be a way to spend the model's context.
+            ToolData::Text { text } => text.clone(),
             ToolData::FileContent {
                 path,
                 lines,
@@ -601,6 +618,14 @@ pub struct ToolContext {
     pub fail_closed_headless: bool,
     /// Shared sub-task state for `task_spawn`/`task_status`/`task_cancel`.
     pub task_store: Option<std::sync::Arc<TaskStore>>,
+    /// The MCP servers this run is talking to, if any.
+    ///
+    /// The tool *registry* is built from this rather than the manager being
+    /// threaded down five function signatures: the Coder's loop already builds
+    /// its own `ToolContext` and hands it to every tool it dispatches, so this
+    /// is the one place the run's servers have to be visible. `None` for a run
+    /// with none configured, and for every test that is not about MCP.
+    pub mcp: Option<std::sync::Arc<crate::mcp::McpManager>>,
     /// Whoever is driving this run and can put a question to a human.
     ///
     /// `ask_user` and `approval` cannot read stdin when the interface owns it:
@@ -4102,6 +4127,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         };
         let messages = vec![
@@ -4139,6 +4165,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         };
         let messages = vec![LoopMessage::User("run echo hi".into())];
@@ -4248,6 +4275,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         };
 
@@ -4305,6 +4333,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         };
         run_tool_loop_with(
@@ -4348,6 +4377,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         };
         let messages = vec![LoopMessage::User("hi".into())];
@@ -4449,6 +4479,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         };
         let messages = vec![LoopMessage::User("read the note".into())];
@@ -4493,6 +4524,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         };
         let (tx, rx) = std::sync::mpsc::channel();
@@ -4592,6 +4624,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         }
     }
@@ -5481,6 +5514,7 @@ mod tests {
             // Empty = block-all, the shipped default.
             network_allowlist: Vec::new(),
             task_store: Some(std::sync::Arc::new(TaskStore::new())),
+            mcp: None,
             human_input: None,
         }
     }
@@ -5497,6 +5531,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         }
     }
@@ -5643,6 +5678,7 @@ mod tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         }
     }
@@ -5706,6 +5742,7 @@ mod network_egress_permission_tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         }
     }
@@ -5944,6 +5981,7 @@ mod network_egress_permission_tests {
             // Empty = block-all, the same default the product ships.
             network_allowlist: Vec::new(),
             task_store: None,
+            mcp: None,
             human_input: None,
         };
         let input = ToolInput {

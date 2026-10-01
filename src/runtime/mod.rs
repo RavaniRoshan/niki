@@ -14,6 +14,7 @@ pub mod checkpoint;
 pub mod compaction;
 pub mod context;
 pub mod events;
+pub mod mcp_tool;
 pub mod metrics;
 pub mod policy;
 pub mod session;

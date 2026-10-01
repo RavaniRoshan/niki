@@ -166,6 +166,7 @@ async fn test_tool_router_and_policy_enforcement() {
         // Empty = block-all, the shipped default.
         network_allowlist: Vec::new(),
         task_store: None,
+        mcp: None,
         human_input: None,
     };
 
