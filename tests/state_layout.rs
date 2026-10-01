@@ -75,21 +75,22 @@ fn every_documented_store_is_written_somewhere() {
     );
 }
 
-/// A temp file written into a user's repository must be git-ignored.
-///
-/// `apply_diff_to_working_tree` writes `.niki-tmp.patch` into the repo root and
-/// removes it on the normal path — but a killed run leaves it behind, and it
-/// was not ignored, so it appeared in `git status` and could be committed.
-#[test]
-fn the_temp_patch_in_a_user_repo_is_git_ignored() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let ignore = std::fs::read_to_string(root.join(".gitignore")).expect(".gitignore");
-    assert!(
-        ignore.lines().any(|l| l.trim() == ".niki-tmp.patch"),
-        ".niki-tmp.patch is written into the user's repository root and can \
-         outlive a killed run; it must be git-ignored"
-    );
-}
+// A temp patch in a user repository **is** git-ignored — and the test that
+// proves it lives in `tests/patch_temp_path_is_unique.rs`, which does it
+// behaviourally: it calls the product's own `ensure_patch_files_ignored`,
+// writes a leftover file, runs a real `git add -A`, and asserts the leftover was
+// not staged — and that the user's own file still was.
+//
+// The copy that used to sit here asserted that `.gitignore` contained the
+// literal string `.niki-tmp.patch`. The writer stopped producing that name — it
+// is `.niki-tmp.<pid>.<unique>.patch` now, and the pattern is the glob
+// `.niki-tmp*.patch` — so the assertion was testing a name the product no
+// longer writes. It went red, and **no gate ran this binary**, so it stayed red.
+//
+// Removed rather than corrected: correcting it would mean a second textual
+// check of a property two behavioural tests already hold. `state_layout`'s own
+// job is that the stores `STATE_LAYOUT.md` documents are the ones the code
+// writes, and it is not this.
 
 /// The contract states that JSON state writes go through `kb::write_atomic`.
 /// `write_manifest` did not, while being documented as if it did — which is

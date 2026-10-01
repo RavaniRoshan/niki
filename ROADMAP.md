@@ -1217,6 +1217,41 @@ Can-fail proven: shrinking the window back below the `Arc` line goes red.
 Replacing `Some(Arc::new(mgr))` with `Some(mgr)` does not reach the assertion at
 all — **it fails to compile**, which is a different and stronger kind of catch.
 
+### B11-02 — the fast lane, grown from a measurement (5 binaries → 22)
+
+B11-01 turned up a red test in a binary **no gate runs**. That is a question
+about every other binary, so it was measured rather than guessed: sixteen more
+cheap binaries were run. Fifteen green, one red.
+
+**The red one, `state_layout::the_temp_patch_in_a_user_repo_is_git_ignored`.**
+It asserted that `.gitignore` contains the literal string `.niki-tmp.patch`. The
+writer stopped producing that name — it is `.niki-tmp.<pid>.<unique>.patch`, and
+the pattern is the glob `.niki-tmp*.patch` — so the assertion was testing a
+filename the product no longer writes.
+
+**And the property it meant to hold is already held, twice, behaviourally.**
+`tests/patch_temp_path_is_unique.rs` calls the product's own
+`ensure_patch_files_ignored`, writes a leftover file, runs a real `git add -A`,
+and asserts the leftover was not staged — **and** that the user's own file still
+was. A second test checks NIKI's own repository covers the glob. So the copy was
+a *stale duplicate of a better test*, and it is removed rather than corrected:
+correcting it would mean a second textual check of a property two behavioural
+tests already own.
+
+**The lane now runs 22 binaries, in 75 s.** The sixteen added were measured
+first — fifteen of them finished in **0.00 s**. That is the whole argument for
+adding them: the reason they were uncovered was not that they are expensive.
+
+Proven to catch: breaking an assertion in `tool_cards_are_live` turns G3 red
+with `rc=101` and names the binary and its log.
+
+**What is still uncovered, stated rather than implied:** 104 integration
+binaries exist and 22 are in the lane. The rest are the heavy ones — pipelines,
+sandboxes, PTY — and this box cannot run them together, which is why they are
+serialised in `.config/test-binary-groups` for CI. Until they are measured, the
+honest position is the one already in `RELEASE_REPORT.md` §5: **this lane covers
+these twenty-two, and only CI covers the rest.**
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in
