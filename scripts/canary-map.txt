@@ -411,3 +411,10 @@ result-still-lands-on-its-own-card | a_result_still_lands_on_its_own_card | the 
 # B7-14 · a model that finished the work must be asked to submit it
 narrated-work-is-asked-to-submit | a_model_that_narrates_its_finished_work_is_asked_to_submit | the loop abandoning an edited worktree because the model summarised instead of submitting
 no-checkpoint-says-so | a_run_with_no_checkpoint_says_so_rather_than_naming_an_errno | a user-facing failure naming `os error 2` instead of the situation
+# B7-16 · §9.3b: an artifact edit the tool loop already made is not a failure
+already-applied-edit-is-done | a_change_that_is_already_in_the_file_is_already_applied | a Coder that edited and then submitted, told its artifact did not apply
+short-replacement-never-claimed | a_short_replacement_is_never_claimed_as_applied | a three-token replace coinciding with existing text and silently accepting an unmade edit
+ambiguous-search-is-not-claimed | an_edit_whose_search_is_still_present_is_not_already_applied | claiming "already done" on a block whose search is still in the file
+empty-replacement-never-claimed | an_empty_replacement_is_never_already_applied | a typo'd deletion accepted as accomplished
+both-sandboxes-use-the-lenient-path | both_sandboxes_treat_an_already_applied_artifact_edit_as_done | the fix in one backend, leaving the other rejecting a good artifact
+edit-tool-stays-strict | the_edit_tool_itself_still_refuses_an_already_present_replacement | the lenient path leaking into the `edit` tool, where a no-op must be reported
