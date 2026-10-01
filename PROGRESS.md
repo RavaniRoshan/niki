@@ -1749,3 +1749,55 @@ $ ./scripts/verify.sh --only G5 → PASS
 $ ./scripts/verify.sh --only G7 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 ```
+
+---
+
+## Iteration 8c — B9-03, the context that actually grows
+
+Batch 8's transcript compressor is wired into the **tool loop**, which is off by
+default and capped at four steps. So the context that grows without bound in a
+default run was not the one being compressed.
+
+**The chat is.** The TUI builds `history` from the entire `chat_log` on every
+submission, unbounded (`display/tui.rs:1727-1739`). And the provider was
+**reporting what each turn cost** — `StreamChunk::Usage` exists — while
+`cli/chat.rs` matched it with `{}` and discarded it.
+
+So the `ctx` gauge in the status bar read **0% for ever**, `/context` reported
+*"Utilized: 0%"* while the model was being handed a two-hundred-turn history on
+every request, and nothing said anything before the provider rejected the
+request.
+
+Now: the usage reaches the surface, `ChatFinished` carries it, and the chat adds
+**one** system line at **90%** naming `/context`, `/compact` and `/clear` — the
+three commands that already exist. `/clear` resets the flag and the counters.
+
+**A warning, not a truncation, and that is the point.** This is the chat surface:
+dropping the oldest turns would trade a visible warning for invisible amnesia,
+which is the defect B2-01 removed. Asserted by
+`the_context_warning_keeps_every_earlier_turn`.
+
+### Two of four sabotages did not bite, and both were the tests' fault
+
+- A test driving `apply_display_event` with a usage value was **green against
+  the defect** — it could not see whether `cli/chat.rs` ever produced one. The
+  stream loop is now extracted as `consume_reply` and tested from the stream,
+  where the loss actually was.
+- A test using a **100%-full** conversation could not distinguish a 90%
+  threshold from a 100% one, nor "never warn" from "warn when full". It now
+  uses 95%, and asserts a 15-token conversation says **nothing** — which is what
+  makes deleting the threshold detectable.
+
+A third test was simply wrong: it asserted a cancelled reply *returns* its
+partial text, and failed with `left: ""`. The loop checks the flag before
+accumulating, so a stream cancelled up front yields no text — correct, since the
+text already reached the user as `ChatDelta`. The test now asserts the observable
+contract: cancelling is visible.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  421 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+$ cargo test --lib → 1086 passed; 0 failed
+```

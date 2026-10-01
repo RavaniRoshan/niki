@@ -154,6 +154,19 @@ pub enum DisplayEvent {
     /// prevent on the pipeline path.
     ChatFinished {
         finish_reason: Option<String>,
+        /// What the provider says this turn cost.
+        ///
+        /// It was sending this all along — `StreamChunk::Usage` exists, and
+        /// `cli/chat.rs` matched it with `{}` and threw it away. So a chat
+        /// conversation never moved `token_count`, which meant the **context
+        /// gauge in the status bar never moved either**: a user could hold a
+        /// two-hundred-turn conversation and watch "ctx" sit at 0%, and then get
+        /// a provider context-window error with nothing having said anything was
+        /// running out.
+        ///
+        /// `None` when the provider reports no usage, which is different from
+        /// reporting zero — the same distinction `RunningStage::tokens` makes.
+        usage: Option<crate::llm::provider::TokenUsage>,
     },
     /// Total token/cost info for the status line.
     StageTotals {

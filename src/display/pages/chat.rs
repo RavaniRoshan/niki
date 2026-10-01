@@ -674,6 +674,12 @@ impl Page for ChatPage {
                     if trimmed == "/clear" || trimmed == "/reset" {
                         state.chat_log.clear();
                         state.chat_lines.clear();
+                        // The conversation is new, so the warning is owed again.
+                        // Leaving it set would mean a user who cleared to get
+                        // out of trouble never saw it a second time.
+                        state.context_warned = false;
+                        state.token_count = 0;
+                        state.context_usage = 0.0;
                         state.set_notice("Conversation cleared", 2500);
                     } else if trimmed == "/compact" {
                         // This used to say "Compacted N previous turns into
@@ -2766,6 +2772,7 @@ mod tests {
 
         let after_pending = chat_content_hash(&state);
         state.apply_display_event(DisplayEvent::ChatFinished {
+            usage: None,
             finish_reason: Some("max_tokens".to_string()),
         });
         assert_ne!(
