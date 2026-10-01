@@ -22,6 +22,7 @@ pub mod scheduler;
 pub mod session;
 pub mod step;
 pub mod tools;
+pub mod transcript;
 pub mod turn;
 
 pub use cancellation::*;
