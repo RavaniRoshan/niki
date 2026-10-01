@@ -1252,6 +1252,43 @@ serialised in `.config/test-binary-groups` for CI. Until they are measured, the
 honest position is the one already in `RELEASE_REPORT.md` §5: **this lane covers
 these twenty-two, and only CI covers the rest.**
 
+### B11-03 — the lane at 56, and a §1 closure test that had gone red
+
+Thirty more binaries measured and added. **All but one green**, and the one
+that was red is a §1 navigation item that batches 1–3 supposedly closed:
+`tui_q_goes_back::a_subpage_q_reaches_the_page_not_the_nav_layer`.
+
+**The product is right.** Both render loops gate their nav block on
+`sub_page_owns(key, &state)` — the *page's* answer to "is this key mine" —
+which is strictly better than the old `key.code != KeyCode::Char('q')`: a page
+that answers `q` keeps its handler, and a page that *declines* it falls through
+to the confirm modal, which the letter gate could not express.
+
+**The test pinned a literal from an earlier design**, and both of its assertions
+had: one per loop, each naming a string the improvement removed. Putting them
+back would forbid the fix.
+
+Two further weaknesses surfaced while making it bite, both recorded:
+
+* it compared a line in `run_tui` against a line in `run_chat` with a
+  whole-file `find` — **two render loops in one file**, so the assertion
+  reported an ordering that did not exist. The second assertion had never been
+  reached while the first was red, which is how it survived.
+* even scoped per loop, it checked only the **first** `intent_from_key`. There
+  are two page-refusal gates per loop — the nav block's and the global
+  keybinding's — and removing the second left it green.
+
+So it now walks **every** nav block and requires the gate on each, and counts at
+least two refusal gates per loop. Both sabotages bite:
+`run_chat has 1 page-refusal gate(s); it needs at least the nav block's and the
+global keybinding's`.
+
+**The lane: 5 binaries → 56, of 107.** Warm cost **1m30**; the first run was
+6m40 because nineteen binaries had never been linked on this machine. Fifty-one
+remain uncovered — the pipelines, sandboxes, PTY and heavy fixtures — and the
+honest statement in `RELEASE_REPORT.md` §5 is narrowed to match: **this lane
+covers these fifty-six, and only CI covers the rest.**
+
 ### §9.2a — the case that never produced a screen — **CLOSED in batch 8 (B8-02)**
 
 The row said the next step was *"read `MOCK_LLM_TRACE=1` output with the fix in

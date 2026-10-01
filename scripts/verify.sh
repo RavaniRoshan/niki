@@ -187,7 +187,12 @@ if want G3; then
   # `the_temp_patch_in_a_user_repo_is_git_ignored` had been red since the patch
   # writer stopped producing that filename, and nothing ran the binary.
   #
-  # Cost, measured: the whole list is a few seconds once linked. The
+  # A further fourteen were measured the same way in batch 11: **all fourteen
+  # green**, and their own test times were 0.00 s–9.01 s (~17 s in total). The
+  # wall clock around each is cargo's per-invocation overhead, not the tests —
+  # which is why "expensive" was the wrong reason to leave them out.
+  #
+  # Cost, measured: the whole list runs in well under two minutes. The
   # binaries this box genuinely cannot afford are the heavy ones, and they are
   # serialised elsewhere (`.config/test-binary-groups`).
   fast_lane="record_claims_are_pinned run_lifecycle agent_tool_loop reverse mcp_call_path \
@@ -196,7 +201,17 @@ if want G3; then
     tool_cards_are_live tui_footers_advertise_what_works tui_terminal_honesty \
     help_tells_the_truth chat_slash_commands state_writes_are_atomic \
     retry_tracking transient_classification_is_one_rule llm_timeout_classification \
-    history_enter_opens_the_run config_field_cursor_is_visible"
+    history_enter_opens_the_run config_field_cursor_is_visible \
+    docs_consistency every_entry_point_delivers ci_contracts test_groups \
+    no_unreferenced_public_modules skips_and_budgets_stay_honest \
+    supply_chain_policy_has_teeth the_record_had_moved artifact_contracts \
+    claims_audit stub_tools_do_not_report_success google_stream_finish_reason \
+    exec_timeout security_exec redaction_keeps_evidence secret_redaction \
+    tui_jk_reaches_the_page tui_page_letters_win tui_page_numbers_are_discoverable \
+    tui_q_goes_back tui_tab_has_one_owner tui_every_binding_is_handled \
+    tui_crash_paths tui_sheets tui_key_matrix_matches_the_code tool_contracts \
+    truncated_tool_calls structured_output repo_intel structural_index provenance \
+    llm_tool_calls llm_mock_provider"
   for bin in $fast_lane; do
     [ -f "tests/$bin.rs" ] || { record G3 FAIL "fast lane names tests/$bin.rs, which does not exist"; continue; }
     run_capture G3 "g3-fast-$bin" cargo test --test "$bin" $CARGO_TEST_FLAGS
