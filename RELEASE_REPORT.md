@@ -1111,3 +1111,63 @@ B9-06 invalidated work shipped two slices earlier. The 90% context warning
 arrived in B9-03 and **could never fire**, because the number it divides by was a
 constant. A sweep for a pattern I had been applying all batch found it. The
 warning shipped; the sweep said it was gated on a number nobody had set.
+
+---
+
+## 2l · Batch 10 — finishing the sweep, and one page that handed back the wrong command
+
+Three slices, and the theme is narrower than batch 9's: **the tail of the sweep,
+and a command a user pastes.**
+
+### B10-01 · The Cost page printed `frame 0.0/0.0ms`
+
+`frame_mean_ms` / `frame_p95_ms` are written by `run_tui` from the frame engine's
+stats. `run_chat` has its own render loop and never touched that engine, so both
+stayed at their initial `0.0` for a whole chat session — and the Cost page,
+reachable from chat with a `]`, printed `frame 0.0/0.0ms mean/p95`.
+
+A real frame is never `0.0` ms, so printing the number prints the **absence** of
+one. `run_chat` now measures itself with the same `FrameStats`, and the page says
+`no frames measured` when it has none.
+
+The sabotage on the first fix does **not** bite, and that is right rather than
+weak: removing the chat loop's publication leaves `frame_samples == 0`, so the
+page honestly says it has measured nothing. Either half closes the user-visible
+defect.
+
+### B10-02 · A recovery page that printed a command for a different task
+
+`niki resume` exists to recover an interrupted run, and it ends by telling the
+user to re-run it. It interpolated the task description inside double quotes:
+
+```
+task:        add a "tally" function that sums a slice
+printed:     niki run "add a "tally" function that sums a slice"
+pasted:      ["run", "add", "a", "tally", "function", "that", "sums", "a", "slice"]
+```
+
+**Eight arguments, on the page whose only job is getting you back to your work.**
+`util::shell_quote` now serves both sites that interpolate a real value, and the
+canary is end to end: seed a session with an awkward description, run the real
+binary, hand its printed command to a real shell.
+
+§9.1 itself is untouched — what a *resumed run* should mean is a product
+decision, and `resume` already says honestly that nothing was re-run.
+
+### B10-03 · The tool-card role — measured, and not built
+
+Real, conditional on a non-default configuration, and cosmetic. Correct under
+the default single-Coder path; the right output on the wrong card under
+`parallel.enabled && coder_count > 1`. The fix is per-card identity, which
+belongs with the parallel-coder work rather than as a patch to a `..`.
+
+**It was also nearly lost**: the finding was in a commit message and in
+`PROGRESS.md` but never made it into `ROADMAP.md`, which is where a reader looks.
+That is the record problem this programme exists to catch, arriving in its own
+records.
+
+### One more test that was wrong in the direction that mattered
+
+`only_text_a_shell_cannot_misread_is_left_alone` first expected
+`add a --verbose flag` to be left unquoted. A space is not safe to leave bare —
+that pastes as three arguments, the same defect. The allow-list excludes it.
