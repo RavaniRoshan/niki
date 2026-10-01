@@ -71,26 +71,14 @@ run() {
     return 1
   fi
 
-  # The run does not reach a verdict, and the case does not pretend otherwise.
-  #
-  # This assertion has been written and taken out three times: after §9.2b
-  # (the chat's dispatch) and after B7-12 (a dropped tool result) were fixed,
-  # and the screen came back byte-for-byte identical both times.
-  #
-  # What is left is narrow, and it is **probably not a product defect**. The
-  # screen shows one `ask_user` completed (`✓`, `A: goodbye`) and a *second*
-  # still running (`⠋`) with the modal up — which is correct behaviour for a
-  # second question, and a question the user simply has not answered yet. The
-  # mock's scripted sequence is `[ask_user, submit_artifact]`, so a second
-  # `ask_user` means the mock's result counter is not advancing: it is
-  # replaying call 0 because it does not recognise the tool result in the
-  # shape NIKI actually sends.
-  #
-  # That is a harness bug, and it would mean §9.2a was never the product
-  # defect it looked like. The check is one experiment — have the mock log the
-  # result count it computes per request — and it is written down rather than
-  # guessed at, because five exclusions have already turned two confident
-  # readings of this screen into wrong ones.
+  # The run does not reach a verdict. The harness bug found while chasing this
+  # is fixed (the mock could not see a tool result in the shape NIKI's
+  # Anthropic client sends) and the verdict assertion is still out: with the
+  # counter corrected the case fails again, and the next step is to read
+  # `MOCK_LLM_TRACE=1` output with the fix in place rather than guess at the
+  # remaining shape. Three slices have already turned two confident readings of
+  # this screen into wrong ones; a fourth is not worth writing down as if it
+  # were a result.
   echo "  PASS: the model asked, the modal opened, the answer reached the tool"
 
 }
