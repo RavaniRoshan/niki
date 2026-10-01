@@ -282,6 +282,22 @@ if want G8; then
   else
     run_capture G8 g8-ci ./scripts/ci-is-green.sh
   fi
+  # The remote answer is about the last *pushed* tree. On a local branch it
+  # therefore describes code that is not here, and a red G8 says nothing about
+  # what is. So run the one CI job that can be checked offline as well, and
+  # report both.
+  #
+  # It is the job that was actually red: `Manifest parity` failed on the last
+  # run because three manifests pointed at a release that was never published
+  # while `Cargo.toml` had moved past it — so `brew install niki`, the headline
+  # install command in the README, 404'd, and the fix could only be verified by
+  # pushing. `scripts/manifest-parity.sh` is that job, extracted, so the tree in
+  # front of us is checked rather than a run from a branch that is gone.
+  if run_capture G8 g8-manifest-parity ./scripts/manifest-parity.sh; then
+    :
+  else
+    record G8 FAIL "manifest parity fails on THIS tree — an install command the README prints does not resolve"
+  fi
 fi
 
 # ── G9 · no dead code, no fake features ───────────────────────────────

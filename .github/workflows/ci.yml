@@ -172,61 +172,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Check manifest download URLs resolve
-        run: |
-          set -euo pipefail
-          # Both archive extensions dist actually publishes. This grepped for
-          # `.tar.gz` alone, which no manifest has contained since the
-          # install-path fix moved Homebrew to `.tar.xz` — so the job had been
-          # checking only the Windows .zip URLs and reporting success while
-          # four of the six release URLs went unverified.
-          urls=$(grep -rhoE 'https://github\.com/[^ "]*\.(tar\.gz|tar\.xz|zip)' homebrew/ scoop/ winget/)
-          echo "$urls"
-          fail=0
-          for u in $urls; do
-            # Skip scoop autoupdate templates (contain $version).
-            case "$u" in
-              *'$'*) echo "SKIP(template) $u"; continue ;;
-            esac
-            if curl -fIsS --max-time 30 "$u" -o /dev/null; then
-              echo "OK   $u"
-              continue
-            fi
-            # A 404 on an asset is only a manifest bug if the release it names
-            # actually exists. A release-preparation branch legitimately points
-            # at a version whose tag has not been pushed yet, and treating that
-            # as a dead link makes every version bump fail CI until the tag
-            # lands — which is backwards.
-            #
-            # So distinguish the two: if the release tag is published, a
-            # missing asset is a real failure and stays one. If the tag does
-            # not exist, the URL is not wrong yet, just early.
-            tag=$(echo "$u" | sed -n 's|.*/releases/download/\([^/]*\)/.*|\1|p')
-            if [ -n "$tag" ] && curl -fIsS --max-time 30 \
-                 "https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag" -o /dev/null; then
-              echo "DEAD $u  (release $tag exists but the asset does not)"; fail=1
-              continue
-            fi
-            # The tag is missing. Whether that is a bug or merely early depends
-            # on something the job can actually check: has this repository
-            # already declared that version shipped?
-            #
-            # It had, and the job called it PENDING anyway. Cargo.toml said
-            # 0.9.0, CHANGELOG.md published `[0.9.0] - 2026-09-27`, and three
-            # package manifests pointed at releases/download/v0.9.0 — while the
-            # newest published release was v0.8.0. So `brew install niki`, the
-            # headline install command in the README, 404'd, and this job was
-            # green. "Not wrong yet, just early" was doing a lot of work.
-            ver="${tag#v}"
-            crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-            changelog_says_shipped=$(grep -cE "^## \[$ver\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md || true)
-            if [ "$ver" = "$crate" ] || [ "${changelog_says_shipped:-0}" -gt 0 ]; then
-              echo "UNPUBLISHED $u  (this repo already declares $ver released: crate=$crate, changelog entries=$changelog_says_shipped)"
-              fail=1
-            else
-              echo "PENDING $u  (release $tag is not published yet and $ver is not declared released)"
-            fi
-          done
-          exit $fail
+        # One copy of the rule, in scripts/manifest-parity.sh, which
+        # `scripts/verify.sh` G8 also runs. It was inline here, which made this
+        # the only place the rule could be exercised — so a dead `brew install`
+        # URL, the headline install command in the README, could not be caught
+        # before it shipped, and was not.
+        run: ./scripts/manifest-parity.sh
+
       - name: Flag crate/manifest version skew (informational)
         run: |
           crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
