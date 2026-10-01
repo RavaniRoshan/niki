@@ -2314,3 +2314,45 @@ $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --lib → 1102 passed; 0 failed
 $ cargo test --test mcp_call_path → 13 passed
 ```
+
+---
+
+## Iteration 10b — B11-02, the fast lane grown from a measurement
+
+B11-01 turned up a red test in a binary no gate runs. That is a question about
+*every other* binary, so it was measured rather than guessed: sixteen more cheap
+binaries run. **Fifteen green, one red.**
+
+The red one, `state_layout::the_temp_patch_in_a_user_repo_is_git_ignored`,
+asserted that `.gitignore` contains the literal `.niki-tmp.patch`. The writer
+stopped producing that name — it is `.niki-tmp.<pid>.<unique>.patch` behind the
+glob `.niki-tmp*.patch` — so the test was checking a filename the product no
+longer writes.
+
+And **the property is already held twice, behaviourally**:
+`tests/patch_temp_path_is_unique.rs` calls the product's own
+`ensure_patch_files_ignored`, writes a leftover, runs a real `git add -A`, and
+asserts the leftover was not staged — and that the user's own file still was.
+So the copy was a stale duplicate of a better test, and it is **removed rather
+than corrected**: correcting it would add a second textual check of a property
+two behavioural tests already own.
+
+**The lane now runs 22 binaries in 75 s.** The sixteen added were measured first
+— fifteen finished in **0.00 s**. That is the whole argument: they were uncovered
+not because they are expensive.
+
+Proven to catch: breaking an assertion in `tool_cards_are_live` turns G3 red
+with `rc=101` and names the binary and its log.
+
+**Still uncovered, and said so rather than implied:** 104 integration binaries
+exist, 22 are in the lane. The rest are the heavy ones — pipelines, sandboxes,
+PTY — serialised in `.config/test-binary-groups` for CI. `RELEASE_REPORT.md` §5
+already says this and it remains true: **this lane covers these twenty-two, and
+only CI covers the rest.**
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  434 can-fail entries all resolve
+$ ./scripts/verify.sh --only G5 → PASS
+$ ./scripts/verify.sh --only G7 → PASS
+$ cargo clippy --all-targets -j 2 -- -D warnings → clean
+```

@@ -181,7 +181,22 @@ if want G3; then
   # manager_beyond_discovery` had been **red** since a comment elsewhere grew
   # the file by eighteen characters, and it was not in the list. A lane you do
   # not extend is a lane that quietly stops covering.
-  fast_lane="record_claims_are_pinned run_lifecycle agent_tool_loop reverse mcp_call_path"
+  # The list grew in batch 11 from measuring rather than assuming: sixteen
+  # further binaries were run, all green, all **sub-second** — fifteen of them
+  # finished in 0.00s. `state_layout` is in the list because its
+  # `the_temp_patch_in_a_user_repo_is_git_ignored` had been red since the patch
+  # writer stopped producing that filename, and nothing ran the binary.
+  #
+  # Cost, measured: the whole list is a few seconds once linked. The
+  # binaries this box genuinely cannot afford are the heavy ones, and they are
+  # serialised elsewhere (`.config/test-binary-groups`).
+  fast_lane="record_claims_are_pinned run_lifecycle agent_tool_loop reverse mcp_call_path \
+    state_layout patch_temp_path_is_unique acp_server chat_conversation \
+    permission_prompt permission_visibility permission_badge_governs_the_run \
+    tool_cards_are_live tui_footers_advertise_what_works tui_terminal_honesty \
+    help_tells_the_truth chat_slash_commands state_writes_are_atomic \
+    retry_tracking transient_classification_is_one_rule llm_timeout_classification \
+    history_enter_opens_the_run config_field_cursor_is_visible"
   for bin in $fast_lane; do
     [ -f "tests/$bin.rs" ] || { record G3 FAIL "fast lane names tests/$bin.rs, which does not exist"; continue; }
     run_capture G3 "g3-fast-$bin" cargo test --test "$bin" $CARGO_TEST_FLAGS
