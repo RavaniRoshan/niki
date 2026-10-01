@@ -2,6 +2,8 @@
 //! gates pipeline topology. No LLM call — cheap keyword/path heuristics over
 //! the spec, so it runs before any stage executes.
 
+pub mod transcript;
+
 use crate::artifacts::types::TaskSpec;
 use crate::config::NikiConfig;
 use serde::{Deserialize, Serialize};
