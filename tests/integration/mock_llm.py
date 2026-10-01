@@ -179,6 +179,17 @@ ROLE_RESPONSES = {
 SCRIPT_PATH = os.environ.get("MOCK_LLM_SCRIPT", "")
 SCRIPTED_MODELS = None
 SCRIPTED_TOOL_LOOP = False
+# An explicit sequence of tool calls for the loop to follow, in order:
+#   {"tool_calls": [{"name": "ask_user", "arguments": {...}}, {"name":
+#    "submit_artifact"}]}
+#
+# Without it the loop's script is two hardcoded calls — read, then submit — so
+# no test could drive any *other* tool. `ask_user` and `approval` were
+# therefore unreachable from an end-to-end leg: the unit tests exercise the
+# adapter and the modal, and nothing exercises the two together through a real
+# run, which is the only place a modal can be wrong in a way no unit test sees
+# — a key swallowed by the ladder, a question the loop never gets to.
+SCRIPTED_TOOL_CALLS = []
 if SCRIPT_PATH:
     try:
         with open(SCRIPT_PATH, encoding="utf-8") as fh:
@@ -191,6 +202,7 @@ if SCRIPT_PATH:
     if _script.get("models") is not None:
         SCRIPTED_MODELS = _script["models"]
     SCRIPTED_TOOL_LOOP = bool(_script.get("tool_loop"))
+    SCRIPTED_TOOL_CALLS = list(_script.get("tool_calls") or [])
     sys.stderr.write(
         f"[mock_llm] scripted: roles={sorted(_script.get('responses') or {})} "
         f"tool_loop={SCRIPTED_TOOL_LOOP} "
@@ -262,6 +274,43 @@ def _tool_result_seen(body):
     return False
 
 
+def seen_count(body):
+    """How many tool results the conversation carries, on either wire format.
+
+    OpenAI sends a `{role: tool}` turn; Anthropic puts `tool_result` blocks in
+    a user turn. A scenario scripted on one provider and run on the other must
+    count the same, or the same script replays a call for ever.
+    """
+    n = 0
+    content = body.get("messages")
+    if isinstance(content, list):
+        for turn in content:
+            if turn.get("role") == "tool":
+                n += 1
+            blocks = turn.get("content")
+            if isinstance(blocks, list):
+                for block in blocks:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        n += 1
+    return n
+
+
+def _next_scripted_call(body):
+    """The Nth scripted call, where N is how many tool results came back.
+
+    `None` once the script is exhausted, so the caller falls back to whatever
+    it does without one.
+
+    Keyed on the count of results rather than a turn counter: a loop that
+    retries, or that sees a rejection, still has exactly one more result per
+    exchange, and a counter that drifts replays a call for ever.
+    """
+    if not SCRIPTED_TOOL_CALLS:
+        return None
+    seen = seen_count(body)
+    return SCRIPTED_TOOL_CALLS[seen] if seen < len(SCRIPTED_TOOL_CALLS) else None
+
+
 def _openai_tool_call(name, arguments, call_id):
     return {
         "choices": [{
@@ -287,6 +336,14 @@ def openai_json_response(role, body):
     text = json.dumps(body)
     tools = body.get("tools") or []
     usage = {"prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 150}
+
+    scripted = _next_scripted_call(body)
+    if scripted and tools:
+        return _openai_tool_call(
+            scripted["name"],
+            scripted.get("arguments") or {},
+            f"call_script{seen_count(body)}",
+        )
 
     if SCRIPTED_TOOL_LOOP and tools:
         # Drive the loop the way a real model drives it: look at the file
@@ -333,6 +390,22 @@ def anthropic_json_response(role, body):
     """Non-streaming Anthropic response with the same tool-loop behavior."""
     text = json.dumps(body)
     tools = body.get("tools") or []
+    if scripted and tools:
+        return {
+            "id": "msg_" + uuid.uuid4().hex[:24],
+            "type": "message",
+            "role": "assistant",
+            "model": "mock-model",
+            "content": [{
+                "type": "tool_use",
+                "id": f"toolu_script{seen_count(body)}",
+                "name": scripted["name"],
+                "input": scripted.get("arguments") or {},
+            }],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 50, "output_tokens": 100},
+        }
+
     if SCRIPTED_TOOL_LOOP and tools:
         # The Anthropic half of the scripted tool loop. Same two turns as the
         # OpenAI half, so a script behaves identically whichever provider the
