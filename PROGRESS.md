@@ -2223,3 +2223,30 @@ $ ./scripts/verify.sh --only G5 → PASS
 $ cargo clippy --all-targets -j 2 -- -D warnings → clean
 $ cargo test --test resume_tells_the_truth → 4 passed
 ```
+
+---
+
+## Iteration 9c — B10-03, measured, and deliberately not built
+
+The sweep flagged this "lower confidence", which was the right instinct. Measured:
+
+`ToolCall.role` is produced correctly (`tools.rs:4058`) and dropped at
+`state.rs:1950` with `..`. `ToolCard` has no role field, and a result matches the
+**first unmatched pending/running card with that tool name** (`state.rs:1967`).
+
+- With the default `parallel.enabled = false`, one Coder runs its tools
+  sequentially and first-unmatched is correct — the dropped role carries nothing.
+- With `enabled && coder_count > 1`, two Coders can each hold a `bash` card and
+  a result can land on the other's: the right output on the wrong card.
+
+That is a display inaccuracy under a mode most users never turn on, and the fix
+is **per-card identity** — a run id, not a role — which belongs with the rest of
+the parallel-coder work rather than as a patch to a `..`.
+
+Not built, and recorded **with its condition** rather than left as an
+unquantified worry. Same call as §8's streaming executor, made from a
+measurement rather than from an estimate.
+
+```
+$ ./scripts/verify.sh --only G3 → PASS  433 can-fail entries all resolve
+```
