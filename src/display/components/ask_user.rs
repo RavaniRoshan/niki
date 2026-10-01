@@ -553,3 +553,79 @@ mod tests {
         }
     }
 }
+
+/// The full state machine a live run drives: an event arrives, the user
+/// answers, and the interface is back to normal.
+///
+/// `tests/tui_smoke/cases/16_agent_asks_the_user.sh` found that after an
+/// answer the run does not reach a verdict, and the modal appears to stay up.
+/// Two tests already cover the halves — the ladder takes the key
+/// (`an_open_question_takes_every_key`) and the tool gets the answer
+/// (`a_questions_answer_reaches_the_loop_and_it_moves_on`) — so the gap is
+/// between them: does the *state* actually return to normal?
+///
+/// It is here because it is the join. An event sets `show_ask_modal`, a
+/// submit clears it, and anything in between that re-asserts the flag leaves a
+/// question on screen that nobody is answering — and a footer that keeps
+/// offering `enter send` for a modal whose tool has already returned.
+#[test]
+fn a_question_closes_when_it_is_answered() {
+    use crate::display::tui::DisplayEvent;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::time::Duration;
+
+    let config = crate::config::NikiConfig::default();
+    let mut state = AppState::new("t".to_string(), config, ".".into());
+    let (answer_tx, answer_rx) = std::sync::mpsc::channel();
+
+    // What a tool does when it asks.
+    state.apply_event(DisplayEvent::AskUser {
+        question: "Which database?".into(),
+        options: vec!["sqlite".into(), "postgres".into()],
+        default: None,
+        response_tx: answer_tx,
+    });
+    assert!(state.show_ask_modal, "the event must open the question");
+    assert!(state.ask_request.is_some());
+    assert!(
+        crate::display::nav::text_focus_active(&state),
+        "and the keyboard must belong to the question while it is open"
+    );
+
+    // What the user does.
+    let key = |c| KeyEvent::new(c, KeyModifiers::NONE);
+    assert!(handle_key(&key(KeyCode::Char('p')), &mut state));
+    assert_eq!(
+        state.ask_input, "p",
+        "typing must reach the answer, not the page"
+    );
+    assert!(handle_key(&key(KeyCode::Enter), &mut state));
+
+    assert!(
+        !state.show_ask_modal,
+        "the modal must close once it is answered — a question still on screen \
+         whose tool has already returned is a question nobody is answering"
+    );
+    assert!(
+        state.ask_request.is_none(),
+        "and the request must be taken, so nothing can answer it twice"
+    );
+    assert!(state.ask_input.is_empty(), "and the field must be cleared");
+    assert_eq!(
+        state.ask_cursor, 0,
+        "and the cursor, or the next question starts mid-string"
+    );
+    assert!(
+        !crate::display::nav::text_focus_active(&state),
+        "and the keyboard must go back to the page"
+    );
+    // The tool is waiting on this, and it must not be waiting for ever.
+    assert!(
+        answer_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the answer must reach the tool that asked")
+            .text
+            == "p",
+        "and it must be the text the user typed, not a default or a blank"
+    );
+}
