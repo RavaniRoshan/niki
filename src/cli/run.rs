@@ -1265,6 +1265,22 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
 /// unreviewed diff to someone's repository is a larger semantic change than a
 /// hardening pass should make on its own. The user gets the Coder's actual
 /// `CodeDiff` and decides what to do with it.
+/// The message for a project that never wrote a checkpoint.
+///
+/// Split out so a test can assert on the wording, which is the part that was
+/// wrong: the salvage reported an errno where it should have reported a
+/// situation.
+pub fn salvage_error_for_missing_sessions(project_dir: &std::path::Path) -> Result<(), String> {
+    let sessions = project_dir.join(".niki").join("sessions");
+    match std::fs::read_dir(&sessions) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Err("no stage checkpoint was written before the run failed".into())
+        }
+        Err(e) => Err(format!("could not read {}: {e}", sessions.display())),
+    }
+}
+
 fn salvage_partial_run(
     project_dir: &std::path::Path,
     task_dir: &std::path::Path,
@@ -1276,10 +1292,18 @@ fn salvage_partial_run(
     // named by task, so the id is the only thing that ties them together.
     let sessions = project_dir.join(".niki").join("sessions");
     let mut best: Option<(std::time::SystemTime, SessionCheckpoint)> = None;
-    for entry in std::fs::read_dir(&sessions)
-        .map_err(|e| e.to_string())?
-        .flatten()
-    {
+    // No sessions directory is the *normal* state for a run that failed before
+    // any stage checkpointed — which is most of them. It was reported as
+    // `No such file or directory (os error 2)`, which names an errno rather
+    // than the situation, and landed on top of a perfectly good failure
+    // message to make it unreadable. Found by a live run against
+    // `poolside/laguna-s-2.1:free`, whose Planner emits no conformant
+    // artifact and so never checkpoints.
+    let entries = match std::fs::read_dir(&sessions) {
+        Ok(entries) => entries,
+        Err(_) => return salvage_error_for_missing_sessions(project_dir).map(|()| unreachable!()),
+    };
+    for entry in entries.flatten() {
         let path = entry.path().join("checkpoint.json");
         let Ok(bytes) = std::fs::read(&path) else {
             continue;

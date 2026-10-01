@@ -410,3 +410,4 @@ failure-with-no-card-is-shown | a_failure_with_no_card_to_land_on_is_still_shown
 result-still-lands-on-its-own-card | a_result_still_lands_on_its_own_card | the fix appending unconditionally, so every call became two cards
 # B7-14 · a model that finished the work must be asked to submit it
 narrated-work-is-asked-to-submit | a_model_that_narrates_its_finished_work_is_asked_to_submit | the loop abandoning an edited worktree because the model summarised instead of submitting
+no-checkpoint-says-so | a_run_with_no_checkpoint_says_so_rather_than_naming_an_errno | a user-facing failure naming `os error 2` instead of the situation

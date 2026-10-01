@@ -307,3 +307,27 @@ fn only_the_named_files_are_read() {
         "the render must leave unrelated files alone"
     );
 }
+
+/// A run that failed before anything checkpointed says so in words.
+///
+/// Found by a live run against `poolside/laguna-s-2.1:free`, whose Planner
+/// emits no conformant artifact and so never writes a checkpoint. The salvage
+/// reported `No such file or directory (os error 2)` — an errno, not a
+/// situation — and it landed on top of a perfectly good failure message, so
+/// the last thing a user read was a number.
+#[test]
+fn a_run_with_no_checkpoint_says_so_rather_than_naming_an_errno() {
+    let (dir, _root) = repo();
+    // A project with no `.niki/sessions` at all: the normal state for a run
+    // that failed in its first stage.
+    let err = niki::cli::run::salvage_error_for_missing_sessions(dir.path())
+        .expect_err("the situation must be described, not leaked");
+    assert!(
+        !err.contains("os error"),
+        "a user-facing failure must not name an errno: {err}"
+    );
+    assert!(
+        err.contains("checkpoint"),
+        "and it must name what is missing, in words a person can act on: {err}"
+    );
+}
