@@ -942,3 +942,87 @@ test stayed green. Guarding both made it red.
 **Five proofs that did not run, across §8 — more than in any earlier batch**,
 and every one found the same way: by reading the count and then asking whether
 the *sabotage* was wrong before assuming the *test* was.
+
+---
+
+## 2j · Batch 8 — two inert components, two unwired fixes, and a gate that could not see either
+
+Eleven slices. The theme is not what it looks like: **almost nothing here was
+found by running the product.** Every item was found by asking a built thing what
+it was *for*, or by running a test suite the gates never run.
+
+### §8's own deliverables were not finished
+
+`resolved_line` — the `⎿ Thought for Xs · N tokens` the brief asks for — had nine
+unit tests and **zero callers**. The strip was rendered only while a stage was
+running, so a run's conclusion had nowhere to live. Third time in this repository
+a component shipped complete, tested and inert.
+
+Two compressors already existed and **neither touches the conversation the model
+is in**: `memory::compression` discards its own result at its one call site, and
+`runtime::compaction::ContextCompactor` has zero callers. So the loop's
+transcript grew without bound until the provider rejected the request.
+
+**§8's concurrency promise, measured rather than built:** three reads take
+**1.62 ms** sequentially and **0.88 ms** joined. 0.74 ms per turn, against a
+model request in seconds — and `bash`, `web_fetch`, `grep` and `glob` are all
+exclusive by construction. The 170-line refactor of the hottest code in the
+repository would have bought less than a frame. The latency is in the streaming,
+not the parallelism.
+
+### Three tests were red while every gate said PASS
+
+**G3 checks the canary map, not the suite** — the suite does not fit this
+machine. So:
+
+| Test | What it was |
+|---|---|
+| `cost::a_fallback_served_call_is_priced_by_the_fallback` | **a real defect**: a 500 wrapped in NIKI's own error prefix read as permanent at *both* call sites, so the failover chain did not fail over |
+| `money::the_coder_loop_bills_before_every_bail_out` | **a real defect** behind a stale hard-coded count: a Coder that explored, spent money, then errored was billed as free |
+| `a_truncation_that_never_resolves_is_reported_as_truncation` | a **test defect**: it counted requests *containing* a notice, not notices *issued* |
+
+### The harness had a post-mortem that never worked
+
+All twelve `.failure.txt` files in `tui-smoke-logs/` were **0 bytes**. Every case
+sources `lib.sh`, whose line 16 is `set -euo pipefail`, which undid the
+harness's own `set +e`; and the case's EXIT trap killed tmux before the parent
+could capture. §9.2a had three slices spent on wrong readings of a screen that
+was never recorded. With it repaired, case 16 passes and the suite is 16/16.
+
+**The obvious fix was rejected.** `set +e` inside the subshell makes a case whose
+third assertion fails and whose last command succeeds report **OK**. A probe case
+written to fail midway and then `true` confirmed it. The shipped design captures
+from inside the EXIT trap instead.
+
+### `KNOWN_FAILING` is now empty
+
+All four entries struck, each against a measurement. Two of them were the same
+shape of lie:
+
+- `INV-STAGE-MANIFEST` asked `topology.contains("Single")`, but
+  `TopologyMode` serialises lowercase. **The check could never fire on a real
+  run** — it only ever fired on the hand-built trace that justified keeping it.
+- `INV-ARTIFACT-SEMANTIC`'s hollow-test read `summary`, a field the review schema
+  has not had for some time, so **every approved review with no issues was
+  flagged hollow**. A clean approval is the correct outcome.
+
+### Four records outlived the thing they described
+
+A pin pointing at a test **deleted the day its feature landed**; a canary row
+doing the same (G3 caught that one); seven numbered items nothing pinned; and a
+comment claiming `call_tool` and `shutdown()` have no production caller, which
+became false in B7-01. All are past-tense-marked or replaced.
+
+### The two green tests that proved nothing
+
+Worth more than the fixes, because they are the failure mode this programme does
+not usually catch:
+
+1. A source-level check was **green twice** against code that did not bill at
+   all — the call was there; the call did nothing.
+2. A ratchet assertion used `"completed"` where `is_completed()` looks for
+   `"Completed"`, so **every check returned `pass()` at the top**, including the
+   one meant to prove the strike was safe.
+
+Both were caught only because a *second* assertion in the same place was
+supposed to fail and did not.
