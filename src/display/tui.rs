@@ -2182,9 +2182,26 @@ fn render(
         }
     }
 
-    // Render a spinner/progress indicator while stages are running
+    // Render a spinner/progress indicator while stages are running.
     if state.has_running_stage() {
         render_activity_spinner(frame, size, state);
+    } else if let Some(resolved) = state.resolved_run {
+        // …and what it resolved into once they are not.
+        //
+        // The same strip, the same place, a different glyph: the working line
+        // says *this is happening* and this one says *this is what it was*.
+        // Without it the last thing a finished run shows is a spinner blinking
+        // out, and the duration a user actually waited has nowhere to live.
+        use ratatui::text::Line;
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new(Line::from(
+                crate::display::components::working_status::resolved_line(
+                    resolved.elapsed,
+                    resolved.tokens,
+                ),
+            )),
+            ratatui::layout::Rect::new(size.x, size.y, size.width, 1),
+        );
     }
 
     // Sheets go last, above the page, the help overlay and the spinner. A sheet
@@ -2357,6 +2374,94 @@ fn handle_session_nav(key: KeyEvent, state: &mut AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Render the whole surface through the real `render`, into a buffer.
+    fn screen(state: &AppState, w: u16, h: u16) -> String {
+        let backend = ratatui::backend::TestBackend::new(w, h);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let frame = terminal
+            .draw(|f| {
+                render(f, state, &PageRouter::new(), &CommandPalette::default());
+            })
+            .unwrap();
+        frame
+            .buffer
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+    }
+
+    /// §8's own words: *"On finish, resolve to ⎿ Thought for Xs · N tokens."*
+    ///
+    /// This test exists because `resolved_line` was **built, tested, and never
+    /// drawn** — nine tests on the component, zero callers outside them, and
+    /// the line the brief asks for absent from the screen. A unit test on the
+    /// component cannot see that, so the assertion is on the rendered buffer.
+    #[test]
+    fn a_finished_run_draws_what_the_working_line_resolved_into() {
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("test".into(), config, ".".into());
+        state.apply_event(DisplayEvent::StageStart {
+            role: AgentRole::Planner,
+        });
+        state.apply_event(DisplayEvent::StageDone {
+            role: AgentRole::Planner,
+            summary: vec!["Spec: 1 file".into()],
+            input_tokens: 1200,
+            output_tokens: 800,
+            cost_usd: 0.01,
+            latency_ms: 3400,
+        });
+
+        let out = screen(&state, 120, 40);
+        assert!(
+            out.contains('\u{23bf}'),
+            "the resolved glyph must be on the screen once the run is over: {out:?}"
+        );
+        assert!(
+            out.contains("Thought for"),
+            "and the sentence the brief asks for, not just a glyph: {out:?}"
+        );
+        assert!(
+            out.contains("tokens"),
+            "and the token count, since the user paid for it: {out:?}"
+        );
+        assert!(
+            out.contains("2.0k"),
+            "and it is the stage's own tokens — 1200 in, 800 out: {out:?}"
+        );
+    }
+
+    /// The spinner and the resolution must not both be on screen. A line that
+    /// says *done* under a run that is still going is worse than no line.
+    #[test]
+    fn a_running_run_does_not_also_draw_the_resolved_line() {
+        let config = crate::config::types::NikiConfig::default();
+        let mut state = AppState::new("test".into(), config, ".".into());
+        state.apply_event(DisplayEvent::StageStart {
+            role: AgentRole::Planner,
+        });
+        state.apply_event(DisplayEvent::StageDone {
+            role: AgentRole::Planner,
+            summary: vec!["Spec".into()],
+            input_tokens: 100,
+            output_tokens: 100,
+            cost_usd: 0.0,
+            latency_ms: 10,
+        });
+        // A second stage starts the next run segment; the first one's
+        // conclusion must not sit underneath it.
+        state.apply_event(DisplayEvent::StageStart {
+            role: AgentRole::Coder,
+        });
+
+        let out = screen(&state, 120, 40);
+        assert!(
+            !out.contains("Thought for"),
+            "a run still in progress must not be labelled as finished: {out:?}"
+        );
+    }
 
     #[test]
     fn display_event_apply() {

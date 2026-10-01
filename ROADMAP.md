@@ -563,6 +563,26 @@ parallel writes to one file is a lost update, and "reads are safe" is only
 true if a read cannot observe a half-applied write. The executor needs a
 per-path lock, not a read/write classification alone.
 
+### T1 was half-rendered — **COMPLETED in batch 8 (B8-01)**
+
+`resolved_line` was built with nine unit tests and **zero callers outside
+them**. `render_activity_spinner` drew `working_line` and the strip was
+rendered only `if state.has_running_stage()`, so the line the brief asks for —
+*"On finish, resolve to ⎿ Thought for Xs · N tokens"* — was absent from the
+screen. The component's tests all passed; a component's tests cannot see that
+nothing draws it. That is the same failure this repository has already produced
+twice (`working_status`, `input_probe`), and it was found here by asking what
+the built thing was *for*, not by running anything.
+
+`AppState::resolved_run` is set when the **last** running stage finishes — not on
+every stage, because "Thought for 12s" under a run that still has a Reviewer and
+a Tester to go is a claim about the wrong run — and cleared when a new one
+starts. The tests assert on the rendered `TestBackend` buffer, not on the
+component, which is the only place this defect was visible.
+
+**Can-fail proven twice:** removing the render branch, and never setting the
+state. Both go red on the buffer assertion.
+
 ### T2's hook layer — **BUILT (B7-26): `src/risk/hooks.rs`, 7 tests**
 
 §8's ordering is **static deny → hooks → classifier**, and the reason it insists

@@ -870,6 +870,17 @@ pub enum HoverTarget {
     ScrollUpIndicator,
 }
 
+/// What the working line resolved into: the run is over, and here is its size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedRun {
+    /// Whole-run elapsed time — the same number the working line was counting,
+    /// so the two lines agree about the same run.
+    pub elapsed: std::time::Duration,
+    /// Tokens for the stage that finished last. `None` when it reported none,
+    /// which is not the same as having reported zero.
+    pub tokens: Option<u32>,
+}
+
 /// The main application state — single source of truth for the UI.
 #[derive(Debug)]
 /// Canonical application state — single source of truth for the TUI.
@@ -982,6 +993,14 @@ pub struct AppState {
     pub finished: bool,
     /// Pipeline start time.
     pub start_time: Option<std::time::Instant>,
+    /// What the working line resolved into when the run ended.
+    ///
+    /// The spinner is drawn only while a stage is running, so without this the
+    /// last thing a user sees of a finished run is a line that blinks out —
+    /// no duration, no token count, nothing saying how long the thing they
+    /// waited for actually took. `resolved_line` was built and tested for
+    /// exactly that sentence and was never drawn; this is the state it needed.
+    pub resolved_run: Option<ResolvedRun>,
     // --- Chat view state (ported from pages::AppState) ---
     /// Current chat input text.
     pub chat_input: String,
@@ -1300,6 +1319,7 @@ impl AppState {
             artifacts_dir: None,
             finished: false,
             start_time: None,
+            resolved_run: None,
             chat_input: String::new(),
             chat_cursor: 0,
             chat_copy_mode: false,
@@ -1528,6 +1548,10 @@ impl AppState {
                 if self.start_time.is_none() {
                     self.start_time = Some(std::time::Instant::now());
                 }
+                // A new run begins, so the previous run's conclusion is no
+                // longer true of what is on screen. Leaving it would put
+                // "Thought for 12s" under a run that has been going for two.
+                self.resolved_run = None;
                 self.stages.push(StageInfo {
                     role,
                     status: StageStatus::Running,
@@ -1602,6 +1626,18 @@ impl AppState {
                 }
                 let total = input_tokens.saturating_add(output_tokens) as usize;
                 self.token_count = self.token_count.saturating_add(total);
+                // The run resolves when the *last* running stage finishes, not
+                // on every stage: `⎿ Thought for 12s` under a run that still has
+                // a Reviewer and a Tester to go would be a claim about the
+                // wrong run. Checked after the status change above, so
+                // `has_running_stage` already reflects it.
+                if !self.has_running_stage() {
+                    let tokens = input_tokens.saturating_add(output_tokens);
+                    self.resolved_run = Some(ResolvedRun {
+                        elapsed: self.start_time.map(|t| t.elapsed()).unwrap_or_default(),
+                        tokens: (tokens > 0).then_some(tokens),
+                    });
+                }
                 if self.context_limit > 0 {
                     self.context_usage = (self.token_count as f64) / (self.context_limit as f64);
                 }
