@@ -397,8 +397,16 @@ pub fn invariants() -> Vec<Invariant> {
                 } else {
                     fail(format!(
                         "these artifacts validate against their schema but say nothing: {}. \
-                         The shipped schemas declare no minItems/minLength, so an empty run is \
-                         indistinguishable from real work.",
+                         An empty run is indistinguishable from real work to anything that \
+                         reads the artifact rather than the run.",
+                        // The message used to add "the shipped schemas declare no
+                        // minItems/minLength". That was false when written and
+                        // stayed false: `code_diff.schema.json` declares
+                        // `"minItems": 1` on both `edits` and `files_changed`,
+                        // and `validate_artifact` rejects an empty diff with
+                        // "[] has less than 1 item". A failure message that
+                        // misstates the cause sends whoever reads it looking
+                        // for a schema bug that is not there.
                         hollow.join(", ")
                     ))
                 }
@@ -581,16 +589,10 @@ pub const LAYERS: &[&str] = &[
 /// Invariants that are known to fail against the current code. Each is a real,
 /// open defect with a written rule; removing an entry requires fixing the
 /// defect, not relaxing the invariant.
-pub const KNOWN_FAILING: &[(&str, &str)] = &[
-    (
-        "INV-TERMINAL-SAFE",
-        "raw model tokens are print!-ed to the terminal (display/agent_stream.rs:319)",
-    ),
-    (
-        "INV-ARTIFACT-SEMANTIC",
-        "artifact schemas declare no minItems/minLength, so a no-op validates cleanly",
-    ),
-];
+pub const KNOWN_FAILING: &[(&str, &str)] = &[(
+    "INV-TERMINAL-SAFE",
+    "raw model tokens are print!-ed to the terminal (display/agent_stream.rs:319)",
+)];
 
 /// Find the first dangerous terminal sequence in `body`.
 ///
@@ -642,11 +644,25 @@ fn is_semantically_empty(v: &Value) -> bool {
                     .get("strengths")
                     .and_then(|s| s.as_array())
                     .map(|a| a.len());
-                let has_text = o
-                    .get("summary")
-                    .and_then(|s| s.as_str())
-                    .map(|s| !s.trim().is_empty())
-                    .unwrap_or(false);
+                // **`overall_assessment`, with `summary` kept as a fallback.**
+                //
+                // The review schema's free-text field is `overall_assessment`;
+                // `summary` is not in it and has not been for some time. Reading
+                // only `summary` made `has_text` permanently false, so **every
+                // approved review with no issues was flagged as hollow** — and a
+                // clean approval is the *correct* outcome, not a hollow one. An
+                // invariant that cries wolf on a perfect review teaches a reader
+                // to ignore it, which is the one thing an audit-style check
+                // cannot afford.
+                //
+                // `summary` is still accepted so a record written before the
+                // rename is not suddenly reported as hollow.
+                let has_text = ["overall_assessment", "summary"].iter().any(|k| {
+                    o.get(*k)
+                        .and_then(|s| s.as_str())
+                        .map(|s| !s.trim().is_empty())
+                        .unwrap_or(false)
+                });
                 if issues == Some(0) && strengths == Some(0) && !has_text {
                     return true;
                 }

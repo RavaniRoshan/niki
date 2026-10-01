@@ -183,21 +183,102 @@ fn known_failing_invariants_are_still_failing() {
         .map(|(id, _, _)| *id)
         .collect();
 
+    // This fixture was built to reproduce two defects, and both are fixed in
+    // batch 8, so it must now carry **no** debt.
+    //
+    // Scoped to this fixture on purpose. The first draft generalised the loop to
+    // "every entry in KNOWN_FAILING must fire here", which is wrong:
+    // `INV-TERMINAL-SAFE` is reproduced by the OSC-52 trace in
+    // `a_model_emitting_osc52_trips_the_terminal_invariant`, not by this one.
+    // Requiring it here failed on a rule nobody wanted, which is the shape a
+    // check drifts into when it is written to be exhaustive rather than true.
     for (id, why) in KNOWN_FAILING {
-        if *id == "INV-ARTIFACT-SEMANTIC" {
-            // (INV-COST-SUM was removed from KNOWN_FAILING when the tool loop
-            // and repair-retry paths were switched from `.max()` to `+=`.)
-            assert!(
-                failing.contains(id),
-                "`{id}` is listed in KNOWN_FAILING but this trace no longer reproduces it. Fix \
-                 the defect and remove the entry, or update the reproduction. Known reason: {why}"
-            );
-        }
+        assert!(
+            !failing.contains(id),
+            "this fixture was fixed in batch 8, but `{id}` still fires on it — \
+             either that defect is back or it belongs to a different trace. \
+             Known reason: {why}"
+        );
     }
 
-    // The one defect this trace is built to reproduce must be the one that
-    // fires — otherwise the fixture has drifted into testing nothing.
-    assert!(failing.contains("INV-ARTIFACT-SEMANTIC"));
+    // **`INV-ARTIFACT-SEMANTIC` was struck in batch 8** — the last entry.
+    //
+    // Its stated cause was *"artifact schemas declare no minItems/minLength, so
+    // a no-op validates cleanly"*. Measured against the shipped schemas, that is
+    // false: `code_diff.schema.json` declares `"minItems": 1` on **both**
+    // `edits` and `files_changed`, and `validate_artifact` rejects an empty diff
+    // with *"[] has less than 1 item; [] has less than 1 item"*. The protection
+    // the entry asked for is in the schema, where it belongs.
+    //
+    // And the invariant's own hollow-test was wrong in the other direction: it
+    // read `summary`, a field `review_verdict.schema.json` has not had for some
+    // time, so `has_text` was permanently false and **every approved review
+    // with no issues was flagged hollow** — a clean approval being the correct
+    // outcome, not a hollow one.
+    //
+    // Both directions are now held below, and the schema-level rejection is
+    // asserted against the real validator.
+    // This fixture's `reviewer.json` has an **empty** summary and no issues, so
+    // it is hollow by design and still fires — correctly. The false positive
+    // was never about this shape; it was about a review that *had* written an
+    // assessment and was flagged anyway. That is the shape held below.
+    let clean_approval = invariants::check(&invariants::RunTrace {
+        task_dir: PathBuf::from("/nonexistent-task-dir"),
+        record: Some(serde_json::json!({"status": "Completed"})),
+        artifacts: [(
+            "reviewer.json".to_string(),
+            serde_json::json!({
+                "verdict": "approved",
+                "issues": [],
+                "strengths": [],
+                "overall_assessment": "Correct, and the regression is covered by a test.",
+            }),
+        )]
+        .into_iter()
+        .collect(),
+        patch: Some("diff --git a/src/list.rs b/src/list.rs\n".to_string()),
+        report: None,
+    });
+    let clean_verdict = clean_approval
+        .iter()
+        .find(|(id, _, _)| *id == "INV-ARTIFACT-SEMANTIC")
+        .map(|(_, _, v)| v)
+        .expect("the invariant is still registered");
+    assert!(
+        matches!(clean_verdict, Verdict::Pass),
+        "an approved review with no issues and a written assessment is the \
+         **correct** outcome, not a hollow artifact — flagging it would train a \
+         reader to ignore this check: {}",
+        describe(clean_verdict)
+    );
+
+    let hollow = invariants::check(&invariants::RunTrace {
+        task_dir: PathBuf::from("/nonexistent-task-dir"),
+        record: Some(serde_json::json!({"status": "Completed"})),
+        artifacts: [(
+            "reviewer.json".to_string(),
+            serde_json::json!({
+                "verdict": "approved",
+                "issues": [],
+                "strengths": [],
+                "overall_assessment": "",
+            }),
+        )]
+        .into_iter()
+        .collect(),
+        patch: Some("diff --git a/src/list.rs b/src/list.rs\n".to_string()),
+        report: None,
+    });
+    let hollow_verdict = hollow
+        .iter()
+        .find(|(id, _, _)| *id == "INV-ARTIFACT-SEMANTIC")
+        .map(|(_, _, v)| v)
+        .expect("the invariant is still registered");
+    assert!(
+        matches!(hollow_verdict, Verdict::Fail(_)),
+        "a verdict with no issues, no strengths and no assessment is still hollow: {}",
+        describe(hollow_verdict)
+    );
 
     // **`INV-STAGE-MANIFEST` was struck from `KNOWN_FAILING` in batch 8.**
     //
