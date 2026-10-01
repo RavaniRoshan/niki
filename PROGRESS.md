@@ -787,3 +787,149 @@ None.
 - The free tier's connection stability, not NIKI, bounds what a live-model run on this box
   can evidence. G4's real-model leg is therefore not a gate.
 
+
+## Iteration 6 — 2026-10-01 · batch 6, twelve slices
+
+Commits `84d3941`…`ee3b5d3`. Canary map 221 → 287. PTY suite 15 → 15.
+Lib tests 943 → 995.
+
+Batch 6 opened on the largest capability gap in the product and spent its
+middle on the process problem that gap exposed. Four of its ten slices are
+**record corrections** — the same failure batch 5 found three of, at a
+higher rate, because nothing was checking.
+
+| # | Commit | Slice |
+|---|---|---|
+| B6-01 | `84d3941` | The two human-input tools say what the model can act on |
+| B6-02 | `733533a` | §2's tool-card renderer is live; the record said it was not |
+| B6-03 | `a6dde45` | `approval` can reach the user in a TUI run |
+| B6-04 | `cc8f8a6` | `ask_user` has a modal of its own, and can reach the user |
+| B6-05 | `824bb9d` | Four of §6's five claims had rotted; the fifth was two doc lies |
+| B6-06 | `01fbd24` | §4.5, §5 and §9.3/§9.4 were four claims the code had fixed |
+| B6-07 | `11c4bd5` | The record gets teeth: open claims are pinned |
+| B6-08 | `62b7c22` | The recommended backend gets in-file tests, and one finds a bug |
+| B6-09 | `8fd69d0` | The default backend gets in-file tests, and its name gets sanitised |
+| B6-10 | `ee3b5d3` | The question modal answers a flag the user cannot see |
+| B6-11 | this commit | Batch 6's record |
+| B6-12 | — | Full nine-gate run |
+
+### The gap: in a TUI run, the model could not talk to you
+
+`ask_user` and `approval` read stdin, and the interface owns stdin — it holds
+it in raw mode and runs its own `event::read()`. A `read_line` in a tool would
+race that for the next keypress and, in raw mode, return after a single
+keystroke with no newline, so a stray `y` typed at the *interface* could be
+taken as consent to a command it never showed the user. Failing closed was
+correct, and stayed.
+
+What was wrong was the conclusion drawn from it: *nobody is there to ask*.
+There is. The interface had been collecting answers for the sandbox's
+`PermissionRequest` all along; the two were simply never connected. So:
+
+- `ToolContext` carries an optional `HumanInput` — that channel plus
+  `[permissions] prompt_timeout_seconds` — and the pipeline builds it from
+  `display.tui_tx()`.
+- `approval` puts the command to the interface and waits. It renders the
+  **same modal** the sandbox's own prompts use, so a command approved through
+  the tool and one approved through the sandbox take one path. No new UI.
+- `ask_user` got `components/ask_user.rs`: a cursor you can move, `1`–`9` to
+  pick a choice, Enter to send, and **Esc as a cancel rather than a refusal**.
+
+The three outcomes stay three throughout. An explicit refusal says the *user*
+refused; an unanswered question says it is a timeout and not a refusal; a run
+with no interface says **nobody was asked** and never says "denied by user",
+which would attribute a decision to a human who was never consulted.
+
+### Four record corrections, and why the rate went up
+
+Nothing was wrong with the *code* in any of these. The record had moved on and
+the record had not:
+
+| Claim | Measured |
+|---|---|
+| §2's tool cards are "unreachable" | called from two production sites; the chat sends no tools by the §0a decision, the pipeline's render |
+| §6's `.niki-worktrees/` is not ignored | `ensure_git_excluded` writes `.git/info/exclude`, and `is_publishable_path` refuses the path |
+| §6's `acp`/`goal` destroy the Coder's work | both call `deliver`; `record.branch` holds a branch name |
+| §6's `multi_provider.rs` is 8/26 tautological | 28 tests, every provider case asserts an endpoint; 27 prior tests stayed green when one was hardcoded |
+| §5's Google never emits `Finish` | `google.rs:308-311`, with 7 wiremock tests |
+| §5's Coder loop swallows errors with `.ok()?` | an `Err` arm writing to stderr since batch 2 |
+| §9.3's agent retry matcher misses 500/502 | it reads the status and judges it with `send_request`'s predicate |
+| §9.4's `git.rs:158` fixed temp path | that line is the `git diff` error arm |
+
+The fifth §6 claim was **real**, and it was not the code: the README feature
+table and `niki.example.toml` both told a user their MCP tools are injected
+into agent prompts. They are not. Both now say so, and two tests hold them
+there.
+
+B6-07 is the answer to the pattern. Every open claim that reduces to something
+checkable is registered in `tests/record_claims_are_pinned.rs` with the test
+that checks it, and that test must itself be in the canary map — so a claim
+cannot be left unpinned, a pin cannot point at a test that no longer exists,
+and a **new** numbered item naming a source with no row fails the gate.
+
+`ROADMAP.md` gains a §0 saying so: the record is re-measured, not appended
+to; a bullet is not evidence; a code comment is not evidence.
+
+### The pin, fired and retired
+
+`the_docker_backend_still_has_no_unit_tests` was written in B6-07 and
+deleted in B6-09, in the same commit that made it false. §6's bullet went with
+it. That is the cycle the pin was built for, run to completion for the first
+time: the failure *is* the signal to update the record.
+
+### Five defects found by writing the tests
+
+| Found by | Defect |
+|---|---|
+| `a_tiny_terminal_does_not_break_the_permission_modal` | the modal clamped its height to the area and then floored it at 8, so a short terminal produced a box **taller than the screen** and the renderer indexed outside the buffer — a panic, on resize, with a destructive command waiting on the answer |
+| `dismissing_a_question_is_not_an_answer` | a dismissed question reported `Success`: `matches!(answer, Questioned(_))` is true for a cancel |
+| `teardown_takes_this_task_and_its_siblings_and_nothing_else` | `cleanup_worktrees_for_task` matched any `<id>-` prefix, so Ctrl+C for `task-1` deleted `task-1-backup`; a sibling is always `<id>-<digits>` |
+| `the_greedy_walk_scores_below_the_floor_where_the_table_does_not` | (the test found no defect — it found that **its own first example was a false green**, see below) |
+| `every_role_produces_an_acceptable_container_name` | the container name is `{:?}`-formatted from a role and passed through no sanitiser; a role name that is not a plain identifier fails the run at create, with an error naming a string the user never typed |
+
+### The theme, again: a test that cannot fail
+
+Nine false greens this batch, and the count is the number of times a test was
+written and *believed* before it was broken:
+
+| Test | Why it stayed green |
+|---|---|
+| `a_tool_call_becomes_a_card` | asserted `ToolCard::new(`; a sabotage that kept the call and replaced its **arguments** passed |
+| `an_open_question_takes_every_key` | asserted `Consumed`; with the question wired out of the ladder, something *behind* it consumed the key |
+| `the_coder_loop_reports_its_failure` | searched the whole function for `eprintln!`; an unrelated one four lines away satisfied it |
+| `a_new_numbered_item_…_is_accounted_for` | read the table opener `\| 9.9` as a line with no leading number, so a new unpinned row sailed past the check the file exists for |
+| `the_greedy_walk_…_where_the_table_does_not` | its "mis-remembered line" example passed with the exact table switched **off** — it was not witnessing the regression at all |
+| `two_runs_get_different_names` (docker) | compared `name + "x"` with `name + "y"`, which cannot differ |
+| `the_sanitiser_matches_the_runtimes_rule` | asserted `is_acceptable(out) == true` on every row, so a sanitiser that mangled valid names passed |
+| `every_pinned_claim_is_still_an_open_bullet` | flagged §9.2, a **struck** bullet carrying a live sub-claim — and was deleted rather than fixed, because it was wrong |
+| `a_short_string_is_not_truncated` | my own miscount: `"exactly-10!"` is 11 characters |
+
+The three corrective moves are now reflexes: **count** rather than `contains`,
+**name the region** rather than window it, and **assert the sabotage applied**
+before believing its result. Two sabotages in this batch did not apply at all
+because `cargo fmt` had rewrapped the anchor, and the test passed anyway.
+
+### Next
+
+§9.1 (resuming a pipeline from a checkpoint) and §9.2 (MCP's agent→server call
+path) are the only two open items left that are not a decision, and both are
+recorded as decisions. §9.8 is the unpushed branch. Everything in §1, §2, §4,
+§5 and §6 is closed. `ROADMAP.md` §8 — the four Claude-Code-architecture tasks
+— is queued and untouched, per the owner's ordering.
+
+### Blockers
+
+Unchanged from batch 5; see `BLOCKERS.md`. **B1** (no push, so G8 stays red) is
+the owner's standing decision, not a failure to fix.
+
+### Assumptions in force
+
+- A run has one interface per process, which is what lets a single
+  `HumanInput` channel stand in for "whoever is driving this run". Two TUIs in
+  one process would need a per-run channel.
+- `tokio`'s `spawn_blocking` is available wherever the tool loop runs, so
+  `ask_permission` awaits rather than calling `block_in_place` — the sandbox's
+  own prompt still does, and would panic on a current-thread runtime.
+- The 8-character container-name truncation is a known ~1-in-4·10⁹ collision
+  window, chosen over a longer name for readability, and now asserted as a
+  window rather than assumed away.

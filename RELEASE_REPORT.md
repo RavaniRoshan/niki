@@ -559,3 +559,85 @@ detection).
 The order is the same one that produced batches 1–3: the contract clauses
 first, then whatever unblocks the most downstream work, then the honesty and
 correctness defects a first-time user hits, then coverage and hygiene.
+
+## 2f · Batch 6 — giving the model a way to ask, and the record a way to rot
+
+Eleven commits, `84d3941`…`ee3b5d3`. Canary map 221 → 287. PTY 15 → 15.
+Lib tests 943 → 995.
+
+Batch 6 opened on the largest capability gap in the product and spent its
+middle on the process problem that gap exposed.
+
+### In a TUI run, the model could not talk to you
+
+`ask_user` and `approval` read stdin, and the interface owns stdin — it holds
+it in raw mode and runs its own `event::read()`. A `read_line` in a tool races
+that for the next keypress and, in raw mode, returns after a single keystroke
+with no newline, so a stray `y` typed at the *interface* could be taken as
+consent to a command it never showed the user. Failing closed was correct.
+
+What was wrong was the conclusion: *nobody is there to ask*. There is. The
+interface had been collecting answers for the sandbox's `PermissionRequest`
+all along; the two were never connected. Both tools are offered to every
+agent, and in the product's primary surface both could only ever fail.
+
+- `ToolContext` carries an optional `HumanInput` — that channel plus
+  `[permissions] prompt_timeout_seconds` — and the pipeline builds it from
+  `display.tui_tx()`.
+- `approval` puts the command to the interface and waits, rendering the
+  **same modal** the sandbox's own prompts use. A command approved through the
+  tool and one approved through the sandbox take one path; no new UI.
+- `ask_user` got `components/ask_user.rs` — a moving cursor, `1`–`9` to pick a
+  choice, Enter to send, and **Esc as a cancel, not a refusal**.
+
+The three outcomes stay three. An explicit refusal says the *user* refused; an
+unanswered question says it is a timeout and not a refusal, and ends at the
+configured deadline; a run with no interface says **nobody was asked** and
+never says "denied by user".
+
+### Four record corrections in ten slices
+
+Nothing was wrong with the code in any of these — §2's tool cards, §6's
+`.niki-worktrees/` ignore, §6's `acp`/`goal` data loss, §6's tautological
+provider tests, §5's Google `Finish`, §5's swallowed Coder errors, §9.3's
+retry matcher, §9.4's temp path. All eight described fixes that had shipped
+one or two batches earlier, because closing a defect in the code did not
+close the bullet that named it.
+
+The fifth §6 claim was real, and it was the **documentation**: the README
+feature table and `niki.example.toml` both told a user their MCP tools are
+injected into agent prompts. They are not — `tools_summary` says `NOT YET
+CALLABLE` and routes the line to a display notice, never to a model.
+
+### The fix for the fix: pins
+
+`tests/record_claims_are_pinned.rs` registers every open claim that reduces
+to something checkable, with the test that checks it, and that test must
+itself be in the canary map. So a claim cannot be left unpinned, a pin cannot
+point at a test that no longer exists, and a **new** numbered item naming a
+source with no row fails the gate. `ROADMAP.md` §0 says all of this.
+
+`the_docker_backend_still_has_no_unit_tests` was written in B6-07 and deleted
+in B6-09, in the commit that made it false. The failure *is* the signal.
+
+### Five defects the tests found
+
+| Defect | Consequence |
+|---|---|
+| The permission modal floored its height at 8 **after** clamping to the area | a box taller than the screen; the renderer indexed outside the buffer — a panic, on resize, with a destructive command waiting on the answer |
+| A dismissed question reported `Success` | the model was told a user had engaged when nobody did, and the run counted an interaction that never happened |
+| `cleanup_worktrees_for_task` matched any `<id>-` prefix | Ctrl+C for `task-1` deleted `task-1-backup`; a sibling is always `<id>-<digits>` |
+| The container name is `{:?}`-formatted and unsanitised | a role name that is not a plain identifier fails the run at create, with an error naming a string the user never typed |
+| The question modal gated on a payload rather than the visible flag | an invisible question answering itself and swallowing the key |
+
+### Nine false greens, which is the number that matters
+
+Every one was a test believed before it was broken: a card test asserting
+`ToolCard::new(` where a sabotage had replaced its *arguments*; a ladder test
+asserting `Consumed` where something behind the question consumed the key; an
+`eprintln!` search that an unrelated one four lines away satisfied; a table
+parser that read `| 9.9` as having no leading number; a greedy-walk example
+that passed with the exact table switched **off**; two docker tests that
+could not fail by construction. One check I wrote was simply *wrong* — it
+flagged a struck bullet carrying a live sub-claim — and was deleted rather
+than made to fit.
