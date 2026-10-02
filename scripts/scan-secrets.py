@@ -69,23 +69,37 @@ PATTERNS: dict[str, re.Pattern[str]] = {
 LITERAL = re.compile(r"""(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)""", re.S)
 
 
-def splice_literals(text: str) -> str:
-    """Return every string literal's contents, concatenated in source order.
+def splice_literals(text: str, max_gap: int = 200) -> str:
+    """Concatenate the contents of *nearby* string literals.
 
-    Not "replace each literal with its contents" — that keeps the source text
-    *between* literals, so two literals on separate lines stay separated by a
-    newline and the credential is still broken across the join. That is
-    exactly the shape this exists to catch, so the text between them has to go
-    too.
+    A secret is written as two adjacent literals — the real one was
+    `"nvapi-2XcDwy…",` / `"dU8Up1X9…"` on consecutive lines, about 20 characters
+    apart — so joining a bounded window catches it.
 
-    Joining every literal with no separator is deliberately more aggressive
-    than the compiler. `splice(&["nvapi-2Xc…", "dU8Up…"])` is an array, and
-    nothing concatenates those at compile time; the runtime does. A scanner
-    that only modelled literal adjacency would miss it. False positives here
-    cost an allowlist entry; false negatives cost a credential, so this errs
-    hard toward reporting.
+    An earlier version joined **every** literal in the file with nothing
+    between them. That found the key, and it found itself: in
+    `src/cli/doctor.rs` it joined the corpus canary `"sk-ant-api03-AAAAAA"` to a
+    backticked commit id in a doc comment a thousand characters later, and
+    reported
+
+        sk-ant-api03-AAAAAA<commit-id>nvapi-<fn>NAME
+
+    as a credential — one real prefix, a git sha, a function name and a label,
+    spliced from three unrelated literals. Written out in full that example
+    would itself match this scanner's `sk-ant-` rule, so it is elided here.
+
+    Beyond `max_gap` the run is broken with a newline, which no credential shape
+    can cross. Erring wide: a secret split by more than 200 characters of source
+    is not something anyone writes.
     """
-    return "".join(m.group(0)[1:-1] for m in LITERAL.finditer(text))
+    out: list[str] = []
+    prev_end: int | None = None
+    for m in LITERAL.finditer(text):
+        if prev_end is not None and m.start() - prev_end > max_gap:
+            out.append("\n")
+        out.append(m.group(0)[1:-1])
+        prev_end = m.end()
+    return "".join(out)
 
 
 def scan_text(text: str) -> list[tuple[str, str, int]]:
@@ -94,6 +108,8 @@ def scan_text(text: str) -> list[tuple[str, str, int]]:
     seen: set[tuple[str, str]] = set()
 
     for pass_name, blob in (("raw", text), ("spliced", splice_literals(text))):
+        for literal in KNOWN_SAFE_LITERALS:
+            blob = blob.replace(literal, "[known-safe-fixture]")
         for name, pattern in PATTERNS.items():
             for match in pattern.finditer(blob):
                 matched = match.group(0)
@@ -130,25 +146,61 @@ EXCLUDED_PREFIXES = (
     "examples/",
 )
 
-# Individual files allowed to hold a credential-shaped string, each with the
-# reason it cannot be moved out. This is deliberately a per-file list rather
-# than a per-line one: a finer allowlist invites the kind of edit nobody
-# re-reads, and one whole file is a boundary a human can actually check.
+# Values we author that are credential-*shaped* and are not credentials.
 #
-# `tests/test_secret_scan_can_fail.rs` pins this list's exact contents, so
-# adding an entry here fails a test that has to be updated deliberately.
-ALLOWED_FILES: dict[str, str] = {
-    "src/cli/doctor.rs": (
-        "redaction_corpus() — niki doctor runs this at runtime to check that "
-        "provider keys are masked, so the shape has to exist in the binary. "
-        "The values are fabricated; one of them was a real key until the "
-        "split-literal scan below caught it."
+# Value-level on purpose. An earlier version allowlisted whole *files* — which
+# meant `src/cli/doctor.rs` was unscannable in the tree, and a real key pasted
+# into the redaction corpus would have been invisible to both passes. Naming
+# the literals instead means a real key in that file still trips the scan; only
+# the shapes we wrote are exempt.
+#
+# Every entry is a fixture from `redaction_corpus()` in `src/cli/doctor.rs`, or
+# a canary the test suite also quotes in `BLOCKERS.md` and `EVIDENCE.md` — which
+# is why the *history* scan needs them: `tests/` is excluded by path, but a doc
+# that quotes a fixture is not.
+#
+# Fixtures that live **only** under `tests/` are deliberately absent. Exempting
+# them here would make `tests/secret_scan_can_fail.rs` vacuous: it asserts the
+# scanner finds canaries in the test suite, and an allowlist entry containing
+# those same canaries means the scanner is only finding them because it was
+# told not to.
+CORPUS = "redaction_corpus() fixture in src/cli/doctor.rs"
+
+KNOWN_SAFE_LITERALS: dict[str, str] = {
+    # Complete runtime values only. Never a fragment.
+    #
+    # An earlier version of this list included the *halves* the corpus
+    # assembles with `splice()`. That was wrong in a way the can-fail test
+    # caught: `"AbCdEfGhIjKlMnOpQrSt"` is a substring of a perfectly good
+    # Anthropic-shaped key, so exempting it silently disabled detection of any
+    # key containing that run — and an allowlist that can hide a real key is
+    # worse than no allowlist. The joined form is exempt instead, which cannot
+    # mask anything else.
+    #
+    # `nvapi-A1b2C3d4E5f6G7h8I9j0` is the one half listed on its own, and it is
+    # a complete key shape in the source: `nvapi` plus 24 characters, which the
+    # rule matches on its own.
+    "AIzaSyA0123456789012345678901234567890A": CORPUS,
+    "AKIAIOSFODNN7EXAMPLE": CORPUS,
+    "ghp_012345678901234567890123456789012345": CORPUS,
+    "hf_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789": CORPUS,
+    "nvapi-A1b2C3d4E5f6G7h8I9j0": "complete NVIDIA corpus sample, first literal",
+    "nvapi-A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v2W3x4Y5z6": CORPUS,
+    "sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": CORPUS,
+    "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": CORPUS,
+    "sk-ant-api03-AAAAAANVIDIAnvapi-ROTATEDROTATED2XcDwyksXdofV7sVL25dBPV2AWS": (
+        "NOT a fixture and NOT a credential: an artefact of the spliced pass "
+        "over historical revisions of src/cli/doctor.rs, where this scanner's "
+        "own incident report sat next to the corpus labels. Assembled from a "
+        "corpus canary, the label \"NVIDIA\", the redaction placeholder, and "
+        "the tail of the key's first half inside a doc comment. Listed as one "
+        "complete string so the exemption cannot mask a different key."
+    ),
+    "sk-canary0123456789abcdefghijklmnop": (
+        "canary in tests/providers_catalogue_echo.rs and "
+        "tests/pipe_to_early_reader.rs — quoted in the reports that cite them"
     ),
 }
-
-
-def allowed_reason(path: str) -> str | None:
-    return ALLOWED_FILES.get(path)
 
 
 def scan_diff(diff: str) -> list[tuple[str, str, str]]:
@@ -171,11 +223,12 @@ def scan_diff(diff: str) -> list[tuple[str, str, str]]:
         if not added:
             return
         blob = "\n".join(added)
-        # Deliberately **not** consulting ALLOWED_FILES here. The allowlist
-        # says "this file holds a fabricated shape *now*", which is true after
-        # the fix and was false before it — and the real key is in exactly that
-        # file's history. Applying it here would hide the finding the history
-        # scan exists to produce.
+        # The value-level KNOWN_SAFE_LITERALS strip already ran inside
+        # `scan_text`, so the redaction corpus and the test canaries are gone
+        # from `blob` before anything is matched — in the tree pass *and* in
+        # the history pass, on purpose. An earlier version exempted whole
+        # files here, which would have hidden the real key: it lived in
+        # exactly the file that was exempt.
         if path and not path.startswith(EXCLUDED_PREFIXES):
             for name, preview, _ in scan_text(blob):
                 findings.append((path, name, preview))
@@ -239,14 +292,6 @@ def main() -> int:
         except (OSError, IsADirectoryError):
             continue
         for name, preview, line in scan_text(text):
-            reason = allowed_reason(path)
-            if reason is not None:
-                print(
-                    f"{path}:{line}: allowed — {name}: {preview}\n"
-                    f"    (allowlisted: {reason})",
-                    file=sys.stderr,
-                )
-                continue
             # The full match is never printed. A scanner that echoes the
             # secret it found has just leaked it into CI logs.
             print(f"{path}:{line}: {name}: {preview}")

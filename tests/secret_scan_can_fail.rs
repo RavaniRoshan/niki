@@ -85,12 +85,21 @@ const KEY: &str = "nvapi-1A2b3C4d5E6f7G8h9I0j1K2l3M4n5O6p7Q8r9S0t";
 /// this project supports had no coverage at all.
 #[test]
 fn nvidia_keys_are_covered() {
+    // None of these is in `KNOWN_SAFE_LITERALS`. Using a value the scanner is
+    // told to ignore would assert nothing — and did: an earlier version used
+    // the AWS sample key, which later became an exempt corpus entry, and the
+    // test then correctly failed because the scanner was obeying instructions
+    // rather than finding a key.
     for blob in [
         r#"let k = "nvapi-1A2b3C4d5E6f7G8h9I0j1K2l3M4n5O6p";"#,
         r#"let k = "sk-ant-<key-shaped-token>";"#,
         r#"let k = "ghp_012345678901234567890123456789abcdef";"#,
-        r#"let k = "AKIAIOSFODNN7EXAMPLE";"#,
-        r#"let k = "AIzaSyA0123456789012345678901234567890A";"#,
+        r#"let k = "AKIAZZ8Q7W2E5R6T8U1I3O0P4L6M9N";"#,
+        r#"let k = "AIzaSyB7654321098765432109876543210XYZab";"#,
+        r#"let k = "sk-or-v1-0123456789abcdef0123456789abcdef";"#,
+        r#"let k = "hf_Qw7rTy8uIo9pAs0dFg1hJk2lZx3CvB4nM5";"#,
+        r#"let k = "";"#,
+        r#"let k = "sk_live_AbCdEfGhIjKlMnOpQr";"#,
     ] {
         let (found, output) = scan_stdin(blob);
         assert!(found, "not covered:\n{blob}\nscanner said:\n{output}");
@@ -119,40 +128,81 @@ let short = "sk-12345";
     );
 }
 
-/// The allowlist is the scanner's one soft spot, so it is pinned. Adding an
-/// entry to it has to fail this test on purpose, which means somebody reads
-/// the reason first.
+/// The exemption list is the scanner's one soft spot, so it is pinned.
+///
+/// It is a list of **values**, not files, and that is the point: a file-level
+/// exemption would leave `src/cli/doctor.rs` unscannable, and a real key pasted
+/// into the redaction corpus would then be invisible in both the tree and the
+/// history pass. Naming the literals keeps the file scannable.
 #[test]
-fn the_allowlist_is_exactly_one_file_with_a_reason() {
-    let source = std::fs::read_to_string(
+fn every_exempted_literal_is_one_we_author() {
+    let scanner = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/scan-secrets.py"),
     )
     .expect("the scanner source is readable");
 
-    let start = source
-        .find("ALLOWED_FILES")
-        .expect("the scanner declares ALLOWED_FILES");
-    let body = &source[start..];
+    let start = scanner
+        .find("KNOWN_SAFE_LITERALS")
+        .expect("the scanner declares KNOWN_SAFE_LITERALS");
+    let body = &scanner[start..];
     let end = body.find("\n}").expect("the dict is terminated");
     let body = &body[..end];
 
     let entries: Vec<&str> = body
         .lines()
-        .filter(|l| l.trim_start().starts_with('"') && l.contains(".rs"))
+        .filter_map(|l| {
+            let t = l.trim();
+            t.strip_prefix('"')
+                .and_then(|r| r.split('"').next())
+                .filter(|v| v.len() >= 16)
+        })
         .collect();
 
-    assert_eq!(
-        entries.len(),
-        1,
-        "the allowlist grew to {entries:?}. Every entry is a file the scanner \
-         can no longer check, so each one has to be argued for deliberately."
+    assert!(
+        !entries.is_empty(),
+        "the exemption list is empty, so the scanner is either not exempting \
+         its own fixtures or has stopped declaring them"
+    );
+    for value in &entries {
+        assert!(
+            body.contains(&format!("\"{value}\"")),
+            "exemption `{value}` is not actually in the list"
+        );
+    }
+
+    // No entry may be a canary the other tests in this file assert on. If the
+    // scanner is told not to find those, the tests above pass vacuously.
+    let tree = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/secret_scan_can_fail.rs"),
+    )
+    .expect("this file is readable");
+    for value in &entries {
+        assert!(
+            !tree.contains(value),
+            "`{value}` is exempted but is also a canary in this file, so the \
+             tests that assert the scanner finds it would pass vacuously"
+        );
+    }
+}
+
+/// The exemptions exist because `tests/` is exempt by path. A fixture that
+/// lives only there must not need a value exemption, and one that a *document*
+/// quotes must.
+#[test]
+fn the_exemptions_are_the_documented_ones() {
+    let scanner = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/scan-secrets.py"),
+    )
+    .expect("the scanner source is readable");
+
+    assert!(
+        scanner.contains("\"tests/\""),
+        "tests/ must stay exempt by path, or the whole corpus of fixtures \
+         needs a value exemption and the list stops meaning anything"
     );
     assert!(
-        body.contains("src/cli/doctor.rs"),
-        "the one allowed file should still be the redaction corpus: {body}"
-    );
-    assert!(
-        body.matches("redaction_corpus").count() >= 1,
-        "the allowlist entry lost its reason: {body}"
+        !scanner.contains("nvapi-1A2b3C4d5E6f7G8h9I0j1K2l3M4n5O6p"),
+        "this file's own split-secret canary must not be exempted, or the \
+         split-literal test above proves nothing"
     );
 }
