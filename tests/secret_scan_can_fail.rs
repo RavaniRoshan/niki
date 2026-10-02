@@ -98,7 +98,11 @@ fn nvidia_keys_are_covered() {
         r#"let k = "AIzaSyB7654321098765432109876543210XYZab";"#,
         r#"let k = "sk-or-v1-0123456789abcdef0123456789abcdef";"#,
         r#"let k = "hf_Qw7rTy8uIo9pAs0dFg1hJk2lZx3CvB4nM5";"#,
-        r#"let k = "";"#,
+        // Assembled, not literal: GitHub's own push protection blocks a push
+        // that contains a string it recognises as a Slack token, and it
+        // recognises this one. The coverage is what matters, so the value is
+        // built at runtime and the literal never reaches the repository.
+        &format!("let k = \"xox{}-1234567890-abcdefghijklmno\";", "b"),
         r#"let k = "sk_live_AbCdEfGhIjKlMnOpQr";"#,
     ] {
         let (found, output) = scan_stdin(blob);
