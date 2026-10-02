@@ -1,13 +1,19 @@
 # NIKI Repository Audit — Launch Readiness
 
 > **Date:** 2026-09-30
-> **Crate version:** 0.9.0 (unreleased) · **MSRV:** 1.88 · **Edition:** 2024
+> **Crate version:** 0.10.0 (unreleased) · **MSRV:** 1.88 · **Edition:** 2024
 >
-> 0.9.0 has not been cut. The installer manifests in `homebrew/`, `scoop/`
-> and `winget/` therefore point at **0.8.0**, the newest release that exists,
-> with 0.8.0's checksums — while `Cargo.toml` says 0.9.0, which is what the
-> source tree is. `docs_consistency.rs` asserts the two agree; it is the
-> *release*, not the docs, that closes the gap. The count in the table below
+> **0.10.0 has not been cut yet**, so the installer manifests in `homebrew/`,
+> `scoop/` and `winget/` still point at **0.9.0** — the newest release that
+> exists — with 0.9.0's checksums, while `Cargo.toml` says 0.10.0, which is
+> what the source tree is. That window is expected and closes when the tag is
+> pushed and the manifests are repinned from the build's `sha256.sum`.
+>
+> This paragraph previously said 0.9.0 had not been cut and that the manifests
+> pointed at 0.8.0. It was wrong by the time it was read: 0.9.0 shipped, and
+> the manifest-parity gate had been green on it. A document that describes a
+> release state nobody re-derives is a guess with a citation, which is the
+> same thing the table below is a table for. The count in the table below
 > is the tree as it stands.
 > **Purpose:** State, without hedging, what this repository actually is.
 
