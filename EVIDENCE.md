@@ -2781,21 +2781,21 @@ public repository. It was committed as two adjacent string literals:
 
 ```rust
 splice(&[
-    "nvapi-ROTATED",
-    "ROTATED",
+    "nvapi-2XcDwy…"   # first half,
+    "dU8Up1X9…"   # second half,
 ]),
 ```
 
 ```
 $ python3 -c "
-committed = 'nvapi-ROTATED' + 'ROTATED'
+committed = 'nvapi-2XcDwy…' + 'ROTATED'
 pasted   = 'nvapi-…'
 print('IDENTICAL:', committed == pasted)"
 IDENTICAL: True
 ```
 
 Every other row of that corpus is visibly fabricated — `sk-proj-AAAA…`,
-`AKIAIOSFODNN7EXAMPLE`, `ghp_0123456789…`. That one row was real, and split
+`AKIA…" (a fake AWS example key, AWS' documented sample)`, `ghp_0123456789…`. That one row was real, and split
 across two literals so a line-based scanner would miss it.
 
 ### The gate that reported PASS
@@ -2879,3 +2879,63 @@ NVIDIA key, and a fixture canary of mine quoted in an earlier commit's
 `EVIDENCE.md`. Neither was silenced. Clearing them needs key rotation (only
 the owner) and a history rewrite with a force-push (stop-and-ask), so this is
 recorded as **B8** rather than fixed quietly. See `BLOCKERS.md`.
+
+### The scanner caught this report
+
+Worth recording on its own. With the scanner wired in, the **tree** scan
+failed — seven findings, all in files written in this same session:
+
+```
+BLOCKERS.md:175: nvidia (nvapi-): nvapi-2XcDwy…
+BLOCKERS.md:237: openai (sk-): sk-canary012…
+EVIDENCE.md:2784: nvidia (nvapi-): nvapi-2XcDwy…
+scripts/scan-secrets.py:15: nvidia (nvapi-): nvapi-2XcDwy…
+RELEASE_REPORT.md:87: aws (AKIA): AKIAIOSFODNN…
+src/cli/doctor.rs:76: nvidia (nvapi-): nvapi-A1b2C3…   (allowlisted)
+```
+
+Removing the key from `doctor.rs` and then quoting it verbatim in three
+documents — including the scanner's own docstring — put it straight back. That
+is not a defect in the scan; it is the scan working. A credential in
+documentation is a credential in the repository.
+
+Masked everywhere. Masking is not deletion-by-silent-edit either: the shape,
+the file, the commit and the split-literal form are all still described, so
+the finding remains fully documented and fully actionable.
+
+```
+$ python3 scripts/scan-secrets.py
+src/cli/doctor.rs:76: allowed — nvidia (nvapi-): nvapi-A1b2C3…
+    (allowlisted: redaction_corpus() …)
+scanned 659 path(s); 0 finding(s)
+$ echo $?
+0
+```
+
+### The gate, as it now stands
+
+```
+$ ./scripts/verify.sh --only=G5
+G5  PASS  advisories ok, bans ok, licenses ok, sources ok
+G5  PASS  warning: 11 allowed warnings found
+G5  PASS  scanned 659 path(s); 0 finding(s)
+G5  PASS  no credentials in the tracked tree
+G5  FAIL  rc=1 — see .evidence/g5-secret-history.log
+1 gate(s) failed
+```
+
+One gate red, and it is the one that should be:
+
+```
+$ sort -u .evidence/g5-secret-history.log
+BLOCKERS.md: aws (AKIA): AKIAIOSFODNN…
+BLOCKERS.md: nvidia (nvapi-): nvapi-2XcDwy…
+EVIDENCE.md: nvidia (nvapi-): nvapi-2XcDwy…
+scripts/scan-secrets.py: nvidia (nvapi-): nvapi-2XcDwy…
+src/cli/doctor.rs: nvidia (nvapi-): nvapi-2XcDwy…    ← the real one
+src/cli/doctor.rs: nvidia (nvapi-): nvapi-A1b2C3…    ← the replacement
+```
+
+The docs entries are earlier commits, before the masking above. They disappear
+in the same history rewrite as the key. Until then they stay, because a green
+gate over a red finding is the failure this whole programme is about.

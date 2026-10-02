@@ -12,8 +12,8 @@ That has two holes, and a live NVIDIA API key walked through both of them:
    literals, concatenated at runtime:
 
        splice(&[
-           "nvapi-ROTATED",
-           "ROTATED",
+           "nvapi-2XcDwy…"   # first half,
+           "dU8Up1X9…"   # second half,
        ])
 
    No regex over raw bytes can see that. The two halves are individually too

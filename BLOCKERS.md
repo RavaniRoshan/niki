@@ -172,14 +172,14 @@ It was committed as two adjacent string literals:
 
 ```rust
 splice(&[
-    "nvapi-ROTATED",
-    "ROTATED",
+    "nvapi-2XcDwy…"   # first half,
+    "dU8Up1X9…"   # second half,
 ]),
 ```
 
 which concatenates at runtime to a byte-identical copy of the live key. Every
 other row of that corpus is visibly fabricated — `sk-proj-AAAA…`,
-`AKIAIOSFODNN7EXAMPLE`, `ghp_0123456789…`. This one row was real, almost
+`AKIA…" (a fake AWS example key, AWS' documented sample)`, `ghp_0123456789…`. This one row was real, almost
 certainly copied from a working session while the corpus was being written, and
 split across two literals so a line-based scanner would not match it.
 
@@ -234,7 +234,7 @@ src/cli/doctor.rs: nvidia (nvapi-): nvapi-2XcDwy…
    doing it unilaterally. It also does not rescue the key — see (1).
 
 3. **`EVIDENCE.md` history finding.** My own doing: a fixture canary
-   (`sk-canary0123456789abcdefghijklmnop`) is quoted in the command output of
+   (`sk-canary…" (a fixture canary)`) is quoted in the command output of
    the CodeQL slice. It is not a credential and the current tree masks it, but
    it is in an earlier commit, so the history scan reports it. It disappears
    in the same rewrite as (2). If the rewrite is declined, the right answer is

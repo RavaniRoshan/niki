@@ -1,3 +1,176 @@
+# RELEASE REPORT — NIKI, current state (2026-10-02)
+
+`master` at `279e282`. Supersedes the batches 1–4 report below, which is kept
+verbatim as the historical record — including two rows this document now
+contradicts. Those contradictions are listed in §3 rather than edited away.
+
+Produced by executing `scripts/verify.sh`, which is the single source of truth
+for the nine gates. Raw command output for every claim is in `EVIDENCE.md`.
+
+---
+
+## 1 · What this release is
+
+A released, installable CLI (`v0.9.0`, six dist targets) whose core promise —
+*hand NIKI a coding task, get back a verified `niki/<id>` git branch* — is
+demonstrated end to end against a **real model**, not only a mock.
+
+```
+$ niki run "Fix calc.py: add() subtracts instead of adding, and mul() divides
+             instead of multiplying. The test suite in test_calc.py must pass
+             afterwards." --project … --backend worktree --quiet
+[Planner]  Done (3s,  in 1174 / out 407)   — Spec: 1 files to modify
+[Coder]    Done (11s, in 7867 / out 1290)  — Changed 1 files; calc.py [modified]
+[Tester]   Done (15s, in 2417 / out 1228)  — Tester reported 7/7 tests passed — 6 edge cases identified
+[Reviewer] Done (33s, in 3708 / out 1163)  — Verdict: Approved; Quality: correctness 10/10 · code quality 10/10 · coverage 10/10
+Verified: `python3 -m pytest -q` exited 0
+exit 0
+```
+
+Verified **independently of NIKI's own reporting**, which is the point:
+
+```
+$ git diff master..niki/2bb61959 -- calc.py
+ def add(a, b):
+-    return a - b
++    return a + b
+
+ def mul(a, b):
+-    return a / b
++    return a * b
+
+$ python3 -m pytest -q
+1 passed in 0.01s
+```
+
+Model: `nvidia/nemotron-3-super-120b-a12b`, over the real
+`https://integrate.api.nvidia.com/v1`. Three separate runs; all four stages;
+all green.
+
+## 2 · The gate table
+
+| Gate | Result | Evidence |
+|---|---|---|
+| **G1** clean clone, install, quick start | **PASS** | `v0.9.0` released, all six dist targets built, `homebrew/niki.rb` / `scoop/niki.json` / `winget/*` repinned with **this release's** checksums; installed binary → `init` → `doctor` (26 checks, 0 failed, exit 0) → `run` → branch with a real change and "Verdict: Approved" |
+| **G2** build, typecheck, lint | **PASS** | `cargo fmt --check`; `cargo clippy --all-targets` warning-free; debug and release both build |
+| **G3** all tests pass; can-fail proven | **PASS** | `scripts/test-fast.sh` — **1103 tests, 1103 passed, 0 skipped**. Four new can-fail proofs this batch, each demonstrated failing and then passing (below) |
+| **G4** core flow, for real | **PASS** | three live-model pipeline runs above; `mega-e2e.sh` PASS against the scripted server; `Product Acceptance Suite`, `Consumer journeys`, `E2E Pipeline (Mock LLM)` green |
+| **G5** security | **FAIL — and it must be** | `cargo deny` / `cargo audit` clean. **Tree scan: clean** (`scripts/scan-secrets.py`, exit 0). **History scan: FAIL** — a real NVIDIA API key is in `src/cli/doctor.rs`'s history since `1182110`, and a fixture canary of mine is in an earlier `EVIDENCE.md`. See §4 |
+| **G6** failure paths | **PASS** | every failure path exits non-zero with a message a person can act on |
+| **G7** docs match reality | **PASS** | every README command executed against the installed binary |
+| **G8** CI green | **PASS** | **22 jobs, 22 success, 0 skipped, 0 failed** on `2b487c4`. `CI`, `CodeQL`, `Integration Test`, `TUI Smoke (tmux)` all green. CodeQL: **0 open alerts** |
+| **G9** no dead code, no fake features | **PARTIAL** | no `todo!`/`unimplemented!` in production code. **One known exception, disclosed in `ROADMAP.md`:** `convex/` is a dormant control-plane experiment — excluded from the build, zero `src/` references, absent from the README — that sits next to a `no telemetry` claim. Owner decision, not silently deleted |
+
+**Eight pass. G5 is red for a real reason. G9 is partial for a disclosed one.**
+Both are stated rather than worked around.
+
+## 3 · Two rows this report contradicts
+
+The batches 1–4 report below claims:
+
+1. **G5: "no credentials in the tree or in history"** — **false, and the gate
+   that said it could not have detected the key.** Its pattern listed
+   `sk-ant-`, `sk-`, `ghp_`, `AKIA`: **no `nvapi` at all**, and no regex over
+   raw bytes can join two string literals. The key was committed split across
+   two. The scanner is replaced and now can-fail-proven.
+2. **G8: "FAIL — the branch is committed locally and not pushed"** — **stale.**
+   The branch is `master`, and CI is 22/22 green.
+
+A report that quietly drops its own errors is one nobody can trust, so both are
+corrected in place here rather than edited away below.
+
+## 4 · G5: a live API key is in the repository history
+
+`src/cli/doctor.rs` has held a **real, working** NVIDIA API key since `1182110`
+(2026-09-30), on a public repository, committed as two adjacent string
+literals. Every other row of that corpus is visibly fabricated —
+`sk-proj-AAAA…`, `AKIA…" (a fake AWS example key, AWS' documented sample)`, `ghp_0123456789…`. That one row was
+real, almost certainly copied from a working session, and split so a
+line-based scanner would not match it.
+
+**Done:** the tree value is now fabricated with the same shape (the corpus still
+tests the same rule — `redact_secrets` catches it through the generic
+mixed-case/digit catch-all exactly as it caught the real one; `doctor` reports
+`13 of 13 known key shapes redacted`). `scripts/scan-secrets.py` replaces the
+grep, scanning each file raw **and** with every string literal's contents
+concatenated. `tests/secret_scan_can_fail.rs` feeds it the exact shape that got
+through — and on its first run caught a bug in the scanner's own splice, which
+kept the newline *between* literals.
+
+**Not done, needs the owner:** key rotation, and a force-pushed history rewrite.
+Full detail in `BLOCKERS.md` §B8.
+
+## 5 · Can-fail proofs from this batch
+
+Each was made to fail, the failure observed, then restored.
+
+| Slice | Broken | Observed |
+|---|---|---|
+| Catalogue key echo-back | `safe_model_id` → sanitize only | test printed `openai	echo-Bearer sk-canary…` |
+| `niki … \| head` | `SIG_DFL` → `SIG_IGN` | `panicked … Broken pipe (os error 32)`, 2 tests failed |
+| Tester attribution | drop `Tester reported` | `4/4 tests passed` reappears, 2 tests failed |
+| Secret scan | (the scanner's first splice) | the finding came from the raw pass, not the spliced one — the test failed |
+
+## 6 · What changed since batches 1–4
+
+- **v0.9.0 released**, all six targets, manifests repinned to its checksums.
+- **PR #39 merged**; master carries all 100 commits. `enforce_admins: false`,
+  so a solo owner is not blocked by the self-approval rule.
+- **CodeQL: 0 open alerts**, from 2 real high-severity findings.
+  - `resume.rs` echoed the session id / task id — a pasted key lands in
+    scrollback. Now redacted.
+  - `providers.rs` printed a model id from a provider that can echo the
+    `Authorization` header back inside it. Now redacted.
+- **`niki … | head` panicked** and exited 101 on the command built to be piped.
+  `main.rs` had "fixed" it with `SIG_IGN`, which does not work — it converts
+  the kill into an `EPIPE` write error and `println!` panics on that too.
+  Now `SIG_DFL`: exit 141, empty stderr, same as `cat` and `git`.
+- **`mega-e2e.sh` was wrong twice.** It piped the binary into `grep -q .` under
+  `set -o pipefail`; `grep -q` exits on first match, closes the pipe, and
+  pipefail reports the signal death as a failed check — so a catalogue that had
+  just printed five model ids was reported as "returned nothing niki could
+  parse". Now `grep -c .`, which reads the whole stream.
+- **The Tester's counts were stated as fact.** A real run printed `4/4 tests
+  passed` when the suite ran 1, and the Tester had claimed it wrote a test file
+  it never wrote. The Reviewer reviewed the phantom file. Now attributed, and
+  the measured result printed separately.
+- **Image input is not supported** — `CompletionRequest` is text-only end to
+  end. Disclosed in `ROADMAP.md`; `space-bunny-alpha` advertises image input,
+  and using it needs a content type through the entire request path.
+
+## 7 · Honest limitations
+
+1. **A real NVIDIA key is in git history.** Rotated by the owner or not, it was
+   public. This is the single most important line in this document.
+2. **No image or audio input.** Text only, on every provider.
+3. **The `ActionClassifier` layer is inert.** The trait, gate, escalation
+   limits, reasoning-blind view, input probe and hook layer all exist and are
+   exercised only by stubs in their own tests. **Nothing implements it against
+   a real provider**, so the LLM transcript-classifier does not run in the
+   product. `BLOCKERS.md` §B7.
+4. **`niki resume` does not resume.** It locates a checkpoint and describes it
+   honestly; it does not continue the pipeline. What resuming *means* is a
+   product decision (`ROADMAP.md` §9.1).
+5. **Live testing used one model family.** Three runs on
+   `nvidia/nemotron-3-super-120b-a12b`. Anthropic, OpenAI, Google, Groq,
+   Together and DeepSeek are wired and unit-tested but have not driven a real
+   pipeline in this programme.
+6. **`convex/` contradicts a stated product property.** Disclosed, not deleted.
+
+## 8 · Exactly what the owner must do
+
+1. **Rotate the NVIDIA API key.** Every clone and fork has it. This is the only
+   step that contains the exposure; history rewriting does not.
+2. **Decide on the history rewrite** (`git filter-repo` + force-push). If
+   declined, §7.1 is the disclosure — a red gate telling the truth beats a
+   green one that is not.
+3. **Decide on `convex/`** — delete, or keep with a README explaining what it
+   is. Recommended: delete.
+4. **Answer one B7 question** — which provider and model answers the safety
+   question. Everything else in §7.3 was settled from prior art.
+
+---
+
 # RELEASE REPORT — NIKI hardening programme, batches 1–4
 
 Branch `niki/hardening` · base `c7e297d` · 57 commits.
