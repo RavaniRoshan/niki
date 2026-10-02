@@ -208,6 +208,16 @@ jobs:
       # that keep the heavy binaries serialized without flattening the rest.
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
+      # cargo-audit, because `tests/supply_chain_policy_has_teeth.rs` shells out
+      # to it to check that every unsound advisory in `deny.toml` carries a
+      # written reason — which is the check that stops the tolerated-advisory
+      # list from quietly swallowing a new one.
+      #
+      # It was installed only in the "Audit (supply chain)" job, so the test
+      # **could not pass in this job** and never has. It was invisible because
+      # this branch's first CI run is the first time anyone looked.
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
       - name: Run unit + integration tests
         run: cargo nextest run --profile ci
       - name: Build release binary
