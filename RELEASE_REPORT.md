@@ -1,6 +1,6 @@
 # RELEASE REPORT — NIKI, current state (2026-10-02)
 
-`master` at `40b968d`, history rewritten. Supersedes the batches 1–4 report below, which is kept
+`master` at `eb1d218`, history rewritten. **v0.10.0 released.** Supersedes the batches 1–4 report below, which is kept
 verbatim as the historical record — including two rows this document now
 contradicts. Those contradictions are listed in §3 rather than edited away.
 
@@ -11,7 +11,7 @@ for the nine gates. Raw command output for every claim is in `EVIDENCE.md`.
 
 ## 1 · What this release is
 
-A released, installable CLI (`v0.9.0`, six dist targets) whose core promise —
+A released, installable CLI (`v0.10.0`, six dist targets) whose core promise —
 *hand NIKI a coding task, get back a verified `niki/<id>` git branch* — is
 demonstrated end to end against a **real model**, not only a mock.
 
