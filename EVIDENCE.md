@@ -3288,3 +3288,76 @@ $ scripts/test-fast.sh                # 1103 tests, 1103 passed, 0 skipped
 $ cargo test --test permission_classifier_asks_a_model   # 16 passed
 $ python3 scripts/scan-secrets.py      # 0 findings
 ```
+
+---
+
+## Release: v0.10.0
+
+```
+$ gh release view v0.10.0 --json tagName,isDraft,isPrerelease
+tag=v0.10.0 draft=false pre=false
+```
+
+All five dist targets built by the release workflow:
+
+```
+success  plan
+success  build-local-artifacts (aarch64-apple-darwin)
+success  build-local-artifacts (aarch64-unknown-linux-gnu)
+success  build-local-artifacts (x86_64-apple-darwin)
+success  build-local-artifacts (x86_64-pc-windows-msvc)
+success  build-local-artifacts (x86_64-unknown-linux-gnu)
+success  build-global-artifacts
+```
+
+### The manifests are pinned to *this* release's bytes
+
+Checksums were taken from the release's own `sha256.sum` and then **verified
+against the downloaded artifact**, because a URL that resolves is not the same
+as a hash that matches:
+
+```
+$ sha256sum niki-x86_64-unknown-linux-gnu.tar.xz
+ed5aa0e436ee47e700f07c50818b60ced43b7cfc1a3aff38661e5ec60a3468d9
+$ grep -A1 'x86_64-unknown-linux-gnu.tar.xz' homebrew/niki.rb | grep -o '[0-9a-f]\{64\}'
+ed5aa0e436ee47e700f07c50818b60ced43b7cfc1a3aff38661e5ec60a3468d9
+```
+
+The released binary runs:
+
+```
+$ ./niki-x86_64-unknown-linux-gnu/niki --version
+niki 0.10.0
+$ niki --help && niki doctor --help      # both ok
+```
+
+### Manifest parity
+
+```
+$ ./scripts/manifest-parity.sh
+OK   …/v0.10.0/niki-aarch64-apple-darwin.tar.xz
+OK   …/v0.10.0/niki-x86_64-apple-darwin.tar.xz
+OK   …/v0.10.0/niki-x86_64-unknown-linux-gnu.tar.xz
+OK   …/v0.10.0/niki-aarch64-unknown-linux-gnu.tar.xz
+OK   …/v0.10.0/niki-x86_64-pc-windows-msvc.zip
+SKIP(template) …/v$version/niki-x86_64-pc-windows-msvc.zip
+OK   …/v0.10.0/niki-x86_64-pc-windows-msvc.zip
+manifest parity: ok
+```
+
+Seven URLs, seven resolving. The Windows zip is present at 0.10.0 — it was not
+at 0.9.0, so the gate now covers five platforms rather than four.
+
+### A doc that had gone stale in the other direction
+
+`docs/launch-audit.md` claimed *"0.9.0 has not been cut"* and that the
+manifests pointed at 0.8.0. 0.9.0 shipped; the manifests had been on it since.
+A document describing a release state nobody re-derives is a guess with a
+citation — which is the same failure the table below it exists to prevent.
+`docs_consistency.rs` re-derives the *numbers*; the prose was on its own, and
+is now true.
+
+It also caught the count: `the_audits_headline_counts_match_the_tree` failed on
+the real CI run for adding `src/risk/llm_classifier.rs` — "audit says 203, the
+tree has 204". Two CI jobs went red for that one row, which is the gate doing
+its job rather than a nuisance.

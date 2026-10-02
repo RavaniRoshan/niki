@@ -1,13 +1,18 @@
 # NIKI Repository Audit — Launch Readiness
 
 > **Date:** 2026-09-30
-> **Crate version:** 0.10.0 (unreleased) · **MSRV:** 1.88 · **Edition:** 2024
+> **Crate version:** 0.10.0 (released) · **MSRV:** 1.88 · **Edition:** 2024
 >
-> **0.10.0 has not been cut yet**, so the installer manifests in `homebrew/`,
-> `scoop/` and `winget/` still point at **0.9.0** — the newest release that
-> exists — with 0.9.0's checksums, while `Cargo.toml` says 0.10.0, which is
-> what the source tree is. That window is expected and closes when the tag is
-> pushed and the manifests are repinned from the build's `sha256.sum`.
+> **0.10.0 is cut.** The installer manifests in `homebrew/`, `scoop/` and
+> `winget/` point at it, with checksums taken from that release's own
+> `sha256.sum` and checked against the downloaded artifact:
+>
+> ```
+> $ sha256sum niki-x86_64-unknown-linux-gnu.tar.xz
+> ed5aa0e436ee47e700f07c50818b60ced43b7cfc1a3aff38661e5ec60a3468d9
+> $ niki --version
+> niki 0.10.0
+> ```
 >
 > This paragraph previously said 0.9.0 had not been cut and that the manifests
 > pointed at 0.8.0. It was wrong by the time it was read: 0.9.0 shipped, and

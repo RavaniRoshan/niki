@@ -1,5 +1,5 @@
 PackageIdentifier: RavaniRoshan.niki
-PackageVersion: 0.9.0
+PackageVersion: 0.10.0
 PackageLocale: en-US
 Publisher: RavaniRoshan
 PackageName: niki
@@ -10,7 +10,13 @@ Tags:
   - cli
   - ai
   - coding-agent
-ReleaseNotes: "v0.9.0: see https://github.com/RavaniRoshan/niki/releases/tag/v0.9.0"
-ReleaseNotesUrl: https://github.com/RavaniRoshan/niki/releases/tag/v0.9.0
+ReleaseNotes: "v0.10.0: the model-based permission classifier. risk::classifier
+  had a trait, a gate, escalation limits, a reasoning-blind view and a hook layer, and
+  nothing implementing the trait. This release adds LlmActionClassifier, resolving its
+  model in Codex's select_review_model order rather than hardcoding one. Also: a live
+  NVIDIA API key that had been committed is purged from every branch and tag (rotate it),
+  niki ... | head no longer panics, and the G5 secret scan can see a credential split
+  across string literals. Full notes: https://github.com/RavaniRoshan/niki/releases/tag/v0.10.0"
+ReleaseNotesUrl: https://github.com/RavaniRoshan/niki/releases/tag/v0.10.0
 ManifestType: defaultLocale
 ManifestVersion: 1.9.0
