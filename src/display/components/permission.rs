@@ -72,9 +72,32 @@ pub fn action_for(index: usize) -> PermissionAction {
     }
 }
 
+/// Whether the detail panel survives at this size.
+///
+/// **The options must never be the thing that gets cut.** `modal_rect` clamps the
+/// modal to the terminal, and it clamps from the bottom — so when the detail
+/// panel makes the box taller than the screen, the *last option* lands past the
+/// last row and a user on a small terminal cannot see how to deny.
+///
+/// It has always been this way: the old test asserted `Allow once`, which is
+/// option **0** and sat one row above the cut, so the layout check was green
+/// while the second option was off-screen. Asserting both options is what made it
+/// visible.
+fn effective_detail(area: Rect, request: &PermissionRequest, show_detail: bool) -> bool {
+    if !show_detail {
+        return false;
+    }
+    // Everything the modal wants, borders included. If it does not fit, the
+    // detail panel is what goes — the command line stays, because a decision
+    // about an unseen command is worse than one about a seen one.
+    let wanted = option_first_row(request, true) + OPTIONS.len() as u16 + 1 + 2;
+    wanted <= area.height
+}
+
 /// Geometry of the modal — shared by the renderer and the hit-test.
 /// Height follows the content (options always visible); clamped to the area.
 pub fn modal_rect(area: Rect, request: &PermissionRequest, show_detail: bool) -> Rect {
+    let show_detail = effective_detail(area, request, show_detail);
     let content_rows = option_first_row(request, show_detail) + OPTIONS.len() as u16 + 1;
     let modal_width = 60u16.min(area.width.saturating_sub(4));
     // `.min(area.height)` then `.max(8)` produced a modal *taller than the
@@ -100,6 +123,7 @@ pub fn click_index(
     request: &PermissionRequest,
     show_detail: bool,
 ) -> Option<usize> {
+    let show_detail = effective_detail(area, request, show_detail);
     let modal = modal_rect(area, request, show_detail);
     let inner_left = modal.x + 1;
     let inner_right = modal.x + modal.width.saturating_sub(1);
@@ -131,6 +155,10 @@ pub fn render_permission_modal(
     area: Rect,
     state: &AppState,
 ) {
+    // Same flag `modal_rect` used. If the renderer consulted the raw
+    // preference it would draw a detail panel the geometry had already decided
+    // does not fit — which is how the last option ends up off-screen.
+    let show_detail = effective_detail(area, request, state.show_permission_detail);
     let modal_area = modal_rect(area, request, state.show_permission_detail);
     // Nothing is legible in a box this small, and drawing into it indexes
     // outside the buffer. The question modal and onboarding guard the same way.
@@ -200,7 +228,7 @@ pub fn render_permission_modal(
     }
 
     // Detail panel (toggled by Ctrl+D)
-    if state.show_permission_detail {
+    if show_detail {
         if let Some(ref params) = request.params {
             lines.push(Line::from(Span::styled(
                 "  Raw parameters:",
@@ -242,7 +270,7 @@ pub fn render_permission_modal(
     lines.push(Line::from(""));
 
     // Pad to the first option row (shared with the hit-test).
-    let first_option_row = option_first_row(request, state.show_permission_detail);
+    let first_option_row = option_first_row(request, show_detail);
     while lines.len() < first_option_row as usize {
         lines.push(Line::from(""));
     }
