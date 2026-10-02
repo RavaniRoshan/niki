@@ -2670,3 +2670,81 @@ documentation, not memory; artifact path `target/llvm-cov/html`.
 
 Final: nightly **6/6 green**, main CI **22/22 green**, CodeQL **0 open
 alerts**, `test-fast.sh` **1103/1103**, secret scan **0 findings in the tree**.
+
+---
+
+## 2026-10-02 · Batch 15 — cleanup decisions, and the history rewrite
+
+### Owner decisions taken
+
+- **convex/ deleted.** 2 TypeScript files, 3 design docs, and a stale
+  packaging exclude. Measured first: `src/control_plane/` does not exist, no
+  `.rs` file references `convex`, and it was in `Cargo.toml` only as an exclude
+  naming a directory. The owner was told "three files"; the two extra docs went
+  with them, flagged in the commit rather than folded in silently.
+- **Classifier model — my recommendation retracted.** I recommended
+  `llama-3.1-nemotron-safety-guard-8b-v3` and called it "purpose-built for
+  this". Measured on seven scope cases it scored **3/7**, missing every
+  scope-only violation: reading `src/auth/session.rs` when the user asked to fix
+  a test is not *harmful*, so a content-safety model has no reason to object.
+  It is right for the input probe, wrong for the trait.
+- **History rewritten.** Owner approved. Five passes.
+
+### The rewrite, and what it cost
+
+| pass | failure | how it surfaced |
+|---|---|---|
+| 1 | `:` instead of `==>` in the replacement file | the key was still in history; the tool reported success |
+| 1 | only 2 of 25 branches in `--refs` | 23 branches and the `v0.9.0` tag still reached the key |
+| 2 | force-push of all branches pushed a **stale local `master`** | cloned the remote; a file was missing |
+| 3–5 | `git filter-repo` ends in `reset --hard` | scanner improvements and this record lost, twice |
+| 4 | GitHub **push protection** read a `xoxb-…` canary as a live Slack token | the push was rejected; the whole push is scanned, not the tip |
+
+The stale-`master` one is the dangerous class: every push this session had been
+`git push origin niki/hardening:master`, which updates the remote-tracking ref
+and never the local branch. Force-pushing "all branches" therefore reverted
+**306 commits** on `master`. Repaired, and the local branch is now realigned
+before every force-push.
+
+Verified from a fresh clone of `github.com/RavaniRoshan/niki`:
+
+```
+HEAD 68b6c80 · 570 commits · 655 files
+0 occurrences across all 26 remote branches
+0 occurrences across all 9 tags
+0 objects containing either half of the key
+tree scan 0 · history scan 0 · cargo test --lib 1103 passed
+```
+
+### The scanner, rebuilt against a real repository
+
+Written for one shape; running it on this repo found three more, all fixed:
+
+- it joined **every** literal in a file, manufacturing a credential out of a
+  corpus canary, a git sha and a label a thousand characters apart → window
+  bounded at 200 chars;
+- it exempted a whole **file**, and that file was where the real key lived →
+  now exempts complete **values**;
+- its value list included **fragments**, and a fragment is a substring of a real
+  key, so exempting one silently disabled detection → complete values only.
+
+The third was caught by the can-fail test rather than by reading, which is the
+only reason it was caught at all.
+
+### B7, answered from open-source prior art
+
+The owner's correction — *the classifier should not be tied to a model* — is
+right, and Codex shows how it is done: `select_review_model()` reads
+`ModelInfo.auto_review_model_override`, then a default, then **the session
+model's own slug**, and the classifier prompt is a **catalog field** on the model
+preset. NIKI already has the place for it: two optional fields on the model
+catalogue entry, mirroring Codex rather than hardcoding an id.
+
+Also recorded: Codex's "YOLO mode" is two flags and only one of them is an
+automated approver (`--approve-for-me`, alias `not-so-yolo`);
+`--dangerously-bypass-approvals-and-sandbox` is a bypass. goose does the same
+narrow call and fails closed. Roo and Cline use rules only, no LLM.
+
+Two findings contradict NIKI's scaffolding and are recorded rather than decided:
+Codex's reviewer **sees** tool results where `ClassifierView` withholds them,
+and its verdict is a risk × authorization **pair** rather than a bool.

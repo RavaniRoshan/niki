@@ -1,6 +1,6 @@
 # RELEASE REPORT — NIKI, current state (2026-10-02)
 
-`master` at `8ef80be`. Supersedes the batches 1–4 report below, which is kept
+`master` at `40b968d`, history rewritten. Supersedes the batches 1–4 report below, which is kept
 verbatim as the historical record — including two rows this document now
 contradicts. Those contradictions are listed in §3 rather than edited away.
 
@@ -55,7 +55,7 @@ all green.
 | **G2** build, typecheck, lint | **PASS** | `cargo fmt --check`; `cargo clippy --all-targets` warning-free; debug and release both build |
 | **G3** all tests pass; can-fail proven | **PASS** | `scripts/test-fast.sh` — **1103 tests, 1103 passed, 0 skipped**. Four new can-fail proofs this batch, each demonstrated failing and then passing (below) |
 | **G4** core flow, for real | **PASS** | three live-model pipeline runs above; `mega-e2e.sh` PASS against the scripted server; `Product Acceptance Suite`, `Consumer journeys`, `E2E Pipeline (Mock LLM)` green |
-| **G5** security | **FAIL — and it must be** | `cargo deny` / `cargo audit` clean. **Tree scan: clean** (`scripts/scan-secrets.py`, exit 0). **History scan: FAIL** — a real NVIDIA API key is in `src/cli/doctor.rs`'s history since `1182110`, and a fixture canary of mine is in an earlier `EVIDENCE.md`. See §4 |
+| **G5** security | **PASS** | `cargo deny` / `cargo audit` clean. Tree scan 0 findings. History scan **0 findings** after the rewrite. Verified from a fresh clone of the public remote: 0 occurrences across all 26 branches, all 9 tags, every object in the store. See §4 |
 | **G6** failure paths | **PASS** | every failure path exits non-zero with a message a person can act on |
 | **G7** docs match reality | **PASS** | every README command executed against the installed binary |
 | **G8** CI green | **PASS** | **22 jobs, 22 success, 0 skipped, 0 failed** on `2b487c4`, and `CI` / `CodeQL` / `Integration Test` / `TUI Smoke (tmux)` all green again on `8ef80be`. CodeQL: **0 open alerts**. The **nightly** workflow is green on `8ef80be` — all six jobs, including the canary kill-rate gate and coverage report, both of which had been broken |
@@ -79,7 +79,7 @@ The batches 1–4 report below claims:
 A report that quietly drops its own errors is one nobody can trust, so both are
 corrected in place here rather than edited away below.
 
-## 4 · G5: a live API key is in the repository history
+## 4 · G5: a live API key was in the repository history — now purged
 
 `src/cli/doctor.rs` has held a **real, working** NVIDIA API key since `1182110`
 (2026-09-30), on a public repository, committed as two adjacent string
@@ -88,17 +88,33 @@ literals. Every other row of that corpus is visibly fabricated —
 real, almost certainly copied from a working session, and split so a
 line-based scanner would not match it.
 
-**Done:** the tree value is now fabricated with the same shape (the corpus still
-tests the same rule — `redact_secrets` catches it through the generic
-mixed-case/digit catch-all exactly as it caught the real one; `doctor` reports
-`13 of 13 known key shapes redacted`). `scripts/scan-secrets.py` replaces the
-grep, scanning each file raw **and** with every string literal's contents
-concatenated. `tests/secret_scan_can_fail.rs` feeds it the exact shape that got
-through — and on its first run caught a bug in the scanner's own splice, which
-kept the newline *between* literals.
+**Done:** the tree value is fabricated with the same shape (the corpus still
+tests the same rule; `doctor` reports `13 of 13 known key shapes redacted`).
+`scripts/scan-secrets.py` replaced the grep, scanning each file raw **and** with
+every string literal's contents concatenated. `tests/secret_scan_can_fail.rs`
+feeds it the exact shape that got through.
 
-**Not done, needs the owner:** key rotation, and a force-pushed history rewrite.
-Full detail in `BLOCKERS.md` §B8.
+**History rewritten.** Verified from a fresh clone of
+`github.com/RavaniRoshan/niki`:
+
+```
+HEAD 68b6c80 · 570 commits · 655 files
+0 occurrences across all 26 remote branches
+0 occurrences across all 9 tags
+0 objects containing either half of the key
+tree scan 0 · history scan 0 · cargo test --lib 1103 passed
+```
+
+**Still the owner's:** **rotate the key.** It was public for four days, and
+rotation is the only step that invalidates the copies already taken. The
+rewrite does not rescue it.
+
+The rewrite cost five passes, and the failures are in `BLOCKERS.md` §B8
+because they are the reusable part: a wrong separator that reported success and
+replaced nothing; a ref scope that left the published `v0.9.0` tag reachable;
+a force-push that reverted **306 commits** on `master`; and repeated
+`reset --hard` from filter-repo discarding uncommitted work — twice, once
+including this report.
 
 ## 5 · Can-fail proofs from this batch
 
@@ -153,14 +169,20 @@ Each was made to fail, the failure observed, then restored.
 
 ## 7 · Honest limitations
 
-1. **A real NVIDIA key is in git history.** Rotated by the owner or not, it was
-   public. This is the single most important line in this document.
+1. **A real NVIDIA key was in git history and has now been purged** — every
+   branch, every tag, every object, verified from a fresh clone. **It still
+   needs rotating**: it was public from 2026-09-30 to 2026-10-02 and rotation
+   is the only thing that invalidates the copies already taken. This is the
+   single most important line in this document.
 2. **No image or audio input.** Text only, on every provider.
 3. **The `ActionClassifier` layer is inert.** The trait, gate, escalation
    limits, reasoning-blind view, input probe and hook layer all exist and are
    exercised only by stubs in their own tests. **Nothing implements it against
-   a real provider**, so the LLM transcript-classifier does not run in the
-   product. `BLOCKERS.md` §B7.
+   a real provider.** The design is now settled from prior art — Codex's
+   Guardian resolves its reviewer through a model-catalogue field and falls
+   back to the session model, which is what "model-agnostic" means in
+   practice — and `BLOCKERS.md` §B7 records it, including two findings that
+   contradict NIKI's own scaffolding.
 4. **`niki resume` does not resume.** It locates a checkpoint and describes it
    honestly; it does not continue the pipeline. What resuming *means* is a
    product decision (`ROADMAP.md` §9.1).
@@ -179,8 +201,12 @@ Each was made to fail, the failure observed, then restored.
    green one that is not.
 3. **Decide on `convex/`** — delete, or keep with a README explaining what it
    is. Recommended: delete.
-4. **Answer one B7 question** — which provider and model answers the safety
-   question. Everything else in §7.3 was settled from prior art.
+4. **Rotate the NVIDIA key** — item 1, restated because it is the only one
+   that changes the risk rather than the code.
+
+The classifier is the next slice when you want it: `ModelPreset` gains an
+optional auto-review model and a classifier prompt, resolution order mirrors
+Codex, and the bundled default prompt is Codex's published policy text.
 
 ---
 
