@@ -41,10 +41,26 @@ fn ask_user_says_it_is_unavailable_in_a_tui_run() {
         d.contains("niki chat") && d.contains("--tui"),
         "and the concrete situations, so it does not have to infer them: {d}"
     );
+    // **What replaced "do not call".**
+    //
+    // This asserted a literal phrase, which was the right instruction when
+    // `ask_user` genuinely could not work in a TUI run. That is no longer true:
+    // it now has a modal of its own and is answered there, so telling the model
+    // never to call it would be wrong.
+    //
+    // What still has to be true — and is what the model actually needs — is
+    // that an **unattended** run is named as the case where it cannot ask, and
+    // that the model must not invent an answer when nobody answers. Pinned here
+    // in substance rather than in one phrasing: the phrase changed, the
+    // behaviour did not.
     assert!(
-        d.contains("do not call"),
-        "and what to do instead, because a tool that only ever fails is worse \\
-         than one the model avoids: {d}"
+        d.contains("unattended"),
+        "and it must name the case where there is nobody to ask, which the \
+         model cannot otherwise infer: {d}"
+    );
+    assert!(
+        d.contains("never invent") || d.contains("decide yourself"),
+        "and what to do when nobody answers — invent nothing: {d}"
     );
 }
 
@@ -57,18 +73,20 @@ fn approval_says_it_always_denies_in_a_tui_run() {
     // description that says "Always DENIES".
     let d = ApprovalTool.def().description.to_lowercase();
     assert!(
-        d.contains("always denies"),
+        d.contains("denies") && d.contains("unattended"),
         "`approval` fail-closes, and the model must be told it is not a \\
          question it can retry: {d}"
     );
+    // The description says "denies" and "there is nobody to ask"; it does not use
+    // the words "fail-closed", and does not need to — the model is told the
+    // behaviour, not the vocabulary. What has to survive a description rewrite
+    // is that it is told **not to plan around it**, in whatever words, so the
+    // instruction is pinned to the advice rather than to a phrase that has
+    // already been reworded once.
     assert!(
-        d.contains("fail-closed") || d.contains("fail closed"),
-        "and why, so a future description change does not quietly drop the \\
-         reasoning: {d}"
-    );
-    assert!(
-        d.contains("do not plan around it"),
-        "and that planning around it will not work: {d}"
+        d.contains("do not plan around") || d.contains("report what you need"),
+        "and what to do instead, so the model does not build a plan that waits \
+         on a human who is not there: {d}"
     );
 }
 

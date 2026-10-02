@@ -538,3 +538,4 @@ mcp-manager-outlives-discovery | the_pipeline_holds_the_mcp_manager_beyond_disco
 subpage-key-reaches-the-page | a_subpage_q_reaches_the_page_not_the_nav_layer | the nav layer claiming q before the page, in either render loop
 resume-says-nothing-was-rerun | test_cli_resume_command | a recovery page claiming "state restored successfully" and restoring nothing
 broken-container-is-a-warning | a_container_that_cannot_start_is_a_warning_not_a_failure | doctor exiting 1 on a machine where --backend worktree runs the whole pipeline
+human-tools-say-what-they-can-do | ask_user_says_it_is_unavailable_in_a_tui_run | the model not told when asking is impossible, or inventing an answer
