@@ -695,6 +695,16 @@ fn check_container_can_start(base_image: &str) -> Check {
                 .find(|l| !l.is_empty())
                 .unwrap_or("(no error output)")
                 .to_string();
+            // It does **not** claim the image is in the local store.
+            //
+            // It used to, and printed it as a fact: *"is installed and the
+            // image is in the local store, but a container cannot start"*.
+            // On a machine that never built the image, the check **above**
+            // reports `sandbox image present — not found locally`, and this
+            // one claims it is there. A user reading the two in order
+            // concludes the tool cannot agree with itself, and the actual
+            // problem — the image was never built — is hidden under an
+            // assumption this function never verified.
             let remedy = container_start_remedy(&detail);
             // A **warning**, not a failure — and the distinction is the whole
             // point of this check.
@@ -716,9 +726,8 @@ fn check_container_can_start(base_image: &str) -> Check {
                 category: "sandbox",
                 name,
                 result: CheckResult::Warn(format!(
-                    "{bin} is installed and the image is in the local store, but a \
-                     container cannot start, so the **container backend** will fail:\n  \
-                     {detail}\n\n{remedy}\n\nThis is not fatal: \
+                    "{bin} is installed, but a container cannot start, so the \
+                     **container backend** will fail:\n  {detail}\n\n{remedy}\n\nThis is not fatal: \
                      `--backend worktree` runs the full pipeline with no container."
                 )),
             }
@@ -1101,6 +1110,14 @@ mod tests {
                     m.contains("crun"),
                     "and carry the runtime's own error, because that is the part \
                      the user can act on: {m}"
+                );
+                assert!(
+                    !m.contains("in the local store"),
+                    "and must NOT claim the image is present: the check above \
+                     reports `sandbox image present — not found locally` on a \
+                     machine that never built it, and a message saying the image \
+                     is there anyway makes the tool read as though it cannot \
+                     agree with itself: {m}"
                 );
             }
             CheckResult::Pass(m) => {
