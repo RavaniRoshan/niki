@@ -72,6 +72,24 @@ fn every_unsound_advisory_is_named_with_a_reason() {
         .cloned()
         .unwrap_or_default();
 
+    // The ids come from the **JSON**, not from the tool's human-readable output.
+    //
+    // It used to scrape `Warning:   unsound` / `ID:` out of the text, on the
+    // stated grounds that "advisory ids are not in the JSON's warning entries".
+    // They are — under `warnings[].advisory.id` — and the text format is not a
+    // contract: a newer cargo-audit changed the spacing, the scrape returned
+    // nothing, and the test failed in CI with *"the JSON's unsound count and
+    // the text output's unsound IDs disagree: 4 vs []"*. The same numbers, read
+    // through a format nobody promised to keep.
+    let mut reported: Vec<String> = unsound
+        .iter()
+        .filter_map(|w| w.get("advisory").and_then(|a| a.get("id")))
+        .filter_map(|id| id.as_str())
+        .map(str::to_string)
+        .collect();
+    reported.sort();
+    reported.dedup();
+
     // Advisory ids are not in the JSON's warning entries, so take them from the
     // human-readable output instead, which is what a maintainer reads.
     let plain = Command::new("cargo")
