@@ -2365,3 +2365,88 @@ OK   https://github.com/RavaniRoshan/niki/releases/download/v0.8.0/niki-x86_64-p
 manifest parity: ok
 ```
 
+
+## Slice: CodeQL alert 18 — `rust/cleartext-logging`, `src/cli/providers.rs:111`
+
+The alert's own message names the source, and it is not what the summary first
+assumed:
+
+```
+$ gh api "repos/RavaniRoshan/niki/code-scanning/alerts/18" \
+    -q '.most_recent_instance.message.markdown'
+This operation writes [api_key](src/cli/catalogue.rs#L145C15-L145C22) to a log file.
+```
+
+`catalogue.rs:145` cols 15–22 is `let key = api_key.ok_or_else(...)` in
+`fetch(provider_name, base_url, api_key)`. The value goes into
+`.header("Authorization", format!("Bearer {key}"))`, the response body becomes
+`m.id`, and `providers.rs` prints `m.id`. So the path is the HTTP round trip:
+**a provider — or any proxy/gateway the user points `base_url` at — can echo
+the bearer token back inside a model id, and NIKI prints it.** Not a false
+positive, and not the same bug as the `resume.rs` alerts: that one was a pasted
+key echoed by the user's own shell, this one is a key echoed back by a peer.
+
+### Can-fail proof
+
+With `safe_model_id` temporarily reverted to sanitise-only:
+
+```
+$ CARGO_BUILD_JOBS=2 cargo test --test providers_catalogue_echo -j 2 -- --test-threads=1
+
+test annotated_listing_never_prints_the_credential ... FAILED
+test plain_listing_never_prints_the_credential ... FAILED
+
+---- plain_listing_never_prints_the_credential stdout ----
+thread '...' panicked at tests/providers_catalogue_echo.rs:94:5:
+the API key reached the terminal verbatim through the catalogue:
+openai	echo-Bearer sk-canary0123456789abcdefghijklmnop
+openai	claude-sonnet-4
+
+test result: FAILED. 2 passed; 2 failed
+```
+
+The leaked credential is visible in the failure output. Restored:
+
+```
+$ CARGO_BUILD_JOBS=2 cargo test --test providers_catalogue_echo -j 2 -- --test-threads=1
+running 4 tests
+test annotated_listing_never_prints_the_credential ... ok
+test plain_listing_never_prints_the_credential ... ok
+test the_canary_is_a_shape_redact_secrets_actually_catches ... ok
+test the_listing_still_lists_models ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+```
+
+The mock stands in for the peer only — a real socket, a real request, a real
+`println!`. `safe_model_id` itself is never mocked.
+
+`the_canary_is_a_shape_redact_secrets_actually_catches` exists so the file
+cannot pass for the wrong reason: if `CANARY_KEY` stopped matching a redaction
+rule, the two assertions above would be checking that an unredacted-looking
+string is absent.
+
+### Lint
+
+```
+$ ./scripts/dev-loop.sh check          # fmt + clippy (lib+bins)
+  check: clean
+
+$ CARGO_BUILD_JOBS=2 cargo clippy --all-targets -j 2
+    Finished `dev` profile [optimized + debuginfo] target(s)
+```
+
+```
+$ python3 scripts/gen-nextest-groups.py --check
+nextest.toml overrides are up to date
+
+$ cargo test --test test_groups -j 2 -- --test-threads=1
+test result: ok. 8 passed; 0 failed
+```
+
+### Consistency
+
+The four other provider response surfaces already redact: `anthropic.rs`,
+`openai.rs`, `google.rs` and `ollama.rs` each wrap the error body in
+`redact_secrets`. The catalogue was the one surface that did not. That is why
+this is a code fix and not an alert dismissal — dismissal would have left the
+one non-conforming call site in place and recorded a false reason.

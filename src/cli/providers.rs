@@ -38,6 +38,26 @@ pub async fn handle(args: &ProvidersArgs) -> Result<()> {
     }
 }
 
+/// Make a model id from a provider's `/models` response safe to print.
+///
+/// Two controls, both needed, neither sufficient alone.
+///
+/// `sanitize_for_terminal` strips escape sequences, because a model id is
+/// untrusted text that reaches a terminal. `redact_secrets` masks credentials,
+/// because the id arrives over a request that carried `Authorization: Bearer
+/// <key>` — so a provider, a corporate gateway, or anything else the user
+/// points `base_url` at can echo the key straight back into a field the
+/// terminal then prints. Without the second control the user's own API key
+/// lands in their scrollback and in CI logs, which is what CodeQL's
+/// `cleartext-logging` alert at this `println!` is describing.
+///
+/// The other four provider response surfaces — the error bodies in
+/// `anthropic.rs`, `openai.rs`, `google.rs` and `ollama.rs` — already pass
+/// through `redact_secrets`. The catalogue was the one surface that did not.
+fn safe_model_id(id: &str) -> String {
+    crate::display::sanitize::sanitize_for_terminal(crate::llm::provider::redact_secrets(id))
+}
+
 /// List what a provider can actually serve, and say plainly when it cannot.
 ///
 /// The failure modes are the interesting part. A provider with no catalogue
@@ -94,33 +114,13 @@ async fn handle_models(provider: Option<&str>, plain: bool) -> Result<()> {
                 any = true;
                 if plain {
                     for m in &models {
-                        // The existing sanitiser, not a second copy of the rule.
-                        //
-                        // This arrived as a CodeQL autofix that mapped control
-                        // characters to U+FFFD. Directionally right — a model id
-                        // comes from a provider's `/models` response, so it is
-                        // untrusted text that reaches a terminal — but it was a
-                        // **second** sanitiser with different behaviour from
-                        // `sanitize_for_terminal`, which strips the whole escape
-                        // sequence and preserves newlines and tabs. Two copies of
-                        // one rule is how they come to disagree.
-                        let safe_id = crate::display::sanitize::sanitize_for_terminal(&m.id);
+                        let safe_id = safe_model_id(&m.id);
                         println!("{name}\t{}", safe_id);
                     }
                 } else {
                     println!("\n{name} — {} model(s):", models.len());
                     for m in &models {
-                        // The existing sanitiser, not a second copy of the rule.
-                        //
-                        // This arrived as a CodeQL autofix that mapped control
-                        // characters to U+FFFD. Directionally right — a model id
-                        // comes from a provider's `/models` response, so it is
-                        // untrusted text that reaches a terminal — but it was a
-                        // **second** sanitiser with different behaviour from
-                        // `sanitize_for_terminal`, which strips the whole escape
-                        // sequence and preserves newlines and tabs. Two copies of
-                        // one rule is how they come to disagree.
-                        let safe_id = crate::display::sanitize::sanitize_for_terminal(&m.id);
+                        let safe_id = safe_model_id(&m.id);
                         let mut notes: Vec<String> = Vec::new();
                         if m.traits
                             .contains(&crate::cli::catalogue::ModelTrait::Reasoning)
