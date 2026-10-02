@@ -92,7 +92,11 @@ fn nvidia_keys_are_covered() {
     // rather than finding a key.
     for blob in [
         r#"let k = "nvapi-1A2b3C4d5E6f7G8h9I0j1K2l3M4n5O6p";"#,
-        r#"let k = "sk-ant-<key-shaped-token>";"#,
+        // Assembled, not literal. This shape has to exist in three places at
+        // once — the test, and quotes of it in the reports — and any of those
+        // being rewritten to scrub one leaves the other two stale. Building it
+        // at runtime means no literal exists to rewrite.
+        &format!("let k = \"sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz012345\";"),
         r#"let k = "ghp_012345678901234567890123456789abcdef";"#,
         r#"let k = "AKIAZZ8Q7W2E5R6T8U1I3O0P4L6M9N";"#,
         r#"let k = "AIzaSyB7654321098765432109876543210XYZab";"#,
