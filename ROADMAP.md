@@ -1525,3 +1525,59 @@ Wired into `apply_patch` in **both** sandboxes — the `Sandbox` trait method th
 | ~~9.7~~ **CLOSED in batch 5** (`1c758c5`). `tests/tui_perf.rs` asserted on wall-clock budgets calibrated on one machine — `full_render_chat` measures 62ms against a 100ms budget here, so a host 1.6× slower fails with no change in the code. `report` is now a printed smoke check that cannot fail the suite, and a new `perf_is_machine_independent` compares repeated measurements against a baseline taken in the same run, which a uniformly slower host scales together and cannot trip. The two unconditional `pytest.skip`s in `headless_tui.py` were already honest — they name the missing capability and where the behaviour is covered — so the gap was nothing *checking* them: `tests/skips_and_budgets_stay_honest.rs` now requires every skip to carry a reason and name its covering path, because a skip with no redirect is a permanent silent hole. | `tests/tui_perf.rs`, `tests/skips_and_budgets_stay_honest.rs` |
 | ~~9.2~~ **CLOSED in batch 7** (B7-01 onward). **The call path was not merely unreachable — it was pointing at corpses.** `McpManager` was a local of the discovery block, so the `McpConnection`s dropped with it and `kill_on_drop(true)` killed the stdio children at the end of that block. Every server was dead before the Planner's first token. A server started and immediately killed is also worse than one never started: the user got a summary naming tools that were already gone, and paid the spawn cost either way. The manager is now an `Arc` held for the whole run and shut down gracefully at its end, and `tests/integration/mcp_server_fixture.py` is a **real** MCP server — newline-delimited JSON-RPC 2.0 over stdio — so the handshake, framing, id routing and error path are all exercised rather than mocked. `the_missing_call_path_is_still_recorded_as_missing` is retired as the work lands. | `src/mcp/mod.rs`, `src/orchestrator/pipeline.rs`, `tests/mcp_call_path.rs` |
 | 9.8 | **`G8` has never run on this branch.** Not a defect; the owner's decision to work locally. It goes green on a push and nothing before. | — |
+
+---
+
+## Added 2026-10-02 · consciously deferred, with reasons
+
+### Image / multimodal input is not supported
+
+`space-bunny-alpha` advertises `['text', 'image', 'video'] -> ['text']` at
+1M context. NIKI cannot use the first. `CompletionRequest` carries text only —
+there is no image content type anywhere in the provider layer, and the request
+path is `user_message: String` end to end.
+
+Adding it is not a provider change; it is a content-type change through the
+whole request path (`CompletionRequest`, `messages_with_system`, every
+provider's serializer, the artifact schema, and the tool-result rendering that
+has to decide what a screenshot in a tool result looks like). Deferred rather
+than half-built: an image path that only works for one provider is worse than
+an honest text-only one, and the text-only claim is currently true.
+
+### `convex/` is dormant and contradicts a stated product property
+
+`convex/schema.ts`, `convex/runs.ts` and `docs/convex-migration-plan.md` are a
+planned Convex control-plane mirror: a hosted service that would receive run
+records.
+
+- It is **excluded from the crate build** (`Cargo.toml:14`), has **zero**
+  references from `src/`, and is **never mentioned in the README**.
+- So it is inert, and release gate G9 ("no dead code presented as a feature")
+  does not flag it — nothing presents it *as* a feature.
+
+It is still a problem for a reader: a directory named after a hosted backend,
+sitting next to a README that says no telemetry and BYOK, reads as either an
+undisclosed dependency or abandoned work, and the two have very different
+implications for someone deciding whether to trust this tool.
+
+**Not deleted unilaterally** — removing files is a stop-and-ask action, and it
+is the owner's call whether the migration plan is parked or abandoned. The
+recommendation is to delete all three: the control plane's job is done locally,
+`no telemetry` is a real product property, and a hosted mirror of run records
+would weaken it.
+
+### `.odw/` stays
+
+`open-dynamic-workflows` driver scripts. Actively used, so it belongs in the
+repo. `.gitignore` already excludes `.odw/*/runs/` (its output), which is the
+right split. Left alone.
+
+### `nvidia`, `together`, `groq` and `deepseek` are not health-checked by `doctor`
+
+`doctor` checks Ollama, Anthropic, OpenAI, Google, OpenRouter, Zen, Kimi and
+Kilo. Four configured providers get no reachability check, so a user who
+configures NVIDIA and typos the key gets a clear "not configured" from a
+provider they *did* configure, and nothing at all about the four.
+
+Found while wiring a real run against NVIDIA. Small, but it is the first-run
+surface, so it belongs on the list rather than in a backlog nobody reads.
