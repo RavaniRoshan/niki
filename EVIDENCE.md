@@ -3361,3 +3361,100 @@ It also caught the count: `the_audits_headline_counts_match_the_tree` failed on
 the real CI run for adding `src/risk/llm_classifier.rs` — "audit says 203, the
 tree has 204". Two CI jobs went red for that one row, which is the gate doing
 its job rather than a nuisance.
+
+---
+
+## The logo
+
+`assets/logo.svg` existed and was committed, and the README comment described
+it as "referenced via `<img>`". **There was no `<img>`.** The file was there,
+the comment asserted it was displayed, and nobody had checked — the same shape
+of failure as every other comment in this repository that says a thing is true.
+
+### Drawn from the product, not invented for a README
+
+The four glyphs are the ones `niki` prints at runtime — ◈ Planner, ⟠ Coder,
+◉ Tester, ◆ Reviewer (`src/display/logo.rs`, `src/display/theme.rs:782-785`) —
+and the colours are `Palette::role_*` from the Kiln theme:
+
+| role | hex | name in the theme |
+|---|---|---|
+| Planner | `#d9a86a` | pale ochre |
+| Coder | `#b85c1a` | deep ember |
+| Tester | `#6fb05c` | leaf |
+| Reviewer | `#3fa396` | verdigris |
+
+The card is `Palette::bg_deep` `#141211`, the wordmark `Palette::fg` `#f3efea`.
+So the mark is the product's own palette, and it cannot drift from the terminal
+without a test failing.
+
+### Two things only visible by rendering it
+
+**1. The wordmark was a font.** The first version drew "NIKI" with
+`<text font-family="ui-monospace">`. Rendered, it came out as a stretched
+proportional face — different widths, visibly off-centre:
+
+```
+N ████  I ██  K █████  I ██
+```
+
+N, I, K and I are **all straight lines**, so the wordmark is now stroked paths.
+No font, no fallback, no webfont, no difference between renderers:
+
+```
+$ python3 -c "…count <text> elements…"
+text elements: 0
+```
+
+**2. It was 8px left of centre.** The letters were centred by cell pitch, which
+is wrong when two of the four letters are single stems. Centred by the letters'
+*visual* bounds instead — they run 97 → 242, midpoint 169.5 against a card
+centre of 170.
+
+A third fix came from looking: the connectors between glyphs sat at even cell
+pitches rather than in the actual gaps (105–127, 157–181, 207–231), so they
+were visibly off-centre in the spaces. And the first version's bottom row was
+three empty circles on a rule, which is decoration that means nothing; it is now
+four dots, one per stage, each under its own glyph in that stage's colour.
+
+### Rendered, on all three backgrounds it will be seen on
+
+```
+$ python3 -c "…paste the logo onto white, #0d1117 and #24292e…"
+```
+
+Identical on all three, with the rounded corners letting the page background
+through. The card is what makes that true, and it is why the file has no
+`prefers-color-scheme` branch.
+
+Also verified legible at the sizes it is used at — 340 (README header), 200 and
+136 (social card, favicon scale):
+
+```
+$ for W in 340 200 136; do …; done
+test result: ok. 6 passed
+```
+
+### `tests/logo_is_honest.rs` — six checks, three can-fail proofs
+
+| broken | observed |
+|---|---|
+| wordmark back on a font | `the_logo_uses_no_font_at_all ... FAILED` |
+| remove the card | `the_logo_carries_its_own_background ... FAILED` |
+| drop the README `<img>` | `the_readme_actually_references_the_logo ... FAILED` |
+
+The third is the one that motivated the file: the comment claimed an `<img>`
+that did not exist, and the test now says so in a way that goes red when it
+happens again.
+
+The checks strip XML comments before asserting. They did not at first, and
+**the tests fired on the SVG's own comment**, which explains why it contains no
+`<text>` and no `prefers-color-scheme`. A test that punishes the next person for
+documenting anything gets deleted within a month.
+
+```
+$ cargo clippy --all-targets            # clean
+$ scripts/test-fast.sh                  # 1103 tests, 1103 passed
+$ cargo test --test logo_is_honest      # 6 passed
+$ cargo test --test docs_consistency    # 7 passed
+```

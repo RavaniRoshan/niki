@@ -1,11 +1,22 @@
 <!--
   NIKI — README
   Logo: GitHub's Markdown sanitizer strips inline <svg>, so the logo is a committed,
-  self-contained SVG (assets/logo.svg, its own dark card) referenced via <img>.
-  This renders identically in light/dark GitHub themes with no external hosting.
+  self-contained SVG (assets/logo.svg) referenced via <img>. It carries its own dark
+  card, so it renders identically in GitHub's light and dark themes with no external
+  hosting and no `prefers-color-scheme`.
+
+  Nothing in the SVG is a font. The four agent glyphs and the wordmark are both
+  paths: the glyphs are the four `niki` prints at runtime (◈ ⟠ ◉ ◆), and N, I, K and
+  I are all straight lines. An earlier version drew the wordmark with <text> and
+  `ui-monospace`, which rendered as a stretched proportional face anywhere that
+  font stack was not the first match — the one difference a logo must not have.
 -->
 
 <div align="center">
+
+<img src="assets/logo.svg" alt="NIKI — four agents in a pipeline, above the wordmark" width="340" />
+
+<br>
 
 <img width="1311" height="605" alt="NIKI terminal UI showing the four-agent pipeline running a task" src="https://github.com/user-attachments/assets/1234e802-b5e8-4033-8ce7-c8015a4d5080" />
 
