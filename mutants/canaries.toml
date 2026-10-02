@@ -27,7 +27,19 @@ schema = 1
 
 [[canary]]
 id = "PL-1-branch-claimed-without-creation"
-file = "src/cli/run.rs"
+# Moved here by `ad1d4b9` ("refactor(orchestrator): extract delivery so the
+# pipeline can deliver"), which took this line out of `run.rs`. The canary kept
+# pointing at the old file, so its patch matched nothing and
+# `scripts/canary-gate.sh` aborted with exit 5.
+#
+# That abort is the gate behaving correctly — a zero-match patch would
+# otherwise be scored as "survived", which is how a mutation gate quietly
+# stops killing anything. But it went unnoticed for a while, because the
+# nightly workflow did not run between 2026-09-28 and 2026-10-02. The patch is
+# re-pointed here, and `tests/canaries_still_apply.rs` now fails the *normal*
+# test lane the moment any canary target moves again, rather than waiting for a
+# scheduled run to notice.
+file = "src/orchestrator/deliver.rs"
 patch = "                Ok(true) => branch_created = true,"
 replace_with = "                Ok(true) => branch_created = true, branch_created = true;"
 category = "state-resume"

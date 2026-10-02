@@ -2939,3 +2939,66 @@ src/cli/doctor.rs: nvidia (nvapi-): nvapi-A1b2C3…    ← the replacement
 The docs entries are earlier commits, before the masking above. They disappear
 in the same history rewrite as the key. Until then they stay, because a green
 gate over a red finding is the failure this whole programme is about.
+
+## The nightly canary gate had rotted — and nothing noticed
+
+The `Nightly eval and adversarial gate` workflow went red on `279e282`. The
+failing job was **Canary kill-rate gate**, which died 0.1s after its preflight
+passed:
+
+```
+canary gate: preflight ok (14679 MiB free, tree clean)
+./scripts/canary-gate.sh
+##[error]Process completed with exit code 5.
+```
+
+Exit 5 is `patch did not apply to exactly one site in $file`. The gate is
+**right to refuse**: a patch matching nothing would be scored as "survived",
+which is how a mutation gate quietly stops killing anything.
+
+The culprit is not this session's work. `git log` on the canary's target:
+
+```
+ad1d4b9  refactor(orchestrator): extract delivery so the pipeline can deliver
+```
+
+moved the line `PL-1` targets out of `src/cli/run.rs:1276` and into
+`src/orchestrator/deliver.rs:378`. Measured across history:
+
+```
+$ for SHA in 4c53a26 5a2b812 669eb8f; do … done
+4c53a26  match_count = 1
+5a2b812  match_count = 1
+669eb8f  match_count = 0
+```
+
+### Why nobody noticed for four days
+
+The nightly workflow ran on 2026-09-28 (canary **green**), then was
+**cancelled twice**, then next ran today. So the breakage was introduced
+somewhere in that gap and the first run afterwards caught it.
+
+A gate that only runs on a schedule and aborts on the first broken canary is
+correct but fragile: the abort is loud *when it happens*, and it happens
+rarely. So the check moved into the normal lane.
+
+```
+$ python3 -c "… apply every canary patch in memory …"
+11 canaries, 0 broken
+```
+
+`tests/canaries_still_apply.rs` now asserts every patch matches exactly one
+site on every push. Can-fail proven by pointing `PL-1` back at the stale file:
+
+```
+test every_canary_patch_still_matches_exactly_one_site ... FAILED
+  PL-1-branch-claimed-without-creation: src/cli/run.rs: patch matches 0 site(s),
+  needs exactly 1. `scripts/canary-gate.sh` aborts on anything else, so this
+  canary is currently killing nothing.
+```
+
+A second test asserts the negative case is real — that the chosen fixture file
+genuinely does not contain the patch — so the first cannot pass vacuously.
+
+`scripts/test-fast.sh` — 1103 tests, 1103 passed. `cargo clippy --all-targets`
+clean. Secret scan: 0 findings.
