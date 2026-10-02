@@ -2399,7 +2399,7 @@ test plain_listing_never_prints_the_credential ... FAILED
 ---- plain_listing_never_prints_the_credential stdout ----
 thread '...' panicked at tests/providers_catalogue_echo.rs:94:5:
 the API key reached the terminal verbatim through the catalogue:
-openai	echo-Bearer sk-canary0123456789abcdefghijklmnop
+openai	echo-Bearer sk-canary…  (a fixture canary, not a credential)
 openai	claude-sonnet-4
 
 test result: FAILED. 2 passed; 2 failed
@@ -2470,7 +2470,7 @@ header back inside a model id:
 
 ```
 $ python3 /tmp/echo_models.py &          # echoes Authorization into model ids
-$ OPENAI_API_KEY="sk-canary0123456789abcdefghijklmnop" \
+$ OPENAI_API_KEY="sk-canary…" \   # a fixture canary, not a credential
   OPENAI_BASE_URL="http://127.0.0.1:8791/v1" \
   ./target/debug/niki providers models --provider openai
 openai — 3 model(s):
@@ -2772,3 +2772,110 @@ test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 `scripts/test-fast.sh` — 1103 tests run, 1103 passed, 0 skipped. `cargo clippy
 --all-targets` clean. The real-model output above is the same run re-executed
 after the fix, so the change is verified in the product, not only in a test.
+
+## Security: a live NVIDIA API key was committed, and G5 could not see it
+
+Found while auditing what was tracked, before any cleanup. `src/cli/doctor.rs`
+has held a **real, working** NVIDIA API key since `1182110` (2026-09-30), on a
+public repository. It was committed as two adjacent string literals:
+
+```rust
+splice(&[
+    "nvapi-ROTATED",
+    "ROTATED",
+]),
+```
+
+```
+$ python3 -c "
+committed = 'nvapi-ROTATED' + 'ROTATED'
+pasted   = 'nvapi-…'
+print('IDENTICAL:', committed == pasted)"
+IDENTICAL: True
+```
+
+Every other row of that corpus is visibly fabricated — `sk-proj-AAAA…`,
+`AKIAIOSFODNN7EXAMPLE`, `ghp_0123456789…`. That one row was real, and split
+across two literals so a line-based scanner would miss it.
+
+### The gate that reported PASS
+
+```
+(sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16})
+```
+
+Two independent holes, and the key went through both:
+
+1. `nvapi` was not in the pattern list — a provider this project explicitly
+   supports had zero coverage.
+2. Split literals are invisible to any regex over raw bytes.
+
+The old gate's output was `PASS no credentials in the tree or in history`
+while the credential it exists to catch sat in the tree. That is the exact
+shape this project is about, in its own security check.
+
+### The replacement
+
+`scripts/scan-secrets.py` scans each file twice — raw, and with every string
+literal's contents concatenated. Vendor prefixes added: `nvapi`, `sk-or-v1-`,
+`sk-proj-`, `hf_`, `sk_live_`, `xox[baprs]-`.
+
+The first version of that splice was wrong and the can-fail test caught it:
+
+```python
+# wrong — replaces each literal in place, keeping the newline BETWEEN them
+LITERAL.sub(lambda m: m.group(0)[1:-1], text)
+```
+
+Two literals on separate lines stay separated by a newline, so the credential
+is still broken across the join — the scanner "found" it only via the raw
+pass. Corrected to concatenate the literal contents with nothing between
+them, which is deliberately more aggressive than the compiler: `splice(&[a,
+b])` is an array, and nothing concatenates those at compile time. The runtime
+does. False positives cost an allowlist entry; false negatives cost a
+credential.
+
+### Can-fail proof
+
+`tests/secret_scan_can_fail.rs` feeds the scanner the exact shape that got
+through:
+
+```
+running 5 tests
+test a_credential_split_across_adjacent_literals_is_found ... ok
+test a_single_literal_credential_is_found_by_the_raw_pass ... ok
+test nvidia_keys_are_covered ... ok
+test ordinary_code_does_not_trip_the_scan ... ok
+test the_allowlist_is_exactly_one_file_with_a_reason ... ok
+test result: ok. 5 passed; 0 failed
+```
+
+`ordinary_code_does_not_trip_the_scan` is the counterweight: a gate nobody can
+keep green gets switched off, and then it protects nothing.
+
+The history scan is path-aware (`--diff`: added lines only, attributed by
+`+++ b/<path>`, `tests/` and its pre-rename name skipped). Scanning raw
+history without path context reports every fixture in `tests/`, which holds
+credential-shaped strings on purpose.
+
+The allowlist deliberately does **not** apply to history. It says "this file
+holds a fabricated shape *now*", which was false before the fix — and the real
+key is in exactly that file's history, so applying it would hide the finding.
+
+### Current state, stated plainly
+
+```
+$ python3 scripts/scan-secrets.py ; echo $?
+0                                    # the working tree is clean
+
+$ git log --all -p --format="" | python3 scripts/scan-secrets.py --diff
+EVIDENCE.md: openai (sk-): sk-canary012…
+src/cli/doctor.rs: nvidia (nvapi-): nvapi-2XcDwy…
+                                    # history is NOT clean, correctly
+```
+
+**The history scan is red, and it should be.** Both findings are real: the
+NVIDIA key, and a fixture canary of mine quoted in an earlier commit's
+`EVIDENCE.md`. Neither was silenced. Clearing them needs key rotation (only
+the owner) and a history rewrite with a force-push (stop-and-ask), so this is
+recorded as **B8** rather than fixed quietly. See `BLOCKERS.md`.

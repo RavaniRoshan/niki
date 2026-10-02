@@ -291,20 +291,28 @@ if want G5; then
     record G5 SKIP "cargo-audit not installed"
   fi
   # Secrets in the tree and in history.
-  # Test fixtures are *meant* to hold credential-shaped strings — that is what
-  # `tests/secret_redaction.rs` and `tests/reverse/injection.rs` are for, and
-  # flagging them would make the check unusable and get it switched off. The
-  # rule is about the product's own files.
-  if grep -rqIE --exclude-dir=target --exclude-dir=.git --exclude-dir=.evidence \
-        --exclude-dir=tests --exclude-dir=.odw \
-        '(sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{32,}|ghp_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16})' .; then
-    record G5 FAIL "a credential-shaped string is in the working tree"
+  #
+  # This used to be one `grep -E` over raw bytes. It reported PASS while a live
+  # NVIDIA API key sat in `src/cli/doctor.rs`, for two reasons: `nvapi` was not
+  # in the pattern list at all, and the key had been committed as two adjacent
+  # string literals that no line-based regex can join. `scripts/scan-secrets.py`
+  # covers both — it scans each file raw *and* with every string literal's
+  # contents concatenated — and `tests/secret_scan_can_fail.rs` proves it can
+  # still fail by feeding it the exact shape that got through.
+  #
+  # History is scanned the same way, on each commit's diff, because removing a
+  # secret from the tree does not remove it from the repository.
+  if run_capture G5 g5-secret-scan python3 scripts/scan-secrets.py; then
+    record G5 PASS "no credentials in the tracked tree"
   else
-    if git log --all -p 2>/dev/null | grep -qE '^\+.*(sk-ant-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16})'; then
-      record G5 FAIL "a credential-shaped string is in git history"
-    else
-      record G5 PASS "no credentials in the tree or in history"
-    fi
+    record G5 FAIL "a credential-shaped string is in the tracked tree"
+  fi
+
+  if run_capture G5 g5-secret-history \
+      bash -c 'git log --all -p --format="" | python3 scripts/scan-secrets.py --diff'; then
+    record G5 PASS "no credentials in git history"
+  else
+    record G5 FAIL "a credential-shaped string is in git history"
   fi
   # The path-escape guard, exercised rather than assumed.
   run_capture G5 g5-sandbox cargo test --test security_exec $CARGO_TEST_FLAGS

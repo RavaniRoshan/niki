@@ -59,12 +59,24 @@ pub fn redaction_corpus() -> Vec<(&'static str, String, &'static str)> {
             "sk-ant-api03-AAAAAA",
         ),
         (
+            // This row used to hold a **real, live** NVIDIA API key, copied in
+            // from a working session while the corpus was being written, and
+            // split across two literals so a line-based secret scanner would
+            // not match it. It sat in `1182110` and every commit since.
+            //
+            // Rotating the key is what actually contains the exposure — the
+            // value below is fake, but a secret that was public is public.
+            //
+            // The shape is all this row needs: `nvapi` plus a ≥40-character
+            // run mixing cases and digits, which is what the generic
+            // catch-all in `redact_secrets` matches. A fake value with that
+            // shape tests the same rule a real one did.
             "NVIDIA",
             splice(&[
-                "nvapi-ROTATED",
-                "ROTATED",
+                "nvapi-A1b2C3d4E5f6G7h8I9j0",
+                "K1l2M3n4O5p6Q7r8S9t0U1v2W3x4Y5z6",
             ]),
-            "2XcDwyksXdofV7sVL25dBPV2",
+            "A1b2C3d4E5f6G7h8I9j0",
         ),
         (
             "AWS access key",
