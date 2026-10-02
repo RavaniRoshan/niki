@@ -28,16 +28,35 @@ pub async fn handle(args: &ResumeArgs) -> Result<()> {
     let output_dir = config.general.output_dir.clone();
     let runtime = AgentRuntime::new(config);
 
-    println!(
-        "Locating checkpoint for session/task '{}'...",
-        args.session_id
-    );
+    // Redacted, and not because a scanner asked.
+    //
+    // `session_id` is whatever the user typed. In the normal case it is a UUID
+    // and there is nothing to hide; in the abnormal case someone has pasted a
+    // key, and this line is the one that puts it into shell scrollback, a CI log
+    // and a terminal capture. `redact_secrets` already exists and already runs
+    // over provider error text for exactly this reason — this echo simply was
+    // not going through it.
+    let asked_for = crate::llm::provider::redact_secrets(args.session_id.trim());
+    println!("Locating checkpoint for session/task '{asked_for}'...");
     let (session, checkpoint) = runtime.resume(&project_dir, &args.session_id).await?;
 
     println!("============================================================");
-    println!("Resumed session:    {}", session.session_id);
-    println!("Task ID:            {}", session.task_id);
-    println!("Task description:   {}", session.task_description);
+    // All three are echoed user text, and all three go through the same
+    // redactor: a description is free text a user typed, and a session or task
+    // id is free text a user pasted. Whatever that was, it should not survive
+    // into a log that gets pasted somewhere else.
+    println!(
+        "Resumed session:    {}",
+        crate::llm::provider::redact_secrets(&session.session_id)
+    );
+    println!(
+        "Task ID:            {}",
+        crate::llm::provider::redact_secrets(&session.task_id.to_string())
+    );
+    println!(
+        "Task description:   {}",
+        crate::llm::provider::redact_secrets(&session.task_description)
+    );
     println!("Last active role:   {:?}", checkpoint.current_role);
     println!("Current turn:       {}", checkpoint.current_turn);
     println!("Current step:       {}", checkpoint.current_step);

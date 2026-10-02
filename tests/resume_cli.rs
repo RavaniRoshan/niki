@@ -113,3 +113,34 @@ fn test_cli_resume_invalid_id() {
 
     assert.failure();
 }
+
+/// A key pasted as a session id must not survive into scrollback or a CI log.
+///
+/// `niki resume` echoes whatever the user typed. In the normal case that is a
+/// UUID; in the abnormal case it is a key someone pasted by mistake, and this
+/// line is the one that writes it into the terminal, where a screenshot or a
+/// CI log picks it up. The redaction already existed for provider error text —
+/// this echo simply was not going through it.
+#[test]
+fn a_secret_pasted_as_a_session_id_is_masked() {
+    const PASTED_KEY: &str = "sk-proj-AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH";
+
+    // The property is the redactor's, not this page's; what matters is that
+    // the page uses it.
+    let shown = niki::llm::provider::redact_secrets(PASTED_KEY);
+    assert!(
+        !shown.contains(PASTED_KEY),
+        "the redactor must not return the secret unchanged: {shown}"
+    );
+
+    // And the page routes its echo through the redactor.
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli/resume.rs"),
+    )
+    .expect("src/cli/resume.rs must be readable");
+    assert!(
+        src.contains("redact_secrets(args.session_id.trim())"),
+        "the session id the user typed is echoed; it must go through \
+         `redact_secrets` on the way out"
+    );
+}
