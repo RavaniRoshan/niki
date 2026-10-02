@@ -2464,3 +2464,76 @@ None was visible to any gate, because no gate ran those binaries.
 The lane is now 69 of 107, warm 1m47, and every binary in it was **measured**
 before being added. Of the sixteen added first, fifteen finished in 0.00 s — so
 the reason the original four were the only ones was never cost.
+
+---
+
+## 2026-10-02 · Batch 12 (PR #39 → master, CodeQL, SIGPIPE)
+
+**State at start:** `master` at `2b54ff0`. PR #39 open with four failing checks.
+Enforcement on `master` is `{approvals: 1, checks: 22, enforce_admins: false}`;
+`enforce_admins: false` means the "author can't approve themselves" rule does
+not bind a solo owner, so merging via PR is impossible (GitHub forbids
+self-approval) but pushing to `master` works. PR #39 has since been merged.
+
+**Slice 1 — CodeQL `rust/cleartext-logging` at `src/cli/providers.rs:111`.**
+The alert names `api_key` (`catalogue.rs:145`) as the source, so the path is the
+HTTP round trip: a provider — or a proxy the user pointed `base_url` at — can
+echo the bearer token back inside a model id and NIKI printed it. **Real, not a
+false positive, and not the `resume.rs` bug.** `sanitize_for_terminal` was
+already applied and does not help: it strips escapes, not secrets. The four
+other provider response surfaces already redact; the catalogue was the one that
+did not. Fixed with `safe_model_id` = sanitize ∘ redact.
+
+Can-fail: `tests/providers_catalogue_echo.rs`, against a real socket whose
+provider echoes the `Authorization` header into a model id. With the fix
+removed, the test prints the key in its own failure output.
+
+**Slice 2 — alert 19.** Re-analysis opened a new one at the shifted line 121,
+which is `println!("\n{name} — {} model(s):", models.len())` — a provider name
+and an integer. CodeQL taints the whole `Vec<CatalogueEntry>` because `fetch`
+takes the key as a parameter, so the count inherits it. Dismissed as `false
+positive` with the real binary's output in the dismissal comment, and the note
+is recorded in the `safe_model_id` doc comment so it is answered rather than
+re-litigated. Open alerts: **0**.
+
+**Slice 3 — `niki … | head` panicked.** `e0982f7` went red on
+`Consumer journeys`; the message pointed at a Python fixture, but step 0 of
+`mega-e2e.sh` *expects* that fixture red. The real failure was the check one
+line below:
+
+```
+openai	mock-model
+  FAIL  http://127.0.0.1:8091/models returned nothing niki could parse
+```
+
+Five model ids printed directly above a check saying nothing was parsed. Two
+causes:
+
+1. `main.rs` already had `ignore_sigpipe()` and it set `SIG_IGN` — which does not
+   help, because ignoring the signal turns the kill into an `EPIPE` write error
+   and `println!` panics on any write error. Measured: `SIG_IGN` → 101 + panic;
+   `SIG_DFL` → 141, empty stderr. 141 is what `cat`/`git`/`grep` return.
+2. `mega-e2e.sh:213` piped the binary into `grep -q .` under `set -o pipefail`.
+   `grep -q` exits on first match, closes the pipe, and pipefail then reports
+   the signal death as a failed check. So **fixing the binary alone does not fix
+   the leg** — verified by reverting the script line with the binary fix in
+   place. `grep -c .` reads the whole stream and asks the question it means to.
+
+Can-fail: `tests/pipe_to_early_reader.rs`, four tests. With `SIG_IGN` restored,
+two fail and print the panic; the full-read control passes in both states, and
+`the_early_reader_still_receives_its_line` catches a "fix" that silences the
+panic by printing nothing.
+
+**Result on `e60b01b`:** 22 jobs, all `success`, 0 skipped, 0 failed.
+`CI`, `CodeQL`, `Integration Test`, `TUI Smoke (tmux)` all green.
+
+```
+$ gh api "repos/RavaniRoshan/niki/code-scanning/alerts?state=open" -q 'length'
+0
+```
+
+**Still open, unchanged by this batch:** B6 (a funded OpenRouter key — the
+supplied one has `total_credits: 0`, so only `:free` models answer) and B7 (the
+`ActionClassifier` trait has no production implementation, so the LLM
+transcript-classifier layer is inert in the product). Neither is a slice that
+can be taken without an owner decision.
