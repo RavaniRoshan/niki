@@ -537,3 +537,4 @@ resume-prints-a-pasteable-command | the_command_resume_prints_survives_a_shell |
 mcp-manager-outlives-discovery | the_pipeline_holds_the_mcp_manager_beyond_discovery | the Arc dropping at the end of the block, killing every stdio child
 subpage-key-reaches-the-page | a_subpage_q_reaches_the_page_not_the_nav_layer | the nav layer claiming q before the page, in either render loop
 resume-says-nothing-was-rerun | test_cli_resume_command | a recovery page claiming "state restored successfully" and restoring nothing
+broken-container-is-a-warning | a_container_that_cannot_start_is_a_warning_not_a_failure | doctor exiting 1 on a machine where --backend worktree runs the whole pipeline

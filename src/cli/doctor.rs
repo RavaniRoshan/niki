@@ -696,13 +696,30 @@ fn check_container_can_start(base_image: &str) -> Check {
                 .unwrap_or("(no error output)")
                 .to_string();
             let remedy = container_start_remedy(&detail);
+            // A **warning**, not a failure — and the distinction is the whole
+            // point of this check.
+            //
+            // It was a `Fail`, so `doctor` exited 1 on any machine where the
+            // runtime is installed but cannot start a container. That is the
+            // *GitHub-hosted CI runner*, and it is not a broken machine: the
+            // worktree backend needs no container, `--backend worktree` runs
+            // the whole pipeline, and the first-run wizard already steers
+            // toward it. Exiting 1 told an operator their machine was
+            // unusable when the product works on it — and, per this file's
+            // own reasoning about exit codes, that trains people to ignore
+            // the exit code, which is what the check exists to prevent.
+            //
+            // It stays loud: the OCI error is carried verbatim, because that
+            // is the part the user can act on, and the working backend is
+            // named.
             Check {
                 category: "sandbox",
                 name,
-                result: CheckResult::Fail(format!(
+                result: CheckResult::Warn(format!(
                     "{bin} is installed and the image is in the local store, but a \
-                     container cannot start. Every run on the default backend will \
-                     fail:\n  {detail}\n\n{remedy}"
+                     container cannot start, so the **container backend** will fail:\n  \
+                     {detail}\n\n{remedy}\n\nThis is not fatal: \
+                     `--backend worktree` runs the full pipeline with no container."
                 )),
             }
         }
@@ -1028,6 +1045,68 @@ mod tests {
             msg.contains("niki run"),
             "the failure must say what will break: {msg}"
         );
+    }
+
+    /// A container runtime that **cannot start** is also not a hard failure.
+    ///
+    /// It was one, and `doctor` exited 1 on the GitHub-hosted CI runner — a
+    /// machine where the product works perfectly, because `--backend worktree`
+    /// needs no container. The test drives the real function with a `docker` on
+    /// `PATH` that fails the way a cgroup-restricted runner does, because that
+    /// is the case the exit code was wrong for and the only way to see it is to
+    /// make one.
+    #[test]
+    fn a_container_that_cannot_start_is_a_warning_not_a_failure() {
+        let bin = std::env::temp_dir().join("niki-doctor-broken-runtime");
+        let _ = std::fs::remove_dir_all(&bin);
+        std::fs::create_dir_all(&bin).expect("temp dir");
+        std::fs::write(
+            bin.join("docker"),
+            "#!/bin/sh\necho 'crun: writing file cpu.max: Invalid argument' >&2\nexit 125\n",
+        )
+        .expect("write the fake runtime");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(
+                bin.join("docker"),
+                std::fs::Permissions::from_mode(0o755),
+            );
+        }
+
+        let old = std::env::var_os("PATH").unwrap_or_default();
+        let mut parts = vec![bin.clone()];
+        parts.extend(std::env::split_paths(&old));
+        // SAFETY: the test binary is single-threaded here, and PATH is restored
+        // before this function returns — including on the panic paths below,
+        // because the restore happens before the match.
+        unsafe { std::env::set_var("PATH", std::env::join_paths(parts).unwrap()) };
+        let check = check_container_can_start("niki-sandbox:24.04");
+        unsafe { std::env::set_var("PATH", old) };
+        let _ = std::fs::remove_dir_all(&bin);
+
+        match check.result {
+            CheckResult::Fail(m) => panic!(
+                "a container that cannot start must be a WARNING when the worktree \
+                 backend still runs the pipeline. Exiting 1 here tells an operator \
+                 their machine is unusable when it is not, and trains them to \
+                 ignore the exit code the check exists to provide: {m}"
+            ),
+            CheckResult::Warn(m) => {
+                assert!(
+                    m.contains("worktree"),
+                    "the warning must name the backend that does work: {m}"
+                );
+                assert!(
+                    m.contains("crun"),
+                    "and carry the runtime's own error, because that is the part \
+                     the user can act on: {m}"
+                );
+            }
+            CheckResult::Pass(m) => {
+                panic!("the fake runtime exits 125; this check must not pass: {m}")
+            }
+        }
     }
 
     /// A machine with no container runtime must not be *failed* for that alone.
