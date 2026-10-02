@@ -1,6 +1,6 @@
 # RELEASE REPORT — NIKI, current state (2026-10-02)
 
-`master` at `279e282`. Supersedes the batches 1–4 report below, which is kept
+`master` at `8ef80be`. Supersedes the batches 1–4 report below, which is kept
 verbatim as the historical record — including two rows this document now
 contradicts. Those contradictions are listed in §3 rather than edited away.
 
@@ -58,7 +58,7 @@ all green.
 | **G5** security | **FAIL — and it must be** | `cargo deny` / `cargo audit` clean. **Tree scan: clean** (`scripts/scan-secrets.py`, exit 0). **History scan: FAIL** — a real NVIDIA API key is in `src/cli/doctor.rs`'s history since `1182110`, and a fixture canary of mine is in an earlier `EVIDENCE.md`. See §4 |
 | **G6** failure paths | **PASS** | every failure path exits non-zero with a message a person can act on |
 | **G7** docs match reality | **PASS** | every README command executed against the installed binary |
-| **G8** CI green | **PASS** | **22 jobs, 22 success, 0 skipped, 0 failed** on `2b487c4`. `CI`, `CodeQL`, `Integration Test`, `TUI Smoke (tmux)` all green. CodeQL: **0 open alerts** |
+| **G8** CI green | **PASS** | **22 jobs, 22 success, 0 skipped, 0 failed** on `2b487c4`, and `CI` / `CodeQL` / `Integration Test` / `TUI Smoke (tmux)` all green again on `8ef80be`. CodeQL: **0 open alerts**. The **nightly** workflow is green on `8ef80be` — all six jobs, including the canary kill-rate gate and coverage report, both of which had been broken |
 | **G9** no dead code, no fake features | **PARTIAL** | no `todo!`/`unimplemented!` in production code. **One known exception, disclosed in `ROADMAP.md`:** `convex/` is a dormant control-plane experiment — excluded from the build, zero `src/` references, absent from the README — that sits next to a `no telemetry` claim. Owner decision, not silently deleted |
 
 **Eight pass. G5 is red for a real reason. G9 is partial for a disclosed one.**
@@ -110,6 +110,7 @@ Each was made to fail, the failure observed, then restored.
 | `niki … \| head` | `SIG_DFL` → `SIG_IGN` | `panicked … Broken pipe (os error 32)`, 2 tests failed |
 | Tester attribution | drop `Tester reported` | `4/4 tests passed` reappears, 2 tests failed |
 | Secret scan | (the scanner's first splice) | the finding came from the raw pass, not the spliced one — the test failed |
+| Canary guard | repoint `PL-1` back at `src/cli/run.rs` | `patch matches 0 site(s), needs exactly 1` |
 
 ## 6 · What changed since batches 1–4
 
@@ -137,6 +138,18 @@ Each was made to fail, the failure observed, then restored.
 - **Image input is not supported** — `CompletionRequest` is text-only end to
   end. Disclosed in `ROADMAP.md`; `space-bunny-alpha` advertises image input,
   and using it needs a content type through the entire request path.
+- **Two nightly gates had rotted, undetected for four days.** The canary
+  kill-rate gate aborted on exit 5 having killed nothing, because `ad1d4b9`
+  moved the line canary `PL-1` targets into `deliver.rs` and the canary kept
+  naming the old file. The coverage report failed on
+  `--output-path may not be used together with --html`. Both were pre-existing,
+  not from this session. The canary check now lives in the normal test lane
+  (`tests/canaries_still_apply.rs`), so a refactor that moves a canary target
+  fails `cargo test` on every push instead of waiting for a schedule that had
+  been cancelled twice.
+- **One claim of mine was wrong and is retracted in place.** I reported that
+  `doctor` health-checks only eight of twelve providers. That was my grep
+  piped through `head -8`, not the code — all twelve are checked.
 
 ## 7 · Honest limitations
 

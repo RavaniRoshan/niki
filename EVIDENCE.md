@@ -3047,3 +3047,30 @@ Both nightly red jobs are now fixed and the workflow re-run on `af72682`:
 
 The canary gate result is the load-bearing one: it now actually kills the 11
 canaries, which it has not been doing since `ad1d4b9`.
+
+### Final nightly result, both fixes in
+
+```
+$ gh run view 36994234482 --json jobs -q '.jobs[] | "\(.conclusion)\t\(.name)"' | sort
+success	Backend differential
+success	Canary kill-rate gate
+success	Consumer journeys
+success	Coverage report
+success	Eval replay + manifest
+success	Price table freshness
+```
+
+The canary gate is doing real work for the first time since `ad1d4b9`:
+
+```
+canaries: 11   killed: 9   survived: 2
+HELD-OUT kill rate: 0.83 (5/6)
+NOTE: held-out kill rate is below the 0.95 target. The corpus needs more
+GATE PASSED: every expected canary was killed; declared blind spots are listed above.
+```
+
+Note what that output does *not* do: it does not hide the 0.83. The two
+survivors are the declared `equivalent`/`known_surviving` entries, the held-out
+rate is printed against its 0.95 target, and the gate passes anyway because
+those two are declared rather than unexpected. A gate that printed 11/11 here
+would be the suspicious one.

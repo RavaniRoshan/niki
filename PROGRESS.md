@@ -2644,3 +2644,29 @@ provider/model id remains the owner's.
   `head -8` and the last four were cut off before I read them. All twelve are
   checked, and the retraction is kept in `ROADMAP.md` rather than deleted,
   because a roadmap that quietly drops its own errors is one nobody trusts.
+
+## 2026-10-02 · Batch 14 — the gates that had rotted
+
+Two nightly jobs were red that had been broken since at least 2026-09-28, and
+neither was from this session.
+
+**Canary kill-rate gate** — exit 5, 0.1s after preflight: *"patch did not
+apply to exactly one site."* `ad1d4b9` (extract delivery) moved canary
+`PL-1`'s target from `src/cli/run.rs:1276` to
+`src/orchestrator/deliver.rs:378`; the canary kept naming the old file. The
+refusal is correct — a zero-match patch scores as "survived", which is how a
+mutation gate stops killing anything — but it only surfaces on a schedule, and
+the nightly had been cancelled twice in between.
+
+Moved into the normal lane: `tests/canaries_still_apply.rs` asserts every
+canary patch matches exactly one site on every push. Re-pointed `PL-1`.
+Can-fail proven. Result: **11 canaries, 9 killed, 2 survived**, held-out kill
+rate 0.83 printed against its 0.95 target rather than hidden.
+
+**Coverage report** — `error: --output-path may not be used together with
+--html`. `cargo-llvm-cov`'s own help says `--output-path` is only usable with
+`--json`/`--lcov`/`--cobertura`/`--text`. Fixed against the tool's
+documentation, not memory; artifact path `target/llvm-cov/html`.
+
+Final: nightly **6/6 green**, main CI **22/22 green**, CodeQL **0 open
+alerts**, `test-fast.sh` **1103/1103**, secret scan **0 findings in the tree**.
