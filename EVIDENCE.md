@@ -2491,3 +2491,130 @@ Not dismissed silently: the note is recorded in the `safe_model_id` doc
 comment so the next occurrence is answered rather than re-litigated, and the
 guard test `annotated_listing_never_prints_the_credential` covers that exact
 code path.
+
+## Slice: `niki … | head` panicked (the mega-e2e failure on `e0982f7`)
+
+CI's `Consumer journeys` job failed with a message about a Python fixture. The
+fixture was not the problem — step 0 of `mega-e2e.sh` *expects* it red. The real
+failure was one line further down:
+
+```
+── 1. the catalogue, over a real socket ─────────────────────────
+openai	anthropic/claude-sonnet-4
+openai	anthropic/claude-haiku-4-5
+openai	openai/gpt-4o-mini
+openai	openai/o3-mini
+openai	mock-model
+  FAIL  http://127.0.0.1:8091/models returned nothing niki could parse
+```
+
+Five model ids, one line above a check that says the endpoint returned nothing.
+
+### Cause 1 — the binary
+
+```
+$ OPENAI_API_KEY=… OPENAI_BASE_URL=http://127.0.0.1:8791/v1 \
+    ./target/debug/niki providers models --provider openai --plain | head -1
+openai	echo-Bearer [REDACTED]
+niki rc=101
+stderr:
+thread 'main' panicked at library/std/src/io/stdio.rs:1165:9:
+failed printing to stdout: Broken pipe (os error 32)
+```
+
+`src/main.rs` already had an `ignore_sigpipe()`, and it set `SIG_IGN`. That is
+not a fix. Ignoring SIGPIPE converts the kill into an `EPIPE` write error, and
+`println!` panics on any write error — so the panic is byte-for-byte the same,
+and the comment claiming it fixed `niki recommend | head` exiting 101 was wrong.
+
+Measured, both dispositions, same binary:
+
+| disposition | `\| head -1` | stderr | full read |
+| --- | --- | --- | --- |
+| `SIG_IGN` (was) | 101 | Rust panic | 0 |
+| `SIG_DFL` (now) | 141 | 0 bytes | 0 |
+
+141 is 128 + SIGPIPE, which is what `cat`, `git` and `grep` return when their
+reader leaves early. Nothing is lost: stdout is line-buffered, so every line
+printed before the reader left was already flushed to it.
+
+### Cause 2 — the script
+
+`mega-e2e.sh:213` piped the binary into `grep -q .`. `grep -q` exits on the
+first match, closing the pipe on a binary that is still writing; the binary
+dies of SIGPIPE; the script runs under `set -o pipefail` (line 36), so the
+pipeline's status is the signal death and the check takes the `else` branch.
+
+So fixing the binary alone does **not** fix the leg — verified:
+
+```
+# with `grep -q .` restored, SIG_DFL in place:
+  FAIL  http://127.0.0.1:8099/v1/models returned nothing niki could parse
+mega-e2e: 1 check(s) failed
+
+# with `grep -c . >/dev/null`:
+mega-e2e: PASS  (mock-model via http://127.0.0.1:8099/v1)
+```
+
+`grep -c` must read the whole stream to count, so the reader never leaves early
+and the check answers the question it means to ask.
+
+### Can-fail proof
+
+`tests/pipe_to_early_reader.rs`, with `SIG_IGN` temporarily restored:
+
+```
+$ CARGO_BUILD_JOBS=2 cargo test --test pipe_to_early_reader -j 2 -- --test-threads=1
+test grep_q_does_not_make_niki_panic ... FAILED
+test head_does_not_make_niki_panic ... FAILED
+thread 'main' panicked at library/std/src/io/stdio.rs:1165:9:
+failed printing to stdout: Broken pipe (os error 32)
+test result: FAILED. 2 passed; 2 failed
+```
+
+`a_reader_that_consumes_everything_gets_everything` passes in both states — it
+is the control, so a "fix" that silenced the panic by printing nothing would be
+caught by `the_early_reader_still_receives_its_line` instead.
+
+With `SIG_DFL`:
+
+```
+running 4 tests
+test a_reader_that_consumes_everything_gets_everything ... ok
+test grep_q_does_not_make_niki_panic ... ok
+test head_does_not_make_niki_panic ... ok
+test the_early_reader_still_receives_its_line ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+### The leg itself, end to end
+
+```
+$ MOCK_LLM_PORT=8099 MOCK_LLM_SCRIPT=tests/integration/script_median.json \
+    python3 tests/integration/mock_llm.py &
+$ NIKI_BIN="$PWD/target/release/niki" NIKI_BASE_URL=http://127.0.0.1:8099/v1 \
+    NIKI_MODEL=mock-model NIKI_PROVIDER=openai ./scripts/mega-e2e.sh
+── 0. the fixture must be red before the agent runs ─────────────
+  ok    it fails for the right reason (no median yet)
+── 1. the catalogue, over a real socket ─────────────────────────
+  ok    the endpoint answered a model list
+── 2. niki run ─────────────────────────────────────────────────
+  ok    the run completed in 2s
+── 3. the branch ───────────────────────────────────────────────
+  ok    niki/7d8741e0
+  ok    the branch actually changes files
+── 4. does the code work? ─────────────────────────────────────
+  ok    the fixture's tests pass on the branch NIKI produced
+  ok    the new function is actually present
+── 5. the advice the product gives ─────────────────────────────
+  ok    recommend does not present unchecked advice as checked
+
+mega-e2e: PASS  (mock-model via http://127.0.0.1:8099/v1)
+```
+
+### Why this was DO NOW
+
+`--plain` exists so the output can be piped. A scripting entry point that
+panics and exits 101 on `| head` is broken for the use it was built for, and it
+is the first thing a Linux user types. Not a test-only defect: the panic
+reaches the user's terminal.

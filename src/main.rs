@@ -2,13 +2,31 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-/// On Unix, ignore SIGPIPE so piping output to `head`/`less`/`grep` does not
-/// terminate the process. A closed pipe then surfaces as a normal write error
-/// instead of a crash (previously `niki recommend | head` exited 101).
+/// Restore the default SIGPIPE disposition, so `niki … | head` dies the way
+/// every other Unix tool does instead of panicking.
+///
+/// Rust ignores SIGPIPE at startup and turns a failed write into a panic
+/// (`println!` unwraps), so out of the box `niki providers models --plain |
+/// head -1` printed
+///
+/// ```text
+/// thread 'main' panicked at library/std/src/io/stdio.rs:1165:9:
+/// failed printing to stdout: Broken pipe (os error 32)
+/// ```
+///
+/// and exited 101. Setting `SIG_IGN` — which is what this used to do — does not
+/// fix that: ignoring the signal just converts the kill into an `EPIPE` write
+/// error, and `println!` panics on that too. The panic is the same either way.
+///
+/// `SIG_DFL` is the fix. The process is killed by the signal, so the exit
+/// status is 141 (128 + SIGPIPE) with nothing on stderr — byte-for-byte the
+/// behaviour of `cat`, `git` and `grep`. Nothing is lost: NIKI's stdout is
+/// line-buffered, so every line printed before the reader left is already
+/// flushed, and the reader got all of them.
 #[cfg(unix)]
-fn ignore_sigpipe() {
+fn restore_default_sigpipe() {
     unsafe {
-        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
 }
 
@@ -105,7 +123,7 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     #[cfg(unix)]
-    ignore_sigpipe();
+    restore_default_sigpipe();
 
     // Initialize logging
     let subscriber = FmtSubscriber::builder()

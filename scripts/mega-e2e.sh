@@ -210,7 +210,16 @@ grn "  ok    it fails for the right reason (no median yet)"
 # socket.
 cyan "── 1. the catalogue, over a real socket ─────────────────────────"
 if "$BIN" providers models --provider "$PROVIDER" --plain 2>&1 | head -8; then :; fi
-if "$BIN" providers models --provider "$PROVIDER" --plain 2>/dev/null | grep -q .; then
+# `grep -c .`, not `grep -q .`.
+#
+# `grep -q` exits the instant it matches, which closes the pipe on a binary
+# that is still writing. NIKI then dies of SIGPIPE, and because this script
+# runs under `set -o pipefail` (line 36) the pipeline takes that 141 as its
+# status — so the check reported "returned nothing niki could parse" about a
+# response that had just printed five model ids one line above. `grep -c` has
+# to read the whole stream to count, so the reader never leaves early and the
+# question being asked is actually the one that gets answered.
+if "$BIN" providers models --provider "$PROVIDER" --plain 2>/dev/null | grep -c . >/dev/null; then
   grn "  ok    the endpoint answered a model list"
 else
   red "  FAIL  $BASE_URL/models returned nothing niki could parse"
