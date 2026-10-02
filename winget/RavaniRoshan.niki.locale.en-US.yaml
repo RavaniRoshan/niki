@@ -1,5 +1,5 @@
 PackageIdentifier: RavaniRoshan.niki
-PackageVersion: 0.8.0
+PackageVersion: 0.9.0
 PackageLocale: en-US
 Publisher: RavaniRoshan
 PackageName: niki
@@ -10,7 +10,7 @@ Tags:
   - cli
   - ai
   - coding-agent
-ReleaseNotes: "v0.8.0: see https://github.com/RavaniRoshan/niki/releases/tag/v0.8.0"
-ReleaseNotesUrl: https://github.com/RavaniRoshan/niki/releases/tag/v0.8.0
+ReleaseNotes: "v0.9.0: see https://github.com/RavaniRoshan/niki/releases/tag/v0.9.0"
+ReleaseNotesUrl: https://github.com/RavaniRoshan/niki/releases/tag/v0.9.0
 ManifestType: defaultLocale
 ManifestVersion: 1.9.0
