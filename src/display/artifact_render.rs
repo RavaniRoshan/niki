@@ -32,13 +32,49 @@ pub fn render_code_diff_summary(diff: &CodeDiff) -> Vec<String> {
     lines
 }
 
+/// The Tester's line, attributed to the Tester.
+///
+/// The counts here come from the model's own artifact. They are *its*
+/// accounting, and NIKI does not measure per-test counts — it runs the suite
+/// and gets an exit code. The distinction is load-bearing, and it was not
+/// visible: the line used to read `4/4 tests passed`, which on a real
+/// `nvidia/nemotron-3-super-120b-a12b` run accompanied a Tester that claimed
+/// four passing tests, named the file it wrote them to, and had written no
+/// file at all. The suite ran `1 passed`. The branch was still gated on the
+/// real exit code, so nothing unsafe shipped — but the number a user reads was
+/// the model's claim, stated as fact.
+///
+/// So the counts are named as a report. The measured result is printed
+/// separately, from `TestExecution`, by `render_verification_line`.
 pub fn render_test_report_summary(report: &TestReport) -> Vec<String> {
     vec![format!(
-        "{}/{} tests passed — {} edge cases identified",
+        "Tester reported {}/{} tests passed — {} edge cases identified",
         report.test_results.passed,
         report.test_results.total,
         report.edge_cases_found.len()
     )]
+}
+
+/// What NIKI actually measured, when it ran the suite itself.
+///
+/// This is the only line in the Tester output backed by something NIKI
+/// executed rather than something a model wrote. It deliberately reports the
+/// exit code rather than a pass count: counting individual tests means parsing
+/// each runner's output format, and a parser that guesses is worse than no
+/// number. `None` when no suite ran — in which case the Tester's line stands
+/// alone and is visibly unattributed to a measurement that never happened.
+pub fn render_verification_line(
+    execution: Option<&crate::agents::tester::TestExecution>,
+) -> Option<String> {
+    let te = execution?;
+    Some(if te.passed {
+        format!("Verified: `{}` exited 0", te.command)
+    } else {
+        format!(
+            "Verified: `{}` exited {} — suite failed",
+            te.command, te.exit_code
+        )
+    })
 }
 
 pub fn render_review_verdict_summary(verdict: &ReviewVerdict) -> Vec<String> {

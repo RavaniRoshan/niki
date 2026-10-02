@@ -290,6 +290,15 @@ pub fn deliver(inp: DeliverInput<'_>) -> Result<Delivered> {
     // changes.patch is written exactly once, by `generate_report` alongside
     // report.md (Phase 5.6 single-writer rule).
 
+    // What NIKI measured, stated plainly and separately from what the Tester
+    // claimed. Printed before the gate decision so the decision is never the
+    // first time the user sees the real result.
+    if let Some(line) =
+        crate::display::artifact_render::render_verification_line(result.test_execution.as_ref())
+    {
+        eprintln!("{line}");
+    }
+
     // Red-suite gate (goal-a3f9c2, Phase 2): a failing executed suite — or a
     // failing mutation gate — blocks the branch. The evidence (patch, report,
     // test output) is still written so the failure is inspectable, but no
