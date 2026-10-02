@@ -327,7 +327,18 @@ fn permission_tall_modal_reflows() {
         let out = render_overlay(w, h, |f| {
             render_permission_modal(f, &req, f.area(), &state);
         });
-        assert!(out.contains("Allow once"), "options lost at {w}x{h}");
+        // `Allow` / `Deny`, not `Allow once` / `Allow always`.
+        //
+        // The modal used to offer four options and this looked for one of them.
+        // It now offers two, and it looks for **both** — the property here is
+        // "the options are still on screen at this size", and one label never
+        // established that: a modal that rendered `Allow` and dropped `Deny`
+        // would have passed.
+        assert!(out.contains("Allow"), "options lost at {w}x{h}");
+        assert!(
+            out.contains("Deny"),
+            "the deny option was dropped at {w}x{h}"
+        );
         assert!(out.contains("Permission Required"), "title lost at {w}x{h}");
     }
 }
