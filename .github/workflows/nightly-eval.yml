@@ -87,12 +87,19 @@ jobs:
       - name: Generate coverage
         run: cargo llvm-cov --lib --summary-only
       - name: Generate an HTML report
-        run: cargo llvm-cov --lib --html --output-path target/llvm-cov
+        # No `--output-path` here. cargo-llvm-cov documents it as usable "only
+        # together with --json, --lcov, --cobertura, or --text", and says
+        # `--html` takes `--output-dir`; passing it anyway fails with
+        # `error: --output-path may not be used together with --html`, which
+        # is how this step has been failing since at least 2026-09-28 — after
+        # the summary step succeeds, so the job looks like coverage failed
+        # rather than a flag typo.
+        run: cargo llvm-cov --lib --html
       - name: Upload the coverage report
         uses: actions/upload-artifact@v7
         with:
           name: coverage-report
-          path: target/llvm-cov
+          path: target/llvm-cov/html
           retention-days: 14
 
   # The price table is a frozen snapshot of vendor rates and it will rot. It

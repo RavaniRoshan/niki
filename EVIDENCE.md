@@ -3002,3 +3002,48 @@ genuinely does not contain the patch — so the first cannot pass vacuously.
 
 `scripts/test-fast.sh` — 1103 tests, 1103 passed. `cargo clippy --all-targets`
 clean. Secret scan: 0 findings.
+
+## The coverage job had been failing since at least 2026-09-28
+
+Same nightly run, second red job. Not today's work either — it failed
+identically on 2026-09-28.
+
+```
+success  Generate coverage          (cargo llvm-cov --lib --summary-only)
+failure  Generate an HTML report    (cargo llvm-cov --lib --html --output-path target/llvm-cov)
+skipped  Upload the coverage report
+```
+
+The error, from the job log:
+
+```
+error: --output-path may not be used together with --html
+```
+
+`cargo-llvm-cov`'s own `--help` says so directly:
+
+> `--output-path <PATH>` … *This flag can only be used together with `--json`,
+> `--lcov`, `--cobertura`, or `--text`. See `--output-dir` for `--html` and
+> `--open`.*
+>
+> `--html` … *If `--output-dir` is not specified, the report will be generated
+> in `target/llvm-cov/html` directory.*
+
+So the step dropped `--output-path` and the artifact path became
+`target/llvm-cov/html`. Verified against the tool's documentation rather than
+from memory — the flag pairing is not something to guess at.
+
+Worth noting how this hid for four days: the step before it *succeeds*, so the
+job reads as "coverage generation failed" rather than "a flag was rejected".
+The nightly workflow had been cancelled twice in between, so there was no
+earlier run to notice.
+
+Both nightly red jobs are now fixed and the workflow re-run on `af72682`:
+
+| job | before | after |
+|---|---|---|
+| Canary kill-rate gate | failure (exit 5, killed nothing) | **success** |
+| Coverage report | failure (`--output-path` + `--html`) | see §below |
+
+The canary gate result is the load-bearing one: it now actually kills the 11
+canaries, which it has not been doing since `ad1d4b9`.
