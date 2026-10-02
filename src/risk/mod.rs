@@ -1,10 +1,24 @@
-//! Deterministic risk classification: maps a TaskSpec to a risk tier that
-//! gates pipeline topology. No LLM call — cheap keyword/path heuristics over
-//! the spec, so it runs before any stage executes.
+//! Risk classification, in two unrelated senses.
+//!
+//! **This module's own tier** — `RiskLevel` — maps a `TaskSpec` to a risk tier
+//! that gates pipeline topology. That path is deterministic: cheap
+//! keyword/path heuristics over the spec, no LLM, so it runs before any stage
+//! executes and cannot be argued with.
+//!
+//! **The permission layers** — `input_probe`, `hooks`, `classifier` — gate
+//! *individual tool calls* during a run. The probe and the hooks are
+//! deterministic. `llm_classifier` is not: it asks a model, and it is the only
+//! place in this module where a model can decide anything. It is the third
+//! layer, it runs last, and it fails closed.
+//!
+//! The distinction matters because a reader seeing "risk classification" here
+//! could reasonably assume both are heuristics. They are not, and the one that
+//! is not is the one that spends the user's credits.
 
 pub mod classifier;
 pub mod hooks;
 pub mod input_probe;
+pub mod llm_classifier;
 pub mod transcript;
 
 use crate::artifacts::types::TaskSpec;

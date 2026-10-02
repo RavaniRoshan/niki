@@ -811,6 +811,102 @@ pub struct PermissionsConfig {
     /// that was the outcome for *every* command in every interactive run.
     #[serde(default = "default_prompt_timeout_seconds")]
     pub prompt_timeout_seconds: u64,
+    /// The model-based permission classifier — the third layer, behind the
+    /// static deny list and the hooks.
+    #[serde(default)]
+    pub classifier: ClassifierConfig,
+}
+
+/// `[permissions.classifier]` — a model decides whether a tool call is inside
+/// what the user asked for.
+///
+/// **Off by default**, and the default is deliberate rather than cautious.
+/// Two vendors ship this and both run it on a model *they* control, on
+/// infrastructure the user cannot see, with the failures handled server-side.
+/// A BYOK harness would instead spend the user's credits on an extra call per
+/// unlisted tool call, against a provider of the user's choosing, with latency
+/// they did not ask for and no measured benefit to show for it. A user who
+/// wants it can turn it on knowing what it costs; a user who does not know it
+/// exists should not be billed for it.
+///
+/// Measured on one open model, the scope cases this has to get right —
+/// reading an unrelated file when the user asked for something else — are
+/// where a general model and a content-safety model diverge completely: 7/7
+/// against 3/7. That gap is the reason this is worth having at all, and also
+/// the reason the model is resolved rather than hardcoded.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClassifierConfig {
+    /// Turn the layer on. Default false; see the type doc.
+    pub enabled: bool,
+    /// Which model answers. Resolved in order: this, then the model preset's
+    /// `auto_review_model`, then [`Self::default_model`], then the session
+    /// model's own slug — Codex's `select_review_model()` order.
+    ///
+    /// Empty means "do not override", not "no model": the session model is
+    /// always the last rung, so there is no configuration in which this layer
+    /// cannot answer.
+    pub model: String,
+    /// A fallback ahead of the session model, for a provider that ships a
+    /// cheaper judge than its main one.
+    #[serde(alias = "fallback_model")]
+    pub default_model: String,
+    /// Replace the bundled policy prompt. A path, or the prompt itself.
+    /// NIKI ships `risk::llm_classifier::DEFAULT_POLICY`; a policy nobody can
+    /// read is not a permission policy, so overriding it is supported.
+    pub prompt: String,
+    /// Max tokens the cheap first pass may use.
+    ///
+    /// Codex's classifier prompt asks for exactly one, and that is achievable
+    /// on a non-reasoning model. It is **not** achievable on a reasoning one:
+    /// measured, `nvidia/nemotron-3-super-120b-a12b` spent an 8-token budget
+    /// entirely on `reasoning_content`, returned `content: null`, and the
+    /// classifier denied every action — correctly, and for a reason that had
+    /// nothing to do with the action. The default is 256, which is what that
+    /// model needed to reach a word.
+    ///
+    /// Lower it if your classifier model does not reason and you want the pass
+    /// cheaper. Raise it if it reasons at length. Leaving it at 8 and wondering
+    /// why everything is denied is the failure this comment exists to prevent.
+    #[serde(default = "default_classifier_triage_tokens")]
+    pub triage_max_tokens: u32,
+}
+
+fn default_classifier_triage_tokens() -> u32 {
+    256
+}
+
+/// Hand-written so it cannot drift from the serde defaults.
+///
+/// `#[serde(default = "…")]` only fires when a config is *deserialised*.
+/// `ClassifierConfig::default()` — which anything constructing one in code
+/// reaches for — used `#[derive(Default)]` and handed back **0** for
+/// `triage_max_tokens`, so the two paths disagreed about the same field and a
+/// caller using the code path got a budget of zero.
+///
+/// `the_default_triage_budget_is_not_the_one_token_the_prompt_asks_for` fails
+/// on the day this drifts again.
+impl Default for ClassifierConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: String::new(),
+            default_model: String::new(),
+            prompt: String::new(),
+            triage_max_tokens: default_classifier_triage_tokens(),
+        }
+    }
+}
+
+impl ClassifierConfig {
+    /// Whether the layer can be constructed, and why not if it cannot.
+    ///
+    /// `enabled` is the only thing that can switch it off. Every other field is
+    /// an override with a fallback behind it, so a half-filled config is a
+    /// config that works, not one that silently does nothing.
+    pub fn is_off(&self) -> bool {
+        !self.enabled
+    }
 }
 
 /// Two minutes. Long enough to read a long command line, and short enough that
@@ -832,6 +928,7 @@ impl Default for PermissionsConfig {
             disable_worktree: false,
             fail_closed_headless: false,
             prompt_timeout_seconds: default_prompt_timeout_seconds(),
+            classifier: ClassifierConfig::default(),
         }
     }
 }

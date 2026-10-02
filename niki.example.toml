@@ -124,6 +124,36 @@ fallbacks = ["openrouter", "openai"]
 provider = "nvidia"                        # Strong model for adversarial review
 model = "meta/llama-3.1-405b-instruct"
 
+# ── Model-based permission classifier ─────────────────────────────────────
+# The third permission layer, behind the static deny list and the hooks: a
+# model judges whether a tool call is inside what the user asked for.
+#
+# OFF by default, and that is a decision rather than caution. Claude Code and
+# Codex both run one — on a model *they* control, with failures handled on
+# infrastructure you cannot see. A BYOK harness would instead bill you an extra
+# call per unlisted tool call, against a provider you chose, for a latency you
+# did not ask for and no measured benefit to show. Turn it on knowing the cost.
+#
+# The model is RESOLVED, never hardcoded, in this order:
+#   1. `model` below
+#   2. `auto_review_model` on the model preset (a provider can nominate a
+#      better judge for its own model — the same rung Codex uses)
+#   3. `default_model` below
+#   4. the session model's own slug
+# So there is no configuration in which this layer cannot answer.
+#
+# Two calls, never one: a cheap HIGH/LOW pass, and a full review only when the
+# first says HIGH. It fails closed — an unreachable or unreadable classifier
+# denies, and says which failure it was.
+#
+# [permissions.classifier]
+# enabled = true
+# model = ""                       # e.g. "gpt-4o-mini"
+# default_model = ""               # fallback ahead of the session model
+# prompt = ""                      # replace the bundled policy
+# triage_max_tokens = 256          # Codex asks for 1; a reasoning model needs
+#                                   # room to reason before it reaches a word.
+
 # Optional: data-driven pipeline topology.
 # Define your own ordered list of stages instead of the built-in
 # Planner -> Coder -> Tester -> Reviewer flow. Each stage binds a role to a
