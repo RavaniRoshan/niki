@@ -94,21 +94,33 @@ async fn handle_models(provider: Option<&str>, plain: bool) -> Result<()> {
                 any = true;
                 if plain {
                     for m in &models {
-                        let safe_id: String = m
-                            .id
-                            .chars()
-                            .map(|c| if c.is_control() { '�' } else { c })
-                            .collect();
+                        // The existing sanitiser, not a second copy of the rule.
+                        //
+                        // This arrived as a CodeQL autofix that mapped control
+                        // characters to U+FFFD. Directionally right — a model id
+                        // comes from a provider's `/models` response, so it is
+                        // untrusted text that reaches a terminal — but it was a
+                        // **second** sanitiser with different behaviour from
+                        // `sanitize_for_terminal`, which strips the whole escape
+                        // sequence and preserves newlines and tabs. Two copies of
+                        // one rule is how they come to disagree.
+                        let safe_id = crate::display::sanitize::sanitize_for_terminal(&m.id);
                         println!("{name}\t{}", safe_id);
                     }
                 } else {
                     println!("\n{name} — {} model(s):", models.len());
                     for m in &models {
-                        let safe_id: String = m
-                            .id
-                            .chars()
-                            .map(|c| if c.is_control() { '�' } else { c })
-                            .collect();
+                        // The existing sanitiser, not a second copy of the rule.
+                        //
+                        // This arrived as a CodeQL autofix that mapped control
+                        // characters to U+FFFD. Directionally right — a model id
+                        // comes from a provider's `/models` response, so it is
+                        // untrusted text that reaches a terminal — but it was a
+                        // **second** sanitiser with different behaviour from
+                        // `sanitize_for_terminal`, which strips the whole escape
+                        // sequence and preserves newlines and tabs. Two copies of
+                        // one rule is how they come to disagree.
+                        let safe_id = crate::display::sanitize::sanitize_for_terminal(&m.id);
                         let mut notes: Vec<String> = Vec::new();
                         if m.traits
                             .contains(&crate::cli::catalogue::ModelTrait::Reasoning)
