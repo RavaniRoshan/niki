@@ -258,6 +258,12 @@ async fn mount_fault(
             let remaining = Arc::new(std::sync::atomic::AtomicUsize::new(*times));
             Mock::given(method("POST"))
                 .respond_with(move |_req: &wiremock::Request| {
+                    // `fetch_update` is deprecated on current Rust (renamed
+                    // `try_update`), and CI's clippy runs the latest stable and
+                    // fails on it. `try_update` is not in `rust-version = 1.88`,
+                    // which this crate declares and CI enforces with its own MSRV
+                    // job — so the rename is not available to us yet.
+                    #[allow(deprecated, reason = "try_update is post-1.88")]
                     if remaining
                         .fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1))
                         .is_ok()
@@ -282,6 +288,12 @@ async fn mount_fault(
             let remaining = Arc::new(std::sync::atomic::AtomicUsize::new(*times));
             Mock::given(method("POST"))
                 .respond_with(move |_req: &wiremock::Request| {
+                    // `fetch_update` is deprecated on current Rust (renamed
+                    // `try_update`), and CI's clippy runs the latest stable and
+                    // fails on it. `try_update` is not in `rust-version = 1.88`,
+                    // which this crate declares and CI enforces with its own MSRV
+                    // job — so the rename is not available to us yet.
+                    #[allow(deprecated, reason = "try_update is post-1.88")]
                     if remaining
                         .fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1))
                         .is_ok()
