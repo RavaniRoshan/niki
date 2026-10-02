@@ -90,29 +90,6 @@ fn every_unsound_advisory_is_named_with_a_reason() {
     reported.sort();
     reported.dedup();
 
-    // Advisory ids are not in the JSON's warning entries, so take them from the
-    // human-readable output instead, which is what a maintainer reads.
-    let plain = Command::new("cargo")
-        .arg("audit")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        .unwrap_or_default();
-    // Only the blocks whose `Warning:` line says `unsound`. The first version
-    // took every `ID:` line the tool prints, which includes six `unmaintained`
-    // advisories, and so reported a correct ignore list as wrong.
-    let mut reported: Vec<String> = Vec::new();
-    for block in plain.split("\n\n") {
-        if !block.contains("Warning:   unsound") {
-            continue;
-        }
-        if let Some(id) = block.lines().find_map(|l| l.trim().strip_prefix("ID:")) {
-            let id = id.trim().to_string();
-            if !reported.contains(&id) {
-                reported.push(id);
-            }
-        }
-    }
-
     let toml = deny_toml();
     let mut ignored: Vec<String> = Vec::new();
     for line in toml.lines() {
