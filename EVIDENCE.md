@@ -2450,3 +2450,44 @@ The four other provider response surfaces already redact: `anthropic.rs`,
 `redact_secrets`. The catalogue was the one surface that did not. That is why
 this is a code fix and not an alert dismissal — dismissal would have left the
 one non-conforming call site in place and recorded a false reason.
+
+### Follow-on: alert 19 (`src/cli/providers.rs:121`)
+
+Re-analysis after `e0982f7` closed alert 18 and opened a new one on the same
+file at the shifted line. Line 121 is:
+
+```rust
+println!("\n{name} — {} model(s):", models.len());
+```
+
+It prints a provider name (from `--provider` or the config map key) and
+`models.len()`, an integer. CodeQL taints the whole `Vec<CatalogueEntry>`
+because `catalogue::fetch` takes `api_key` as a parameter, so the response-
+derived collection inherits the taint and the count inherits it in turn.
+
+Verified against a real binary and a provider that echoes the `Authorization`
+header back inside a model id:
+
+```
+$ python3 /tmp/echo_models.py &          # echoes Authorization into model ids
+$ OPENAI_API_KEY="sk-canary0123456789abcdefghijklmnop" \
+  OPENAI_BASE_URL="http://127.0.0.1:8791/v1" \
+  ./target/debug/niki providers models --provider openai
+openai — 3 model(s):
+  echo-Bearer [REDACTED]
+  claude-sonnet-4
+  gpt-4o
+```
+
+The credential appears nowhere. Dismissed as `false positive` with this
+evidence in the dismissal comment:
+
+```
+$ gh api "repos/RavaniRoshan/niki/code-scanning/alerts?state=open" -q 'length'
+0
+```
+
+Not dismissed silently: the note is recorded in the `safe_model_id` doc
+comment so the next occurrence is answered rather than re-litigated, and the
+guard test `annotated_listing_never_prints_the_credential` covers that exact
+code path.

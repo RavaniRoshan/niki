@@ -54,6 +54,13 @@ pub async fn handle(args: &ProvidersArgs) -> Result<()> {
 /// The other four provider response surfaces — the error bodies in
 /// `anthropic.rs`, `openai.rs`, `google.rs` and `ollama.rs` — already pass
 /// through `redact_secrets`. The catalogue was the one surface that did not.
+///
+/// Expect a second alert here and do not "fix" it by adding redaction to the
+/// neighbouring `println!`. CodeQL taints the whole `Vec<CatalogueEntry>`
+/// because `fetch` takes the key as a parameter, so `models.len()` inherits
+/// that taint and the count-printing statement gets flagged too. That one
+/// prints a provider name and an integer; there is no secret-shaped content on
+/// the path. See `EVIDENCE.md`.
 fn safe_model_id(id: &str) -> String {
     crate::display::sanitize::sanitize_for_terminal(crate::llm::provider::redact_secrets(id))
 }
