@@ -2537,3 +2537,106 @@ supplied one has `total_credits: 0`, so only `:free` models answer) and B7 (the
 `ActionClassifier` trait has no production implementation, so the LLM
 transcript-classifier layer is inert in the product). Neither is a slice that
 can be taken without an owner decision.
+
+---
+
+## 2026-10-02 · Batch 13 — real models, an honesty defect, and a leaked key
+
+**Starting position:** `master` at `669eb8f`, CI green on `e60b01b`, PR #39
+merged, zero open CodeQL alerts.
+
+### B6 is no longer a blocker
+
+The OpenRouter key is **expired** (`{"error":{"message":"API key expired"}}`).
+The **NVIDIA key works**, and NIKI already ships an `nvidia` provider at that
+endpoint. Three real pipeline runs against
+`nvidia/nemotron-3-super-120b-a12b`, all four stages, exit 0, and the branches
+verified independently of NIKI's own reporting (`git diff`, then pytest on the
+branch contents). Reasoning models need token headroom — at `max_tokens: 16`
+both `gpt-oss-20b` and `nemotron-3-super` return `content: null` with
+`finish_reason: "length"`, which reads as a broken provider.
+
+`reasoning_effort` confirmed working against a real provider. NVIDIA's accepted
+set is `none, minimal, low, medium, high, xhigh, max` — exactly the five the
+owner described, plus `none` and `minimal`. NIKI sends it only when configured,
+never inferred, which is what stops an unsupported field 400-ing the request.
+
+**Image input is not supported** — `CompletionRequest` is text-only end to end.
+Logged in `ROADMAP.md` with the reason it is not a provider change.
+
+### Slice 1 — the Tester's test counts were stated as fact
+
+The first real-model run printed `4/4 tests passed`. The suite ran **1**. The
+Tester had also claimed it wrote `test_calc_add.py` and had written no file; the
+Reviewer reviewed the phantom file and raised a `TestGap` issue about it.
+
+`render_test_report_summary` printed the model's own artifact with no
+attribution, and `TestExecution` — the measured exit code and real stdout — was
+used to gate the branch but never for what the user is told. Fixed: the counts
+are now attributed (`Tester reported 4/4`), and a new `render_verification_line`
+prints what NIKI actually measured, before the gate decision.
+
+The measured line reports the **exit code, not a pass count**. Counting means
+parsing pytest/cargo/jest output, and a parser that guesses produces exactly
+the un-auditable number this fixes.
+
+Can-fail proven: removing the attribution brings back the exact string and two
+tests fail. Re-verified in the product — the next real run printed
+`Tester reported 7/7 tests passed` followed by `Verified: python3 -m pytest -q
+exited 0`.
+
+### Slice 2 — a live NVIDIA API key was committed, and G5 could not see it
+
+Found while auditing what was tracked, before doing any cleanup at all.
+`src/cli/doctor.rs` has held a **real, working** NVIDIA key since `1182110`, on
+a public repo, as two adjacent string literals so a line-based scanner would
+not match it. Every other row of that corpus is visibly fabricated.
+
+G5 reported `PASS no credentials in the tree or in history` the entire time.
+Its pattern listed `sk-ant-`, `sk-`, `ghp_`, `AKIA` — **no `nvapi` at all** —
+and no regex over raw bytes can join two literals. Two holes; the key went
+through both.
+
+`scripts/scan-secrets.py` replaces it: each file scanned raw **and** with every
+string literal's contents concatenated. `tests/secret_scan_can_fail.rs` feeds it
+the exact shape that got through. Writing that test caught a bug in the
+scanner's own first splice implementation, which kept the newline *between*
+literals — so the credential was still broken across the join.
+
+**Tree scan: clean. History scan: red, and left red.** Two real findings — the
+key, and a fixture canary of mine in an earlier `EVIDENCE.md`. Clearing them
+needs key rotation (owner's only) and a force-pushed history rewrite
+(stop-and-ask). Logged as **B8**.
+
+### B7 answered from prior art, not from the owner
+
+Claude Code's published design is **already-built spec**, not a guess: two
+layers (input probe + transcript classifier), a single-token pre-filter that
+errs toward blocking, reasoning-blind (results stripped), denial returned as a
+tool result, fail-closed on no verdict, and escalation at **exactly** NIKI's 3
+consecutive / 20 total — not configurable. Codex (Rust, the closer prior art)
+has the same shape via `approvals_reviewer = "auto_review"`, fails closed on
+timeouts too, and adds a rolling-window breaker NIKI lacks.
+
+One contradiction worth recording: Codex's reviewer **does** see tool outputs
+("hidden assistant reasoning is not included"). It is reasoning-blind but not
+result-blind. Claude Code strips results; Codex does not.
+
+The design questions are therefore settled from evidence: fail-closed stays,
+the config key gets **no default** (Claude Code can name a model; a BYOK
+harness cannot), and the layer ships **off** until it is measured. Only the
+provider/model id remains the owner's.
+
+### Repository cleanup
+
+- Working tree clean; 657 tracked files; no temp, scratch or `.bak` files
+  tracked.
+- `.gitignore` audited — already tuned, with two documented near-misses in its
+  own comments (a bare `demo.sh` that excluded `scripts/demo.sh`; an
+  `evals/` rule that hid the negative-control fixtures from every clone).
+- `convex/` — dormant, excluded from the build, zero `src/` references, absent
+  from the README, and it contradicts a stated `no telemetry` property.
+  **Not deleted** (owner call); recommended for deletion in `ROADMAP.md`.
+- `.odw/` — active tooling, stays.
+- New gap found and logged: `doctor` health-checks eight providers but **not**
+  `nvidia`, `together`, `groq` or `deepseek`.
