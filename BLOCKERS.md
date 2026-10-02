@@ -182,8 +182,25 @@ implementations plus the vendor blog. The remaining choice is narrow:
   recommended) or from a single `[permissions] classifier_model` key;
 - and whether `ClassifierView` keeps withholding tool results.
 
-Both are defensible. Neither blocks starting the work, which is why B7 is no
-longer a blocker in the way B8 was.
+Both are defensible, and neither blocked the work.
+
+## B7 · CLOSED — implemented in batch 16 (2026-10-02)
+
+`risk::llm_classifier::LlmActionClassifier` exists, resolves its model in
+Codex's order, and was driven against a live model: **5/5**, including the
+scope case. Three can-fail proofs; 16 tests; ships off by default.
+
+Three bugs it could only have been found with:
+
+- **the two passes were given contradictory output contracts**, so every
+  classification came back unreadable and every action was denied;
+- **Codex's one-token triage is unreachable on a reasoning model** — at 8
+  tokens the model spent everything on `reasoning_content` and returned null;
+- **the bundled policy let project membership stand in for scope**, so the
+  model allowed exactly the unrelated-file read the layer exists to catch.
+
+The two questions above are answered by measurement rather than decided, and
+both are recorded in `EVIDENCE.md`.
 
 ## B8 · RESOLVED — the live NVIDIA key is purged from the public repository (2026-10-02)
 

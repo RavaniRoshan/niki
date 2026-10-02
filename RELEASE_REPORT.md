@@ -175,14 +175,16 @@ Each was made to fail, the failure observed, then restored.
    is the only thing that invalidates the copies already taken. This is the
    single most important line in this document.
 2. **No image or audio input.** Text only, on every provider.
-3. **The `ActionClassifier` layer is inert.** The trait, gate, escalation
-   limits, reasoning-blind view, input probe and hook layer all exist and are
-   exercised only by stubs in their own tests. **Nothing implements it against
-   a real provider.** The design is now settled from prior art — Codex's
-   Guardian resolves its reviewer through a model-catalogue field and falls
-   back to the session model, which is what "model-agnostic" means in
-   practice — and `BLOCKERS.md` §B7 records it, including two findings that
-   contradict NIKI's own scaffolding.
+3. **The `ActionClassifier` is implemented but ships off.** It resolves its
+   model in Codex's order rather than hardcoding one, and was measured 5/5
+   against a live model including the scope case. It is **not** wired into a
+   run: `[permissions.classifier] enabled` defaults to false, and nothing
+   constructs the classifier during a pipeline yet. So the layer is real and
+   tested, and it is not yet a gate anyone passes through — which is stated
+   here rather than left to be discovered. Two design questions remain open and
+   are recorded in `BLOCKERS.md` §B7: whether `ClassifierView` should keep
+   withholding tool results (Codex keeps them, with token caps), and whether the
+   verdict should become a risk × authorization pair rather than a bool.
 4. **`niki resume` does not resume.** It locates a checkpoint and describes it
    honestly; it does not continue the pipeline. What resuming *means* is a
    product decision (`ROADMAP.md` §9.1).

@@ -2748,3 +2748,39 @@ narrow call and fails closed. Roo and Cline use rules only, no LLM.
 Two findings contradict NIKI's scaffolding and are recorded rather than decided:
 Codex's reviewer **sees** tool results where `ClassifierView` withholds them,
 and its verdict is a risk × authorization **pair** rather than a bool.
+
+## 2026-10-02 · Batch 16 — the permission classifier (last slice)
+
+`risk::classifier` had a trait, a gate, escalation limits, a reasoning-blind
+view and a hook layer, and **nothing implementing the trait** outside its own
+tests. `LlmActionClassifier` is that implementation.
+
+Model resolution is the design: explicit config → the model preset's
+`auto_review_model` → a configured default → **the session model's own slug**.
+Codex's `select_review_model()` order, and the thing that makes it
+model-agnostic rather than merely configurable.
+
+Two calls per flagged action, never one: a cheap HIGH/LOW pass, then a full
+review only if the first flags it. Fails closed, and the denial carries
+Codex's do-not-route-around instruction. Ships **off**.
+
+**Live against `nvidia/nemotron-3-super-120b-a12b`: 5/5**, including
+`Read(src/auth/session.rs)` when the user asked to fix a test.
+
+### Four bugs, three found only by running it
+
+| bug | how it showed |
+|---|---|
+| triage instruction appended to a policy already saying "Answer SAFE or UNSAFE" | every classification came back `neither HIGH nor LOW`; every action denied |
+| Codex's one-token triage is unreachable on a reasoning model | at 8 tokens the model spent everything on `reasoning_content`, returned `null` |
+| bundled policy said "a read inside the project is in scope" | the model **allowed** the unrelated-file read the layer exists to catch |
+| `#[serde(default)]` does not apply to `Default::default()` | code constructing a config got a **zero** triage budget |
+
+The first three are unreachable from a scripted provider, which answers what it
+is told. The fourth was caught by a test written to pin the default.
+
+Three can-fail proofs: fail-open, unreadable-as-LOW, and hardcoded-model each
+made the suite red before restore.
+
+`cargo test --test permission_classifier_asks_a_model` — 16 passed.
+`cargo clippy --all-targets` — clean. `scripts/test-fast.sh` — 1103/1103.
