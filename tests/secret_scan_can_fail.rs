@@ -96,7 +96,10 @@ fn nvidia_keys_are_covered() {
         // once — the test, and quotes of it in the reports — and any of those
         // being rewritten to scrub one leaves the other two stale. Building it
         // at runtime means no literal exists to rewrite.
-        &format!("let k = \"sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz012345\";"),
+        &format!(
+            "let k = \"sk-ant-api0{}AbCdEfGhIjKlMnOpQrStUvWxYz012345\";",
+            "3-"
+        ),
         r#"let k = "ghp_012345678901234567890123456789abcdef";"#,
         r#"let k = "AKIAZZ8Q7W2E5R6T8U1I3O0P4L6M9N";"#,
         r#"let k = "AIzaSyB7654321098765432109876543210XYZab";"#,
