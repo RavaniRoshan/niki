@@ -1572,12 +1572,26 @@ would weaken it.
 repo. `.gitignore` already excludes `.odw/*/runs/` (its output), which is the
 right split. Left alone.
 
-### `nvidia`, `together`, `groq` and `deepseek` are not health-checked by `doctor`
+### ~~`doctor` does not health-check every provider~~ — RETRACTED, it was wrong
 
-`doctor` checks Ollama, Anthropic, OpenAI, Google, OpenRouter, Zen, Kimi and
-Kilo. Four configured providers get no reachability check, so a user who
-configures NVIDIA and typos the key gets a clear "not configured" from a
-provider they *did* configure, and nothing at all about the four.
+An earlier draft of this entry claimed `doctor` checked eight providers and
+missed `nvidia`, `together`, `groq` and `deepseek`. **That was false, and it
+came from my own grep**, not from the code: the output was piped through
+`head -8` and the last four providers were cut off before I read them.
 
-Found while wiring a real run against NVIDIA. Small, but it is the first-run
-surface, so it belongs on the list rather than in a backlog nobody reads.
+Measured, with a real NVIDIA key in the environment:
+
+```
+✓ Ollama (local) provider — running locally (no key needed)
+✓ NVIDIA NIM provider — configured via env var
+⚠ Groq provider — not configured (run `niki auth login groq`)
+⚠ DeepSeek provider — not configured (run `niki auth login deepseek`)
+⚠ Together provider — not configured (run `niki auth login together`)
+```
+
+All twelve in `auth::PROVIDERS` are checked, and the redaction corpus reports
+`13 of 13 known key shapes redacted` — with the fabricated NVIDIA value that
+replaced the real key, which is the fix landing as intended.
+
+No gap. The retraction is kept rather than deleted because a roadmap that
+quietly drops its own errors is a roadmap nobody can trust.

@@ -2638,5 +2638,9 @@ provider/model id remains the owner's.
   from the README, and it contradicts a stated `no telemetry` property.
   **Not deleted** (owner call); recommended for deletion in `ROADMAP.md`.
 - `.odw/` — active tooling, stays.
-- New gap found and logged: `doctor` health-checks eight providers but **not**
-  `nvidia`, `together`, `groq` or `deepseek`.
+- One thing I reported and then **retracted**: a claimed gap where `doctor`
+  health-checks eight providers but not `nvidia`, `together`, `groq` or
+  `deepseek`. That was my grep, not the code — the output was piped through
+  `head -8` and the last four were cut off before I read them. All twelve are
+  checked, and the retraction is kept in `ROADMAP.md` rather than deleted,
+  because a roadmap that quietly drops its own errors is one nobody trusts.
