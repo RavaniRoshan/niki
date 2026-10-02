@@ -13,6 +13,7 @@ Env:  NIKI_BIN=/path/to/niki   (default: target/release/niki)
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 import pytest
@@ -43,9 +44,46 @@ async def _dismiss_onboarding(s) -> None:
     """The onboarding modal auto-dismisses on a single Esc (Skip)."""
     try:
         await s.press("escape")
-        await s.wait_for_stable(quiet_ms=200, timeout=4)
+        await wait_stable_text(s, quiet_ms=200, timeout=4)
     except Exception:
         pass
+
+
+async def wait_stable_text(s, quiet_ms: int = 200, timeout: float = 5.0) -> None:
+    """Wait until the **visible content** stops changing.
+
+    `TuiSession.wait_for_stable` fingerprints the cell grid *and* the terminal's
+    active DEC modes, and NIKI emits DEC 2026 (synchronized output) around every
+    draw — set at the start of a frame, cleared at the end. The chat loop also
+    redraws on a 500 ms tick (`refresh_fleet_if_stale`), so the mode flips every
+    half second whether or not a single visible cell changed. With
+    `quiet_ms=200` the fingerprint therefore **never** repeats, and every test
+    that waits on it fails with "screen did not stabilise" while the screen sits
+    there perfectly still.
+
+    Measured: over 6 s of the History page, zero cell changes and fourteen mode
+    toggles. The test was failing on the measurement, not on the product.
+
+    What these tests are about is whether the *user* sees a settled screen, so
+    that is what this waits for. The mode is still read by `wait_for_stable`
+    elsewhere; this only replaces the waits that were never about modes.
+    """
+    import time
+
+    prev = s.screen.text
+    deadline = time.monotonic() + timeout
+    last_change = time.monotonic()
+    while time.monotonic() < deadline:
+        await asyncio.sleep(0.1)
+        cur = s.screen.text
+        if cur != prev:
+            prev = cur
+            last_change = time.monotonic()
+        elif (time.monotonic() - last_change) * 1000 >= quiet_ms:
+            return
+    raise AssertionError(
+        f"visible content did not settle within {timeout}s (quiet_ms={quiet_ms})"
+    )
 
 
 async def _wait_chat_ready(s, timeout: float = 15.0) -> None:
@@ -106,17 +144,17 @@ async def test_kill_ring_yank(chat):
     await chat.type("hello world")
     await chat.press("ctrl+w")      # kill "world" -> "hello "
     await chat.press("ctrl+y")      # yank "world" at the cursor -> "hello world"
-    await chat.wait_for_stable(quiet_ms=150, timeout=4)
+    await wait_stable_text(chat, quiet_ms=150, timeout=4)
     assert chat.screen.contains("hello world")
 
 
 async def test_input_undo(chat):
     await chat.type("ab")
-    await chat.wait_for_stable(quiet_ms=100, timeout=3)
+    await wait_stable_text(chat, quiet_ms=100, timeout=3)
     # push_undo snapshots before each insert, so each Ctrl+Z reverts one char.
     await chat.press("ctrl+z")
     await chat.press("ctrl+z")
-    await chat.wait_for_stable(quiet_ms=150, timeout=4)
+    await wait_stable_text(chat, quiet_ms=150, timeout=4)
     assert chat.screen.contains("Describe a change")
 
 
@@ -149,7 +187,7 @@ async def test_scroll_and_scrollbar_thumb_skipped(chat):
 
 async def test_click_to_position_cursor(chat):
     await chat.click(row=ROWS - 2, col=40)
-    await chat.wait_for_stable(quiet_ms=150, timeout=3)
+    await wait_stable_text(chat, quiet_ms=150, timeout=3)
     assert chat.screen.contains("Describe a change")
 
 
@@ -208,39 +246,57 @@ async def test_footer_advertises_the_new_navigation_keys(chat):
 async def test_right_and_left_arrows_change_page(chat):
     # Tab toggles chat <-> page view; from the page view the arrows navigate.
     await chat.press("tab")
-    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    await wait_stable_text(chat, quiet_ms=200, timeout=5)
     before = chat.screen.text
 
     await chat.press("right")
-    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    await wait_stable_text(chat, quiet_ms=200, timeout=5)
     after_right = chat.screen.text
     assert after_right != before, "Right must move to a different page"
 
     await chat.press("left")
-    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    await wait_stable_text(chat, quiet_ms=200, timeout=5)
     assert chat.screen.text == before, "Left must return to the previous page"
 
 
 async def test_h_and_l_navigate_like_the_arrows(chat):
     await chat.press("tab")
-    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    await wait_stable_text(chat, quiet_ms=200, timeout=5)
     start = chat.screen.text
 
     await chat.type("l")
-    await chat.wait_for_stable(quiet_ms=200, timeout=5)
-    assert chat.screen.text != start, "l must move to the next page"
+    await wait_stable_text(chat, quiet_ms=200, timeout=5)
+    assert chat.screen.text != start, "l must reach TestLog"
+    assert "TEST OUTPUT" in chat.screen.text, f"and that page, not another: {chat.screen.text[:200]}"
 
+    # **`h` reaches History — it is not "previous page".**
+    #
+    # This test asserted `h` returns to the page before `l`, which was true when
+    # `h`/`l` were plain prev/next. §1.2 deliberately made them page
+    # shortcuts — `PageId::from_key` maps `h` to History and `l` to TestLog —
+    # and the Rust test for that (`tui_page_letters_win.rs`) says so. This file
+    # had never run, so it was still asserting the semantics that were replaced.
+    # A suite nobody runs does not stay correct; it just stays quiet.
     await chat.type("h")
-    await chat.wait_for_stable(quiet_ms=200, timeout=5)
-    assert chat.screen.text == start, "h must move to the previous page"
+    await wait_stable_text(chat, quiet_ms=200, timeout=5)
+    assert chat.screen.text != start, "h must reach History, not stay put"
+    assert "TEST OUTPUT" not in chat.screen.text, (
+        "and leave TestLog behind, not flip between two pages: "
+        f"{chat.screen.text[:200]}"
+    )
+
+    # And the pair round-trips: `l` again returns to TestLog from History.
+    await chat.type("l")
+    await wait_stable_text(chat, quiet_ms=200, timeout=5)
+    assert "TEST OUTPUT" in chat.screen.text, "l must reach TestLog from History too"
 
 
 async def test_digit_key_jumps_to_a_page(chat):
     await chat.press("tab")
-    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    await wait_stable_text(chat, quiet_ms=200, timeout=5)
     before = chat.screen.text
     await chat.type("4")
-    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    await wait_stable_text(chat, quiet_ms=200, timeout=5)
     assert chat.screen.text != before, "a digit must jump to a page"
 
 
@@ -252,7 +308,7 @@ async def test_navigation_keys_are_letters_while_typing(chat):
     short of a real terminal would catch it.
     """
     await chat.type("hjkl")
-    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    await wait_stable_text(chat, quiet_ms=200, timeout=5)
     assert chat.screen.contains("hjkl"), (
         f"h/j/k/l must be typed literally into the composer, got: {chat.screen.row(ROWS - 2)!r}"
     )
@@ -260,10 +316,10 @@ async def test_navigation_keys_are_letters_while_typing(chat):
 
 async def test_arrow_keys_still_reach_the_composer(chat):
     await chat.type("ab")
-    await chat.wait_for_stable(quiet_ms=150, timeout=4)
+    await wait_stable_text(chat, quiet_ms=150, timeout=4)
     await chat.press("left")
     await chat.type("X")
-    await chat.wait_for_stable(quiet_ms=200, timeout=5)
+    await wait_stable_text(chat, quiet_ms=200, timeout=5)
     assert chat.screen.contains("aXb"), (
         f"Left must move the caret inside the composer, not change page; screen: {chat.screen.text!r}"
     )
@@ -310,7 +366,7 @@ async def _open_settings(s):
     await s.press("enter")
     # The hint line, which only the form renders.
     await s.wait_for_text("space change", timeout=10)
-    await s.wait_for_stable(quiet_ms=200, timeout=5)
+    await wait_stable_text(s, quiet_ms=200, timeout=5)
 
 
 async def test_config_opens_an_editable_form(chat):
@@ -376,7 +432,7 @@ async def test_escape_closes_the_sheet_and_returns_to_the_conversation(chat):
     # passed against a form that was working perfectly.
     for _ in range(3):
         await chat.press("escape")
-        await chat.wait_for_stable(quiet_ms=150, timeout=4)
+        await wait_stable_text(chat, quiet_ms=150, timeout=4)
     assert not chat.screen.contains("move"), "the form chrome is still up"
     assert chat.screen.contains("Describe a change"), "and the composer is back"
 
@@ -401,7 +457,7 @@ async def test_a_cancelled_theme_picker_restores_the_previous_theme(chat):
     await chat.press("enter")
     await chat.wait_for_text("apply and save", timeout=10)
     await chat.press("down")     # preview something else
-    await chat.wait_for_stable(quiet_ms=250, timeout=5)
+    await wait_stable_text(chat, quiet_ms=250, timeout=5)
     await chat.press("escape")   # back out
-    await chat.wait_for_stable(quiet_ms=250, timeout=5)
+    await wait_stable_text(chat, quiet_ms=250, timeout=5)
     assert not chat.screen.contains("apply and save")
