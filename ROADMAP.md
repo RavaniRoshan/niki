@@ -1544,27 +1544,29 @@ has to decide what a screenshot in a tool result looks like). Deferred rather
 than half-built: an image path that only works for one provider is worse than
 an honest text-only one, and the text-only claim is currently true.
 
-### `convex/` is dormant and contradicts a stated product property
+### ~~`convex/` is dormant and contradicts a stated product property~~ — DONE
 
-`convex/schema.ts`, `convex/runs.ts` and `docs/convex-migration-plan.md` are a
-planned Convex control-plane mirror: a hosted service that would receive run
-records.
+The owner approved deletion and it is done. What went:
 
-- It is **excluded from the crate build** (`Cargo.toml:14`), has **zero**
-  references from `src/`, and is **never mentioned in the README**.
-- So it is inert, and release gate G9 ("no dead code presented as a feature")
-  does not flag it — nothing presents it *as* a feature.
+| file | what it was |
+|---|---|
+| `convex/schema.ts` | Convex schema — runs/stages/events |
+| `convex/runs.ts` | create/update/complete CAS mutations |
+| `docs/convex-migration-plan.md` | the phased plan |
+| `docs/convex-architecture.md` | system diagram, local-first rationale |
+| `docs/convex-schema.md` | schema + authz notes |
+| `Cargo.toml` `exclude` | a packaging entry naming `/convex` |
 
-It is still a problem for a reader: a directory named after a hosted backend,
-sitting next to a README that says no telemetry and BYOK, reads as either an
-undisclosed dependency or abandoned work, and the two have very different
-implications for someone deciding whether to trust this tool.
+The last two docs were **not** in the question that was put to the owner, who
+was told about "three files". They were removed too, and flagged rather than
+folded in silently — leaving two design docs for a deleted experiment would not
+have removed the ambiguity the deletion was for.
 
-**Not deleted unilaterally** — removing files is a stop-and-ask action, and it
-is the owner's call whether the migration plan is parked or abandoned. The
-recommendation is to delete all three: the control plane's job is done locally,
-`no telemetry` is a real product property, and a hosted mirror of run records
-would weaken it.
+Measured before deleting: `src/control_plane/` **does not exist** — nothing was
+ever implemented — `Cargo.toml` mentioned `convex` in exactly one place, a
+packaging exclude, and `grep` finds no reference from any `.rs` file. The
+experiment was two TypeScript files and three markdown files, against a
+`no telemetry` property it would have weakened.
 
 ### `.odw/` stays
 
