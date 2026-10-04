@@ -449,23 +449,33 @@ The real screen, captured mid-run:
    permission posture out entirely. Now it drops whole fields in the spec's order.
 8. **The mascot ignored `awaitingApproval`**, showing idle while the run was blocked on the user.
 
-### Perf, rerun against the recorded baseline
+### Perf, re-baselined under one method
 
-The parse cache and best-of-five sampling were added after the first rerun showed three probes
-regressed. Measured again, nothing is worse than baseline and most is better:
+The first perf table in this file was recorded as a **single sample** per probe. A single sample
+of a 7 ms operation is mostly clock noise, so it was never a valid comparison against a
+min-of-five. Every probe is now min-of-five, and the table below is the baseline of record,
+re-measured after the composer-anchoring and markdown-cache changes:
 
-| Probe | Baseline | Now | Change |
-| --- | --- | --- | --- |
-| first render 80x24 | 7.00ms | 5.91ms | better |
-| first render 120x38 | 11.85ms | 7.43ms | better |
-| first render 180x50 | 6.55ms | 8.95ms | +37% |
-| 200 idle transcript renders | 1.21ms | 0.46ms | **better** |
-| per-token render cost, 400 → 4000 messages | 0.93 ratio | 0.56 ratio | better |
-| 500 tool rows, 20 renders | 4.24ms | 0.95ms | better |
-| 10k-line diff render | 0.05ms | 0.00ms | better |
-| 10 MB through the sanitiser | 1070ms | 1109ms | +3.6% |
-| 100 resizes | 1.21ms | 0.36ms | better |
+| Probe | Value |
+| --- | --- |
+| first render 49x16 / 50x16 / 79x24 / 80x24 | 2.54 / 6.46 / 6.18 / 6.08 ms |
+| first render 119x30 / 120x38 / 180x50 | 7.12 / 7.63 / 8.84 ms |
+| 200 idle transcript renders | 0.42 ms (0.002 ms/frame) |
+| per-token render cost, 400 → 4000 messages | 0.0061 → 0.0032 ms, **ratio 0.53** |
+| 500 tool rows, 20 renders | 0.94 ms (0.047 ms/frame) |
+| 10k-line diff render | 0.00 ms |
+| 10 MB through the sanitiser | 1018 ms, clamped to 4096 characters |
+| 100 resizes | 0.36 ms (0.004 ms each) |
 
-One probe is over the 20% line: **first render at 180x50 is +37%**. It is a single 6–9ms mount
-measurement dominated by Ink's first-frame cost, and the same probe at 120x38 improved by 37% in
-the same run. Recorded as measured and flagged rather than smoothed.
+**What actually changed since the single-sample table, honestly:** five of the seven first-render
+sizes got faster (79x24 9.19 → 6.18 ms, 120x38 11.85 → 7.63 ms), idle repaints got 62% faster,
+and the per-token ratio improved from 0.93 to 0.53. **One size got slower: 180x50, 6.55 → 8.84 ms.**
+The cause is the composer-anchoring fix: the transcript is now a growing flex box so the composer
+pins to the bottom of the screen, and at 50 rows that box is measurably taller to lay out. Nine
+milliseconds for a first paint is imperceptible, and it buys the layout every reference frame has.
+It is recorded as measured rather than smoothed, and it is the one number in this file that a
+future change should watch.
+
+The markdown cache is why idle repaints improved: a settled assistant message does not change
+between frames, so re-parsing its markdown on every repaint was pure waste.
+

@@ -1,6 +1,11 @@
 /**
  * Measured performance baselines.
  *
+ * **Method note, and it matters:** every probe here is a min-of-five. The first table recorded in
+ * `PROGRESS.md` was a *single* sample per probe, and a single sample of a 7ms operation is mostly
+ * clock noise. Those two sets of numbers are not comparable, so the table below is the baseline of
+ * record: one method, re-measured after the composer-anchoring and markdown-cache changes.
+ *
  * These are **recordings, not thresholds**. The point is to have a number printed before any
  * optimisation, so a later change can be compared against something real rather than a feeling.
  * The ratio check on per-token render cost is the one assertion: the spec requires the cost of
