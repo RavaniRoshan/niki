@@ -39,7 +39,11 @@ export function Masthead({ state, theme, charset, version = '0.1.0' }: MastheadP
         ? 'interrupted'
         : state.phase === 'done'
           ? 'done'
-          : state.phase === 'thinking' || state.phase === 'streaming' || state.phase === 'toolRunning'
+          : state.phase === 'thinking' ||
+              state.phase === 'streaming' ||
+              state.phase === 'toolRunning' ||
+              // Waiting on the user is still work in progress: the run has not finished.
+              state.phase === 'awaitingApproval'
             ? 'working'
             : 'idle';
 

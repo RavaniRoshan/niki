@@ -170,30 +170,57 @@ export function Footer({ state, theme, charset, overlayOpen = false }: FooterPro
     return [session.branch, up, down].filter(Boolean).join(' ');
   };
 
-  const left = [
-    showModel && pieces.model ? pieces.model : null,
-    permission,
-    showBranch ? branchArrow() : null,
-    showCwd && pieces.cwd ? pieces.cwd : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
   const context =
     state.context && state.context.limit > 0
       ? `ctx ${Math.round((state.context.used / state.context.limit) * 100)}% (${formatCount(state.context.used)}/${formatCount(state.context.limit)})`
-      : null;
+      : '';
 
-  const right = [
-    ...(showHints ? [formatHintList(hintsFor(state.phase, overlayOpen))] : []),
-    context,
-  ]
-    .filter(Boolean)
-    .join('   ');
+  const hints = showHints ? formatHintList(hintsFor(state.phase, overlayOpen)) : '';
+
+  // Order on the right is the spec's: contextual hints, then the context meter. Dropping never
+  // reorders what stays.
+  const postureWidth = permission.length + 3;
+  const rightParts = [hints, context].filter((p): p is string => p.length > 0);
+  const rightWidth = (parts: readonly string[]): number => parts.join('   ').length;
+
+  // Hints go first when keeping them would leave the posture nowhere to go; only if there is
+  // still no room does the meter yield, because the posture wins over both.
+  if (postureWidth + rightWidth(rightParts) + 3 > width) {
+    const withoutHints = rightParts.filter((p) => p !== hints);
+    if (withoutHints.length !== rightParts.length) {
+      rightParts.length = 0;
+      rightParts.push(...withoutHints);
+    }
+  }
+  if (postureWidth + rightWidth(rightParts) + 3 > width) {
+    const withoutMeter = rightParts.filter((p) => p !== context);
+    rightParts.length = 0;
+    rightParts.push(...withoutMeter);
+  }
+  const right = rightParts.join('   ');
+
+  // Lower priority goes first on the left: cwd, then branch, then model. The posture is priority
+  // 0 and is never a candidate for removal.
+  const room = Math.max(postureWidth, width - right.length - 3);
+  const candidates: { text: string; priority: number }[] = [
+    { text: pieces.model ?? '', priority: 3 },
+    { text: permission, priority: 0 },
+    { text: branchArrow(), priority: 2 },
+    { text: showCwd ? pieces.cwd : '', priority: 1 },
+  ].filter((c) => c.text.length > 0);
+
+  let kept = [...candidates];
+  const joinedLength = (): number => kept.map((c) => c.text).join(' · ').length;
+  while (joinedLength() > room && kept.some((c) => c.priority > 0)) {
+    const droppable = kept.filter((c) => c.priority > 0);
+    const victim = droppable.reduce((a, b) => (a.priority < b.priority ? a : b));
+    kept = kept.filter((c) => c !== victim);
+  }
+  const left = kept.map((c) => c.text).join(' · ');
 
   return (
     <Box width={width} justifyContent="space-between">
-      <Text color={c.muted}>{truncate(left, Math.max(10, width - right.length - 3))}</Text>
+      <Text color={c.muted}>{left}</Text>
       <Text color={c.secondary}>
         {right}
         {state.queue.length > 0 ? `   ${g.queued} ${state.queue.length} queued` : ''}

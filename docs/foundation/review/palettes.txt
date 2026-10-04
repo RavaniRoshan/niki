@@ -1,0 +1,92 @@
+# NIKI palettes as tokens
+
+Every colour in the shell comes from this table. A value that is not in it does not exist.
+
+## niki
+
+- `background`: `#14161A`
+- `surface`: `#1B1E25`
+- `panel`: `#232831`
+- `foreground`: `#E4E7EC`
+- `muted`: `#9AA1AD`
+- `primary`: `#6B8EF2`
+- `secondary`: `#8B93A3`
+- `accent`: `#43AFA0`
+- `success`: `#5FAE7A`
+- `warning`: `#D99A3E`
+- `error`: `#D2605C`
+- `tool`: `#5FA8C4`
+- `toolHover`: `#7FC2D8`
+- `skill`: `#A98BD0`
+- `skillHover`: `#C0A6DE`
+- `incognito`: `#9B8AAE`
+- `errorOnSurface`: `#DE6C68`
+- `accentOnPanel`: `#43AFA0`
+- `successOnPanel`: `#5FAE7A`
+
+## niki-light
+
+- `background`: `#FAFAFB`
+- `surface`: `#F1F2F4`
+- `panel`: `#E7E9ED`
+- `foreground`: `#1F2328`
+- `muted`: `#5C636E`
+- `primary`: `#3355CC`
+- `secondary`: `#4B535F`
+- `accent`: `#1F7A70`
+- `success`: `#2E7D4F`
+- `warning`: `#8A5E12`
+- `error`: `#A83232`
+- `tool`: `#1F6C86`
+- `toolHover`: `#17566B`
+- `skill`: `#6B3FA0`
+- `skillHover`: `#573089`
+- `incognito`: `#6B4E86`
+- `errorOnSurface`: `#8F2A2A`
+- `accentOnPanel`: `#177268`
+- `successOnPanel`: `#267547`
+
+## niki-contrast
+
+- `background`: `#000000`
+- `surface`: `#111111`
+- `panel`: `#1A1A1A`
+- `foreground`: `#FFFFFF`
+- `muted`: `#C8C8C8`
+- `primary`: `#7AA2FF`
+- `secondary`: `#D0D0D0`
+- `accent`: `#4FE3C1`
+- `success`: `#7BE08F`
+- `warning`: `#FFC061`
+- `error`: `#FF7B76`
+- `tool`: `#7FD4F0`
+- `toolHover`: `#A8E4F8`
+- `skill`: `#C9A6F5`
+- `skillHover`: `#DCC6FF`
+- `incognito`: `#BBA8D0`
+- `errorOnSurface`: `#FF7B76`
+- `accentOnPanel`: `#4FE3C1`
+- `successOnPanel`: `#7BE08F`
+
+## niki-dim
+
+- `background`: `#1A1B1E`
+- `surface`: `#232428`
+- `panel`: `#2A2B30`
+- `foreground`: `#D6D8DC`
+- `muted`: `#A2A6AE`
+- `primary`: `#8A9FD8`
+- `secondary`: `#A8ADB6`
+- `accent`: `#7FBFB6`
+- `success`: `#8FBF9E`
+- `warning`: `#CFA96A`
+- `error`: `#DE9490`
+- `tool`: `#92B6C6`
+- `toolHover`: `#AECBD8`
+- `skill`: `#B3A0CC`
+- `skillHover`: `#C7B8DB`
+- `incognito`: `#A79BAC`
+- `errorOnSurface`: `#DE9490`
+- `accentOnPanel`: `#7FBFB6`
+- `successOnPanel`: `#8FBF9E`
+

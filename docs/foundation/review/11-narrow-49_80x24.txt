@@ -1,0 +1,2 @@
+terminal is 49 columns wide
+NIKI needs 50 or more. Enlarge the window.

@@ -32,14 +32,14 @@ pub fn derive_learnings(snapshot_id: &str, result: &PipelineResult) -> Vec<Learn
     // test grounds (any round — the artifact trail keeps every verdict).
     let mut verification_notes = Vec::new();
     if let Some(te) = &result.test_execution
-        && !te.passed
+        && te.status.blocks_delivery()
     {
         verification_notes.push(format!(
             "executed suite `{}` failed (exit {})",
             te.command, te.exit_code
         ));
         if let Some(mutation) = te.mutation.as_ref()
-            && !mutation.passed
+            && mutation.status.blocks_delivery()
         {
             verification_notes.push(format!(
                 "mutation gate `{}` failed (exit {})",

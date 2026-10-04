@@ -20,6 +20,41 @@ import type { AppState, StageRow, ToolRow } from '../state.js';
 import { paletteFor, type ThemeName } from '../theme/index.js';
 import { glyphs, sweepFrame, type Charset } from '../glyphs.js';
 import { formatCount, truncate } from './footer.js';
+import { parseBlocks, type Block, type Span } from '../markdown.js';
+
+/**
+ * Parsed-markdown cache, keyed by the source text.
+ *
+ * The transcript re-renders on every frame, including frames caused by something else moving. A
+ * settled assistant message does not change between those frames, so re-parsing its markdown every
+ * time is pure waste — and it is the difference between an idle repaint costing microseconds and
+ * costing milliseconds. The bound keeps a long session from turning this into a leak.
+ */
+const MARKDOWN_CACHE_LIMIT = 256;
+const markdownCache = new Map<string, readonly Block[]>();
+
+function cachedBlocks(text: string): readonly Block[] {
+  const hit = markdownCache.get(text);
+  if (hit) return hit;
+  const blocks = parseBlocks(text);
+  if (markdownCache.size >= MARKDOWN_CACHE_LIMIT) {
+    // Oldest first: Map preserves insertion order, and the oldest entry is the least likely to
+    // still be on screen.
+    const oldest = markdownCache.keys().next();
+    if (!oldest.done) markdownCache.delete(oldest.value);
+  }
+  markdownCache.set(text, blocks);
+  return blocks;
+}
+
+/** Exposed for tests and for the perf probe: how many distinct messages are memoised. */
+export function markdownCacheSize(): number {
+  return markdownCache.size;
+}
+
+export function clearMarkdownCache(): void {
+  markdownCache.clear();
+}
 
 export type TranscriptProps = {
   readonly state: AppState;
@@ -125,7 +160,7 @@ export function renderTranscriptLines(props: TranscriptProps): RenderedLine[] {
       // transcript that is unmistakably "you said this".
       window.push({ text: `> ${message.text}`, token: c.foreground, bold: true });
     } else {
-      window.push({ text: `${glyphs(charset).bullet} ${message.text}`, token: c.foreground });
+      for (const line of renderMarkdown(message.text, c, charset)) window.push(line);
     }
   }
 
@@ -133,6 +168,67 @@ export function renderTranscriptLines(props: TranscriptProps): RenderedLine[] {
   // wide a row may be. The component below only maps lines to elements.
   const width = state.cols;
   return window.toArray().reverse().map((l) => ({ ...l, text: truncate(l.text, width) }));
+}
+
+/**
+ * Renders assistant markdown into transcript rows. The block parser emits a partial final block in
+ * its in-progress form, so a paragraph being written appears as it is typed without any row
+ * already on screen moving.
+ */
+function renderMarkdown(
+  text: string,
+  c: ReturnType<typeof paletteFor>,
+  charset: Charset,
+): RenderedLine[] {
+  const g = glyphs(charset);
+  const lines: RenderedLine[] = [];
+
+  for (const block of cachedBlocks(text)) {
+    switch (block.kind) {
+      case 'heading':
+        lines.push({ text: `${g.bullet} ${spansToText(block.spans)}`, token: c.foreground, bold: true });
+        break;
+      case 'paragraph':
+        lines.push({ text: spansToText(block.spans), token: c.foreground });
+        break;
+      case 'quote':
+        lines.push({ text: `${g.connector} ${spansToText(block.spans)}`, token: c.muted });
+        break;
+      case 'rule':
+        lines.push({ text: g.rule.repeat(24), token: c.muted });
+        break;
+      case 'list':
+        for (const item of block.items) {
+          const indent = '  '.repeat(item.depth);
+          const marker = item.done === undefined ? (block.ordered ? '-' : g.bullet) : item.done ? g.done : g.queued;
+          lines.push({
+            text: `${indent}${marker} ${spansToText(item.spans)}`,
+            token: item.done ? c.muted : c.foreground,
+          });
+        }
+        break;
+      case 'code': {
+        // The language label is a fact about the block, not decoration: it tells the reader what
+        // they are looking at before they read a line of it.
+        const label = block.lang ? ` ${block.lang}` : '';
+        lines.push({ text: `${g.rule.repeat(3)}${label}`, token: c.muted });
+        for (const line of block.lines) lines.push({ text: `  ${line}`, token: c.tool });
+        if (!block.closed) lines.push({ text: `${g.rule.repeat(3)} (streaming)`, token: c.muted });
+        else lines.push({ text: `${g.rule.repeat(3)} · ctrl+o copy`, token: c.muted });
+        break;
+      }
+      case 'table':
+        lines.push({ text: block.header.join(' | '), token: c.foreground, bold: true });
+        for (const row of block.rows) lines.push({ text: row.join(' | '), token: c.muted });
+        break;
+    }
+  }
+
+  return lines;
+}
+
+function spansToText(spans: readonly Span[]): string {
+  return spans.map((s) => s.text).join('');
 }
 
 function renderTool(

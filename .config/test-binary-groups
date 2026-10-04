@@ -32,6 +32,10 @@ heavy planner_coder_branch
 heavy resume_cli
 heavy hooks_lifecycle
 heavy agent_runtime
+heavy full_pipeline_branch
+heavy revision_loop_seam
+heavy risk_escalation_seam
+heavy verifier_verdict
 
 # Binaries that build large in-memory indexes.
 heap structural_index

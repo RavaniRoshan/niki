@@ -416,7 +416,12 @@ fn result_envelope(
             serde_json::to_value(&r.outcome).unwrap_or(serde_json::Value::Null),
             r.outcome.is_independently_reviewed(),
             r.revision_rounds,
-            r.test_execution.as_ref().map(|te| te.passed),
+            // `null` when nothing was verified — never `false`, which would be
+            // indistinguishable from a suite that ran and failed. The verdict
+            // itself is `verification` below.
+            r.test_execution
+                .as_ref()
+                .and_then(|te| te.status.is_verified().then_some(te.passed)),
             r.test_execution
                 .as_ref()
                 .and_then(|te| te.mutation.as_ref().map(|m| m.passed)),
@@ -430,6 +435,9 @@ fn result_envelope(
             None,
         ),
     };
+    let verification = result
+        .and_then(|r| r.test_execution.as_ref())
+        .map(|te| te.status.as_str());
     serde_json::json!({
         "task_id": task.id.to_string(),
         "description": task.description,
@@ -453,6 +461,11 @@ fn result_envelope(
         "revision_rounds": revisions,
         "tests_passed": tests_passed,
         "mutation_passed": mutation_passed,
+        // `passed` / `failed` / `errored` / `unverified`. A CI script gating on
+        // `verdict == "Approved"` needs to know whether the suite behind that
+        // approval ever ran; this says so in one field rather than making it
+        // infer `unverified` from `tests_passed == null`.
+        "verification": verification,
         "cost_usd": record.total_cost_usd,
         "input_tokens": record.total_input_tokens,
         "output_tokens": record.total_output_tokens,

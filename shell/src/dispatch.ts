@@ -15,6 +15,7 @@
  */
 
 import type { AppState, LocalAction } from './state.js';
+import { escapeDecision } from './approval.js';
 
 export type KeyEvent = {
   readonly input: string;
@@ -34,6 +35,8 @@ export type KeyEvent = {
   readonly home: boolean;
   readonly end: boolean;
   readonly tab: boolean;
+  /** Set for a bracketed paste: the whole payload is in `input` and is literal text. */
+  readonly paste?: boolean;
 };
 
 export type KeyOutcome = {
@@ -57,13 +60,19 @@ export function handleKey(state: AppState, key: KeyEvent): KeyOutcome {
       options.findIndex((o) => o.id === state.approval?.focusedOptionId),
     );
     if (key.escape) {
-      // Esc means deny, and means it by choosing the engine's own deny option.
-      const deny = options.find((o) => o.id.toLowerCase().includes('den')) ?? options[options.length - 1];
+      // Esc means deny: it picks the engine's own refusal option rather than merely closing.
+      const deny = escapeDecision(state.approval.request);
       return deny
         ? { actions: [{ kind: 'approval.decide' }], approval: { id: state.approval.request.id, optionId: deny.id } }
         : { actions: [{ kind: 'approval.decide' }] };
     }
-    if (key.return) {
+    // A bracketed paste is text, full stop: it must never run a command and never submit, no matter
+  // what it contains.
+  if (key.paste) {
+    return { actions: [], insert: key.input };
+  }
+
+  if (key.return) {
       const focused = options[currentIndex];
       return focused
         ? { actions: [{ kind: 'approval.decide' }], approval: { id: state.approval.request.id, optionId: focused.id } }
@@ -80,11 +89,30 @@ export function handleKey(state: AppState, key: KeyEvent): KeyOutcome {
     return none;
   }
 
-  // Transcript scrolling is checked before the composer so a focused composer cannot swallow it.
+  // Transcript scrolling is checked before the composer, because a focused composer must never
+  // swallow a scroll key. This is one of the three defects the old TUI had and NIKI must not.
   if (key.pageUp) return { actions: [], scroll: 'pageUp' };
   if (key.pageDown) return { actions: [], scroll: 'pageDown' };
   if (key.home) return { actions: [], scroll: 'home' };
   if (key.end) return { actions: [], scroll: 'end' };
+
+  // Up/Down move the caret only inside a multi-line composer. In a single-line composer there is
+  // no caret to move, so they scroll the transcript.
+  if ((key.upArrow || key.downArrow) && !state.composer.includes('\n')) {
+    return { actions: [], scroll: key.upArrow ? 'lineUp' : 'lineDown' };
+  }
+
+  // `g` then `G` and `g` then `g`: the vim-style jump pair, as a two-key chord. A bare `g` still
+  // types a `g`, because a chord that eats a letter is worse than a chord that waits.
+  if (key.input === 'g' && !key.ctrl && !key.meta) {
+    if (state.pendingChord === 'g') {
+      return { actions: [{ kind: 'clearChord' }], scroll: 'home' };
+    }
+    return { actions: [{ kind: 'setChord', chord: 'g' }], insert: 'g' };
+  }
+  if (key.input === 'G' && !key.ctrl && !key.meta && state.pendingChord === 'g') {
+    return { actions: [{ kind: 'clearChord' }], scroll: 'end' };
+  }
 
   if (key.ctrl && key.input === 'c') {
     if (state.composer.length > 0) return { actions: [{ kind: 'composer.set', text: '' }] };
@@ -130,18 +158,29 @@ export function handleKey(state: AppState, key: KeyEvent): KeyOutcome {
     return none;
   }
 
-  if (key.shift && key.input === 'Tab') {
+  if (key.shift && key.tab) {
     // Cycling a mode must never take focus out of the composer.
     return { actions: [{ kind: 'mode.cycle' }] };
+  }
+
+  // A bracketed paste is text, full stop: it must never run a command and never submit, no matter
+  // what it contains.
+  if (key.paste) {
+    return { actions: [], insert: key.input };
   }
 
   if (key.return) {
     if (state.slashMenu) return { actions: [{ kind: 'slashMenu.accept' }] };
     const text = state.composer.trim();
     if (text.length === 0) return none;
+    // Split on the first whitespace run. `indexOf(' ')` returns -1 for a single-word command,
+    // and `slice(-1)` would then send the command's own last letter as its arguments.
+    const spaceAt = text.search(/\s/);
+    const name = spaceAt === -1 ? text : text.slice(0, spaceAt);
+    const args = spaceAt === -1 ? '' : text.slice(spaceAt).trim();
     return {
       actions: text.startsWith('/')
-        ? [{ kind: 'command.run', name: text.split(/\s+/)[0] ?? text, args: text.slice(text.indexOf(' ')).trim() }]
+        ? [{ kind: 'command.run', name, args }]
         : [{ kind: 'turn.submit', prompt: text }],
     };
   }

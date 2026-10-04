@@ -21,6 +21,7 @@ import { homedir } from 'node:os';
 import { App } from './app.js';
 import { EngineClient, PROTOCOL_VERSION } from './protocol/client.js';
 import { handleKey } from './dispatch.js';
+import { decisionFor } from './approval.js';
 import { InputParser } from './input.js';
 import { initialState, reduce, reduceLocal, type AppState, type ReduceOptions } from './state.js';
 import type { ServerNotification } from './protocol/generated/index.js';
@@ -82,6 +83,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const env = process.env;
   const engineArgIndex = argv.indexOf('--engine');
   const engine = engineArgIndex === -1 ? 'niki' : (argv[engineArgIndex + 1] ?? 'niki');
+  // Extra arguments for `niki serve`, so a test can point the shell at the scripted runtime
+  // without a second code path. Repeatable: `--engine-arg --fixture --engine-arg --bare`.
+  const engineArgs: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--engine-arg' && argv[i + 1]) engineArgs.push(argv[i + 1]!);
+  }
   const themeArg = argv.indexOf('--theme');
   const theme: ThemeName =
     themeArg !== -1 && isThemeName(argv[themeArg + 1] ?? '') ? (argv[themeArg + 1] as ThemeName) : 'niki';
@@ -147,7 +154,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
   const client = new EngineClient({
     command: engine,
-    args: ['serve'],
+    args: ['serve', ...engineArgs],
     onEngineStderr: engineLog,
   });
 
@@ -194,7 +201,26 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   process.stdin.on('data', (chunk: string) => {
     for (const keyEvent of parser.push(chunk)) {
       const outcome = handleKey(state, keyEvent);
-      for (const action of outcome.actions) state = reduceLocal(state, action, opts());
+      for (const action of outcome.actions) {
+        // A submitted turn is the one action that has to reach the engine as well as the state.
+        // Applying it locally without sending it is what makes a composer that types beautifully
+        // and then does nothing.
+        if (action.kind === 'turn.submit') {
+          void client
+            .request(
+              {
+                method: 'turn.start',
+                params: { prompt: action.prompt, permission_mode: state.session?.permission_mode ?? 'manual' },
+              },
+              `turn-${Date.now()}`,
+            )
+            .catch((e: Error) => {
+              engineLog(`turn.start failed: ${e.message}`);
+              state = reduceLocal(state, { kind: 'protocolError', message: e.message }, opts());
+            });
+        }
+        state = reduceLocal(state, action, opts());
+      }
       if (outcome.insert !== undefined) {
         state = reduceLocal(state, { kind: 'composer.set', text: state.composer + outcome.insert }, opts());
       }
@@ -202,11 +228,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         state = reduceLocal(state, { kind: 'scroll', by: outcome.scroll }, opts());
       }
       if (outcome.approval) {
+        // The decision comes from the option the user actually chose. Hardcoding `allow` here
+        // would turn an Esc-deny into an allow the moment the key handling changed.
+        const option = state.approval?.request.options.find((o) => o.id === outcome.approval?.optionId);
+        const decision = option ? decisionFor(option) : 'deny';
+        state = reduceLocal(state, { kind: 'approval.decide' }, opts());
         void client
           .request(
             {
               method: 'approval.reply',
-              params: { id: outcome.approval.id, decision: 'allow', reason: null },
+              params: { id: outcome.approval.id, decision, reason: null },
             },
             `approval-${Date.now()}`,
           )

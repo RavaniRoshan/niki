@@ -11,8 +11,10 @@
  */
 
 import { sanitize, sanitizeSingleLine } from './sanitize.js';
+import { safestFocus } from './approval.js';
 import type {
   ApprovalRequestParams,
+  PermissionMode,
   BranchCreatedParams,
   ContextUsageParams,
   FinalParams,
@@ -128,6 +130,8 @@ export type AppState = {
   readonly exitArmed: boolean;
   readonly scrollOffset: number;
   readonly workspaceMode: boolean;
+  /** A partially-typed key chord, e.g. the `g` of `gg`. Empty when there is none. */
+  readonly pendingChord: string;
 };
 
 export type OverlayName =
@@ -175,6 +179,7 @@ export function initialState(cols = 80, rows = 24): AppState {
     exitArmed: false,
     scrollOffset: 0,
     workspaceMode: false,
+    pendingChord: '',
   };
 }
 
@@ -456,6 +461,12 @@ export function reduce(state: AppState, event: ServerNotification, opts: ReduceO
 
     case 'approval.request': {
       const p = event.params;
+      // The focus is resolved here, not in the renderer and not in the key handler: one place
+      // decides, so a prompt can never open focused on an approving option by accident.
+      const focusedOptionId = safestFocus(
+        p,
+        state.session?.permission_mode as PermissionMode | undefined,
+      );
       return {
         ...state,
         phase: 'awaitingApproval',
@@ -465,7 +476,7 @@ export function reduce(state: AppState, event: ServerNotification, opts: ReduceO
             tool: sanitizeSingleLine(p.tool),
             command: sanitizeSingleLine(p.command),
           },
-          focusedOptionId: p.safest_option_id,
+          focusedOptionId,
         },
         activity: null,
       };
@@ -547,16 +558,19 @@ export type LocalAction =
   | { kind: 'slashMenu.close' }
   | { kind: 'slashMenu.open'; query: string }
   | { kind: 'slashMenu.accept' }
-  | { kind: 'scroll'; by: ScrollBy };
+  | { kind: 'scroll'; by: ScrollBy }
+  | { kind: 'setChord'; chord: string }
+  | { kind: 'clearChord' };
 
 export type ScrollBy = 'pageUp' | 'pageDown' | 'home' | 'end' | 'lineUp' | 'lineDown';
 
 export function reduceLocal(state: AppState, action: LocalAction, _opts: ReduceOptions): AppState {
   switch (action.kind) {
     case 'composer.set':
-      // A slash at the start of the composer opens the popup without blocking typing.
+      // Any ordinary typing clears a half-typed chord: the user has moved on.
       return {
         ...state,
+        pendingChord: '',
         composer: action.text,
         slashMenu: action.text.startsWith('/')
           ? { query: action.text.slice(1).split(' ')[0] ?? '', selected: 0 }
@@ -611,7 +625,13 @@ export function reduceLocal(state: AppState, action: LocalAction, _opts: ReduceO
     case 'slashMenu.accept':
       return { ...state, slashMenu: null };
     case 'scroll':
+      // Scrolling never disturbs the composer: the text the user is typing survives a scroll, and
+      // that is the whole point of the row.
       return { ...state, scrollOffset: applyScroll(state.scrollOffset, action.by) };
+    case 'setChord':
+      return { ...state, pendingChord: action.chord };
+    case 'clearChord':
+      return { ...state, pendingChord: '' };
   }
 }
 

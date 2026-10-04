@@ -32,8 +32,25 @@ use crate::permissions::PermissionAction;
 use super::{AdapterSink, TurnOutcome};
 
 /// How long the script waits for a shell to answer its scripted approval before answering for
-/// it. A snapshot test that only renders still has to finish.
-const APPROVAL_ANSWER_WAIT: Duration = Duration::from_secs(2);
+/// it.
+///
+/// Two seconds was tuned for a render-only test and is far too short for a real shell in a real
+/// pseudo-terminal: the interface was still booting when the approval expired, so the prompt
+/// flashed past and the run finished before anyone could see it. Thirty seconds is long enough
+/// for a human and for a PTY test, and short enough that a forgotten run still terminates.
+/// A PTY test boots the real shell through a TypeScript loader, which on a busy machine can take
+/// the better part of a minute before the turn is even submitted.
+/// `NIKI_FIXTURE_APPROVAL_WAIT_MS` overrides it for a test that must not wait.
+fn approval_answer_wait() -> Duration {
+    let default = Duration::from_secs(120);
+    match std::env::var("NIKI_FIXTURE_APPROVAL_WAIT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        Some(ms) => Duration::from_millis(ms),
+        None => default,
+    }
+}
 
 /// The scripted reference loop.
 ///
@@ -213,7 +230,8 @@ async fn request_approval(tx: &Sender<DisplayEvent>, sink: &Arc<AdapterSink>) {
         return;
     }
 
-    let deadline = Instant::now() + APPROVAL_ANSWER_WAIT;
+    let wait = approval_answer_wait();
+    let deadline = Instant::now() + wait;
     while Instant::now() < deadline {
         if sink.resolve_oldest_approval(PermissionAction::Allow) {
             return;
@@ -223,7 +241,7 @@ async fn request_approval(tx: &Sender<DisplayEvent>, sink: &Arc<AdapterSink>) {
     eprintln!(
         "niki serve: fixture: nobody answered the scripted approval within {:?}; it resolves on \
          its own timeout",
-        APPROVAL_ANSWER_WAIT
+        wait
     );
 }
 

@@ -1,0 +1,24 @@
+ ▄████▄ Niki 0.1.0
+███◑███ claude-sonnet-4 · manual
+ ▀████▀ /home/u/projects/api (main ↑1)
+> audit and improve test coverage
+Three tests fail on the new endpoint. Fixing those first.
+✓ Read(package.json)
+  └ read 46 lines · ctrl+o expand
+✗ Bash(npm test)
+  └ exit 1 · 3 failing · ctrl+o expand
+◐ Running Bash
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+› ▏
+────────────────────────────────────────────────────────────────────────────────
+claude-sonnet-4 · manual · main ↑1       esc interrupt · ctrl+o details · ? help

@@ -16,7 +16,7 @@
 //! fiction attached to it. The Reviewer was fooled by the same claim and
 //! reviewed a test file that did not exist.
 
-use niki::agents::tester::TestExecution;
+use niki::agents::tester::{TestExecution, VerificationStatus};
 use niki::artifacts::types::TestReport;
 use niki::display::artifact_render::{render_test_report_summary, render_verification_line};
 
@@ -42,6 +42,13 @@ fn execution(exit_code: i64, stdout: &str) -> TestExecution {
         command: "python3 -m pytest -q".into(),
         exit_code,
         passed: exit_code == 0,
+        // The recorded verdict, alongside `passed`. Mechanical: the fixture already
+        // derives `passed` from `exit_code`, so the status follows from the same input.
+        status: if exit_code == 0 {
+            VerificationStatus::Passed
+        } else {
+            VerificationStatus::Failed
+        },
         stdout: stdout.into(),
         stderr: String::new(),
         truncated: false,

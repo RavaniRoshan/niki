@@ -173,6 +173,58 @@ describe('PTY terminal lifecycle', () => {
   }, 60_000);
 });
 
+describe('D4: a terminal that cannot do the job gets a plain answer', () => {
+  it.skipIf(!shellAvailable)('renders no escape garbage when TERM is dumb', async () => {
+    const s = startPty(COLS, ROWS, { NO_COLOR: '1', TERM: 'dumb' });
+    await s.waitFor(() => s.screen().trim().length > 0, 45_000);
+    const screen = s.screen();
+    // A dumb terminal has no business being sent an alternate screen or a colour run.
+    // eslint-disable-next-line no-control-regex
+    expect(screen, 'a control sequence reached a dumb terminal').not.toMatch(/\x1b|\u009b/);
+  }, 120_000);
+
+  it.skipIf(!shellAvailable)('still shows the composer, because it is the anchor', async () => {
+    const s = startPty(COLS, ROWS, { NO_COLOR: '1', TERM: 'dumb' });
+    await s.waitFor(() => s.screen().includes('Niki'), 45_000);
+    expect(s.screen()).toMatch(/[>\u203a] /);
+  }, 120_000);
+});
+
+describe('D10: a bracketed paste through the real terminal', () => {
+  it.skipIf(!shellAvailable)('lands in the composer and submits nothing', async () => {
+    const s = startPty(COLS, ROWS, { NO_COLOR: '1' });
+    await s.waitFor(() => s.screen().includes('Niki'), 45_000);
+    // A paste containing what would otherwise be a command and an Enter.
+    s.write('\x1b[200~/quit\r\x1b[201~');
+    const pasted = await s.waitFor(() => s.screen().includes('/quit'), 20_000);
+    expect(pasted, `the paste never landed:\n${s.screen()}`).toBe(true);
+    // The Enter inside the paste must not have submitted: the turn is still not running.
+    expect(s.screen()).not.toContain('Thinking');
+  }, 150_000);
+});
+
+describe('D11: mouse capture is a mode with a release', () => {
+  it.skipIf(!shellAvailable)('ctrl+m releases capture and takes it back', async () => {
+    const s = startPty(COLS, ROWS, { NO_COLOR: '1' });
+    await s.waitFor(() => s.screen().includes('Niki'), 45_000);
+    // One key gets the user their native selection back, and the same key takes it again.
+    s.write('\x0d');
+    await new Promise((r) => setTimeout(r, 600));
+    expect(s.child.exitCode === null || s.child.exitCode === 0).toBe(true);
+    expect(s.screen()).toContain('Niki');
+  }, 150_000);
+
+  it.skipIf(!shellAvailable)('an SGR mouse report is consumed, never typed', async () => {
+    const s = startPty(COLS, ROWS, { NO_COLOR: '1' });
+    await s.waitFor(() => s.screen().includes('Niki'), 45_000);
+    // A click at row 10, column 5: press, release, modifiers.
+    s.write('\x1b[<0;5;10M\x1b[<0;5;10m');
+    await new Promise((r) => setTimeout(r, 800));
+    const composerLine = s.screen().split('\n').find((l) => l.includes('\u203a')) ?? '';
+    expect(composerLine, 'a mouse report was typed into the composer').not.toContain('[<');
+  }, 150_000);
+});
+
 describe('the terminal emulator the PTY tests trust', () => {
   it('places text where the cursor was moved', () => {
     const t = new Terminal(20, 5);

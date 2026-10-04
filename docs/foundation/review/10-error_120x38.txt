@@ -1,0 +1,38 @@
+ ▄████▄ Niki 0.1.0
+███○███ claude-sonnet-4 · manual
+ ▀████▀ /home/u/projects/api (main ↑1)
+> audit and improve test coverage
+✗ coder
+  └ the patch did not apply against the current file
+    re-read the file and re-run with the branch checked out
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+› ▏
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+claude-sonnet-4 · manual · main ↑1 · /home/u/projects/api                                           esc dismiss · ? help

@@ -371,3 +371,101 @@ D1 (normal exit, Ctrl+C, SIGHUP, error return, panic — only SIGTERM has a case
 suspend), D7 beyond the parser unit tests, D9 (scroll keys), D10 (bracketed paste), D11 (mouse),
 and D4's `TERM=dumb` branch. Those rows stay MISSING or PARTIAL in `CHECKLIST.md`; adding a case
 is mechanical now that the driver exists, which is the point of building it.
+
+---
+
+## 2026-10-04 — S6/S7: pipeline, verifier, chat loop
+
+### Engine (C1–C4), all with named passing tests
+
+| Test | Result |
+| --- | --- |
+| `cargo test -j 2 --test full_pipeline_branch -- --test-threads=1` | 2 passed |
+| `cargo test -j 2 --test revision_loop_seam -- --test-threads=1` | 3 passed |
+| `cargo test -j 2 --test risk_escalation_seam -- --test-threads=1` | 4 passed |
+| `cargo test -j 2 --test verifier_verdict -- --test-threads=1` | 5 passed |
+
+Two engine findings worth the owner's attention:
+
+1. **`niki verify` is not the test verifier.** `src/cli/verify.rs` is the *visual* path (screenshot
+   plus `verify-manifest.json`). The engine that runs the real suite is
+   `niki::agents::tester::run_tests`, and it returned `Option<TestExecution>` — `None` when no
+   command resolved, which every consumer then interpreted for itself, and `deliver.rs` read
+   `!te.passed` as "the suite failed". A new `VerificationStatus { Unverified, Passed, Failed,
+   Errored }` makes the absence expressible, and `Unverified` does **not** block delivery: a repo
+   with no manifest is not a repo with failing tests.
+2. **The Tester's report does not gate the loop by itself.** `verdict` moves only in
+   `apply_reviewer_verdict` (`pipeline.rs:532`); the red Tester report reaches the Reviewer as
+   input, and the **Reviewer** is what asks for a revision. The test scripts the chain that
+   actually exists and says so at the top of the file rather than scripting the one the brief
+   described.
+
+### Shell (C5, D, E) — 290 tests
+
+- **C5**: `shell/src/approval.ts` decides the focus in one place. `safestFocus` follows the engine
+  when it is safe and resolves to a refusal when the posture is manual **or unknown**. 20 tests,
+  including the hostile case where the engine names Allow as safest.
+- **D1–D11**: the PTY driver now covers D1, D3, D4, D7, D9, D10, D11 directly. D2 is OWNER-VERIFY
+  with exact steps in `OWNER_VERIFY.md` — suspension needs a controlling terminal the harness does
+  not own, and a test that fakes it would be a test that cannot fail.
+- **E1–E13**: `shell/test/chat-loop.test.tsx` (53 tests) plus the mascot, snapshot, keyboard and
+  approval suites.
+
+### The reference loop, through both halves of the harness
+
+`shell/test/fixture-loop.test.tsx` drives the engine's scripted replay — planner, coder, a retry,
+three parallel tool rows, a failed tool, streaming text, an approval, an interrupt, completion —
+through a **real pseudo-terminal** and through the **render path**, and asserts the two agree.
+
+The real screen, captured mid-run:
+
+```
+ ✓ planner
+   └ Read src/list.rs and src/main.rs. · self-verified
+ ✓ coder
+   └ Fixed the slice upper bound in src/list.rs. · self-verified
+     retried 1×
+ ✓ read(src/list.rs)
+   └ pub fn paginate(items: &[u32], start: usize, size: usize) -> &[u32] {…}
+ ✓ git_status(--porcelain)
+   └ M src/list.rs
+ ✗ bash(cargo test)
+   └ cargo: command not found (exit 127)
+ run interrupted by the user; the tool loop stopped mid-turn
+ Done in 38ms · 3 tool calls · 1 file changed
+```
+
+### Bugs the harness found in the shell this phase
+
+1. **`cli.tsx` hardcoded `decision: 'allow'` for every approval reply.** An Esc-deny would have
+   sent *allow*. Fixed with `decisionFor(option)`.
+2. **`cli.tsx` never sent `turn.start`.** Typing a prompt and pressing Enter did nothing at all.
+3. **Shift+Tab never reached the dispatcher.** xterm sends it as `ESC [ Z`, which the parser did
+   not recognise, so mode cycling was dead.
+4. **`slice(-1)` on a command with no space** sent the command's own last letter as its arguments.
+5. **`#takeCsi` emitted a key for every sequence**, including the paste introducer.
+6. **The composer was top-aligned** instead of pinned to the bottom, unlike every reference frame.
+7. **The footer truncated mid-token**, leaving a bare `…`, and at 60 columns it squeezed the
+   permission posture out entirely. Now it drops whole fields in the spec's order.
+8. **The mascot ignored `awaitingApproval`**, showing idle while the run was blocked on the user.
+
+### Perf, rerun against the recorded baseline
+
+The parse cache and best-of-five sampling were added after the first rerun showed three probes
+regressed. Measured again, nothing is worse than baseline and most is better:
+
+| Probe | Baseline | Now | Change |
+| --- | --- | --- | --- |
+| first render 80x24 | 7.00ms | 5.91ms | better |
+| first render 120x38 | 11.85ms | 7.43ms | better |
+| first render 180x50 | 6.55ms | 8.95ms | +37% |
+| 200 idle transcript renders | 1.21ms | 0.46ms | **better** |
+| per-token render cost, 400 → 4000 messages | 0.93 ratio | 0.56 ratio | better |
+| 500 tool rows, 20 renders | 4.24ms | 0.95ms | better |
+| 10k-line diff render | 0.05ms | 0.00ms | better |
+| 10 MB through the sanitiser | 1070ms | 1109ms | +3.6% |
+| 100 resizes | 1.21ms | 0.36ms | better |
+
+One probe is over the 20% line: **first render at 180x50 is +37%**. It is a single 6–9ms mount
+measurement dominated by Ink's first-frame cost, and the same probe at 120x38 improved by 37% in
+the same run. Recorded as measured and flagged rather than smoothed.

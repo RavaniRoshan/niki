@@ -359,10 +359,20 @@ fn render_audit_section(result: &PipelineResult) -> String {
 /// Build the "## Verification — Test Suite" section from the real sandbox test run.
 /// Returns an empty string when no test command was executed, so a run that had
 /// nothing to verify simply omits the section rather than asserting a pass.
+///
+/// `test_execution` used to be `None` in that case and now carries an explicit
+/// `Unverified` status, so the guard is on the status rather than on the option —
+/// otherwise an unverified project would render as **FAILED**, which is exactly
+/// the fabricated verdict this section exists to avoid. The machine-readable
+/// half of the record is `artifacts/test_execution.json`, where the same case is
+/// `status: "unverified"`.
 fn render_verification_section(result: &PipelineResult) -> String {
     let Some(te) = &result.test_execution else {
         return String::new();
     };
+    if !te.status.is_verified() {
+        return String::new();
+    }
     let status = if te.passed { "PASSED" } else { "FAILED" };
     let mut out = String::from("## Verification — Test Suite (executed in sandbox)\n\n");
     out.push_str(&format!("- Command: `{}`\n", te.command));

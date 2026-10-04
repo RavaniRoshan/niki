@@ -4633,7 +4633,9 @@ fn maybe_stage_skill_candidate(
     metrics: &[StageMetric],
     task_id: &str,
 ) {
-    let suite_green = test_execution.map(|t| t.passed).unwrap_or(false);
+    let suite_green = test_execution
+        .map(|t| t.status == crate::agents::tester::VerificationStatus::Passed)
+        .unwrap_or(false);
     if !matches!(verdict, Verdict::Approved) || !suite_green {
         return;
     }

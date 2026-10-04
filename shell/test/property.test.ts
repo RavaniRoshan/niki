@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { InputParser } from '../src/input.js';
+import { handleKey } from '../src/dispatch.js';
 import { sanitize, sanitizeSingleLine } from '../src/sanitize.js';
 import { initialState, reduce, type AppState } from '../src/state.js';
 import { renderTranscriptLines } from '../src/components/transcript.js';
@@ -206,5 +207,81 @@ describe('reducer: every row is created by an event', () => {
       { nowMs: 0 },
     );
     expect(s.messages).toEqual([]);
+  });
+});
+describe('D10: a bracketed paste is text, never a command', () => {
+  it('delivers the whole paste as one insert', () => {
+    const parser = new InputParser();
+    const events = parser.push('\x1b[200~hello world\x1b[201~');
+    expect(events).toHaveLength(1);
+    expect(events[0]?.input).toBe('hello world');
+    expect(events[0]?.paste).toBe(true);
+  });
+
+  it('never turns an Enter inside a paste into a submit', () => {
+    const parser = new InputParser();
+    const events = parser.push('\x1b[200~one\r\ntwo\x1b[201~');
+    expect(events).toHaveLength(1);
+    expect(events.some((e) => e.return)).toBe(false);
+    expect(events[0]?.input).toContain('\n');
+  });
+
+  it('never turns a Ctrl+C inside a paste into an interrupt', () => {
+    const parser = new InputParser();
+    const events = parser.push('\x1b[200~danger\x03command\x1b[201~');
+    expect(events.filter((e) => e.ctrl)).toHaveLength(0);
+  });
+
+  it('reassembles a paste split across several reads', () => {
+    const parser = new InputParser();
+    let events = parser.push('\x1b[200~first line\n');
+    events = events.concat(parser.push('second line\n'));
+    events = events.concat(parser.push('third'));
+    events = events.concat(parser.push('\x1b[201~'));
+    expect(events).toHaveLength(1);
+    expect(events[0]?.input).toBe('first line\nsecond line\nthird');
+  });
+
+  it('collapses a very large paste to a placeholder with a preview', () => {
+    const parser = new InputParser();
+    const huge = Array.from({ length: 5000 }, (_, i) => `line ${i}`).join('\n');
+    const events = parser.push(`\x1b[200~${huge}\x1b[201~`);
+    expect(events[0]?.input).toContain('pasted 5000 lines');
+    expect(events[0]?.input.length).toBeLessThan(400);
+  });
+
+  it('leaves the parser usable after a paste ends', () => {
+    const parser = new InputParser();
+    parser.push('\x1b[200~abc\x1b[201~');
+    const after = parser.push('x');
+    expect(after).toHaveLength(1);
+    expect(after[0]?.input).toBe('x');
+    expect(parser.pending).toBe(false);
+  });
+
+  it('the dispatcher inserts a paste and runs nothing', () => {
+    const s = initialState(80, 24);
+    const outcome = handleKey(s, {
+      input: '/quit',
+      ctrl: false,
+      meta: false,
+      shift: false,
+      escape: false,
+      return: false,
+      backspace: false,
+      delete: false,
+      upArrow: false,
+      downArrow: false,
+      leftArrow: false,
+      rightArrow: false,
+      pageUp: false,
+      pageDown: false,
+      home: false,
+      end: false,
+      tab: false,
+      paste: true,
+    });
+    expect(outcome.actions).toEqual([]);
+    expect(outcome.insert).toBe('/quit');
   });
 });

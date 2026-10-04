@@ -305,24 +305,32 @@ pub fn deliver(inp: DeliverInput<'_>) -> Result<Delivered> {
     // `niki/<id>` branch is created and the task is recorded as Failed.
     // `--force` overrides with the override itself recorded; a forced branch
     // is explicitly not a verified branch.
-    let suite_failed = result
-        .test_execution
-        .as_ref()
-        .is_some_and(|te| !te.passed || te.mutation.as_ref().is_some_and(|m| !m.passed));
+    let suite_failed = result.test_execution.as_ref().is_some_and(|te| {
+        te.status.blocks_delivery()
+            || te
+                .mutation
+                .as_ref()
+                .is_some_and(|m| m.status.blocks_delivery())
+    });
     let mut branch_block_note: Option<String> = None;
     if suite_failed && !args.force {
         let what = match result.test_execution.as_ref() {
-            Some(te) if !te.passed => {
-                format!("test suite `{}` failed (exit {})", te.command, te.exit_code)
-            }
-            Some(te) => format!(
-                "mutation gate `{}` failed (exit {})",
-                te.mutation
+            Some(te)
+                if te
+                    .mutation
                     .as_ref()
-                    .map(|m| m.command.as_str())
-                    .unwrap_or("?"),
-                te.mutation.as_ref().map(|m| m.exit_code).unwrap_or(-1),
-            ),
+                    .is_some_and(|m| m.status.blocks_delivery()) =>
+            {
+                format!(
+                    "mutation gate `{}` failed (exit {})",
+                    te.mutation
+                        .as_ref()
+                        .map(|m| m.command.as_str())
+                        .unwrap_or("?"),
+                    te.mutation.as_ref().map(|m| m.exit_code).unwrap_or(-1),
+                )
+            }
+            Some(te) => format!("test suite `{}` failed (exit {})", te.command, te.exit_code),
             None => "verification failed".to_string(),
         };
         branch_block_note = Some(format!(

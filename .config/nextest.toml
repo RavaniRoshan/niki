@@ -67,7 +67,7 @@ test-threads = "num-cpus"
 # the heavy and heap binaries run one at a time, everything else parallelises.
 
 [[profile.default.overrides]]
-filter = 'binary(tui_navigation) | binary(tui_perf) | binary(visual_layout_check) | binary(run_lifecycle) | binary(pipeline_guards) | binary(kb_pipeline) | binary(runtime_benchmarks) | binary(worktree_policy) | binary(diff_scope) | binary(sandbox_teardown) | binary(acp_server) | binary(serve_protocol) | binary(planner_coder_branch) | binary(resume_cli) | binary(hooks_lifecycle) | binary(agent_runtime)'
+filter = 'binary(tui_navigation) | binary(tui_perf) | binary(visual_layout_check) | binary(run_lifecycle) | binary(pipeline_guards) | binary(kb_pipeline) | binary(runtime_benchmarks) | binary(worktree_policy) | binary(diff_scope) | binary(sandbox_teardown) | binary(acp_server) | binary(serve_protocol) | binary(planner_coder_branch) | binary(resume_cli) | binary(hooks_lifecycle) | binary(agent_runtime) | binary(full_pipeline_branch) | binary(revision_loop_seam) | binary(risk_escalation_seam) | binary(verifier_verdict)'
 test-group = 'heavy'
 
 [[profile.default.overrides]]

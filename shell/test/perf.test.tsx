@@ -28,6 +28,17 @@ function ms(fn: () => void): number {
   return Number(process.hrtime.bigint() - start) / 1e6;
 }
 
+/**
+ * Best of five. A single sample of a microsecond-scale operation on a machine that is also
+ * running a build is mostly noise, and a "regression" measured from noise is a claim about the
+ * clock rather than about the code.
+ */
+function bestOfFive(fn: () => void): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < 5; i += 1) best = Math.min(best, ms(fn));
+  return best;
+}
+
 function session(): ServerNotification {
   return {
     method: 'session.ready',
@@ -70,7 +81,7 @@ describe('perf baselines (recorded on this machine)', () => {
     const results: string[] = [];
     for (const [cols, rows] of sizes) {
       const state: AppState = { ...initialState(cols, rows), phase: 'idle' };
-      const elapsed = ms(() => {
+      const elapsed = bestOfFive(() => {
         const inst = render(
           React.createElement(App, { state, theme: 'niki', charset: 'unicode', reducedMotion: true }),
         );
@@ -85,7 +96,7 @@ describe('perf baselines (recorded on this machine)', () => {
 
   it('records idle cost: rendering the same state repeatedly costs nothing extra per frame', () => {
     const state = populated(4, 8);
-    const elapsed = ms(() => {
+    const elapsed = bestOfFive(() => {
       for (let i = 0; i < 200; i += 1) {
         renderTranscriptLines({
           state,
@@ -168,7 +179,7 @@ describe('perf baselines (recorded on this machine)', () => {
       { method: 'tool.diff', params: { tool_id: 'd', path: 'src/big.rs', hunks: [{ old_start: 1, old_lines: 10_000, new_start: 1, new_lines: 10_000, header: '@@', lines: bigDiff }] } } as never,
       T0,
     );
-    const renderElapsed = ms(() => {
+    const renderElapsed = bestOfFive(() => {
       renderTranscriptLines({
         state: s,
         theme: 'niki',
@@ -192,7 +203,7 @@ describe('perf baselines (recorded on this machine)', () => {
 
   it('records 100 consecutive resizes', () => {
     const state = populated(10, 4);
-    const elapsed = ms(() => {
+    const elapsed = bestOfFive(() => {
       for (let i = 0; i < 100; i += 1) {
         const cols = 40 + (i % 160);
         renderTranscriptLines({

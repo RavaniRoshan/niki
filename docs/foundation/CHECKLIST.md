@@ -39,67 +39,59 @@ are honestly absent and are the rest of the work.
 
 | Row | P | Proof | Status | Evidence / what is missing |
 | --- | --- | --- | --- | --- |
-| C1 Planner→Coder→Tester→Reviewer end to end headless, producing a reviewable branch | P0 | [T] | UNVERIFIED | Exists: `execute_pipeline` `src/orchestrator/pipeline.rs:2663`. Legs: `scripts/mega-e2e.sh`, `scripts/demo.sh`, `tests/run_lifecycle.rs`, `tests/pipeline_to_early_reader.rs`. **Not yet run in this build.** |
-| C2 revision loop bounded; failing test sends the Coder back with a visible retry marker | P0 | [T] | UNVERIFIED | Exists: `while round < max_rounds` `src/orchestrator/pipeline.rs:3539`, `revision_hold` `:810`, `RunBudget` `src/orchestrator/budget.rs:26`. Candidates: `tests/revision_loop.rs` does not exist — nearest are `tests/pipeline_guards.rs`, `tests/request_budget.rs`, `tests/skips_and_budgets_stay_honest.rs`. The **retry marker on the seam** is new work. |
-| C3 risk classifier escalates auth/crypto/network changes to security audit | P0 | [T] | UNVERIFIED | Exists: `apply_risk_stages` `src/orchestrator/pipeline.rs:313-377` (never rewrites an explicit `[pipeline].stages`). Candidates: `tests/risk_enumeration.rs`, `tests/permission_classifier_asks_a_model.rs`. **Not yet run.** |
-| C4 verifier runs the real test/build and records a machine-checked verdict, never reporting success without evidence | P0 | [T] | PARTIAL | `niki verify` exists (`src/main.rs:120`) and `TestReport`/`RunOutcome` are typed (`src/artifacts/types.rs:133,241`), but the verdict is not yet machine-attached to a protocol message a shell can render. New work in S5+. |
-| C5 safest approval option focused by default; Esc denies; every decision logged | P0 | [T] | BROKEN | `DisplayEvent::PermissionRequest` (`src/display/tui.rs:201`) embeds a `std::sync::mpsc::Sender` inside a **`Clone`** enum, so approval structurally cannot cross the seam; the in-process modal opens focused on Approve. Rebuild target: `approval.request { id }` + `approval.reply { id, decision }` with an engine-owned oneshot, safest option focused. |
+| C1 Planner→Coder→Tester→Reviewer end to end headless, producing a reviewable branch | P0 | [T] | **WORKS** | `cargo test -j 2 --test full_pipeline_branch -- --test-threads=1` — **2 passed**. `the_full_chain_runs_headless_and_leaves_a_reviewable_branch` asserts stdout is exactly one JSON envelope with no escape sequences (that is the headless claim), all four of `planner/coder/tester/reviewer.json` exist with no `-2` variant, `task.json` meters the roles in order, `reviewer.json` deserialises as `ReviewVerdict` with `Approved`, `refs/heads/niki/…` resolves via `rev-parse --verify`, and `git show <branch>:src/list.rs` contains the new line and not the old one. The negative half, `a_chain_that_never_reached_the_reviewer_reports_no_branch`, asserts a run missing the reviewer's response exits non-zero and creates no branch — without it, every positive assertion would also pass for a pipeline that silently stopped after the Tester. |
+| C2 revision loop bounded; failing test sends the Coder back with a visible retry marker | P0 | [T] | **WORKS** | `cargo test -j 2 --test revision_loop_seam` — **3 passed**. `a_failing_tester_turns_the_loop_and_the_coder_runs_twice` asserts `revision_rounds == 1`, `coder.json` **and** `coder-2.json` exist and `coder-3.json` does not, and `tester.json.failed == 1` while `tester-2.json.failed == 0`. `a_tester_that_always_fails_stops_at_max_revision_rounds` pins `revision_rounds == 2` and asserts the `-3` artifacts are absent. `the_seam_carries_the_retry_as_a_visible_marker` asserts over the wire that `stage.start` for `coder` carries `attempt == [1, 2]`, that both `stage.done` frames carry a numeric `retry_count`, and that a notice naming the revision round was emitted. **Engine finding:** the Tester's report does not itself gate the pipeline — `verdict` moves only in `apply_reviewer_verdict` (`pipeline.rs:532`); the loop turns when the **Reviewer** asks, with the red Tester report carried into its prompt. The test scripts the chain that actually exists and says so at the top. No engine change was needed: `attempt` and `retry_count` were already plumbed. |
+| C3 risk classifier escalates auth/crypto/network changes to security audit | P0 | [T] | **WORKS** | `cargo test -j 2 --test risk_escalation_seam` — **4 passed**, both directions. `a_security_sensitive_task_forces_an_auditor_ahead_of_the_reviewer` asserts `High` classification, no auditor before injection (precondition), injection **before** the Reviewer, and that `force_multiagent_for_high_risk(SingleAgent, Auto, High)` is true so the stage survives the fast path. `a_low_risk_task_escalates_nothing` asserts an identical role list with no auditor and no Critic. `the_emitted_stage_sequence_escalates_only_for_the_sensitive_task` runs two real `niki serve` turns and asserts the two sequences differ, with `security_auditor` present before `reviewer` in one and absent from the other. `pinned_singleagent_does_not_override_an_explicit_topology` pins the documented boundary rather than leaving a reader to assume the opposite. |
+| C4 verifier runs the real test/build and records a machine-checked verdict, never reporting success without evidence | P0 | [T] | **WORKS** | `cargo test -j 2 --test verifier_verdict` — **5 passed**. **Engine finding:** `niki verify` (`src/cli/verify.rs`) is the **visual** path (screenshot + `verify-manifest.json`) and does not run a test suite. The engine that runs the real test/build is `niki::agents::tester::run_tests`. It returned `Option<TestExecution>` and `None` when no command resolved — an absence every consumer interpreted for itself, and `deliver.rs` read `!te.passed` as "the suite failed". A new `VerificationStatus { Unverified, Passed, Failed, Errored }` makes that absence expressible: a `status` field on `TestExecution`, `run_tests` always returns a record, and delivery gates on `status.blocks_delivery()` where `Unverified` does **not** block (a repo with no manifest is not a repo with failing tests). Tests: `a_green_suite_is_verified_as_passed` (real `WorktreeSandbox`; asserts status, exit code and `test result: ok` in the captured output), `a_red_suite_is_verified_as_failed_and_blocks_delivery`, `a_project_with_no_test_command_is_unverified_and_never_a_pass`, `the_verdict_survives_serialisation_into_the_artifact` (a **pre-field** artifact parses as `Unverified`, never as an accidental pass), and `a_run_against_a_project_with_no_manifest_reports_unverified` end to end through the binary. |
+| C5 safest approval option focused by default; Esc denies; every decision logged | P0 | [T] | **WORKS** | `npx vitest run test/approval.test.tsx` — **20 passed**. `shell/src/approval.ts` decides it in one place: `safestFocus` follows the engine's `safest_option_id` when it is safe, and when the posture is manual **or not yet reported** it resolves to a refusal anyway. Tests cover the hostile case (`safest_option_id: "allow"` in manual mode → focus is `deny`), the unknown-posture case, the non-manual case where the engine is followed, and a `safest_option_id` naming no existing option. Esc is proven to deny even after focus was moved to Allow, and to deny when the engine offered no refusal-looking option. Every decision goes over the seam as `decisionFor(option)`; a test pins that no option which does not read as an approval can produce `allow`. This also fixed a live bug: `cli.tsx` had hardcoded `decision: 'allow'` for every approval reply. |
 
 ## D — Shell lifecycle and input
 
 The TypeScript/Ink shell exists (`shell/`) and the PTY end-to-end driver exists
-(`shell/test/pty.test.ts`, with the terminal emulator in `shell/src/vt.ts`).
+(`shell/test/pty.test.ts`, with the terminal emulator in `shell/src/vt.ts`). The driver allocates a
+**real** pseudo-terminal (`script -qfec`), sizes it with `stty` inside the pty, feeds raw bytes,
+kills every child on a hard timeout, and asserts on the **final screen**.
 
-The driver allocates a **real** pseudo-terminal (`script -qfec`), sizes it with `stty` inside the
-pty, feeds raw bytes, kills every child on a hard timeout, and asserts on the **final screen**
-after running the output through the emulator. It proved itself immediately: it found that
-`cli.tsx` never read `stdout.columns` and never subscribed to `resize`, so the shell started at a
-hard-coded 80x24 and ignored the window entirely. That is row D3, and it is fixed.
+It proved itself immediately: it found that `cli.tsx` never read `stdout.columns` and never
+subscribed to `resize`, so the shell started at a hard-coded 80x24 and ignored the window entirely.
 
-Rows below the ones marked WORKS are still MISSING: the driver proves start, narrow width, typed
-input, NO_COLOR, SIGTERM restore and a resize storm, and the input parser and dispatcher are
-fuzz-tested — but bracketed paste, SGR mouse reporting, Ctrl+Z suspend and D4's non-TTY path have
-no driver case yet.
-
-What is proven elsewhere and is not the same thing: `shell/src/input.ts` (one parser, fuzzed
-against 300 random byte strings and split sequences), `shell/src/dispatch.ts` (one dispatcher,
-lint-enforced to be the only place that matches a key).
-
-The only UI before this build was `src/display/**` (ratatui, 31,025 lines).
-
-| D1 terminal restored on normal exit, Ctrl+C, SIGTERM, SIGHUP, error, panic | P0 | [P] | MISSING |
-| D2 Ctrl+Z suspend/resume restores on suspend, full redraw on resume | P0 | [P] | MISSING |
-| D3 resize re-lays out immediately, no stale cells; 1x1..300x100 never panics | P0 | [P] | **WORKS** | `shell/test/pty.test.ts` — `survives a resize storm without panicking` and `says so plainly at 49 columns`, both driving the real binary through a real pty sized with `stty`. The emulator's own `never throws on a resize to zero or an absurd size` covers 1x1..99999. **This row was BROKEN and the driver found it**: `cli.tsx` never read `stdout.columns`. |
-| D4 non-TTY or `TERM=dumb`: no escape garbage, clear message or plain output | P0 | [P] | PARTIAL | The pty case with `NO_COLOR=1` is green (`leaves no escape garbage`), and a non-tty run was observed rendering without garbage. **No test covers the `TERM=dumb` branch**, so this row is PARTIAL, not WORKS. |
-| D5 all engine text sanitized (CSI, OSC, DCS, C0/C1 except newline/tab); hostile fixtures never reach the terminal | P0 | [T] | MISSING |
-| D6 nothing writes to stdout/stderr while the TUI is active; logs go to a file | P0 | [L] | MISSING |
-| D7 robust escape parsing: split sequences, lone Esc vs Alt+key, non-ASCII, AltGr; fuzz passes | P0 | [P] | MISSING |
-| D8 one event loop, one dispatcher, one context-scoped keymap registry | P0 | [L][T] | MISSING |
-| D9 arrows, j/k, PgUp/PgDn, Home/End, g/G on every scrollable surface; transcript scrolls while the composer is focused | P0 | [P] | MISSING |
-| D10 bracketed paste honoured; pasted text never fires hotkeys or Enter; large pastes collapse | P0 | [P] | MISSING |
-| D11 mouse is a mode with a one-key release toggle; restored across suspend, exit, panic | P0 | [P] | MISSING |
+| Row | P | Proof | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| D1 terminal restored on exit, Ctrl+C, SIGTERM, SIGHUP, error, panic | P0 | [P] | **WORKS** | `shell/src/cli.tsx` restores on normal exit and from `SIGINT`/`SIGTERM`/`SIGHUP` handlers and an `uncaughtException` handler; `restoreTerminal` is idempotent. PTY: `PTY terminal lifecycle > restores the terminal when it is killed with SIGTERM`. |
+| D2 Ctrl+Z suspend/resume restores on suspend, full redraw on resume | P0 | [P] | **OWNER-VERIFY** | Exact steps in `OWNER_VERIFY.md`. There is no PTY case: `expect`-style suspension needs a controlling terminal this harness does not own, and a test that cannot drive it would be a test that cannot fail. |
+| D3 resize re-lays out immediately, no stale cells; 1x1..300x100 never panics | P0 | [P] | **WORKS** | PTY `survives a resize storm without panicking` and `says so plainly at 49 columns`; the emulator's `never throws on a resize to zero or an absurd size` covers 1x1..99999. **This row was BROKEN and the driver found it.** |
+| D4 non-TTY or `TERM=dumb`: no escape garbage, clear message or plain output | P0 | [P] | **WORKS** | PTY `D4: renders no escape garbage when TERM is dumb` and `still shows the composer, because it is the anchor`. |
+| D5 all engine text sanitized (CSI, OSC, DCS, C0/C1 except newline/tab) | P0 | [T] | **WORKS** | `shell/test/sanitize.test.ts` (18) + `shell/test/property.test.ts` (300 random byte strings, idempotence, single-line guarantee). **Two real bugs found and fixed here**: OSC/DCS bodies were cut at the CSI final byte, leaking `]0;PWNED`. |
+| D6 nothing writes to stdout/stderr while the TUI is active | P0 | [L] | **WORKS** | `shell/test/lint.test.ts` — no `process.stdout.write` or `console.*` outside `src/cli.tsx`. Engine stderr goes to `~/.niki/logs/shell.log`. |
+| D7 robust escape parsing: split sequences, lone Esc vs Alt+key, non-ASCII, AltGr | P0 | [P] | **WORKS** | `shell/test/property.test.ts` and the emulator's own tests. **Three real bugs found and fixed**: Alt+key emitted two events, `ESC [ A` produced no arrow, and `ESC [ Z` (Shift+Tab) was unrecognised so mode cycling was dead. |
+| D8 one event loop, one dispatcher, one context-scoped keymap registry | P0 | [L][T] | **WORKS** | `shell/test/lint.test.ts` — no key matching outside `src/dispatch.ts`; `shell/test/keyboard.test.ts` asserts every advertised key dispatches. **A real off-by-one found**: `slice(-1)` sent a single-word command's last letter as its arguments. |
+| D9 arrows, j/k, PgUp/PgDn, Home/End, g/G on every scrollable surface | P0 | [P] | **WORKS** | `shell/test/keyboard.test.ts` — PgUp/PgDn/Home/End/Up/Down scroll, scrolling never disturbs the composer text, and `gg`/`G` work as a chord. **Conflict resolved and recorded:** `j`, `k`, `g` and `G` are letters, so a focused composer must receive them; a test pins that `g` types and `gG` scrolls. |
+| D10 bracketed paste honoured; pasted text never fires hotkeys or Enter | P0 | [P] | **WORKS** | `shell/test/property.test.ts` (7 cases: split across reads, Ctrl+C inside a paste is inert, Enter inside a paste never submits, large pastes collapse to a placeholder) and PTY `D10: lands in the composer and submits nothing`, which pastes `/quit` + Enter and asserts nothing was submitted. |
+| D11 mouse is a mode with a one-key release toggle | P0 | [P] | **WORKS** | PTY `D11: ctrl+m releases capture and takes it back` and `an SGR mouse report is consumed, never typed`. |
 
 ## E — Chat loop
 
-All rows **MISSING** (new shell). The three legacy defects the owner listed as must-not-inherit
-are recorded so the shell cannot regress into them: approval opening on Approve; PgUp/PgDn
-swallowed by a focused composer; Shift+Tab stealing composer focus.
+All rows **WORKS**, each with a named test. The proof for every row lives in
+`shell/test/chat-loop.test.tsx` (53 tests), `shell/test/approval.test.tsx` (20),
+`shell/test/keyboard.test.ts`, `shell/test/snapshots.test.tsx`, `shell/test/mascot.test.ts` (26),
+and `shell/test/fixture-loop.test.tsx`, which drives the engine's scripted reference loop through
+both a real pseudo-terminal and the render path.
 
-| Row | P | Proof | Status |
-| --- | --- | --- | --- |
-| E1 composer anchored, keeps focus, accepts typing and queueing while output streams | P0 | [P] | MISSING |
-| E2 user message echoes immediately as a raised row; assistant text distinct | P0 | [S][T] | MISSING |
-| E3 one live activity line from real events; dim "next" line only when supplied; stops at idle; static in reduced motion | P0 | [T] | MISSING |
-| E4 reasoning collapsed to one dim line with duration and expand key; provider summaries only | P0 | [T] | MISSING |
-| E5 tool and stage rows: state glyph, bold name, dim args, one-line result with expand hint, independent parallel states | P0 | [S][T] | MISSING |
-| E6 failures inline in the error colour with the useful excerpt and a recovery action; session continues | P0 | [S][T] | MISSING |
-| E7 footer: left ambient facts, right contextual hints changing by state, context meter only when the engine knows | P0 | [S][T] | MISSING |
-| E8 header with the NIKI mascot, name, version, model, posture, cwd, branch; scrolls away | P0 | [S] | MISSING |
-| E9 streaming Markdown renders into one block, no reflow flicker | P0 | [T] | MISSING |
-| E10 end of turn: "Done in 42s · 3 tool calls · 1 file changed", every number from real counters | P0 | [S][T] | MISSING |
-| E11 Esc interrupts, keeps partial output, shows an Interrupted row with how to continue | P0 | [T] | MISSING |
-| E12 pipeline stages use the same row grammar with truthful provenance; no invented stage | P0 | [S][T] | MISSING |
-| E13 NIKI one-eye orb mascot: three width tiers, five states, ASCII and NO_COLOR, no continuous animation, constant width, art only in the mascot module, contrast passes | P0 | [S][T][L] | MISSING |
+| Row | P | Proof | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| E1 composer anchored, keeps focus, accepts typing and queueing while output streams | P0 | [P] | **WORKS** | `chat-loop.test.tsx` "the composer is the anchor" asserts the composer sits below the transcript and above the footer at both sizes; queue rows render visibly. The review frames show it pinned to the bottom of a 24-row screen with the transcript absorbing the slack. |
+| E2 user message echoes immediately as a raised row; assistant text distinct | P0 | [S][T] | **WORKS** | The user row is `>` + bold, the assistant is a bullet and not bold; both asserted. |
+| E3 one live activity line from real events; dim "next" only when supplied; stops at idle; static in reduced motion | P0 | [T] | **WORKS** | Activity text is derived from the role the engine reported (`Planning`/`Editing`/`Running tests`/`Reviewing changes`); no "next" line without one; absent at idle; cadence pinned at 100/120/200 ms per the spec. |
+| E4 reasoning collapsed to one dim line with an expand key; provider summaries only | P0 | [T] | **WORKS** | Many summaries produce exactly one row; a stage that sent none produces none; the raw provider text is asserted **absent** from every row. |
+| E5 tool and stage rows: state glyph, bold name, dim args, result line with expand hint, independent parallel states | P0 | [S][T] | **WORKS** | Independent per-tool state; the expand hint appears only where the engine sent a `full_ref`; a retry marker appears only when `attempt > 1`; provenance labels differ for independent review and self-verification. |
+| E6 failures inline in the error colour with the excerpt and a recovery action | P0 | [S][T] | **WORKS** | The failed row is painted with the error token; the excerpt is the engine's own summary; a recovery action renders only when the engine supplied one; a failure with no summary says `failed` rather than inventing a message; output after the failure still renders. |
+| E7 footer: left ambient facts, right contextual hints by state, meter only when known | P0 | [S][T] | **WORKS** | No meter before `context.usage` arrives; the meter shows real numbers after; no branch arrow until git reported; hints change by state; the permission posture survives every width from 50 up; and fields collapse **whole**, in the spec's order (hints, cwd, branch, model). |
+| E8 header with the NIKI mascot, name, version, model, posture, cwd, branch | P0 | [S] | **WORKS** | Before a session arrives the header says `connecting to the engine` and renders nothing rather than a placeholder; `undefined` and `null` are asserted absent from the frame. |
+| E9 streaming Markdown renders into one block, no reflow flicker | P0 | [T] | **WORKS** | Deltas accumulate into a single assistant block; across a token-by-token stream the visible block count never shrinks; headings, nested and task lists, quotes, inline code, fenced code with its language label, links and tables all render; `**` and `` ` `` are asserted absent from the screen. |
+| E10 end of turn: "Done in 42s · 3 tool calls · 1 file changed" | P0 | [S][T] | **WORKS** | Rendered exactly, pluralised from the number, absent when the engine sent no summary. |
+| E11 Esc interrupts, keeps partial output, shows how to continue | P0 | [T] | **WORKS** | Partial text survives, the activity line clears, `Interrupted · type to continue` renders. |
+| E12 pipeline stages use the same row grammar with truthful provenance | P0 | [S][T] | **WORKS** | A stage row and a tool row share one grammar; provenance is labelled; no stage row exists without a `stage.*` event. |
+| E13 NIKI one-eye orb mascot at three width tiers, five states, ASCII and NO_COLOR, no animation, constant width, art only in the mascot module, contrast passes | P0 | [S][T][L] | **WORKS** | `shell/test/mascot.test.ts` (26 tests) plus the lint test that keeps art out of every other module. `docs/foundation/review/mascot-tiers-and-states.txt` carries every tier and state for the owner. |
 
 ## F — Commands and surfaces
 
@@ -152,9 +144,9 @@ All rows **MISSING**. Baseline note: only one snapshot file exists in the whole 
 | --- | --- | --- | --- | --- | --- |
 | A | 4 | 0 | 0 | 0 | 0 |
 | B | 5 | 0 | 0 | 0 | 0 |
-| C | 0 | 3 | 0 | 1 | 1 |
-| D | 1 | 0 | 9 | 1 | 0 |
-| E | 0 | 0 | 13 | 0 | 0 |
+| C | 5 | 0 | 0 | 0 | 0 |
+| D | 10 | 0 | 0 | 0 | 0 |
+| E | 13 | 0 | 0 | 0 | 0 |
 | F | 0 | 0 | 7 | 0 | 0 |
 | G | 0 | 0 | 9 | 0 | 0 |
 | H | 0 | 0 | 1 | 2 | 0 |

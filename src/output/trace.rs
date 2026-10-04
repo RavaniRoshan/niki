@@ -52,6 +52,9 @@ pub fn trace_lines(
             "parent": "task",
             "command": te.command,
             "passed": te.passed,
+            // `unverified` when nothing ran at all — `passed: false` alone
+            // reads as "the suite failed", which is a different claim.
+            "status": te.status.as_str(),
             "exit_code": te.exit_code,
             "mutation_passed": te.mutation.as_ref().map(|m| m.passed),
             "derived_timeline": true,

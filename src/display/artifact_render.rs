@@ -67,6 +67,13 @@ pub fn render_verification_line(
     execution: Option<&crate::agents::tester::TestExecution>,
 ) -> Option<String> {
     let te = execution?;
+    // No evidence, no line. A project with no resolvable test command used to
+    // arrive here as `None`; it now arrives as an explicit `Unverified`
+    // record, and printing it as "exited -1 — suite failed" would be a
+    // fabricated failure for something that was never run.
+    if !te.status.is_verified() {
+        return None;
+    }
     Some(if te.passed {
         format!("Verified: `{}` exited 0", te.command)
     } else {
