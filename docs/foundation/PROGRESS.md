@@ -305,3 +305,69 @@ except nine modified files, all reviewed:
 `eslint-disable-next-line no-control-regex` (a regex that must match control bytes to do its job)
 and one `Iterator::skip` in the fixture replay that is arithmetic on the interrupt point, not a
 skipped test.
+
+---
+
+## 2026-10-04 — the PTY driver, and the bug it found
+
+The Phase 1 harness was missing its PTY end-to-end driver. It is built:
+
+- `shell/src/vt.ts` — a small terminal emulator: cursor movement, erase, insert/delete line, the
+  alternate screen, save/restore, scroll, and wide-character and combining-mark width. It is the
+  instrument the PTY tests trust, so it has its own tests.
+- `shell/test/pty.test.ts` — spawns the **real** shell as a child of a **real** pseudo-terminal
+  (`script -qfec`), sizes the pty with `stty` inside it, feeds raw bytes, kills every child on a
+  hard timeout, and asserts on the final screen.
+
+Three harness bugs had to be fixed before it could assert anything:
+
+1. **The terminal emulator consumed incomplete escape sequences.** `ESC [` arriving without its
+   final byte was treated as a complete two-byte sequence, so every cursor move was swallowed and
+   the screen stayed blank. `#consumeSequence` now distinguishes *complete* from *still arriving*,
+   which is the classic terminal-parser distinction and the one that matters most.
+2. **The shell was launched through the wrong entry form.** Both the `tsx` wrapper binary and
+   `node --import tsx src/cli.tsx` exit 0 with no output under `script`, which looks exactly like a
+   shell that renders nothing. Importing the module and calling `main` is the form that runs.
+3. **The pty could not be resized from the test.** `script` allocates a pty at the real terminal's
+   size, so a test that cannot change the size cannot test a narrow layout. `stty cols/rows` inside
+   the pty does.
+
+### The bug the driver found
+
+`cli.tsx` **never read `stdout.columns` and never subscribed to `resize`.** The shell started at a
+hard-coded 80x24 and ignored the user's window entirely — row D3, broken. Fixed by seeding
+`initialState` from the real terminal and wiring `stdout.on('resize')`; the pty now renders the
+narrow-layout message at 49 columns.
+
+A check that has only ever been green is not known to be a check. This one failed on its first
+real run and found a product bug.
+
+### PTY results
+
+```
+$ npx vitest run test/pty.test.ts
+ ✓ PTY end-to-end > enters the alternate screen and shows the header 690ms
+ ✓ PTY end-to-end > leaves no escape garbage when NO_COLOR is set 613ms
+ ✓ PTY end-to-end > puts typed characters in the composer 640ms
+ ✓ PTY end-to-end > says so plainly at 49 columns instead of drawing a broken layout 613ms
+ ✓ PTY terminal lifecycle > restores the terminal when it is killed with SIGTERM 2091ms
+ ✓ PTY terminal lifecycle > survives a resize storm without panicking 2030ms
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+```
+
+### Full shell suite after the PTY work
+
+```
+$ npx tsc --noEmit     # clean
+$ npx vitest run
+ Test Files  12 passed (12)
+      Tests  171 passed (171)
+```
+
+### What the PTY driver does NOT yet cover
+
+D1 (normal exit, Ctrl+C, SIGHUP, error return, panic — only SIGTERM has a case), D2 (Ctrl+Z
+suspend), D7 beyond the parser unit tests, D9 (scroll keys), D10 (bracketed paste), D11 (mouse),
+and D4's `TERM=dumb` branch. Those rows stay MISSING or PARTIAL in `CHECKLIST.md`; adding a case
+is mechanical now that the driver exists, which is the point of building it.

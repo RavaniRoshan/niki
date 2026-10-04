@@ -97,6 +97,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     exited = true;
     restoreTerminal(terminal);
   };
+  const removeResizeListener = (): void => {
+    process.stdout.off('resize', onResize);
+  };
+  process.on('exit', removeResizeListener);
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
     process.on(sig, () => {
       cleanup();
@@ -110,7 +114,27 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.exit(1);
   });
 
-  let state: AppState = initialState();
+  // Seed from the real terminal, then keep it current. A shell that starts at a hard-coded
+  // 80x24 ignores every window the user has, and never notices a resize at all.
+  let state: AppState = {
+    ...initialState(
+      Math.max(1, process.stdout.columns ?? 80),
+      Math.max(1, process.stdout.rows ?? 24),
+    ),
+  };
+  const onResize = () => {
+    state = reduceLocal(
+      state,
+      {
+        kind: 'resize',
+        cols: Math.max(1, process.stdout.columns ?? state.cols),
+        rows: Math.max(1, process.stdout.rows ?? state.rows),
+      },
+      opts(),
+    );
+    paint();
+  };
+  process.stdout.on('resize', onResize);
   let instance: Instance | null = null;
   const opts = (): ReduceOptions => ({ nowMs: Date.now() });
 

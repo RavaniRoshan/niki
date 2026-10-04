@@ -114,8 +114,10 @@ describe('lint: one dispatcher', () => {
   it('matches no raw escape byte outside the sanitizer, the input parser and terminal setup', () => {
     // cli.tsx is exempt only so it can send the two restore sequences on the way out; the count
     // of escape literals it is allowed is pinned by the next test, so the exemption cannot grow.
+    // `vt.ts` is the terminal emulator the PTY tests trust; modelling escape sequences is its
+    // entire job, so it is allowed the same exemption the sanitizer has.
     offenders(
-      [join(SRC, 'sanitize.ts'), join(SRC, 'input.ts'), DISPATCH_FILE, GLYPH_FILE, MASCOT_FILE, CLI_FILE],
+      [join(SRC, 'sanitize.ts'), join(SRC, 'input.ts'), join(SRC, 'vt.ts'), DISPATCH_FILE, GLYPH_FILE, MASCOT_FILE, CLI_FILE],
       (line) => /\\u001[bB]|\\x1[bB]|\\e\[/.test(line),
       'escape-sequence knowledge belongs to the sanitizer and the input parser only',
     );

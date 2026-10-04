@@ -47,30 +47,30 @@ are honestly absent and are the rest of the work.
 
 ## D — Shell lifecycle and input
 
-The TypeScript/Ink shell exists (`shell/`). What does **not** exist is the PTY end-to-end driver
-that would prove these rows against a real terminal: spawning the real binary in a pseudo-terminal,
-feeding raw bytes, and asserting on the **final screen** through a terminal emulator.
+The TypeScript/Ink shell exists (`shell/`) and the PTY end-to-end driver exists
+(`shell/test/pty.test.ts`, with the terminal emulator in `shell/src/vt.ts`).
 
-That omission is deliberate and it is the reason these rows stay MISSING rather than being marked
-done on the strength of unit tests. Without a VT parser, a "PTY test" can only assert on the raw
-byte stream, which passes even when the screen is wrong — precisely the failure these rows exist to
-catch. A green test that cannot fail is worse than an honest gap. Building it needs a PTY
-dev-dependency (`portable-pty` or `expectrl`) plus a VT parser, and is the first item in the
-Phase 1 remainder.
+The driver allocates a **real** pseudo-terminal (`script -qfec`), sizes it with `stty` inside the
+pty, feeds raw bytes, kills every child on a hard timeout, and asserts on the **final screen**
+after running the output through the emulator. It proved itself immediately: it found that
+`cli.tsx` never read `stdout.columns` and never subscribed to `resize`, so the shell started at a
+hard-coded 80x24 and ignored the window entirely. That is row D3, and it is fixed.
 
-What *is* proven for this group, and is not the same thing: `shell/src/input.ts` (one parser, fuzz
-tested against 300 random byte strings and split sequences), `shell/src/dispatch.ts` (one
-dispatcher, lint-enforced to be the only place that matches a key), and `shell/src/cli.tsx`
-(restore on exit, SIGINT, SIGTERM, SIGHUP and uncaught exception).
+Rows below the ones marked WORKS are still MISSING: the driver proves start, narrow width, typed
+input, NO_COLOR, SIGTERM restore and a resize storm, and the input parser and dispatcher are
+fuzz-tested — but bracketed paste, SGR mouse reporting, Ctrl+Z suspend and D4's non-TTY path have
+no driver case yet.
+
+What is proven elsewhere and is not the same thing: `shell/src/input.ts` (one parser, fuzzed
+against 300 random byte strings and split sequences), `shell/src/dispatch.ts` (one dispatcher,
+lint-enforced to be the only place that matches a key).
 
 The only UI before this build was `src/display/**` (ratatui, 31,025 lines).
 
-| Row | P | Proof | Status |
-| --- | --- | --- | --- |
 | D1 terminal restored on normal exit, Ctrl+C, SIGTERM, SIGHUP, error, panic | P0 | [P] | MISSING |
 | D2 Ctrl+Z suspend/resume restores on suspend, full redraw on resume | P0 | [P] | MISSING |
-| D3 resize re-lays out immediately, no stale cells; 1x1..300x100 never panics | P0 | [P] | MISSING |
-| D4 non-TTY or `TERM=dumb`: no escape garbage, clear message or plain output | P0 | [P] | MISSING |
+| D3 resize re-lays out immediately, no stale cells; 1x1..300x100 never panics | P0 | [P] | **WORKS** | `shell/test/pty.test.ts` — `survives a resize storm without panicking` and `says so plainly at 49 columns`, both driving the real binary through a real pty sized with `stty`. The emulator's own `never throws on a resize to zero or an absurd size` covers 1x1..99999. **This row was BROKEN and the driver found it**: `cli.tsx` never read `stdout.columns`. |
+| D4 non-TTY or `TERM=dumb`: no escape garbage, clear message or plain output | P0 | [P] | PARTIAL | The pty case with `NO_COLOR=1` is green (`leaves no escape garbage`), and a non-tty run was observed rendering without garbage. **No test covers the `TERM=dumb` branch**, so this row is PARTIAL, not WORKS. |
 | D5 all engine text sanitized (CSI, OSC, DCS, C0/C1 except newline/tab); hostile fixtures never reach the terminal | P0 | [T] | MISSING |
 | D6 nothing writes to stdout/stderr while the TUI is active; logs go to a file | P0 | [L] | MISSING |
 | D7 robust escape parsing: split sequences, lone Esc vs Alt+key, non-ASCII, AltGr; fuzz passes | P0 | [P] | MISSING |
@@ -153,7 +153,7 @@ All rows **MISSING**. Baseline note: only one snapshot file exists in the whole 
 | A | 4 | 0 | 0 | 0 | 0 |
 | B | 5 | 0 | 0 | 0 | 0 |
 | C | 0 | 3 | 0 | 1 | 1 |
-| D | 0 | 0 | 11 | 0 | 0 |
+| D | 1 | 0 | 9 | 1 | 0 |
 | E | 0 | 0 | 13 | 0 | 0 |
 | F | 0 | 0 | 7 | 0 | 0 |
 | G | 0 | 0 | 9 | 0 | 0 |
