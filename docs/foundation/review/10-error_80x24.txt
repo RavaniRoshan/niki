@@ -5,19 +5,6 @@
 ✗ coder
   └ the patch did not apply against the current file
     re-read the file and re-run with the branch checked out
-
-
-
-
-
-
-
-
-
-
-
-
-
 ────────────────────────────────────────────────────────────────────────────────
 › ▏
 ────────────────────────────────────────────────────────────────────────────────

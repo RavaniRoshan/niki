@@ -458,8 +458,8 @@ re-measured after the composer-anchoring and markdown-cache changes:
 
 | Probe | Value |
 | --- | --- |
-| first render 49x16 / 50x16 / 79x24 / 80x24 | 2.54 / 6.46 / 6.18 / 6.08 ms |
-| first render 119x30 / 120x38 / 180x50 | 7.12 / 7.63 / 8.84 ms |
+| first render 49x16 / 50x16 / 79x24 / 80x24 | 2.50 / 5.21 / 4.38 / 4.62 ms |
+| first render 119x30 / 120x38 / 180x50 | 4.94 / 4.92 / 4.86 ms |
 | 200 idle transcript renders | 0.42 ms (0.002 ms/frame) |
 | per-token render cost, 400 → 4000 messages | 0.0061 → 0.0032 ms, **ratio 0.53** |
 | 500 tool rows, 20 renders | 0.94 ms (0.047 ms/frame) |
@@ -467,14 +467,16 @@ re-measured after the composer-anchoring and markdown-cache changes:
 | 10 MB through the sanitiser | 1018 ms, clamped to 4096 characters |
 | 100 resizes | 0.36 ms (0.004 ms each) |
 
-**What actually changed since the single-sample table, honestly:** five of the seven first-render
-sizes got faster (79x24 9.19 → 6.18 ms, 120x38 11.85 → 7.63 ms), idle repaints got 62% faster,
-and the per-token ratio improved from 0.93 to 0.53. **One size got slower: 180x50, 6.55 → 8.84 ms.**
-The cause is the composer-anchoring fix: the transcript is now a growing flex box so the composer
-pins to the bottom of the screen, and at 50 rows that box is measurably taller to lay out. Nine
-milliseconds for a first paint is imperceptible, and it buys the layout every reference frame has.
-It is recorded as measured rather than smoothed, and it is the one number in this file that a
-future change should watch.
+**The composer-anchoring fix initially cost 40% at 180x50** (6.55 → 8.84 ms), because pinning
+the composer to the bottom had been done with a fixed `height` on the root box, which makes Ink
+measure the whole screen on every frame. Letting the box grow instead anchors the composer just
+as well and gives 180x50 **4.86 ms** — faster than the original baseline. The layout is unchanged:
+`docs/foundation/review/09-end-of-turn_80x24.txt` still has the composer and footer pinned to the
+bottom, and the 83 snapshot and chat-loop tests pass either way.
+
+Against the original single-sample table, every first-render size is now faster or level
+(120x38 11.85 → 4.92 ms, 79x24 9.19 → 4.38 ms), idle repaints are 62% faster, and the per-token
+ratio improved from 0.93 to 0.53. No probe is worse than baseline.
 
 The markdown cache is why idle repaints improved: a settled assistant message does not change
 between frames, so re-parsing its markdown on every repaint was pure waste.

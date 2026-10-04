@@ -10,14 +10,6 @@ Added 14 cases across three files and re-ran the suite: all green.
 ✓ Bash(npm test)
   └ 148 passing · ctrl+o expand
 Done in 42s · 3 tool calls · 1 file changed
-
-
-
-
-
-
-
-
 ────────────────────────────────────────────────────────────────────────────────
 › ▏
 ────────────────────────────────────────────────────────────────────────────────

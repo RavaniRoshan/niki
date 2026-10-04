@@ -62,7 +62,7 @@ export function App(props: AppProps): React.ReactElement {
     // `height` plus a growing transcript is what makes the composer an anchor rather than just
     // another row: the transcript absorbs the slack, so the composer and footer stay pinned to
     // the bottom of the screen however long the conversation gets.
-    <Box flexDirection="column" width={state.cols} height={state.rows}>
+    <Box flexDirection="column" width={state.cols}>
       <Masthead state={state} theme={theme} charset={charset} version={props.version} />
       <Box flexDirection="column" flexGrow={1}>
         <Transcript

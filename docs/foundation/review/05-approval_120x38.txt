@@ -3,28 +3,6 @@
  ▀████▀ /home/u/projects/api (main ↑1)
 > audit and improve test coverage
 ◐ Bash(npm test)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │bash wants to run                                                                                  │
 │  $ npm test -- --coverage                                                                         │
