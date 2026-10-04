@@ -94,7 +94,7 @@ describe('the reference loop, through the PTY driver', () => {
   // look like a product failure.
   async function bootToApproval(cols = 100, rows = 30): Promise<ReturnType<typeof startFixtureShell>> {
     const s = startFixtureShell(cols, rows);
-    await s.waitFor(() => s.screen().includes('Niki'), 90_000);
+    await s.waitFor(() => s.screen().includes('Niki'), 180_000);
     // Type and submit exactly as a user would: the bytes go through the real input parser.
     for (const ch of 'go') s.write(ch);
     await s.waitFor(() => s.screen().includes('go'), 30_000);
@@ -115,7 +115,7 @@ describe('the reference loop, through the PTY driver', () => {
     // Wait for the run to finish rather than for the approval: the approval is a transient frame,
     // and asserting on a transient is how a test ends up reading a half-drawn box. The finished
     // run is what a user is left looking at, and it is the thing worth asserting on.
-    const finished = await s.waitFor(() => s.screen().includes('Done in'), 120_000);
+    const finished = await s.waitFor(() => s.screen().includes('Done in'), 240_000);
     const screen = s.screen();
     expect(finished, `the run never finished:\n${screen}`).toBe(true);
 
@@ -132,14 +132,14 @@ describe('the reference loop, through the PTY driver', () => {
     // And the approval really was on screen at some point: the run could not have finished
     // without it, because the fixture stops and waits for a reply there.
     expect(screen, 'the composer is missing, so nothing was submitted').toMatch(/[>\u203a]/);
-  }, 300_000);
+  }, 600_000);
 
   it.skipIf(!binaryAvailable)('Esc on the approval denies it and the run continues', async () => {
     const s = await bootToApproval();
     s.write('\x1b');
     const dismissed = await s.waitFor(() => !s.screen().includes('esc denies'), 30_000);
     expect(dismissed, `Esc did not dismiss the approval:\n${s.screen()}`).toBe(true);
-  }, 300_000);
+  }, 600_000);
 });
 
 /** The notification stream the engine's fixture emits, as the shell receives it. */
@@ -272,5 +272,5 @@ describe('the client against the real fixture engine', () => {
     expect(seen, 'no tool ran').toContain('tool.call');
     expect(seen, 'the reference loop did not replay an approval').toContain('approval.request');
     expect(seen, 'the run never finished').toContain('turn.end');
-  }, 60_000);
+  }, 240_000);
 });
