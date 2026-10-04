@@ -83,3 +83,11 @@ tui-smoke-logs/
 # else NIKI leaves behind.
 .niki-tmp*.patch
 .odw/*/runs/
+
+# NIKI shell (TypeScript/Ink). Dependencies and build output are never committed; the generated
+# protocol bindings under shell/src/protocol/generated/ are, because they are part of the
+# contract and are checked by a drift test.
+shell/node_modules/
+shell/dist/
+shell/.ink-cache/
+*.tsbuildinfo

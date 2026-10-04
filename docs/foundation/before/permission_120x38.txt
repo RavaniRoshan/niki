@@ -1,0 +1,38 @@
+                                                ███╗   ██╗██╗██╗  ██╗██╗
+                                                ████╗  ██║██║██║ ██╔╝██║
+                                                ██╔██╗ ██║██║█████╔╝ ██║
+                                                ██║╚██╗██║██║██╔═██╗ ██║
+                                                ██║ ╚████║██║██║  ██╗██║
+                                                ╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝╚═╝
+                               ? for keybindings · Ctrl+P commands · Tab switches view
+
+✦ Welcome to NIKI
+  add a health endpoint
+  Directory: /tmp/test        ┌ Permission Required ─────────────────────────────────────┐
+                              │The agent wants to run:                                   │
+◈ user: Run the full suite bef│                                                          │
+                              │  $ cargo test --verbose --all-features                   │
+                              │                                                          │
+  ┌─ Tool Execution ──────────│──────────────────────────────────────────────────────    │
+  ⠋ sandbox_exec cargo test --│                                                          │
+  └───────────────────────────│  2 options:                                              │
+──────────────────────────────│  ······················································  │─────────────────────────────
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │  ● Allow                                                 │
+                              │  ○ Deny                                                  │
+                              │                                                          │
+                              └──────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│▎ Build  Describe a change or press / for commands...                                                sandbox   podman │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ claude-sonne…  │ ⠋ sandbox_exec: cargo test --verbose… ↑↓ choose · enter confirm · ←→ page · tab pages          MANUAL

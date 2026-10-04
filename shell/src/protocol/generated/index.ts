@@ -1,0 +1,57 @@
+// Re-exports the TypeScript types ts-rs generated from the Rust source of `niki-protocol`.
+// Nothing in this directory but this barrel is hand-written. `test/protocol-drift.test.ts`
+// proves it stays that way: it compares this tree against a fresh export from the Rust crate and
+// fails on any difference, in either direction.
+export type * from './ApprovalDecision.js';
+export type * from './ApprovalOption.js';
+export type * from './ApprovalReplyParams.js';
+export type * from './ApprovalReplyResult.js';
+export type * from './ApprovalRequestParams.js';
+export type * from './BranchCreatedParams.js';
+export type * from './Capabilities.js';
+export type * from './ClientInfo.js';
+export type * from './ClientRequest.js';
+export type * from './ClientResult.js';
+export type * from './ContextUsageParams.js';
+export type * from './CostUpdateParams.js';
+export type * from './DiffLine.js';
+export type * from './DiffLineKind.js';
+export type * from './FinalParams.js';
+export type * from './Hunk.js';
+export type * from './InitializeParams.js';
+export type * from './InitializeResult.js';
+export type * from './JsonRpc.js';
+export type * from './NoticeParams.js';
+export type * from './NotificationFrame.js';
+export type * from './PermissionMode.js';
+export type * from './PlanItem.js';
+export type * from './PlanUpdateParams.js';
+export type * from './Provenance.js';
+export type * from './RefParams.js';
+export type * from './RequestFrame.js';
+export type * from './RequestId.js';
+export type * from './ResponseFrame.js';
+export type * from './RpcError.js';
+export type * from './ServerNotification.js';
+export type * from './SessionLoadParams.js';
+export type * from './SessionLoadResult.js';
+export type * from './SessionReadyParams.js';
+export type * from './Severity.js';
+export type * from './ShutdownParams.js';
+export type * from './ShutdownResult.js';
+export type * from './StageDoneParams.js';
+export type * from './StageFailedParams.js';
+export type * from './StageRole.js';
+export type * from './StageStartParams.js';
+export type * from './StageTokenParams.js';
+export type * from './ToolCallParams.js';
+export type * from './ToolDiffParams.js';
+export type * from './ToolProgressParams.js';
+export type * from './ToolResultParams.js';
+export type * from './TraceId.js';
+export type * from './TurnDeltaParams.js';
+export type * from './TurnEndParams.js';
+export type * from './TurnStartParams.js';
+export type * from './TurnStartResult.js';
+export type * from './TurnStartedParams.js';
+export type * from './VerdictReadyParams.js';

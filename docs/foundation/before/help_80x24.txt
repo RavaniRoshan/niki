@@ -1,0 +1,24 @@
+◈ NIKI v0.10.0 · test ()
+✦ Welcome to┌ Keybindings ─────────────────────────────────────────┐
+  add a heal│?           Toggle keybinding help                    │
+  Directory:│Ctrl+E      Toggle mouse capture (text selection)     │
+            │Ctrl+C      Cancel running stage / exit               │
+────────────│Ctrl+P      Open the command palette                  │───────────
+            │Ctrl+T      Cycle theme (dark → light → auto)         │
+            │Tab         Switch chat ↔ page view                   │
+            │G           Jump to the Fleet grid                    │
+            │S           Open the Session view                     │
+            │Enter       Submit input / run command                │
+            │Esc         Close menu, modal, or overlay             │
+            │Ctrl+L      Clear the screen                          │
+            │↑ / ↓       History navigation / menu navigation      │
+            │Ctrl+A / E  Jump to line start / end                  │
+            │Ctrl+W / U / KDelete word / to line start / end       │
+            │@ / / / !   File / slash-command / shell prefix       │
+            │Ctrl+R      Reverse history search                    │
+            │← / →  ·  h / l  ·  [ / ]Previous / next page         │
+            │↑ / ↓  ·  j / kMove selection up / down               │
+╭───────────│1 – 9       Jump to page by number                    │───────────╮
+│▎ Build  De└──────────────────────────────────────────────────────┘x   podman │
+╰───────────press ? or Esc to close                                 ───────────╯
+ claude-sonne… esc close help · ←→ page                                  MANUAL

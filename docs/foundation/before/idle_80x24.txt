@@ -1,0 +1,24 @@
+◈ NIKI v0.10.0 · test ()
+┌──────────────────────────────────────────────────────────────────────────────┐
+│Build add a health endpoint                                                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+$ niki run 'add a health endpoint' --project /tmp/test
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+branch  · report.md · changes.patch
+
+tab switch agent  ctrl-p commands  esc cancel run
+ claude-sonne… pgup/pgdn scroll · ←→ page                                MANUAL

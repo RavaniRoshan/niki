@@ -1,3 +1,8 @@
+[workspace]
+# The root package stays a member, so `cargo build`, `cargo test`, `cargo dist` and the published
+# binary are unchanged. New engine crates live under crates/ and are picked up automatically.
+members = [".", "crates/*"]
+
 [package]
 name = "niki"
 version = "0.10.0"
@@ -14,6 +19,9 @@ categories = ["command-line-utilities", "development-tools", "ai"]
 exclude = ["/.github", "/assets", "/docs", "/research", "/tests", "/evals", "/bench", "/scripts", "/target", "/prompts", "/schemas", "/niki.example.toml"]
 
 [dependencies]
+# The typed seam between the engine and any shell. One crate, one message set.
+niki-protocol = { path = "crates/niki-protocol" }
+
 # CLI framework
 clap = { version = "4", features = ["derive"] }
 
@@ -129,6 +137,11 @@ ast = [
   "dep:tree-sitter-python",
   "dep:tree-sitter-go",
 ]
+# A scripted, deterministic runtime for `niki serve`, so a PTY or snapshot test can drive the
+# real binary with no network, no model and no sandbox. OFF by default, and `src/cli/serve/
+# fixture.rs` carries a `compile_error!` in non-debug builds: a fixture engine must never be
+# reachable in something a user installed.
+fixture-runtime = []
 
 [dev-dependencies]
 tempfile = "3"

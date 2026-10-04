@@ -1,0 +1,33 @@
+{
+  "name": "@niki/shell",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The NIKI terminal shell. A pure client: it speaks niki-protocol and never talks to an engine API directly.",
+  "bin": {
+    "niki-shell": "./src/cli.tsx"
+  },
+  "scripts": {
+    "start": "tsx src/cli.tsx",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test --max-warnings=0",
+    "gen:bindings": "cp ../crates/niki-protocol/bindings/*.ts src/protocol/generated/ 2>/dev/null || true"
+  },
+  "dependencies": {
+    "ink": "^6.0.1",
+    "react": "^19.0.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "ink-testing-library": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

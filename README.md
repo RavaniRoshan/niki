@@ -347,6 +347,7 @@ niki run "..." --backend worktree   # no container runtime
 | `niki voice` | Record and transcribe a voice message. |
 | `niki verify` | Screenshot-based visual verification. |
 | `niki acp` | Agent Client Protocol server (drives Zed/Claude Code IDE clients). |
+| `niki serve` | The engine as a `niki-protocol` JSON-RPC server over stdio: one JSON object per line, protocol frames on stdout, diagnostics on stderr. |
 
 Run `niki <command> --help` for full flags.
 

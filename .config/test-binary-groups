@@ -27,6 +27,8 @@ heavy worktree_policy
 heavy diff_scope
 heavy sandbox_teardown
 heavy acp_server
+heavy serve_protocol
+heavy planner_coder_branch
 heavy resume_cli
 heavy hooks_lifecycle
 heavy agent_runtime

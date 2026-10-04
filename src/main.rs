@@ -91,6 +91,8 @@ enum Commands {
     Commands(niki::cli::commands::CommandsArgs),
     /// Run NIKI as an Agent Client Protocol (ACP) server over stdio
     Acp(niki::cli::acp::AcpArgs),
+    /// Run the engine as a niki-protocol JSON-RPC server over stdio
+    Serve(niki::cli::serve::ServeArgs),
     /// Emit a consolidated compliance bundle for one task as JSON
     Audit(niki::cli::audit::AuditArgs),
     /// Run a smoke test: quick pipeline check to verify your setup works end-to-end
@@ -167,6 +169,7 @@ async fn main() -> Result<()> {
     match &command {
         Commands::Run(args) => niki::cli::run::handle(args).await?,
         Commands::Acp(args) => niki::cli::acp::handle(args).await?,
+        Commands::Serve(args) => niki::cli::serve::handle(args).await?,
         Commands::Audit(args) => niki::cli::audit::handle(args)?,
         Commands::Status(args) => niki::cli::status::handle(args).await?,
         Commands::Report(args) => niki::cli::report::handle(args).await?,

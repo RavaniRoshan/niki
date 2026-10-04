@@ -20,6 +20,7 @@ pub mod report;
 pub mod research;
 pub mod resume;
 pub mod run;
+pub mod serve;
 pub mod session;
 pub mod skills;
 pub mod smoke;

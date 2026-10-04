@@ -1,0 +1,38 @@
+[0m[1;39;49m                                                ███╗   ██╗██╗██╗  ██╗██╗[0m
+[0m[1;39;49m                                                ████╗  ██║██║██║ ██╔╝██║[0m
+[0m[1;39;49m                                                ██╔██╗ ██║██║█████╔╝ ██║[0m
+[0m[1;39;49m                                                ██║╚██╗██║██║██╔═██╗ ██║[0m
+[0m[1;39;49m                                                ██║ ╚████║██║██║  ██╗██║[0m
+[0m[1;39;49m                                                ╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝╚═╝[0m
+[0m[39;49m                               ? for keybindings · Ctrl+P commands · Tab switches view[0m
+[0m[39;49m                                ┌[0m[1;39;49m Keybindings [0m[39;49m─────────────────────────────────────────┐[0m
+[0m[39;49m✦ Welcome to NIKI               │[0m[1;39;49m?           [0m[39;49mToggle keybinding help                    │[0m
+[0m[39;49m  add a health endpoint         │[0m[1;39;49mCtrl+E      [0m[39;49mToggle mouse capture (text selection)     │[0m
+[0m[39;49m  Directory: /tmp/test          │[0m[1;39;49mCtrl+C      [0m[39;49mCancel running stage / exit               │[0m
+[0m[39;49m                                │[0m[1;39;49mCtrl+P      [0m[39;49mOpen the command palette                  │[0m
+[0m[39;49m────────────────────────────────│[0m[1;39;49mCtrl+T      [0m[39;49mCycle theme (dark → light → auto)         │───────────────────────────────[0m
+[0m[39;49m                                │[0m[1;39;49mTab         [0m[39;49mSwitch chat ↔ page view                   │[0m
+[0m[39;49m                                │[0m[1;39;49mG           [0m[39;49mJump to the Fleet grid                    │[0m
+[0m[39;49m                                │[0m[1;39;49mS           [0m[39;49mOpen the Session view                     │[0m
+[0m[39;49m                                │[0m[1;39;49mEnter       [0m[39;49mSubmit input / run command                │[0m
+[0m[39;49m                                │[0m[1;39;49mEsc         [0m[39;49mClose menu, modal, or overlay             │[0m
+[0m[39;49m                                │[0m[1;39;49mCtrl+L      [0m[39;49mClear the screen                          │[0m
+[0m[39;49m                                │[0m[1;39;49m↑ / ↓       [0m[39;49mHistory navigation / menu navigation      │[0m
+[0m[39;49m                                │[0m[1;39;49mCtrl+A / E  [0m[39;49mJump to line start / end                  │[0m
+[0m[39;49m                                │[0m[1;39;49mCtrl+W / U / K[0m[39;49mDelete word / to line start / end       │[0m
+[0m[39;49m                                │[0m[1;39;49m@ / / / !   [0m[39;49mFile / slash-command / shell prefix       │[0m
+[0m[39;49m                                │[0m[1;39;49mCtrl+R      [0m[39;49mReverse history search                    │[0m
+[0m[39;49m                                │[0m[1;39;49m← / →  ·  h / l  ·  [ / ][0m[39;49mPrevious / next page         │[0m
+[0m[39;49m                                │[0m[1;39;49m↑ / ↓  ·  j / k[0m[39;49mMove selection up / down               │[0m
+[0m[39;49m                                │[0m[1;39;49m1 – 9       [0m[39;49mJump to page by number                    │[0m
+[0m[39;49m                                │[0m[1;39;49mQ           [0m[39;49mQuit (cancels a running stage first)      │[0m
+[0m[39;49m                                │                                                      │[0m
+[0m[39;49m                                └──────────────────────────────────────────────────────┘[0m
+[0m[39;49m                                press ? or Esc to close[0m
+
+
+
+[0m[39;49m╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮[0m
+[0m[39;49m│▎ [0m[1;39;49mBuild [0m[38;2;26;23;22;48;2;204;120;92m [0m[39;49mDescribe a change or press / for commands...                                                sandbox   podman │[0m
+[0m[39;49m╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯[0m
+[0m[1;39;49m claude-sonne… esc[0m[39;49m close help · [0m[1;39;49m←→[0m[39;49m page · [0m[1;39;49mtab[0m[39;49m pages · [0m[1;39;49m^p[0m[39;49m commands · [0m[1;39;49m?[0m[39;49m keys                                      [0m[1;39;49m [0m[39;49mMANUAL[0m
