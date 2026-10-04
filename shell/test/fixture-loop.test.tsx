@@ -14,7 +14,7 @@
  * the reducer and the live shell disagree about what the engine said.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { render } from 'ink-testing-library';
@@ -33,6 +33,20 @@ const SHELL_ENTRY = join(REPO, 'shell', 'src', 'cli.tsx');
 const T0: ReduceOptions = { nowMs: 0 };
 
 const binaryAvailable = existsSync(ENGINE);
+
+/**
+ * Whether this binary was actually built with the scripted runtime. A plain `cargo build` or a
+ * clippy run replaces `target/debug/niki` without the feature, and the fixture tests then wait out
+ * their full budget for a run that can never happen — which reads like a hang rather than like a
+ * mis-built binary. One fast probe turns that into an immediate, named failure.
+ */
+function engineHasFixtureRuntime(): boolean {
+  if (!binaryAvailable) return false;
+  const probe = spawnSync(ENGINE, ['serve', '--fixture', '--help'], { encoding: 'utf8' });
+  return probe.status === 0 && /--fixture/.test(`${probe.stdout}${probe.stderr}`);
+}
+
+const fixtureAvailable = engineHasFixtureRuntime();
 const open: ChildProcess[] = [];
 
 afterEach(() => {
@@ -110,7 +124,7 @@ describe('the reference loop, through the PTY driver', () => {
     expect(binaryAvailable, 'run: cargo build -j 2 --features fixture-runtime').toBe(true);
   });
 
-  it.skipIf(!binaryAvailable)('replays the whole reference loop on the real screen', async () => {
+  it.skipIf(!fixtureAvailable)('replays the whole reference loop on the real screen', async () => {
     const s = await bootToApproval();
     // Wait for the run to finish rather than for the approval: the approval is a transient frame,
     // and asserting on a transient is how a test ends up reading a half-drawn box. The finished
@@ -134,7 +148,7 @@ describe('the reference loop, through the PTY driver', () => {
     expect(screen, 'the composer is missing, so nothing was submitted').toMatch(/[>\u203a]/);
   }, 600_000);
 
-  it.skipIf(!binaryAvailable)('Esc on the approval denies it and the run continues', async () => {
+  it.skipIf(!fixtureAvailable)('Esc on the approval denies it and the run continues', async () => {
     const s = await bootToApproval();
     s.write('\x1b');
     const dismissed = await s.waitFor(() => !s.screen().includes('esc denies'), 30_000);
@@ -232,7 +246,7 @@ describe('the reference loop, through render snapshots', () => {
  * ------------------------------------------------------------------ */
 
 describe('the client against the real fixture engine', () => {
-  it.skipIf(!binaryAvailable)('receives the declared notifications and refuses nothing declared', async () => {
+  it.skipIf(!fixtureAvailable)('receives the declared notifications and refuses nothing declared', async () => {
     const client = new EngineClient({
       command: ENGINE,
       args: ['serve', '--fixture', '--bare', '--project', '/tmp'],
