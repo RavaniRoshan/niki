@@ -307,12 +307,7 @@ fn subcommands_for(parent: &str) -> Option<Vec<String>> {
     let start = src
         .lines()
         .position(|l| l.starts_with("pub enum ") && l.contains("Commands"))
-        .map(|idx| {
-            src.lines()
-                .take(idx)
-                .map(|l| l.len() + 1)
-                .sum::<usize>()
-        })
+        .map(|idx| src.lines().take(idx).map(|l| l.len() + 1).sum::<usize>())
         .or_else(|| src.find("pub enum "))?;
     let body = &src[start..];
     let end = body.find("\n}\n").unwrap_or(body.len());
