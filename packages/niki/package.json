@@ -1,0 +1,35 @@
+{
+  "name": "niki-cli",
+  "version": "0.10.0",
+  "description": "Thin launcher for NIKI multi-agent coding harness",
+  "type": "module",
+  "bin": {
+    "niki": "./bin/niki.js"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RavaniRoshan/niki.git"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "cli",
+    "harness",
+    "benchmarking"
+  ],
+  "author": "RavaniRoshan",
+  "license": "Apache-2.0",
+  "optionalDependencies": {
+    "@niki-cli/linux-x64": "0.10.0",
+    "@niki-cli/linux-arm64": "0.10.0",
+    "@niki-cli/darwin-x64": "0.10.0",
+    "@niki-cli/darwin-arm64": "0.10.0",
+    "@niki-cli/win32-x64": "0.10.0"
+  }
+}
