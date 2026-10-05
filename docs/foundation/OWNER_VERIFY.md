@@ -116,3 +116,81 @@ The automated probes record numbers. What only you can judge is whether they are
 3. Leave the shell idle for a minute and check CPU:
    `ps -o %cpu,rss,comm -p $(pgrep -f "tsx src/cli.tsx" | head -1)` sampled a few times.
    Idle should be effectively zero, because the sweep timer only runs while something is in flight.
+---
+
+## W1 — a real model answers, with your key
+
+**Why it is here:** every other first-answer check in this repository is a *plumbing* check.
+The CI leg (`scripts/smoke_real_model.sh --provider fixture`) drives the identical assertions
+against a scripted server, so it proves the wiring and the failure handling and proves nothing
+about whether your provider is reachable, your key is good, or a real model can emit what NIKI
+asks it for. Only a real key can answer that, and a credential does not belong in CI.
+
+**This is the only OWNER-VERIFY row that is a P0.**
+
+### Steps
+
+1. Build the release binary — the smoke script runs the *release* build by default:
+
+   ```bash
+   cd /path/to/niki && CARGO_BUILD_JOBS=2 cargo build --release
+   ```
+
+2. Point it at a provider you have a key for. Any OpenAI-compatible endpoint works; the
+   examples below cover the two shapes:
+
+   ```bash
+   # OpenAI-compatible (OpenRouter, Together, Groq, vLLM, Ollama…)
+   export NIKI_BASE_URL="https://openrouter.ai/api/v1"
+   export NIKI_MODEL="qwen/qwen3-coder-30b-a3b-instruct"
+   export OPENAI_API_KEY="sk-…"
+   ./scripts/smoke_real_model.sh
+
+   # Anthropic
+   export NIKI_BASE_URL="https://api.anthrop.com/v1"
+   export NIKI_MODEL="claude-sonnet-4-5"
+   export NIKI_SMOKE_PROVIDER_NAME=anthropic
+   export ANTHROPIC_API_KEY="sk-ant-…"
+   ./scripts/smoke_real_model.sh
+   ```
+
+3. **Look for**, in this order:
+
+   ```
+   1. the binary starts
+         ok    niki 0.10.0
+   2. a provider answers one question
+         provider=openai model=qwen/qwen3-coder-30b-a3b-instruct base_url=https://openrouter.ai/api/v1
+         ok    no escape sequences in the answer
+         ok    chat exited 0
+         ok    no key in the output
+   4. the same provider drives a headless JSON run
+         ok    stdout is exactly one JSON envelope
+
+   SMOKE PASSED (real provider: openai / qwen/qwen3-coder-30b-a3b-instruct)
+   ```
+
+4. **Fails if:** any check prints `FAIL`; the answer is an error message rather than prose; the
+   key appears anywhere in the output; or the headless run's stdout is not a single JSON object.
+   The script exits non-zero on any of these.
+
+### What a pass does and does not establish
+
+It establishes: the install is complete, the provider is reachable, the key is accepted, a real
+model answers, and the answer is clean. It does **not** establish anything about model quality —
+one prompt against one model is not a measurement, and nothing this prints may be quoted as
+though it were.
+
+### The command has been proven able to fail
+
+Both failure paths were exercised against this repository before the row was written, because a
+check that has only ever been green is not known to be a check:
+
+```
+$ NIKI_BASE_URL=http://127.0.0.1:9/v1 NIKI_MODEL=nope OPENAI_API_KEY=sk-test ./scripts/smoke_real_model.sh
+  FAIL  chat exited 1
+SMOKE FAILED — 1 check(s) failed                          exit 1
+
+$ NIKI_BASE_URL=http://127.0.0.1:8080/v1 NIKI_MODEL=x ./scripts/smoke_real_model.sh
+smoke: no API key in the environment for provider 'openai'.   exit 2
+```
