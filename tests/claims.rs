@@ -303,7 +303,16 @@ const SUBCOMMAND_PARENTS: &[(&str, &str)] = &[
 fn subcommands_for(parent: &str) -> Option<Vec<String>> {
     let path = SUBCOMMAND_PARENTS.iter().find(|(p, _)| *p == parent)?.1;
     let src = std::fs::read_to_string(repo_root().join(path)).ok()?;
-    let start = src.find("pub enum ")?;
+    let start = src
+        .lines()
+        .position(|l| l.starts_with("pub enum ") && l.contains("Commands"))
+        .map(|idx| {
+            src.lines()
+                .take(idx)
+                .map(|l| l.len() + 1)
+                .sum::<usize>()
+        })
+        .or_else(|| src.find("pub enum "))?;
     let body = &src[start..];
     let end = body.find("\n}\n").unwrap_or(body.len());
     let body = &body[..end];
