@@ -32,7 +32,7 @@ export type EngineChild = {
     on(event: 'data', cb: (chunk: string) => void): unknown;
   };
   kill(signal?: NodeJS.Signals): unknown;
-  on?(event: string, cb: (e: Error) => void): unknown;
+  on?(event: string, cb: (...args: unknown[]) => void): unknown;
 };
 
 export type SpawnFn = (
@@ -68,6 +68,7 @@ export class EngineClient extends EventEmitter {
   #nextId = 1;
   #buffer = '';
   #closed = false;
+  #error: Error | null = null;
 
   constructor(options: ClientOptions) {
     super();
@@ -88,7 +89,21 @@ export class EngineClient extends EventEmitter {
         }
       }
     });
-    this.#child.on?.('error', (e: Error) => this.emit('protocolError', e));
+    this.#child.on?.('error', (e: unknown) => {
+      const err = e instanceof Error ? e : new Error(String(e));
+      this.#error = err;
+      this.emit('protocolError', err);
+      for (const [, p] of this.#pending) p.reject(err);
+      this.#pending.clear();
+    });
+    this.#child.on?.('close', (code: unknown, signal: unknown) => {
+      if (!this.#closed) {
+        const err = new Error(`engine process exited before replying (code ${String(code)}, signal ${String(signal)})`);
+        this.#error = this.#error ?? err;
+        for (const [, p] of this.#pending) p.reject(err);
+        this.#pending.clear();
+      }
+    });
   }
 
   get closed(): boolean {
@@ -98,11 +113,20 @@ export class EngineClient extends EventEmitter {
   /** Writes one request and resolves with its typed result. */
   request(call: ClientRequest, traceId: string): Promise<ClientResult> {
     if (this.#closed) return Promise.reject(new Error('engine client is closed'));
+    if (this.#error) return Promise.reject(this.#error);
     const id = this.#nextId++;
     const frame = { jsonrpc: '2.0', id, trace_id: traceId, ...call };
     return new Promise<ClientResult>((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });
-      this.#write(JSON.stringify(frame));
+      try {
+        this.#write(JSON.stringify(frame));
+      } catch (err) {
+        this.#pending.delete(id);
+        const e = err instanceof Error ? err : new Error(String(err));
+        this.#error = e;
+        this.emit('protocolError', e);
+        reject(e);
+      }
     });
   }
 

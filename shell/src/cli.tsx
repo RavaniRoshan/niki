@@ -14,7 +14,7 @@
 
 import React from 'react';
 import { render, type Instance } from 'ink';
-import { appendFileSync, createWriteStream, mkdirSync } from 'node:fs';
+import { appendFileSync, createWriteStream, existsSync, mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -104,7 +104,21 @@ function restoreTerminal(state: TerminalState): void {
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   const env = process.env;
   const engineArgIndex = argv.indexOf('--engine');
-  const engine = engineArgIndex === -1 ? 'niki' : (argv[engineArgIndex + 1] ?? 'niki');
+  // When --engine is not given, check the standard build output directories before falling
+  // back to a bare PATH lookup. This covers running `npm run start` from a source checkout
+  // without needing niki installed globally or remembering the --engine flag every time.
+  let engine: string;
+  if (engineArgIndex !== -1 && argv[engineArgIndex + 1]) {
+    engine = argv[engineArgIndex + 1]!;
+  } else {
+    const candidates = [
+      join('..', 'target', 'release', 'niki'),
+      join('..', 'target', 'debug', 'niki'),
+      join('target', 'release', 'niki'),
+      join('target', 'debug', 'niki'),
+    ];
+    engine = candidates.find((c) => existsSync(c)) ?? 'niki';
+  }
   // Extra arguments for `niki serve`, so a test can point the shell at the scripted runtime
   // without a second code path. Repeatable: `--engine-arg --fixture --engine-arg --bare`.
   const engineArgs: string[] = [];

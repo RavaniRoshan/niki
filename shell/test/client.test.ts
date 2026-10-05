@@ -181,4 +181,32 @@ describe('EngineClient', () => {
     expect(seen).toEqual([]);
     expect(errors).toHaveLength(1);
   });
+
+  it('rejects pending requests when child process emits an error', async () => {
+    const { spawn } = scriptedEngine();
+    const childRef: EventEmitter[] = [];
+    const wrappingSpawn: SpawnFn = (cmd, args, opts) => {
+      const c = spawn(cmd, args, opts);
+      childRef.push(c as unknown as EventEmitter);
+      return c;
+    };
+    const client = new EngineClient({ command: 'x', spawn: wrappingSpawn });
+    const errors: Error[] = [];
+    client.on('protocolError', (e: Error) => errors.push(e));
+
+    const pending = client.request(
+      {
+        method: 'initialize',
+        params: { protocol_version: 1, client: { name: 's', version: '0', cols: 80, rows: 24 } },
+      },
+      't',
+    );
+    childRef[0]!.emit('error', new Error('spawn failed'));
+
+    await expect(pending).rejects.toThrow('spawn failed');
+    expect(errors).toHaveLength(1);
+    await expect(
+      client.request({ method: 'shutdown', params: { user_initiated: true } }, 't2'),
+    ).rejects.toThrow('spawn failed');
+  });
 });
