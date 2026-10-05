@@ -122,6 +122,10 @@ enum Commands {
     },
     /// Capture a screenshot for visual verification
     Verify(niki::cli::verify::VerifyArgs),
+    /// Run benchmark evaluation tasks through Harbor with strict budget enforcement
+    Bench(niki::cli::bench::BenchArgs),
+    /// Headless agent runner for external evaluation harnesses (e.g. Harbor)
+    Agent(niki::cli::agent::AgentArgs),
 }
 
 #[tokio::main]
@@ -205,6 +209,8 @@ async fn main() -> Result<()> {
         Commands::Architecture { command } => niki::cli::architecture::handle(command).await?,
         Commands::Index { command } => niki::cli::index::handle(command)?,
         Commands::Skills { command } => niki::cli::skills::handle(command)?,
+        Commands::Bench(args) => niki::cli::bench::handle(args.clone()).await?,
+        Commands::Agent(args) => niki::cli::agent::handle(args.clone()).await?,
     }
 
     Ok(())

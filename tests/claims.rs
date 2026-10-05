@@ -297,6 +297,7 @@ const SUBCOMMAND_PARENTS: &[(&str, &str)] = &[
     ("commands", "src/cli/commands.rs"),
     ("session", "src/cli/session.rs"),
     ("memory", "src/cli/memory.rs"),
+    ("bench", "src/cli/bench.rs"),
 ];
 
 /// The sub-subcommands each parent accepts, derived from its clap enum.

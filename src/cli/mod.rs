@@ -1,7 +1,9 @@
 pub mod acp;
+pub mod agent;
 pub mod architecture;
 pub mod audit;
 pub mod auth;
+pub mod bench;
 pub mod catalogue;
 pub mod chat;
 pub mod commands;
