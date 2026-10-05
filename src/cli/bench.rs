@@ -185,8 +185,8 @@ pub async fn handle(args: BenchArgs) -> Result<()> {
         } => {
             let niki_content = fs::read_to_string(&results)
                 .with_context(|| format!("reading niki results from {}", results.display()))?;
-            let niki_run: RunResults = serde_json::from_str(&niki_content)
-                .with_context(|| "parsing niki results json")?;
+            let niki_run: RunResults =
+                serde_json::from_str(&niki_content).with_context(|| "parsing niki results json")?;
 
             let niki_solved = niki_run.tasks.iter().filter(|t| t.solved).count();
             let niki_total = niki_run.tasks.len();
@@ -197,17 +197,14 @@ pub async fn handle(args: BenchArgs) -> Result<()> {
             };
 
             let mut report_md = String::new();
-            report_md.push_str(&format!(
-                "# Benchmark Report: {}\n\n",
-                niki_run.benchmark
-            ));
+            report_md.push_str(&format!("# Benchmark Report: {}\n\n", niki_run.benchmark));
             report_md.push_str(&format!(
                 "- Model: `{}`\n- Trials per task: `{}`\n- Tasks evaluated: `{}`\n\n",
                 niki_run.model, niki_run.trials_per_task, niki_total
             ));
-            report_md.push_str(&format!(
-                "| Harness | Solved | Total | Resolve rate | Mean Cost/Task |\n|---|---|---|---|---|\n"
-            ));
+            report_md.push_str(
+                "| Harness | Solved | Total | Resolve rate | Mean Cost/Task |\n|---|---|---|---|---|\n",
+            );
 
             let total_cost: f64 = niki_run.tasks.iter().filter_map(|t| t.cost_usd).sum();
             let mean_cost = if niki_total > 0 {
@@ -262,7 +259,9 @@ pub async fn handle(args: BenchArgs) -> Result<()> {
                                     ((sample_niki as f64 - sample_base as f64) / n as f64) * 100.0,
                                 );
                             }
-                            diffs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                            diffs.sort_by(|a, b| {
+                                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                            });
                             let ci_low = diffs[250];
                             let ci_high = diffs[9750];
 
@@ -303,11 +302,15 @@ pub async fn handle(args: BenchArgs) -> Result<()> {
                 }
             }
 
-            let split: SplitFile = serde_json::from_slice(&bytes)
-                .with_context(|| "parsing split json")?;
+            let split: SplitFile =
+                serde_json::from_slice(&bytes).with_context(|| "parsing split json")?;
 
             if !hasher_out.is_empty() && hasher_out != FROZEN_SPLIT_HASH {
-                bail!("split hash mismatch: expected {}, got {}", FROZEN_SPLIT_HASH, hasher_out);
+                bail!(
+                    "split hash mismatch: expected {}, got {}",
+                    FROZEN_SPLIT_HASH,
+                    hasher_out
+                );
             }
 
             if check {
@@ -338,8 +341,8 @@ pub async fn handle(args: BenchArgs) -> Result<()> {
         BenchCommands::Validate { trajectory } => {
             let content = fs::read_to_string(&trajectory)
                 .with_context(|| format!("reading trajectory from {}", trajectory.display()))?;
-            let val: serde_json::Value = serde_json::from_str(&content)
-                .with_context(|| "parsing trajectory JSON")?;
+            let val: serde_json::Value =
+                serde_json::from_str(&content).with_context(|| "parsing trajectory JSON")?;
 
             if val.get("schema_version").is_none() {
                 bail!("ATIF validation error: missing 'schema_version' field");
@@ -347,10 +350,9 @@ pub async fn handle(args: BenchArgs) -> Result<()> {
             if val.get("task_id").is_none() {
                 bail!("ATIF validation error: missing 'task_id' field");
             }
-            let steps = val
-                .get("steps")
-                .and_then(|s| s.as_array())
-                .ok_or_else(|| anyhow::anyhow!("ATIF validation error: 'steps' must be an array"))?;
+            let steps = val.get("steps").and_then(|s| s.as_array()).ok_or_else(|| {
+                anyhow::anyhow!("ATIF validation error: 'steps' must be an array")
+            })?;
 
             if steps.is_empty() {
                 bail!("ATIF validation error: 'steps' must contain at least one step");

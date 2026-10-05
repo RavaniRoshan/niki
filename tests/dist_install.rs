@@ -350,3 +350,31 @@ fn scoop_and_winget_manifests_match_the_crate_version() {
         }
     }
 }
+
+#[test]
+fn powershell_installer_exists_and_matches_dist() {
+    let ps = read("scripts/install.ps1");
+    assert!(
+        ps.contains("niki-x86_64-pc-windows-msvc.zip")
+            || ps.contains("TARGET")
+            || ps.contains("windows"),
+        "scripts/install.ps1 must support Windows target"
+    );
+    assert!(
+        ps.contains("sha256.sum") || ps.contains("SHA256"),
+        "scripts/install.ps1 must verify SHA256 checksum"
+    );
+    assert!(
+        ps.contains("NIKI_VERSION") || ps.contains("Tag"),
+        "scripts/install.ps1 must support version pinning"
+    );
+}
+
+#[test]
+fn powershell_uninstaller_exists() {
+    let ps = read("scripts/uninstall.ps1");
+    assert!(
+        ps.contains("niki.exe") || ps.contains("niki"),
+        "scripts/uninstall.ps1 must remove niki binary"
+    );
+}
