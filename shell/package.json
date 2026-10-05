@@ -5,10 +5,10 @@
   "type": "module",
   "description": "The NIKI terminal shell. A pure client: it speaks niki-protocol and never talks to an engine API directly.",
   "bin": {
-    "niki-shell": "./src/cli.tsx"
+    "niki-shell": "./src/bin/niki-shell.ts"
   },
   "scripts": {
-    "start": "tsx src/cli.tsx",
+    "start": "tsx src/bin/niki-shell.ts",
     "test": "npm run test:unit && npm run test:pty",
     "test:watch": "vitest --exclude 'test/pty.test.ts' --exclude 'test/fixture-loop.test.tsx' --exclude 'test/roundtrip-latency.test.ts'",
     "typecheck": "tsc --noEmit",

@@ -224,6 +224,28 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
   };
 
+  // `session.ready` — the frame carrying the model, the permission posture and the branch — is the
+  // engine's reply to `session.load`, not to `initialize`. Without this the shell boots straight
+  // into a header that reads "connecting to the engine" and stays there, which is exactly how it
+  // looked the first time anyone ran it.
+  const loadSession = async (): Promise<void> => {
+    try {
+      await client.request(
+        { method: 'session.load', params: { session_id: null, project_path: process.cwd() } },
+        `session-${Date.now()}`,
+      );
+    } catch (e) {
+      // A refusal is not fatal: the interface still works, the header says only what it was told.
+      const message = e instanceof Error ? e.message : String(e);
+      engineLog(`session.load failed: ${message}`);
+      state = reduceLocal(
+        state,
+        { kind: 'notice.push', text: 'the engine did not report a session', level: 'warning' },
+        opts(),
+      );
+    }
+  };
+
   /**
    * Sends whatever the reducer decided to send. The reducer is pure, so it records the intent in
    * `state.outbox` and this is the only place that puts it on the wire.
@@ -281,10 +303,15 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     attach();
     state = reduceLocal(state, { kind: 'notice.push', text: 'reconnected to the engine', level: 'info' }, opts());
     await initialize();
+    await loadSession();
     paint();
   };
 
+  // Handshake: initialize tells us the engine's version and capabilities; session.load is what
+  // makes it report the project, model, posture and branch. Both are needed before the header can
+  // say anything true.
   await initialize();
+  await loadSession();
 
   instance = render(
     React.createElement(App, { state, theme, charset, reducedMotion, sweepTick: 0 }),
