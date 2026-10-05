@@ -85,6 +85,16 @@ fn agent_help_advertises_harness_flags() {
     assert!(stdout.contains("--atif-out"));
     assert!(stdout.contains("--max-time"));
     assert!(stdout.contains("--max-cost"));
+    assert!(stdout.contains("--lever-completion-gate"));
+    assert!(stdout.contains("--lever-budget-manager"));
+    assert!(stdout.contains("--lever-loop-guard"));
+    assert!(stdout.contains("--lever-onboarding"));
+    assert!(stdout.contains("--lever-pty"));
+    assert!(stdout.contains("--lever-edit-robust"));
+    assert!(stdout.contains("--lever-context"));
+    assert!(stdout.contains("--lever-effort-schedule"));
+    assert!(stdout.contains("--lever-parallel"));
+    assert!(stdout.contains("--lever-model-profiles"));
 }
 
 #[test]
