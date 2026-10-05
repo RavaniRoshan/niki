@@ -42,6 +42,7 @@ fn run_args(project: PathBuf) -> niki::cli::run::RunArgs {
         output_format: niki::cli::run::OutputFormat::Text,
         bare: true,
         permission_mode: None,
+        i_understand_bypass: false,
         otel_endpoint: None,
     }
 }

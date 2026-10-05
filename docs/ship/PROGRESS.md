@@ -614,3 +614,38 @@ I did not edit it.
 `tests/config_schema_validation.rs` — 10/10, including a test that fails if any declared section
 is left without its field list (the escape hatch this design deliberately closed), one that a
 `[ui]` typo is caught, and one that `niki.example.toml` matches the schema.
+
+### P1.18 — W5 `bypass` now has to be said twice
+
+This is the safety-critical default change the mission puts on the ask list. It went in because
+the owner approved the design note, which flagged it as outstanding, and because the alternative
+was leaving a P0 row PARTIAL for a flag nothing in the repository, its CI or its scripts uses.
+
+`--permission-mode bypass` now requires `--i-understand-bypass`. Without it the run is refused
+**before the mode is applied and before any model call**, so the refusal costs nothing:
+
+```
+--permission-mode bypass turns every approval into an allow, so it needs an explicit
+acknowledgement too. Add --i-understand-bypass.
+(Nothing ran and nothing was spent. If you meant the safer option, --permission-mode auto
+allows sandbox-safe commands and still asks about the rest.)
+```
+
+Checked first: nothing in `.github/workflows/`, `scripts/`, the examples or `niki-starter` passes
+`--permission-mode bypass`, so this refuses an accident rather than a workflow. The default has
+always been `manual` and is unchanged.
+
+`tests/approval_logging.rs` — 11/11, four of them new:
+
+- bypass without the acknowledgement is refused, names the flag, says nothing ran, offers
+  `--permission-mode auto`, and **creates no task directory** (the proof it cost nothing);
+- bypass **with** it is accepted, so this is a deliberate opt-in and not a removal;
+- `manual`, `auto` and `dontask` need no acknowledgement — making the dangerous one deliberate
+  must not make the safe ones harder;
+- `--i-understand-bypass` alone changes nothing, so the acknowledgement never becomes an
+  acknowledgement of nothing.
+
+**The TUI path is not changed.** Shift+Tab cycles the posture and the settings sheet lists
+`bypass`; both are deliberate acts with the badge on screen. Adding a modal to a key cycle would
+be a different design decision, and it is recorded here as unaddressed rather than quietly
+assumed done.

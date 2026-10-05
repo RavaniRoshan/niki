@@ -196,6 +196,15 @@ pub struct RunArgs {
     #[arg(long)]
     pub permission_mode: Option<String>,
 
+    /// Required alongside `--permission-mode bypass`, and refused without it.
+    ///
+    /// `bypass` turns every approval into an allow. Typing one word and getting an agent that
+    /// can run anything on the machine is the shape of accident this flag exists to stop, so the
+    /// mode now takes two words. The message names this one, so a refusal is an instruction
+    /// rather than a wall.
+    #[arg(long)]
+    pub i_understand_bypass: bool,
+
     /// OTLP/HTTP endpoint for trace export (e.g. http://localhost:4318).
     /// Also reads `OTEL_EXPORTER_OTLP_ENDPOINT`. Export is best-effort and
     /// warn-only: telemetry never fails a run.
@@ -710,6 +719,21 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
 
     // Per-run permission posture override (explicit beats config).
     if let Some(mode) = &args.permission_mode {
+        // `bypass` needs to be said twice. Nothing in this repository, its CI or its scripts
+        // relies on the single-word form, and the default has always been `manual`, so this
+        // refuses an accident rather than a workflow.
+        //
+        // Checked here, before the mode is applied and long before a model is called, so a
+        // refusal costs nothing.
+        if mode.eq_ignore_ascii_case("bypass") && !args.i_understand_bypass {
+            anyhow::bail!(
+                "--permission-mode bypass turns every approval into an allow, so it needs an \
+                 explicit acknowledgement too. Add --i-understand-bypass.\n\
+                 (Nothing ran and nothing was spent. If you meant the safer option, \
+                 --permission-mode auto allows sandbox-safe commands and still asks about the \
+                 rest.)"
+            );
+        }
         config.permissions.mode = mode.clone();
     }
 

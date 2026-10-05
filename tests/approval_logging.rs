@@ -9,6 +9,8 @@ use niki::artifacts::types::AgentRole;
 use niki::runtime::policy::{PolicyViolation, ToolPolicy};
 use niki::runtime::tools::{PermissionRequirement, RiskLevel, ToolCategory};
 
+mod common;
+
 fn policy(mode: &str) -> ToolPolicy {
     ToolPolicy::for_role(AgentRole::Coder, RiskLevel::Medium, mode)
 }
@@ -123,5 +125,141 @@ fn the_auto_approve_message_is_the_one_that_is_printed() {
     assert!(
         src.contains("auto-approved") && src.contains("without asking"),
         "the auto-approval line the policy layer is supposed to print is not in policy.rs"
+    );
+}
+
+/// `bypass` needs to be said twice.
+///
+/// It turns every approval into an allow. Typing one word and getting an agent that can run
+/// anything on the machine is the shape of accident this closes, so `--permission-mode bypass`
+/// is refused without `--i-understand-bypass`.
+#[test]
+fn bypass_without_the_acknowledgement_is_refused_before_anything_runs() {
+    let repo = common::fixture_repo::create_fixture_repo();
+    let project = repo.path().to_path_buf();
+
+    let out = std::process::Command::new(std::path::PathBuf::from(env!("CARGO_BIN_EXE_niki")))
+        .args([
+            "run",
+            "do something",
+            "--backend",
+            "worktree",
+            "--project",
+            project.to_str().expect("utf-8 path"),
+            "--permission-mode",
+            "bypass",
+        ])
+        .output()
+        .expect("niki runs");
+
+    assert!(
+        !out.status.success(),
+        "bypass ran without an acknowledgement"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("i-understand-bypass"),
+        "the refusal must name the flag that would work:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Nothing ran"),
+        "the refusal must say that nothing happened:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("--permission-mode auto"),
+        "the refusal must offer the safer option:\n{stderr}"
+    );
+    // The whole point is that it costs nothing: no task directory, therefore no model call.
+    assert!(
+        !project.join(".niki/tasks").exists(),
+        "a refused bypass still created a task directory"
+    );
+}
+
+/// With the acknowledgement it is allowed — the point is a deliberate opt-in, not a removal.
+#[test]
+fn bypass_with_the_acknowledgement_is_accepted() {
+    let repo = common::fixture_repo::create_fixture_repo();
+    let project = repo.path().to_path_buf();
+
+    let out = std::process::Command::new(std::path::PathBuf::from(env!("CARGO_BIN_EXE_niki")))
+        .args([
+            "run",
+            "do something",
+            "--backend",
+            "worktree",
+            "--project",
+            project.to_str().expect("utf-8 path"),
+            "--permission-mode",
+            "bypass",
+            "--i-understand-bypass",
+        ])
+        .output()
+        .expect("niki runs");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("i-understand-bypass"),
+        "the acknowledgement did not take:\n{stderr}"
+    );
+    // It will still fail for want of a provider, which is a different failure and proves the
+    // permission gate let it through to that point.
+    assert!(
+        !project.join(".niki/tasks").is_dir() || !stderr.contains("add --i-understand-bypass"),
+        "bypass was still refused with the acknowledgement:\n{stderr}"
+    );
+}
+
+/// The other modes must be untouched. Making the dangerous one deliberate must not make the safe
+/// ones harder.
+#[test]
+fn the_other_modes_need_no_acknowledgement() {
+    for mode in ["manual", "auto", "dontask"] {
+        let repo = common::fixture_repo::create_fixture_repo();
+        let project = repo.path().to_path_buf();
+        let out = std::process::Command::new(std::path::PathBuf::from(env!("CARGO_BIN_EXE_niki")))
+            .args([
+                "run",
+                "do something",
+                "--backend",
+                "worktree",
+                "--project",
+                project.to_str().expect("utf-8 path"),
+                "--permission-mode",
+                mode,
+            ])
+            .output()
+            .expect("niki runs");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("i-understand-bypass"),
+            "--permission-mode {mode} demanded an acknowledgement meant only for bypass:\n{stderr}"
+        );
+    }
+}
+
+/// `bypass` must still never be the default, and the acknowledgement must not become one either.
+#[test]
+fn neither_the_default_nor_the_acknowledgement_is_ever_bypass() {
+    let repo = common::fixture_repo::create_fixture_repo();
+    let project = repo.path().to_path_buf();
+    let out = std::process::Command::new(std::path::PathBuf::from(env!("CARGO_BIN_EXE_niki")))
+        .args([
+            "run",
+            "do something",
+            "--backend",
+            "worktree",
+            "--project",
+            project.to_str().expect("utf-8 path"),
+            "--i-understand-bypass",
+        ])
+        .output()
+        .expect("niki runs");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    // The flag alone means nothing without the mode. If this ever starts bypassing, the
+    // acknowledgement has stopped being an acknowledgement of anything.
+    assert!(
+        !stderr.contains("auto-approved") || !project.join(".niki/tasks").exists(),
+        "--i-understand-bypass alone changed the posture"
     );
 }
