@@ -680,3 +680,49 @@ report *content*: a column header and a `user file:` line were counted as settin
 "distinct paths" came out of 133 settings. The assertion now matches a dotted identifier rather
 than guessing which lines are settings — a gate that flags its own headings is a gate people
 learn to disable.
+
+### P1.20 — W2 migration: the last sub-gap
+
+`niki config migrate [--dry-run]`. Two rules shaped it:
+
+**A migration that runs on every load must be additive and total.** `NikiConfig::migrate` cannot
+fail, so a user with an old file never loses a run to a config error.
+`migration_is_total_and_never_panics` feeds it an empty document, a bare version, an unknown
+section, a provider block, and a half-migrated file.
+
+**A load does not get to rewrite the user's file.** The migration is *reported* on load and
+*applied* only by the command. A change nobody can see is a change nobody trusts, and a load that
+edits its own input is a load with a side effect it cannot report on.
+
+```
+$ niki config migrate --dry-run
+/tmp/mig/niki.toml — 2 change(s)
+  renamed docker.sandbox_image → docker.base_image
+  renamed permissions.auto_approve = true → permissions.mode = "auto"
+  note: v1 → v2: `docker.sandbox_image` is now `docker.base_image`. The old name still works…
+  note: this file has no `version` key, so it is read as v1. Current is v2.
+dry run: /tmp/mig/niki.toml was not written.
+
+$ niki config migrate && cat niki.toml
+version = 2
+[docker]
+base_image = "niki-sandbox:24.04"
+[general]
+max_revision_rounds = 7
+[permissions]
+mode = "auto"
+```
+
+Three properties the tests pin, each of which is a way to lose someone's file:
+
+- **an existing new key is never overwritten** — the user has already moved on, and re-applying a
+  rename over their value loses data;
+- **an unknown key survives** — a migration that deletes what it does not understand is how a
+  setting added for something else disappears;
+- **the write is atomic** — a sibling plus a rename, so a crash leaves the original readable and a
+  watcher never sees a half-written document.
+
+A file with no `version` key is read as v1, because v1 predates the field. That is a guess and it
+is the safe one: stamping a current file that predates the field costs nothing.
+
+`tests/config_migration.rs` — 12/12.

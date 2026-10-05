@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Subcommand;
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use crate::cli::auth::{PROVIDERS, resolve_api_key};
 use crate::config::NikiConfig;
@@ -23,6 +24,15 @@ pub enum ConfigCommands {
     Check,
     /// Show every effective value and which layer it came from
     Explain,
+    /// Rewrite a niki.toml to the current format, in place
+    Migrate {
+        /// Write here instead of the project's niki.toml
+        #[arg(long, short, value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Say what would change and write nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 pub async fn handle(command: &ConfigCommands) -> Result<()> {
@@ -31,6 +41,7 @@ pub async fn handle(command: &ConfigCommands) -> Result<()> {
         ConfigCommands::Schema => cmd_schema(),
         ConfigCommands::Check => cmd_check(),
         ConfigCommands::Explain => cmd_explain(),
+        ConfigCommands::Migrate { path, dry_run } => cmd_migrate(path.as_deref(), *dry_run),
     }
 }
 
@@ -342,6 +353,105 @@ fn cmd_explain() -> Result<()> {
     );
     println!("  Secret values are reported as set or unset, never printed.");
     Ok(())
+}
+
+/// Bring a config file up to the current format.
+///
+/// Applies the renames `NikiConfig::migrate` knows about, stamps `version`, and writes the file
+/// back atomically. Nothing is removed: a key this build does not recognise is carried across
+/// untouched, because a migration that deletes what it does not understand is how a user's file
+/// loses a setting they added for a plugin.
+///
+/// A file with no `version` key is assumed to be v1. That is a guess, and it is the safe one:
+/// stamping a current file that simply predates the field costs nothing, and refusing to touch a
+/// file for fear of guessing wrong helps nobody.
+fn cmd_migrate(path: Option<&Path>, dry_run: bool) -> Result<()> {
+    let target = match path {
+        Some(p) => p.to_path_buf(),
+        None => std::env::current_dir()?.join("niki.toml"),
+    };
+    if !target.exists() {
+        anyhow::bail!("No config at {}. Nothing to migrate.", target.display());
+    }
+    let content = fs::read_to_string(&target)
+        .map_err(|e| anyhow::anyhow!("could not read {}: {e}", target.display()))?;
+    let mut doc: toml::Value = content
+        .parse()
+        .map_err(|e| anyhow::anyhow!("could not parse {}: {e}", target.display()))?;
+
+    let notes = NikiConfig::migrate(&doc);
+    let before = NikiConfig::migrate(&doc).len();
+
+    // The renames, applied only when the old key is present and the new one is not. An existing
+    // new key always wins: the user has already moved on.
+    let renamed = apply_renames(&mut doc);
+
+    let table = doc
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("{} is not a table of settings", target.display()))?;
+    table.insert(
+        "version".to_string(),
+        toml::Value::Integer(NikiConfig::CONFIG_WRITE_VERSION as i64),
+    );
+
+    println!("{} — {} change(s)", target.display(), renamed.len());
+    for r in &renamed {
+        println!("  renamed {}", r);
+    }
+    for n in &notes {
+        println!("  note: {n}");
+    }
+    if before == 0 && renamed.is_empty() {
+        println!("  already current");
+    }
+
+    if dry_run {
+        println!("\ndry run: {} was not written.", target.display());
+        return Ok(());
+    }
+
+    let rendered = toml::to_string_pretty(&doc)
+        .map_err(|e| anyhow::anyhow!("could not render the migrated config: {e}"))?;
+    // Write through a sibling and rename, so an interrupted migration leaves the original intact.
+    let tmp = target.with_extension("toml.partial");
+    fs::write(&tmp, &rendered)
+        .map_err(|e| anyhow::anyhow!("could not write {}: {e}", tmp.display()))?;
+    fs::rename(&tmp, &target)
+        .map_err(|e| anyhow::anyhow!("could not replace {}: {e}", target.display()))?;
+    println!("wrote {}", target.display());
+    Ok(())
+}
+
+/// Every rename this build knows, applied where it applies.
+fn apply_renames(doc: &mut toml::Value) -> Vec<String> {
+    let mut renamed = Vec::new();
+    if let Some(t) = doc.as_table_mut() {
+        // `docker.sandbox_image` → `docker.base_image`
+        if let Some(docker) = t.get_mut("docker").and_then(|d| d.as_table_mut())
+            && let Some(old) = docker.remove("sandbox_image")
+            && !docker.contains_key("base_image")
+        {
+            docker.insert("base_image".to_string(), old);
+            renamed.push("docker.sandbox_image → docker.base_image".to_string());
+        }
+        // `[permissions] auto_approve = true` → `mode = "auto"`
+        if let Some(perm) = t.get_mut("permissions").and_then(|p| p.as_table_mut())
+            && let Some(old) = perm.remove("auto_approve")
+            && !perm.contains_key("mode")
+        {
+            let mode = if old.as_bool() == Some(true) {
+                "auto"
+            } else {
+                "manual"
+            };
+            perm.insert("mode".to_string(), toml::Value::String(mode.to_string()));
+            renamed.push(format!(
+                "permissions.auto_approve = {} → permissions.mode = \"{mode}\"",
+                old
+            ));
+        }
+    }
+    renamed
 }
 
 async fn cmd_init(interactive: bool, scan: bool) -> Result<()> {

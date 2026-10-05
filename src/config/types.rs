@@ -1763,6 +1763,84 @@ impl NikiConfig {
     /// Tables whose fields are still parsed-but-unwired at Phase 6.1. All known sections are now live.
     const DEAD_TABLES: &'static [&'static str] = &[];
 
+    /// The config format version this build reads.
+    pub const CONFIG_VERSION: u32 = 2;
+
+    /// The version this build writes, when it writes a file.
+    ///
+    /// Distinct from `CONFIG_VERSION` on purpose: a build that can still read v1 but only ever
+    /// writes v2 is a build in a migration, and that is a fact worth being able to print.
+    pub const CONFIG_WRITE_VERSION: u32 = 2;
+
+    /// Bring one file up to `CONFIG_VERSION` in memory, reporting what changed.
+    ///
+    /// A migration here must be **additive and total**: it runs on every load, so a rule that can
+    /// fail takes the whole product down for a user with an old file. Unknown sections are left
+    /// alone for the validator to report, because guessing what a renamed section became is how a
+    /// migration silently changes behaviour.
+    ///
+    /// v1 → v2: `docker.sandbox_image` became `docker.base_image`. The old name is still read by
+    /// serde's alias, so this only *reports* the rename — the value is not moved, because moving
+    /// it would be the migration overwriting something the user wrote for a reason.
+    ///
+    /// A file with no `version` is a v1 file, not a current one: v1 predates the field.
+    pub fn migrate(raw: &toml::Value) -> Vec<String> {
+        let mut notes = Vec::new();
+        let declared = raw.get("version").and_then(|v| v.as_integer()).unwrap_or(1) as u32;
+        if declared > Self::CONFIG_VERSION {
+            notes.push(format!(
+                "this file declares version {declared}, but this build reads up to {}. \
+                 Settings this build does not know about will be ignored.",
+                Self::CONFIG_VERSION
+            ));
+            return notes;
+        }
+        if declared >= 2 {
+            return notes;
+        }
+
+        if raw
+            .get("docker")
+            .and_then(|d| d.get("sandbox_image"))
+            .is_some()
+        {
+            notes.push(
+                "v1 → v2: `docker.sandbox_image` is now `docker.base_image`. The old name still \
+                 works; rename it when you next edit this file."
+                    .to_string(),
+            );
+        }
+        if raw
+            .get("permissions")
+            .and_then(|p| p.get("auto_approve"))
+            .is_some()
+        {
+            notes.push(
+                "v1 → v2: `[permissions] auto_approve` is now `[permissions] mode`. Use \
+                 `mode = \"auto\"` for the old behaviour."
+                    .to_string(),
+            );
+        }
+        notes.push(format!(
+            "this file has no `version` key, so it is read as v1. Current is v{}.",
+            Self::CONFIG_VERSION
+        ));
+        notes
+    }
+
+    /// Say what a migration would do with this file, without doing it.
+    ///
+    /// Warned rather than applied: a load has no business rewriting a file the user wrote, and a
+    /// migration that cannot be seen is a migration nobody trusts. `niki config migrate` is where
+    /// it gets applied.
+    fn warn_migrations(content: &str, path: &std::path::Path) {
+        if let Ok(raw) = content.parse::<toml::Value>() {
+            for note in Self::migrate(&raw) {
+                eprintln!("migration: {path:?} — {note}");
+            }
+        }
+    }
+
     fn warn_unknown_sections(content: &str, path: &std::path::Path) {
         if let Ok(raw) = content.parse::<toml::Value>() {
             if let Some(table) = raw.as_table() {
@@ -1895,6 +1973,7 @@ impl NikiConfig {
         {
             let content = fs::read_to_string(gp)?;
             Self::warn_unknown_sections(&content, gp);
+            Self::warn_migrations(&content, gp);
             let c: NikiConfig = toml::from_str(&content)?;
             config.merge(c);
         }
@@ -1902,6 +1981,7 @@ impl NikiConfig {
         if local_path.exists() {
             let content = fs::read_to_string(&local_path)?;
             Self::warn_unknown_sections(&content, &local_path);
+            Self::warn_migrations(&content, &local_path);
             let c: NikiConfig = toml::from_str(&content)?;
             config.merge(c);
         }
