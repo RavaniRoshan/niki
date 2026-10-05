@@ -275,7 +275,11 @@ def os_environ(name: str) -> str:
 def run_agent(agent: str, sealed: dict, model: str, timeout: int) -> dict:
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{agent}.json"
+    # Written after every case, not at the end. A 27-case run against a local model takes tens of
+    # minutes, and a run killed at case 24 must still leave cases 1-23 on disk. Losing a long run
+    # because someone pressed ctrl-c is not acceptable for the one artefact that costs this much.
     records = []
+    flush = lambda: out.write_text(json.dumps({"agent": agent, "model": model, "blocked": blocked, "records": records}, indent=2) + "\n")
     cmd = None if agent == "niki" else agent_command(agent, model)
     blocked = ""
     if agent != "niki" and cmd is None:
@@ -284,6 +288,7 @@ def run_agent(agent: str, sealed: dict, model: str, timeout: int) -> dict:
     for case in sealed["cases"]:
         if blocked:
             records.append({**case, "verdict": None, "error": blocked})
+            flush()
             continue
         started = time.time()
         try:
@@ -299,7 +304,10 @@ def run_agent(agent: str, sealed: dict, model: str, timeout: int) -> dict:
             "raw": raw[:400],
             "seconds": round(time.time() - started, 2),
         })
-        print(f"  {agent:12} {case['id']:34} -> {records[-1]['verdict'] or 'unparseable'}")
+        # Flushed per case, and the line is flushed too: a redirected stdout is block-buffered, so
+        # a long run would otherwise look hung.
+        print(f"  {agent:12} {case['id']:34} -> {records[-1]['verdict'] or 'unparseable'}", flush=True)
+        flush()
 
     payload = {"agent": agent, "model": model, "blocked": blocked, "records": records}
     out.write_text(json.dumps(payload, indent=2) + "\n")
