@@ -127,13 +127,24 @@ pub struct RunArgs {
     pub max_steps: Option<u32>,
 
     /// Override the unified run budget: max estimated USD (falls back to
-    /// spend_cap_usd when unset).
-    #[arg(long)]
+    /// spend_cap_usd when unset). Also spelled `--max-cost`, which is what
+    /// every external harness calls it — an alias rather than a second flag so
+    /// there is one behaviour and one budget, not two that can disagree.
+    #[arg(long, visible_alias = "max-cost")]
     pub max_usd: Option<f64>,
 
-    /// Override the unified run budget: max wallclock seconds.
-    #[arg(long)]
+    /// Override the unified run budget: max wallclock seconds. Also spelled
+    /// `--max-time`, for the same reason as `--max-cost`.
+    #[arg(long, visible_alias = "max-time")]
     pub max_wallclock_secs: Option<u64>,
+
+    /// Write an ATIF trajectory (`trajectory.json`) to this path when the run
+    /// ends, success or failure. ATIF is the interop format Terminal-Bench's
+    /// leaderboard reads; NIKI never reads one back, so this is a write-only
+    /// export and adding it cannot change what a run does. Built from the
+    /// `events.jsonl` the run already wrote, so nothing in it is invented.
+    #[arg(long, value_name = "PATH")]
+    pub atif_out: Option<PathBuf>,
 
     /// Override planner model
     #[arg(long)]
@@ -580,6 +591,18 @@ pub async fn handle(args: &RunArgs) -> Result<()> {
 }
 
 async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
+    // `-` reads the task from stdin. Explicit rather than inferred: a shell that
+    // pipes something into `niki run` would otherwise have its pipe silently
+    // become the task, which is the kind of surprise that costs money.
+    let description = if args.description == "-" {
+        let mut buf = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            .map_err(|e| anyhow::anyhow!("`niki run -` could not read the task from stdin: {e}"))?;
+        buf.trim().to_string()
+    } else {
+        args.description.clone()
+    };
+
     // An empty task is not a task, and the pipeline will not notice: the
     // Planner is handed "" and asked for a spec, produces one, and the run
     // continues through four paid model calls to hand back a change nobody
@@ -588,10 +611,11 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
     // ways to spend money by accident.
     //
     // Checked here, before the project is even resolved, so it costs nothing.
-    if args.description.trim().is_empty() {
+    if description.trim().is_empty() {
         anyhow::bail!(
             "No task given. `niki run` needs a description of what to change, e.g.\n  \
              niki run \"add a --verbose flag to the build command\"\n\
+             Or pipe it:  echo \"...\" | niki run -\n\
              (This usually means a shell variable expanded to nothing.)"
         );
     }
@@ -715,7 +739,7 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
 
     let task = Task {
         id: Uuid::new_v4(),
-        description: args.description.clone(),
+        description: description.clone(),
         project_path: project_dir.clone(),
     };
 
@@ -1003,6 +1027,11 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
                 display.show_failure(&e.to_string());
             }
             display.finish_tui();
+            // A harness that only receives trajectories when the run succeeded cannot tell a
+            // crash from a silent skip. The failing trial is the one worth reading.
+            if let Some(path) = args.atif_out.as_deref() {
+                write_atif(path, &task, &task_dir, &rec);
+            }
             if args.output_format == OutputFormat::Json {
                 *emitted_envelope = true;
                 println!(
@@ -1232,6 +1261,13 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
     // restores the terminal before any further output.
     display.finish_tui();
 
+    // ATIF export, on the success path and the failure path alike. A harness
+    // that gets a trajectory only when the run worked cannot tell a crash from
+    // a silent skip, and the failing trial is the one worth reading.
+    if let Some(path) = args.atif_out.as_deref() {
+        write_atif(path, &task, &task_dir, &record);
+    }
+
     // The exit code has to agree with the record. Until now it did not: a run
     // that recorded `TaskStatus::Failed` — a blocked branch, a failed commit,
     // an empty diff — still returned `Ok(())`, so `niki run "…"` in a CI step
@@ -1243,6 +1279,9 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
     // build system sees are the same fact stated once. `--dry-run` is the one
     // case where "no branch" is the expected result, not a failure.
     if !args.dry_run && matches!(record.status, TaskStatus::Failed { .. }) {
+        if let Some(path) = args.atif_out.as_deref() {
+            write_atif(path, &task, &task_dir, &record);
+        }
         return Err(anyhow!(
             "{}",
             status_error
@@ -1252,6 +1291,81 @@ async fn run_inner(args: &RunArgs, emitted_envelope: &mut bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Write the run's ATIF trajectory from the journal it already produced.
+///
+/// Best-effort, and it says so: a trajectory is a record of a run, and a run
+/// that failed to *record* itself did still happen. Failing the run because
+/// the export could not be written would turn a successful pipeline into a
+/// failed one over a file handle. The warning goes to stderr, where a headless
+/// consumer reading stdout as JSON never sees it.
+fn write_atif(
+    path: &std::path::Path,
+    task: &Task,
+    task_dir: &std::path::Path,
+    record: &TaskRecord,
+) {
+    use crate::artifacts::atif;
+
+    let mut trajectory = atif::AtifTrajectory::new(
+        "niki",
+        env!("CARGO_PKG_VERSION"),
+        record.agent_metrics.first().map(|m| m.model.clone()),
+    );
+    trajectory.push(
+        "user",
+        task.description.clone(),
+        Some(chrono::Utc::now().to_rfc3339()),
+    );
+
+    let journal_path = task_dir.join("events.jsonl");
+    let journal = std::fs::read_to_string(&journal_path).unwrap_or_default();
+    let steps = atif::steps_from_journal(&journal, &mut trajectory);
+
+    // Costs come from the record, not from the journal: `StageMetric.cost_usd`
+    // is what the price table actually charged, and the journal's own copy is
+    // per-request. Summing both would double-count.
+    for metric in &record.agent_metrics {
+        let step = trajectory.push(
+            "agent",
+            format!(
+                "{} finished: {} in / {} out, {} ms, ${:.6}",
+                metric.role.as_str(),
+                metric.input_tokens,
+                metric.output_tokens,
+                metric.latency_ms,
+                metric.cost_usd
+            ),
+            None,
+        );
+        step.model_name = Some(metric.model.clone());
+        step.metrics = Some(atif::AtifMetrics {
+            prompt_tokens: Some(metric.input_tokens),
+            completion_tokens: Some(metric.output_tokens),
+            cached_tokens: (metric.cached_input_tokens > 0).then_some(metric.cached_input_tokens),
+            cost_usd: Some(metric.cost_usd),
+        });
+        step.llm_call_count = Some(metric.retry_count + 1);
+    }
+
+    let priced = record.agent_metrics.iter().any(|m| m.cost_usd > 0.0);
+    trajectory.finalize(priced);
+
+    if let Err(e) = trajectory.write_to(path) {
+        eprintln!(
+            "Warning: could not write the ATIF trajectory to {}: {e}",
+            path.display()
+        );
+        return;
+    }
+    if steps == 0 {
+        eprintln!(
+            "Warning: the ATIF trajectory at {} has no journal events. The run produced \
+             no runtime events, so it says nothing about what happened.",
+            path.display()
+        );
+    }
 }
 
 /// Recover what a failed run had already produced.

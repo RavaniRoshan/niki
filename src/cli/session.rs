@@ -1,8 +1,17 @@
 use crate::session::{RewindMode, SessionManager};
 use anyhow::{Result, bail};
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use std::env;
 use std::path::{Path, PathBuf};
+
+/// What `niki session export` writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ExportFormat {
+    /// A readable transcript.
+    Markdown,
+    /// The Agent Trajectory Interchange Format.
+    Atif,
+}
 
 /// Inspect and rewind chat/pipeline sessions.
 ///
@@ -27,6 +36,18 @@ pub enum SessionCommands {
     Show {
         /// Session ID (default: current)
         id: Option<String>,
+    },
+    /// Write a session out in a shareable form
+    Export {
+        /// Session ID (default: current)
+        id: Option<String>,
+        /// `markdown` (default) reads as a transcript; `atif` is the Agent Trajectory
+        /// Interchange Format an external harness can validate.
+        #[arg(long, value_enum, default_value_t = ExportFormat::Markdown)]
+        format: ExportFormat,
+        /// Write here instead of stdout.
+        #[arg(long, short, value_name = "PATH")]
+        out: Option<PathBuf>,
     },
     /// List checkpoints of the current session
     Checkpoints,
@@ -157,6 +178,38 @@ pub fn handle(args: &SessionArgs) -> Result<()> {
             }
             Ok(())
         }
+        SessionCommands::Export { id, format, out } => {
+            let session = match id {
+                Some(sid) => Some(mgr.load(sid)?),
+                None => mgr.load_current()?,
+            };
+            let Some(s) = session else {
+                // Not an error and not an empty file: there is nothing to export, and writing
+                // an empty document would be indistinguishable from a session with no messages.
+                bail!(
+                    "No session to export in {}.\nNothing was written.",
+                    project_dir.display()
+                );
+            };
+            let rendered = match format {
+                ExportFormat::Markdown => render_markdown(&s),
+                ExportFormat::Atif => render_atif(&s)?,
+            };
+            match out {
+                Some(path) => {
+                    if let Some(parent) = path.parent()
+                        && !parent.as_os_str().is_empty()
+                    {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(path, rendered)
+                        .map_err(|e| anyhow::anyhow!("could not write {}: {e}", path.display()))?;
+                    eprintln!("Wrote {} ({format:?}).", path.display());
+                }
+                None => print!("{rendered}"),
+            }
+            Ok(())
+        }
         SessionCommands::Checkpoints => {
             for label in mgr.checkpoint_labels()? {
                 println!("- {}", label);
@@ -225,4 +278,110 @@ pub fn handle(args: &SessionArgs) -> Result<()> {
             }
         }
     }
+}
+
+/// A readable transcript.
+///
+/// The model, provider and cost are in the header because a transcript without them reads as a
+/// conversation that happened to nobody in particular. Usage is printed from what the session
+/// actually recorded; a session that never recorded usage says so rather than showing zeros,
+/// which would be a claim nobody made.
+fn render_markdown(s: &crate::session::Session) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "# {}",
+        if s.title.is_empty() { &s.id } else { &s.title }
+    );
+    let _ = writeln!(out);
+    let _ = writeln!(out, "- Session: `{}`", s.id);
+    let _ = writeln!(out, "- Model: {} ({})", s.model, s.provider);
+    let _ = writeln!(out, "- Project: {}", s.project_path.display());
+    if s.total_input_tokens > 0 || s.total_output_tokens > 0 {
+        let _ = writeln!(
+            out,
+            "- Usage: {} in / {} out",
+            s.total_input_tokens, s.total_output_tokens
+        );
+    }
+    if s.total_cost_usd > 0.0 {
+        let _ = writeln!(out, "- Cost: ${:.4}", s.total_cost_usd);
+    }
+    let _ = writeln!(out, "- Started: {}", s.created_at.to_rfc3339());
+    let _ = writeln!(out);
+    let _ = writeln!(out, "---");
+    let _ = writeln!(out);
+
+    if s.messages.is_empty() {
+        let _ = writeln!(out, "_This session recorded no messages._");
+        return out;
+    }
+    for m in &s.messages {
+        // Fenced, because message content routinely contains its own backticks and code fences,
+        // and a transcript that mangles them is not a transcript.
+        let fence = if m.content.contains("```") {
+            "````"
+        } else {
+            "```"
+        };
+        let _ = writeln!(
+            out,
+            "## {}",
+            if m.role.is_empty() {
+                "unknown"
+            } else {
+                &m.role
+            }
+        );
+        let _ = writeln!(out, "_{}_", m.timestamp.to_rfc3339());
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{fence}");
+        let _ = writeln!(out, "{}", m.content);
+        let _ = writeln!(out, "{fence}");
+        let _ = writeln!(out);
+    }
+    out
+}
+
+/// The same session as an ATIF trajectory, so an external harness can read a conversation
+/// rather than only a pipeline run.
+fn render_atif(s: &crate::session::Session) -> Result<String> {
+    use crate::artifacts::atif::{AtifMetrics, AtifTrajectory};
+    use std::fmt::Write as _;
+
+    let mut t = AtifTrajectory::new(
+        "niki",
+        env!("CARGO_PKG_VERSION"),
+        (!s.model.is_empty()).then(|| s.model.clone()),
+    );
+    for m in &s.messages {
+        // The source is the declared set, not the stored string: a role like "assistant" maps to
+        // `agent`, and anything unrecognised is an `agent` step rather than an invented source
+        // the ATIF schema does not allow.
+        let source = match m.role.as_str() {
+            "system" => "system",
+            "user" => "user",
+            _ => "agent",
+        };
+        t.push(source, m.content.clone(), Some(m.timestamp.to_rfc3339()));
+    }
+
+    let last = t.last_step_mut();
+    if s.total_input_tokens > 0 || s.total_output_tokens > 0 || s.total_cost_usd > 0.0 {
+        if let Some(step) = last {
+            step.metrics = Some(AtifMetrics {
+                prompt_tokens: Some(s.total_input_tokens as u32),
+                completion_tokens: Some(s.total_output_tokens as u32),
+                cached_tokens: None,
+                cost_usd: (s.total_cost_usd > 0.0).then_some(s.total_cost_usd),
+            });
+        }
+    }
+    t.finalize(s.total_cost_usd > 0.0);
+    let mut json = t.to_json()?;
+    // The writer emits no trailing newline; a file that ends mid-line is a nuisance to diff.
+    let _ = writeln!(json);
+    Ok(json)
 }

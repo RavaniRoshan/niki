@@ -65,6 +65,30 @@ fn default_skill_version() -> u32 {
     1
 }
 
+impl SkillMetadata {
+    /// A blank record for a skill read from a `SKILL.md` header.
+    ///
+    /// Field-by-field rather than `..Default::default()` because `SkillMetadata` has no
+    /// `Default`: the promotion path is supposed to supply every field deliberately, and a
+    /// derived `Default` would let a new field be forgotten here without a compiler error.
+    fn blank(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            version: default_skill_version(),
+            description: String::new(),
+            source_runs: Vec::new(),
+            verdicts: Vec::new(),
+            model: String::new(),
+            created_at: String::new(),
+            updated_at: String::new(),
+            status: default_skill_status(),
+            retire_reason: None,
+            snapshot_ref: String::new(),
+            history: Vec::new(),
+        }
+    }
+}
+
 fn default_skill_status() -> SkillStatus {
     SkillStatus::Active
 }
@@ -745,5 +769,298 @@ mod tests {
         );
         assert!(list_project_skills_for(root).contains(&"legacy-skill".to_string()));
         assert!(load_project_skill_for(root, "legacy-skill").is_some());
+    }
+}
+
+// ── SKILL.md frontmatter ────────────────────────────────────────────────────
+
+/// One `key: value` from a SKILL.md frontmatter block.
+///
+/// The format is the one Claude Code, Kimi Code and the `~/.agents/skills/` layer all use:
+/// a `---` fenced YAML header, then the Markdown body. Only flat `key: value` scalars are read,
+/// because that is what the field names below are; a skill whose header uses nested YAML still
+/// loads, with the fields NIKI uses populated and the rest ignored. Anything richer would be a
+/// YAML dependency for keys no consumer here reads.
+fn frontmatter_scalar(frontmatter: &str, key: &str) -> Option<String> {
+    for line in frontmatter.lines() {
+        let line = line.trim();
+        // A nested or list line (`  - foo`, `key:`) is not the key being asked for.
+        let Some(rest) = line.strip_prefix(key).and_then(|r| r.strip_prefix(':')) else {
+            continue;
+        };
+        let value = rest.trim().trim_matches('"').trim_matches('\'').trim();
+        if value.is_empty() {
+            continue;
+        }
+        return Some(value.to_string());
+    }
+    None
+}
+
+/// Read a `SKILL.md` into NIKI's metadata plus the body, or `None` when it is not one.
+///
+/// `metadata.json` remains the source of truth for NIKI-promoted skills, because that is what
+/// `niki skills promote` writes and what the lock file tracks. This is the *other* format: a
+/// hand-written or third-party SKILL.md with no sibling JSON, which is how most skills in the
+/// wild arrive. Before this, such a skill was silently invisible.
+pub fn read_skill_md(path: &Path) -> Option<(SkillMetadata, String)> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let (frontmatter, body) = split_skill_frontmatter(&content);
+    if body.trim().is_empty() {
+        return None;
+    }
+
+    // The directory name is the identity. A header `name:` that disagrees with it is ignored,
+    // because that is what the tools address skills by, and a skill listed under a name it does
+    // not answer to is worse than one listed under the name it does.
+    let name = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+    if name.is_empty() {
+        return None;
+    }
+
+    // `summary` is the short form Claude Code shows; `description` is the long one. Prefer the
+    // long one and fall back, rather than joining them into something no field described.
+    let description = frontmatter_scalar(frontmatter, "description")
+        .or_else(|| frontmatter_scalar(frontmatter, "summary"))
+        .or_else(|| frontmatter_scalar(frontmatter, "when_to_use"))
+        .unwrap_or_default();
+
+    let version = frontmatter_scalar(frontmatter, "version")
+        .and_then(|v| v.split('.').next().and_then(|n| n.parse::<u32>().ok()))
+        .unwrap_or_else(default_skill_version);
+
+    let status = match frontmatter_scalar(frontmatter, "status").as_deref() {
+        Some("retired") => SkillStatus::Retired,
+        _ => SkillStatus::Active,
+    };
+
+    let mut meta = SkillMetadata::blank(&name);
+    meta.version = version;
+    meta.description = description;
+    meta.status = status;
+    Some((meta, body.to_string()))
+}
+
+/// Split a SKILL.md into `(frontmatter, body)`.
+///
+/// Without a leading `---`, the whole file is the body — the same rule the slash-command
+/// registry uses, because one rule for two formats is easier to keep honest than two.
+fn split_skill_frontmatter(content: &str) -> (&str, &str) {
+    let Some(rest) = content.strip_prefix("---") else {
+        return ("", content);
+    };
+    let rest = rest.strip_prefix('\n').unwrap_or(rest);
+    for (idx, line) in rest.split_inclusive('\n').enumerate() {
+        if line.trim() == "---" {
+            let offset: usize = rest.split_inclusive('\n').take(idx + 1).map(str::len).sum();
+            return (&rest[..offset - line.len()], &rest[offset..]);
+        }
+    }
+    ("", content)
+}
+
+/// Every directory that may hold skills, in precedence order.
+///
+/// NIKI's own promoted skills come first, then the formats other tools write. Searching
+/// `.claude/skills` and `.agents/skills` is what makes an existing skill *work* here rather than
+/// merely being present on disk.
+pub fn skill_search_paths(project_path: &Path, config: &NikiConfig) -> Vec<PathBuf> {
+    let mut out = vec![project_skills_dir(project_path, config)];
+    for rel in [".claude/skills", ".agents/skills"] {
+        let p = project_path.join(rel);
+        if p.is_dir() {
+            out.push(p);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".agents/skills");
+        if p.is_dir() {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Every skill visible to this project, from every path, without duplicates.
+///
+/// A skill in two paths appears once, taking the first: NIKI's own promoted copy is the one it
+/// maintains and the one whose hash the lock file tracks.
+pub fn list_all_skills(project_path: &Path, config: &NikiConfig) -> Vec<(SkillMetadata, String)> {
+    let mut seen: Vec<String> = Vec::new();
+    let mut out: Vec<(SkillMetadata, String)> = Vec::new();
+
+    for root in skill_search_paths(project_path, config) {
+        let Ok(rd) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if seen.iter().any(|s| s == name) {
+                continue;
+            }
+            let found = read_skill_md(&dir.join("SKILL.md")).or_else(|| {
+                let body = std::fs::read_to_string(dir.join("SKILL.md")).ok()?;
+                let text = std::fs::read_to_string(dir.join("metadata.json")).ok()?;
+                let meta = serde_json::from_str::<SkillMetadata>(&text).ok()?;
+                Some((meta, body))
+            });
+            let Some((meta, body)) = found else {
+                continue;
+            };
+            if meta.status == SkillStatus::Retired {
+                continue;
+            }
+            seen.push(name.to_string());
+            out.push((meta, body));
+        }
+    }
+    out.sort_by(|a, b| a.0.name.cmp(&b.0.name));
+    out
+}
+
+/// Load one skill body by name, from any search path.
+pub fn load_skill(
+    project_path: &Path,
+    config: &NikiConfig,
+    name: &str,
+) -> Option<(String, String)> {
+    for root in skill_search_paths(project_path, config) {
+        let dir = root.join(name);
+        if let Ok(body) = std::fs::read_to_string(dir.join("SKILL.md")) {
+            return Some((body, dir.display().to_string()));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod frontmatter_tests {
+    use super::*;
+
+    #[test]
+    fn a_skill_md_with_frontmatter_yields_name_description_and_body() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let d = dir.path().join("aha");
+        std::fs::create_dir_all(&d).expect("mkdir");
+        std::fs::write(
+            d.join("SKILL.md"),
+            "---\nname: aha\ndescription: Use when hunting bugs.\nversion: \"20.1.0\"\n---\n\nDo the thing.\n",
+        )
+        .expect("write");
+
+        let (meta, body) = read_skill_md(&d.join("SKILL.md")).expect("parses");
+        assert_eq!(meta.name, "aha", "the directory name is the identity");
+        assert_eq!(meta.description, "Use when hunting bugs.");
+        assert_eq!(meta.version, 20, "a two-part version yields its major");
+        assert!(body.contains("Do the thing."));
+        assert!(
+            !body.contains("description:"),
+            "frontmatter leaked into the body: {body}"
+        );
+    }
+
+    #[test]
+    fn a_real_third_party_header_loads() {
+        // The shape an actual `~/.agents/skills` entry uses: extra keys, single and double
+        // quotes, a summary and a when_to_use, and a non-numeric version.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let d = dir.path().join("email-render-builder");
+        std::fs::create_dir_all(&d).expect("mkdir");
+        std::fs::write(
+            d.join("SKILL.md"),
+            "---\nname: email-render-builder\nslug: a-x\ndisplayName: \"Email Render Builder\"\nsummary: \"email HTML\"\ndescription: 'Use when the user asks to build the email HTML'\nversion: \"20.1.0\"\nlicense: Apache-2.0\nwhen_to_use: \"Use when coding the HTML build\"\nargument-hint: \"<creative> [clients]\"\n---\n\n# Body here\n",
+        )
+        .expect("write");
+
+        let (meta, body) = read_skill_md(&d.join("SKILL.md")).expect("parses");
+        assert_eq!(meta.name, "email-render-builder");
+        assert!(
+            meta.description.starts_with("Use when the user asks"),
+            "the quoted description did not parse: {:?}",
+            meta.description
+        );
+        assert!(body.contains("# Body here"));
+    }
+
+    #[test]
+    fn a_longer_key_does_not_match_a_prefix_of_itself() {
+        // `name:` must not be satisfied by `namespace:`, which is how a naive scanner reports a
+        // field that is not there.
+        let fm = "namespace: other\nname: real\n";
+        assert_eq!(frontmatter_scalar(fm, "name").as_deref(), Some("real"));
+    }
+
+    #[test]
+    fn summary_and_when_to_use_are_fallbacks_not_additions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for (header, expected) in [
+            ("summary: short only", "short only"),
+            ("when_to_use: when only", "when only"),
+        ] {
+            let d = dir.path().join(format!("s{}", expected.len()));
+            std::fs::create_dir_all(&d).expect("mkdir");
+            std::fs::write(d.join("SKILL.md"), format!("---\n{header}\n---\nbody\n"))
+                .expect("write");
+            let (meta, _) = read_skill_md(&d.join("SKILL.md")).expect("parses");
+            assert_eq!(
+                meta.description, expected,
+                "fallback did not apply for {header}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_file_with_no_frontmatter_is_all_body() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let d = dir.path().join("plain");
+        std::fs::create_dir_all(&d).expect("mkdir");
+        std::fs::write(d.join("SKILL.md"), "Just a body, no header.\n").expect("write");
+        let (meta, body) = read_skill_md(&d.join("SKILL.md")).expect("parses");
+        assert_eq!(
+            meta.description, "",
+            "no header means no description, not a invented one"
+        );
+        assert_eq!(body.trim(), "Just a body, no header.");
+        assert_eq!(meta.version, default_skill_version());
+    }
+
+    #[test]
+    fn an_unterminated_header_is_all_body() {
+        let (fm, body) = split_skill_frontmatter("---\nname: x\nno closing fence\n");
+        assert_eq!(fm, "", "an unterminated header must not be parsed as one");
+        assert!(body.contains("name: x"));
+    }
+
+    #[test]
+    fn a_retired_skill_is_marked_retired() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let d = dir.path().join("old");
+        std::fs::create_dir_all(&d).expect("mkdir");
+        std::fs::write(d.join("SKILL.md"), "---\nstatus: retired\n---\nbody\n").expect("write");
+        let (meta, _) = read_skill_md(&d.join("SKILL.md")).expect("parses");
+        assert_eq!(meta.status, SkillStatus::Retired);
+    }
+
+    #[test]
+    fn a_skill_with_no_body_is_not_a_skill() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let d = dir.path().join("empty");
+        std::fs::create_dir_all(&d).expect("mkdir");
+        std::fs::write(d.join("SKILL.md"), "---\nname: empty\n---\n").expect("write");
+        assert!(
+            read_skill_md(&d.join("SKILL.md")).is_none(),
+            "a header with no body is not a skill"
+        );
     }
 }

@@ -189,7 +189,31 @@ impl ToolPolicy {
             ))),
             PermissionRequirement::Ask => {
                 match self.permission_mode.to_ascii_lowercase().as_str() {
-                    "bypass" | "dontask" | "auto" => Ok(()),
+                    "bypass" | "dontask" | "auto" => {
+                        // Every decision is logged, and this is the one that most needs it.
+                        //
+                        // Nothing asked anybody. `Ok(())` here is silent, so a run that
+                        // auto-approved every command left no record that it had — which is
+                        // exactly the run someone wants to audit afterwards and cannot. The
+                        // sandbox backends already print this line for their own prompt
+                        // (`niki: auto-approved '…'`); this is the policy layer, which had
+                        // no equivalent.
+                        tracing::warn!(
+                            target: "niki::permissions",
+                            tool = tool_name,
+                            mode = %self.permission_mode,
+                            "auto-approved '{}' without asking: permission mode '{}' turns an \
+                             Ask into an Allow, and nobody was asked",
+                            tool_name,
+                            self.permission_mode
+                        );
+                        eprintln!(
+                            "niki: auto-approved '{tool_name}' without asking — permission mode \
+                             '{}' turns an Ask into an Allow",
+                            self.permission_mode
+                        );
+                        Ok(())
+                    }
                     _ => Err(PolicyViolation::PermissionDenied(format!(
                         "tool '{}' requires approval (Ask) but permission mode '{}' operates headless",
                         tool_name, self.permission_mode

@@ -158,3 +158,21 @@ the list; `--check` is wired into the gate.
 - Copy `niki.example.toml` → `niki.toml` for a full config reference.
 
 See `CONTRIBUTING.md`, `README.md` (CLI reference, project structure), and `docs/content/` for deeper detail.
+
+---
+
+# NIKI ship + perform
+
+- Read `docs/ship/PACK.md` completely at the start of every session and after any `/compact`.
+- Memory lives in `docs/ship/CHECKLIST.md`, `PROGRESS.md`, `DESIGN.md`, `BUDGET.md`. Re-read them
+  before each phase.
+- Never publish, tag, push, or submit anything. Prepare it and stop for the owner.
+
+> **Read this before following the rule above.** As of this writing `docs/ship/` holds only
+> `niki-ship-and-perform-mega-prompt.md`; `PACK.md`, `CHECKLIST.md`, `PROGRESS.md`, `DESIGN.md` and
+> `BUDGET.md` do not exist yet. Until they do, the working memory is
+> `docs/foundation/DESIGN.md`, `docs/foundation/CHECKLIST.md`, `docs/foundation/PROGRESS.md` and
+> `docs/foundation/GAPS.md` — read those instead of the missing paths.
+>
+> This section also supersedes earlier instructions to push: **do not push, tag or publish from
+> now on.** Prepare the work and stop for the owner.

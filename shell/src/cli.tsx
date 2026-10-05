@@ -69,6 +69,26 @@ function enterTerminal(): TerminalState {
   return { mouseOn: true, rawMode: true };
 }
 
+/**
+ * Whether this process has a terminal it can safely take over.
+ *
+ * Both ends matter: a stdout that is a pipe means every sequence below would be written into a
+ * file or another program's input, and a stdin that is not a terminal means keypresses and
+ * Ctrl+C would never arrive, so the interface would start and then be unable to be driven or
+ * stopped.
+ *
+ * `TERM` is deliberately not part of this. `dumb` with a real TTY is a supported mode the
+ * render path already handles and the PTY suite already proves; it is not the same failure as
+ * having no terminal at all, and treating them alike would take away a mode that works.
+ */
+export function isInteractive(
+  env: NodeJS.ProcessEnv = process.env,
+  out: { isTTY?: boolean } = process.stdout,
+  input: { isTTY?: boolean } = process.stdin,
+): boolean {
+  return out.isTTY === true && input.isTTY === true;
+}
+
 function restoreTerminal(state: TerminalState): void {
   // Idempotent and unconditional: every exit path calls it, and calling it twice must not send
   // the user a stray escape sequence.
@@ -97,6 +117,31 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const reducedMotion = reducedMotionFromEnv(env);
   const charset = charsetFromEnv(env);
   void noColorFromEnv(env);
+
+  // No terminal, no interface — and say so in words rather than in escape bytes.
+  //
+  // This used to call `enterTerminal()` unconditionally, so a process whose stdout was a pipe
+  // or a file received `[?1049h[?25l[?1000h[?1006h[?2004h` and then exited 0 with nothing else:
+  // garbage in whatever captured it, no message, and a success code. That is the first thing a
+  // user in a broken or automated environment sees, and it tells them nothing.
+  //
+  // `niki chat` already refused this way and named the way to work without a terminal
+  // (`j_chat_without_a_terminal_says_so`); the shell now answers the same question the same
+  // shape. Exit 2 matches `niki`'s own "you invoked me wrong" code.
+  if (!isInteractive(env)) {
+    process.stderr.write(
+      'niki-shell needs a terminal, and this process has none.\n' +
+        'Nothing was drawn and nothing was started.\n' +
+        '\n' +
+        'To work without a terminal:\n' +
+        '  niki run "…" --output-format json     the pipeline, one JSON envelope on stdout\n' +
+        '  niki run "…" --atif-out traj.json    …plus a trajectory an external harness can read\n' +
+        '  niki chat -m "…"                      one answer, no interface\n' +
+        '\n' +
+        'For the interface itself, run this command in a real terminal.\n',
+    );
+    return 2;
+  }
 
   const terminal = enterTerminal();
   let exited = false;

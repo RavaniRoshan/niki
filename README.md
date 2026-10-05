@@ -48,9 +48,12 @@ produced.
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0_·_open_source-2da44f)](LICENSE)
 [![Status: beta](https://img.shields.io/badge/status-beta-58a6ff)](#roadmap)
 
-<sub>946 unit tests · ~540 integration tests across 53 binaries · 11 canaries that inject real
-defects to prove the suite fails when the product is broken · Apache-2.0, no telemetry, your
-own keys</sub>
+<sub>A suite that includes canaries injecting real defects, to prove the checks fail when the
+product is broken · Apache-2.0, no telemetry, your own keys</sub>
+
+<sub>Test counts are deliberately absent. A number nobody regenerates is a number that is wrong
+within a release; `scripts/gen-readme-counts.sh` measures them and `--check` keeps a hand-typed
+one from coming back.</sub>
 
 <br>
 
@@ -255,16 +258,17 @@ niki run "Add a /health endpoint" --project /path/to/your/project
 niki report <id>    # full report, or a unique short prefix
 ```
 
-**First verified branch in under five minutes** once prerequisites are in place —
-about two of those on Path A (install + `ollama pull qwen2.5-coder`), since there
-is no image to build and no key to provision.
+**Time-to-branch is not published here.** It was claimed as "under five minutes" for several
+releases with nothing measuring it, and a wall-clock figure nobody re-measures is a figure that
+is wrong. `scripts/demo.sh` runs the whole first-run story end to end against a scripted model if
+you want to time it on your own machine.
 
 > **What does a task cost?** NIKI is free software; you pay only your provider
-> (or nothing — local Ollama runs are **$0.00**). Measured on a real small task
-> (~2.9k input / ~0.25k output tokens across the pipeline, priced at NIKI's own
-> meter rates): **~$0.01 on Claude Sonnet 4, <$0.005 on Haiku or GPT-4o-mini**.
-> Every run reports exact tokens and cost, `general.spend_cap_usd` aborts past
-> your ceiling, and unpriced models warn instead of silently costing $0.00.
+> (or nothing — a local model costs **$0.00**). No per-task dollar figure is published here yet:
+> the one that was, was typed by hand and drifted from what runs actually spend. Every run
+> reports its own exact tokens and cost from real usage, `general.spend_cap_usd` aborts past your
+> ceiling, and an unpriced model warns rather than silently costing $0.00. Run
+> `niki run --output-format json` and read `cost_usd` — that number is the one.
 
 ### Verify your setup
 

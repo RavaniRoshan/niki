@@ -28,6 +28,7 @@ fn run_args(project: PathBuf) -> niki::cli::run::RunArgs {
         max_steps: None,
         max_usd: None,
         max_wallclock_secs: None,
+        atif_out: None,
         planner_model: None,
         coder_model: None,
         tester_model: None,

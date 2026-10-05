@@ -120,8 +120,21 @@ describe('the reference loop, through the PTY driver', () => {
     return s;
   }
 
+  // This asserted only that the file existed, while its name promised the *feature*. A plain
+  // `cargo build` replaces `target/debug/niki` without `fixture-runtime`, that assertion stayed
+  // green, and the three tests below it skipped — which is how 403 shell tests could pass while
+  // the only leg that drives the real binary end to end was silently absent.
   it('has the fixture-enabled binary', () => {
-    expect(binaryAvailable, 'run: cargo build -j 2 --features fixture-runtime').toBe(true);
+    expect(
+      binaryAvailable,
+      'run: cargo build -j 2 --features fixture-runtime',
+    ).toBe(true);
+    expect(
+      fixtureAvailable,
+      'target/debug/niki exists but was built without `fixture-runtime`, so `niki serve --fixture` \
+       does not exist and every test below this line silently skipped. Rebuild it with: \
+       cargo build -j 2 --features fixture-runtime',
+    ).toBe(true);
   });
 
   it.skipIf(!fixtureAvailable)('replays the whole reference loop on the real screen', async () => {

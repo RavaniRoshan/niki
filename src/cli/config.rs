@@ -21,6 +21,8 @@ pub enum ConfigCommands {
     Schema,
     /// Report what is wrong with niki.toml, and exit non-zero if anything is
     Check,
+    /// Show every effective value and which layer it came from
+    Explain,
 }
 
 pub async fn handle(command: &ConfigCommands) -> Result<()> {
@@ -28,6 +30,7 @@ pub async fn handle(command: &ConfigCommands) -> Result<()> {
         ConfigCommands::Init { interactive, scan } => cmd_init(*interactive, *scan).await,
         ConfigCommands::Schema => cmd_schema(),
         ConfigCommands::Check => cmd_check(),
+        ConfigCommands::Explain => cmd_explain(),
     }
 }
 
@@ -99,6 +102,192 @@ fn cmd_check() -> Result<()> {
         );
         std::process::exit(1);
     }
+    Ok(())
+}
+
+/// One setting worth explaining: where the value lives, the environment variable that
+/// overrides it, and whether printing the value is safe.
+///
+/// The `secret` flag is not decoration. `ANTHROPIC_API_KEY` is a real setting with a real
+/// source, and a report that prints it turns a diagnostic into a credential written to a
+/// terminal, a scrollback buffer and a CI log.
+struct Tracked {
+    /// Dotted path into `niki.toml`, e.g. `general.spend_cap_usd`.
+    path: &'static str,
+    /// The env var that beats every file, or `None` when nothing does.
+    env: Option<&'static str>,
+    /// What the loader uses when no file and no env set it.
+    default: &'static str,
+    secret: bool,
+}
+
+const fn setting(path: &'static str, default: &'static str) -> Tracked {
+    Tracked {
+        path,
+        env: None,
+        default,
+        secret: false,
+    }
+}
+
+const fn provider_setting(
+    path: &'static str,
+    env: &'static str,
+    default: &'static str,
+    secret: bool,
+) -> Tracked {
+    Tracked {
+        path,
+        env: Some(env),
+        default,
+        secret,
+    }
+}
+
+/// Only settings whose environment override the loader actually honours are listed with one.
+///
+/// The first version of this table named `NIKI_PLANNER_MODEL` and friends. Nothing reads those
+/// variables, so the report would have claimed a file was overridden by an environment that
+/// does not exist — a lie a user would act on. The names below are the ones
+/// `NikiConfig::apply_env_lookup` reads.
+const TRACKED: &[Tracked] = &[
+    setting("general.max_revision_rounds", "3"),
+    setting("general.output_dir", ".niki"),
+    setting("general.spend_cap_usd", "0.0"),
+    setting("general.max_diff_lines", "0"),
+    setting("general.max_context_chars", "48000"),
+    setting("docker.backend", "docker"),
+    setting("permissions.mode", "manual"),
+    setting("agents.coder.provider", "(provider default)"),
+    provider_setting(
+        "providers.anthropic.api_key",
+        "ANTHROPIC_API_KEY",
+        "(unset)",
+        true,
+    ),
+    provider_setting(
+        "providers.anthropic.base_url",
+        "ANTHROPIC_BASE_URL",
+        "(unset)",
+        false,
+    ),
+    provider_setting(
+        "providers.anthropic.default_model",
+        "ANTHROPIC_MODEL",
+        "(provider default)",
+        false,
+    ),
+    provider_setting(
+        "providers.openai.api_key",
+        "OPENAI_API_KEY",
+        "(unset)",
+        true,
+    ),
+    provider_setting(
+        "providers.openai.base_url",
+        "OPENAI_BASE_URL",
+        "(unset)",
+        false,
+    ),
+    provider_setting(
+        "providers.openai.default_model",
+        "OPENAI_MODEL",
+        "(provider default)",
+        false,
+    ),
+];
+
+/// Show every effective value and which layer produced it.
+///
+/// The reason this exists: layering is invisible until it is wrong. Three files, an environment
+/// and a pile of defaults, and a setting that is not doing what the file says has no symptom
+/// other than the setting being wrong. `niki config check` says whether a file *parses*; this
+/// says what the loader actually used and where it came from.
+///
+/// The precedence is the loader's own, taken from `NikiConfig::apply_env_lookup` and
+/// `NikiConfig::load`: a non-empty environment variable wins where the loader honours one, and
+/// otherwise the project file beats the user file beats the built-in default. Reporting a
+/// source the loader would not have used is worse than reporting nothing.
+fn cmd_explain() -> Result<()> {
+    let project_dir = std::env::current_dir()?;
+    let project_file = project_dir.join("niki.toml");
+    let user_file = dirs::home_dir().map(|h| h.join(".config/niki/niki.toml"));
+
+    let read = |p: &std::path::Path| -> Option<toml::Value> {
+        if !p.exists() {
+            return None;
+        }
+        fs::read_to_string(p)
+            .ok()
+            .and_then(|c| c.parse::<toml::Value>().ok())
+    };
+    let project = read(&project_file);
+    let user = user_file.as_deref().and_then(read);
+
+    println!("NIKI configuration — effective values and where each came from");
+    println!();
+    println!("  project file: {}", project_file.display());
+    println!(
+        "  user file:    {}",
+        user_file
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "(none)".into())
+    );
+    println!();
+    println!("  {:<38} {:<24} source", "setting", "value");
+    println!("  {}", "-".repeat(78));
+
+    for t in TRACKED {
+        // Walk the dotted path. A layer only wins if it actually carries the key, so a file that
+        // sets `general.output_dir` does not mask a `docker.backend` in the same file.
+        let lookup = |doc: Option<&toml::Value>| -> Option<String> {
+            let mut node = doc?;
+            for part in t.path.split('.') {
+                node = node.get(part)?;
+            }
+            match node.as_str() {
+                Some(s) => Some(s.to_string()),
+                None => Some(node.to_string()),
+            }
+        };
+
+        let env_value = t
+            .env
+            .and_then(|name| std::env::var(name).ok())
+            .filter(|v| !v.is_empty());
+
+        // Env first, then project, then user, then default — the loader's order.
+        let (value, source) = if let Some(v) = env_value {
+            (v, format!("environment {}", t.env.unwrap_or_default()))
+        } else if let Some(v) = lookup(project.as_ref()) {
+            (v, format!("{}", project_file.display()))
+        } else if let Some(v) = lookup(user.as_ref()) {
+            (
+                v,
+                user_file
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "user file".into()),
+            )
+        } else {
+            (t.default.to_string(), "built-in default".to_string())
+        };
+
+        // A secret reports that it is set, never what it is.
+        let shown = if t.secret && source != "built-in default" {
+            "(set)".to_string()
+        } else {
+            value
+        };
+        println!("  {:<38} {:<24} {}", t.path, shown, source);
+    }
+
+    println!();
+    println!(
+        "  Precedence: environment, then project file, then user file, then built-in default."
+    );
+    println!("  Secret values are reported as set or unset, never printed.");
     Ok(())
 }
 

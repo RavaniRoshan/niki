@@ -185,6 +185,10 @@ struct Check {
 pub fn handle(args: &DoctorArgs) -> Result<()> {
     let mut checks: Vec<Check> = Vec::new();
 
+    // Both backends need git and nothing else, so one probe answers two questions: whether to
+    // report the sandbox check as a warning or a failure, and what to tell a user who has it.
+    let git_available = git_available();
+
     checks.extend(check_install());
     checks.extend(check_config());
     checks.extend(check_providers());
@@ -203,8 +207,9 @@ pub fn handle(args: &DoctorArgs) -> Result<()> {
             checks.push(check_sandbox_image(&cfg.docker.base_image));
             checks.push(check_container_can_start(&cfg.docker.base_image));
         }
-        checks.push(check_backend_vs_runtime(&cfg));
+        checks.push(check_backend_vs_runtime(&cfg, git_available));
     }
+    checks.push(check_terminal());
 
     if args.measure {
         let cfg = cfg_for_measure();
@@ -810,10 +815,74 @@ fn check_sandbox() -> Vec<Check> {
 /// It was missing entirely, which is how a machine that runs NIKI perfectly
 /// well on Ollama plus the worktree backend was told, by the very command the
 /// README tells a new user to run, to install a container runtime.
-fn check_backend_vs_runtime(cfg: &NikiConfig) -> Check {
+/// Whether git runs here. One probe, used by two checks that must agree.
+fn git_available() -> bool {
+    Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Can this process actually drive a terminal interface?
+///
+/// This check is new and it exists because the interface's own failure was silent. `niki-shell`
+/// with no TTY wrote escape sequences into whatever captured it and exited 0; a user in a
+/// container, a CI job or a redirected shell had no way to learn that from `doctor`, which said
+/// nothing about terminals at all.
+fn stdout_is_a_terminal() -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY: `isatty` takes a file descriptor and has no preconditions; STDOUT_FILENO is
+        // always a valid descriptor for the calling process.
+        unsafe { libc::isatty(libc::STDOUT_FILENO) != 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+fn check_terminal() -> Check {
+    // TERM tells us what the terminal claims to be; the TTY checks tell us what this process
+    // actually has. They are different questions and the answer is only "fine" when both agree.
+    let term = std::env::var("TERM").unwrap_or_default();
+    let has_tty = stdout_is_a_terminal();
+    let name = "terminal capability".to_string();
+
+    let result = if term == "dumb" {
+        CheckResult::Warn(
+            "TERM=dumb — the interface will render a plain, deliberately reduced layout. It is \
+             usable; it will not draw colour or alternate-screen transitions."
+                .to_string(),
+        )
+    } else if !has_tty {
+        CheckResult::Warn(
+            "no terminal on stdout. The interface (`niki-shell`) needs one and will refuse \
+             without it. Everything else works headlessly: `niki run --output-format json`, \
+             `niki chat -m \"...\"`, `niki doctor`, `niki serve`."
+                .to_string(),
+        )
+    } else {
+        CheckResult::Pass(format!(
+            "{} on {}",
+            if term.is_empty() { "TERM unset" } else { &term },
+            if cfg!(windows) { "windows" } else { "unix" }
+        ))
+    };
+
+    Check {
+        category: "interface",
+        name,
+        result,
+    }
+}
+
+fn check_backend_vs_runtime(cfg: &NikiConfig, git_available: bool) -> Check {
     backend_vs_runtime(
         cfg.docker.backend,
         crate::sandbox::detect_container_runtime(),
+        git_available,
     )
 }
 
@@ -824,7 +893,11 @@ fn check_backend_vs_runtime(cfg: &NikiConfig) -> Check {
 /// documented keyless, containerless path lands in — and the previous behaviour
 /// there was to report "install a container runtime" with no mention of the
 /// backend that needs none.
-fn backend_vs_runtime(backend: SandboxBackend, runtime: Option<String>) -> Check {
+fn backend_vs_runtime(
+    backend: SandboxBackend,
+    runtime: Option<String>,
+    git_available: bool,
+) -> Check {
     let name = "sandbox backend matches this machine".to_string();
     match (backend, runtime) {
         (SandboxBackend::Worktree, _) => Check {
@@ -842,16 +915,40 @@ fn backend_vs_runtime(backend: SandboxBackend, runtime: Option<String>) -> Check
             name,
             result: CheckResult::Pass(format!("backend = docker, using {rt}")),
         },
+        // Severity here is the whole question, and it was answered wrongly.
+        //
+        // `(docker, no runtime)` on a machine that has git is a **warning**, not a failure: one
+        // flag — `--backend worktree` — makes the very next command work, and the message below
+        // says so. Reporting it as a failure made `niki doctor` exit non-zero on machines where
+        // NIKI runs perfectly well, which is the same class of bug as the bare "no container
+        // runtime" line this check replaced: true, useless, and alarming.
+        //
+        // With no git either, there is genuinely no backend this machine can run, so it stays a
+        // failure. That is the honest difference between the two.
+        (SandboxBackend::Docker, None) if git_available => Check {
+            category: "sandbox",
+            name,
+            result: CheckResult::Warn(
+                "backend = docker but no container runtime was found. Your next run still works \
+                 if you pass `--backend worktree`, which needs no container: \
+                 niki run \"...\" --backend worktree. To make docker the default instead, install \
+                 Podman (`sudo apt install podman`, or see https://podman.io) and build the \
+                 sandbox image (`podman build -t niki-sandbox:24.04 -f docker/Dockerfile .`), \
+                 or set `[docker] backend = \"worktree\"` in niki.toml. `niki init --interactive` \
+                 picks the right one for this machine."
+                    .to_string(),
+            ),
+        },
         (SandboxBackend::Docker, None) => Check {
             category: "sandbox",
             name,
             result: CheckResult::Fail(
-                "backend = docker but no container runtime was found, so `niki run` will \
-                 fail to start. Either install Podman (`sudo apt install podman`, or see \
-                 https://podman.io) and build the sandbox image \
-                 (`podman build -t niki-sandbox:24.04 -f docker/Dockerfile .`), or run \
-                 without a container by setting `[docker] backend = \"worktree\"` in \
-                 niki.toml. `niki init --interactive` picks the right one for this machine."
+                "backend = docker but no container runtime was found, and git is not installed \
+                 either, so neither backend can run. Install Podman (`sudo apt install podman`, \
+                 or see https://podman.io) and build the sandbox image \
+                 (`podman build -t niki-sandbox:24.04 -f docker/Dockerfile .`), or install git \
+                 and set `[docker] backend = \"worktree\"` in niki.toml. `niki init \
+                 --interactive` picks the right one for this machine."
                     .to_string(),
             ),
         },
@@ -1039,32 +1136,55 @@ mod tests {
         let with_runtime = Some("podman version 5.0.0".to_string());
 
         // The keyless, containerless machine: passes, and says why.
-        let ok = backend_vs_runtime(SandboxBackend::Worktree, no_runtime.clone());
+        let ok = backend_vs_runtime(SandboxBackend::Worktree, no_runtime.clone(), true);
         assert!(
             matches!(ok.result, CheckResult::Pass(_)),
             "worktree + no runtime must pass; it is a fully supported configuration"
         );
 
         // Container backend on a machine that has one: passes.
-        let ok = backend_vs_runtime(SandboxBackend::Docker, with_runtime.clone());
+        let ok = backend_vs_runtime(SandboxBackend::Docker, with_runtime.clone(), true);
         assert!(matches!(ok.result, CheckResult::Pass(_)));
 
-        // Container backend on a machine that has none: fails, and must offer
-        // the way out that needs no container.
-        let bad = backend_vs_runtime(SandboxBackend::Docker, no_runtime);
-        let msg = match &bad.result {
-            CheckResult::Fail(m) => m.clone(),
-            CheckResult::Pass(m) => panic!("expected a failure, got a pass: {m}"),
-            CheckResult::Warn(m) => panic!("expected a failure, got a warning: {m}"),
+        // Container backend, no runtime, but git: a WARNING, because `--backend worktree` makes
+        // the next command work and the message says so.
+        let warned = backend_vs_runtime(SandboxBackend::Docker, no_runtime.clone(), true);
+        let msg = match &warned.result {
+            CheckResult::Warn(m) => m.clone(),
+            CheckResult::Pass(m) => panic!("a warning was expected, got a pass: {m}"),
+            CheckResult::Fail(m) => panic!(
+                "a machine with git can run NIKI on the worktree backend, so this must not be a \
+                 hard failure: {m}"
+            ),
         };
         assert!(
-            msg.contains("worktree"),
-            "the failure must name the backend that needs no container, not just \
-             tell the user to install one: {msg}"
+            msg.contains("--backend worktree"),
+            "the warning must name the flag that makes the next command work: {msg}"
         );
         assert!(
             msg.contains("niki run"),
-            "the failure must say what will break: {msg}"
+            "the warning must say what to do, not just what is wrong: {msg}"
+        );
+
+        // Container backend, no runtime, and no git: now it really is a failure, because there
+        // is no backend this machine can run.
+        let bad = backend_vs_runtime(SandboxBackend::Docker, no_runtime, false);
+        let msg = match &bad.result {
+            CheckResult::Fail(m) => m.clone(),
+            CheckResult::Pass(m) => panic!("expected a failure, got a pass: {m}"),
+            CheckResult::Warn(m) => panic!(
+                "with neither a container runtime nor git there is no working backend, so this \
+                 must not be a warning: {m}"
+            ),
+        };
+        assert!(
+            msg.contains("worktree"),
+            "the failure must name the backend that needs no container, not just tell the user \
+             to install one: {msg}"
+        );
+        assert!(
+            msg.contains("git"),
+            "the failure must say what is missing: {msg}"
         );
     }
 
