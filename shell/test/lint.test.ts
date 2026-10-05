@@ -48,6 +48,7 @@ const GLYPH_FILE = join(SRC, 'glyphs.ts');
 const MASCOT_FILE = join(SRC, 'mascot.ts');
 const DISPATCH_FILE = join(SRC, 'dispatch.ts');
 const CLI_FILE = join(SRC, 'cli.tsx');
+const FOOTER_FILE = join(SRC, 'components', 'footer.tsx');
 
 function offenders(
   allowed: string[],
@@ -128,6 +129,43 @@ describe('lint: one dispatcher', () => {
     // someone bypassed the one constant on purpose.
     const escapeLiterals = codeLines(CLI_FILE).filter((l) => /\\x1[bB]|\\u001[bB]/.test(l.line));
     expect(escapeLiterals.map((l) => l.line.trim())).toEqual([]);
+  });
+});
+
+describe('lint: one registry', () => {
+  it('declares no command list outside src/components/footer.tsx', () => {
+    // The footer owns the registry. A second `const SOMETHING_COMMANDS = [` — or a bare array of
+    // the `Command` type — is how the popup, the palette and Help each end up with their own list
+    // and the three disagree.
+    offenders(
+      [FOOTER_FILE],
+      (line) =>
+        /const\s+\w*[Cc][Oo][Mm][Mm]?[Aa]?[Nn][Dd]?[Ss]?\w*\s*(:[^=]*)?=\s*\[/.test(line) ||
+        /(readonly\s+)?Command\[\]\s*=\s*\[/.test(line) ||
+        /name:\s*'\/[a-z-]+',\s*description:/.test(line),
+      'the command registry lives in src/components/footer.tsx and nowhere else',
+    );
+  });
+
+  it('re-exports COMMANDS rather than re-declaring it', () => {
+    // A module may import the registry and derive from it — that is the whole design — but a
+    // module that exports its own `COMMANDS` is a second registry wearing the first one's name.
+    const found: string[] = [];
+    for (const file of FILES) {
+      if (file === FOOTER_FILE) continue;
+      for (const { line, n } of codeLines(file)) {
+        if (/export\s+const\s+COMMANDS\b/.test(line)) found.push(`${rel(file)}:${n}: ${line.trim()}`);
+      }
+    }
+    expect(found).toEqual([]);
+  });
+
+  it('declares the keymap in the dispatcher only', () => {
+    offenders(
+      [DISPATCH_FILE],
+      (line) => /export\s+const\s+KEYMAP\b/.test(line),
+      'the keymap Help is generated from lives beside the dispatcher that matches it',
+    );
   });
 });
 

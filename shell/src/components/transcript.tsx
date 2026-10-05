@@ -118,6 +118,7 @@ class LineWindow {
 export function renderTranscriptLines(props: TranscriptProps): RenderedLine[] {
   const { state, theme, charset, reducedMotion, sweepTick } = props;
   const c = paletteFor(theme);
+  const g = glyphs(charset);
   const window = new LineWindow(props.height > 0 ? props.height : 1);
 
   // Reverse order: the newest thing is the first thing worth drawing.
@@ -158,7 +159,11 @@ export function renderTranscriptLines(props: TranscriptProps): RenderedLine[] {
     if (message.kind === 'user') {
       // The user's turn is a raised row: a `>` prefix and bold weight, the one moment in the
       // transcript that is unmistakably "you said this".
-      window.push({ text: `> ${message.text}`, token: c.foreground, bold: true });
+      window.push({
+        text: `${stamp(state, message.atMs)}> ${message.text}`,
+        token: c.foreground,
+        bold: true,
+      });
     } else {
       for (const line of renderMarkdown(message.text, c, charset)) window.push(line);
     }
@@ -167,7 +172,43 @@ export function renderTranscriptLines(props: TranscriptProps): RenderedLine[] {
   // Width is applied here, in the pure function, so there is exactly one place that decides how
   // wide a row may be. The component below only maps lines to elements.
   const width = state.cols;
-  return window.toArray().reverse().map((l) => ({ ...l, text: truncate(l.text, width) }));
+  // The scrollbar costs one column, and only when it has somewhere to point: with nothing above,
+  // a track of empty cells is decoration, not information.
+  const gutter = state.showScrollbar && window.dropped > 0 ? 1 : 0;
+  const ordered = window.toArray().reverse();
+  return ordered.map((line, i) => {
+    const text = truncate(line.text, width - gutter);
+    return {
+      ...line,
+      text: gutter === 0 ? text : `${text}${scrollbarCell(g, ordered.length, window.dropped + i)}`,
+    };
+  });
+}
+
+/**
+ * One column of scrollbar. The thumb's size and position come from the window actually on screen
+ * and the number of rows the window dropped — both counted here, neither estimated.
+ */
+function scrollbarCell(g: ReturnType<typeof glyphs>, visible: number, position: number): string {
+  if (visible <= 0) return g.scrollTrack;
+  const size = Math.max(1, Math.round(visible / (visible + position) * visible));
+  const start = Math.round((position / (visible + position)) * visible);
+  return position >= start && position < start + size ? g.scrollThumb : g.scrollTrack;
+}
+
+/**
+ * The turn's timestamp, in UTC and only when the user asked for timestamps. A message with no
+ * captured clock — every message before this existed, and any clock-free state — gets no stamp,
+ * rather than a fabricated one.
+ */
+function stamp(state: AppState, atMs: number | undefined): string {
+  if (!state.showTimestamps || atMs === undefined) return '';
+  return `${formatClock(atMs)} `;
+}
+
+export function formatClock(atMs: number): string {
+  const iso = new Date(atMs).toISOString();
+  return `${iso.slice(11, 19)}Z`;
 }
 
 /**

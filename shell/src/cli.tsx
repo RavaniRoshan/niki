@@ -15,6 +15,7 @@
 import React from 'react';
 import { render, type Instance } from 'ink';
 import { appendFileSync, createWriteStream, mkdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -24,9 +25,9 @@ import { handleKey } from './dispatch.js';
 import { decisionFor } from './approval.js';
 import { InputParser } from './input.js';
 import { initialState, reduce, reduceLocal, type AppState, type ReduceOptions } from './state.js';
-import type { ServerNotification } from './protocol/generated/index.js';
+import type { ClientRequest, InitializeResult, ServerNotification } from './protocol/generated/index.js';
 import { isThemeName, type ThemeName } from './theme/index.js';
-import { charsetFromEnv, noColorFromEnv, reducedMotionFromEnv } from './glyphs.js';
+import { charsetFromEnv, noColorFromEnv, reducedMotionFromEnv, sweepIntervalMs } from './glyphs.js';
 
 /* c8 ignore start -- process wiring: exercised by a PTY test, not by unit tests */
 
@@ -145,48 +146,130 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   let instance: Instance | null = null;
   const opts = (): ReduceOptions => ({ nowMs: Date.now() });
 
+  // The theme the shell booted with is a fact about this shell, so it goes in the state rather than
+  // living only in a prop: the settings sheet has to be able to show it.
+  state = reduceLocal(state, { kind: 'theme.commit', theme }, opts());
+
+  let sweepTick = 0;
+  let sweepTimer: ReturnType<typeof setInterval> | null = null;
+
   const paint = () => {
     if (!instance) return;
     instance.rerender(
-      React.createElement(App, { state, theme, charset, reducedMotion, sweepTick: 0 }),
+      React.createElement(App, { state, theme, charset, reducedMotion, sweepTick }),
     );
   };
 
-  const client = new EngineClient({
+  let client = new EngineClient({
     command: engine,
     args: ['serve', ...engineArgs],
     onEngineStderr: engineLog,
   });
 
-  client.on('notification', (n: ServerNotification) => {
-    const next = reduce(state, n, opts());
-    // The window title tracks the session topic, and only when the engine gave us one.
-    if (n.method === 'turn.started') process.stdout.write(seq.title(n.params.prompt));
-    if (n.method === 'final') process.stdout.write(seq.title('Niki'));
-    state = next;
-    paint();
-  });
-  client.on('protocolError', (e: Error) => {
-    engineLog(`protocol: ${e.message}`);
-    state = reduceLocal(state, { kind: 'protocolError', message: e.message }, opts());
-    paint();
-  });
-
-  await client
-    .request(
-      {
-        method: 'initialize',
-        params: {
-          protocol_version: PROTOCOL_VERSION,
-          client: { name: 'niki-shell', version: '0.1.0', cols: state.cols, rows: state.rows },
-        },
-      },
-      `boot-${Date.now()}`,
-    )
-    .catch((e: Error) => {
-      engineLog(`initialize failed: ${e.message}`);
-      state = reduceLocal(state, { kind: 'protocolError', message: `engine did not start: ${e.message}` }, opts());
+  const attach = (): void => {
+    client.on('notification', (n: ServerNotification) => {
+      const next = reduce(state, n, opts());
+      // The window title tracks the session topic, and only when the engine gave us one.
+      if (n.method === 'turn.started') process.stdout.write(seq.title(n.params.prompt));
+      if (n.method === 'final') process.stdout.write(seq.title('Niki'));
+      state = next;
+      paint();
     });
+    client.on('protocolError', (e: Error) => {
+      engineLog(`protocol: ${e.message}`);
+      state = reduceLocal(state, { kind: 'protocolError', message: e.message }, opts());
+      paint();
+    });
+  };
+  attach();
+
+  const initialize = async (): Promise<void> => {
+    try {
+      const result = (await client.request(
+        {
+          method: 'initialize',
+          params: {
+            protocol_version: PROTOCOL_VERSION,
+            client: { name: 'niki-shell', version: '0.1.0', cols: state.cols, rows: state.rows },
+          },
+        },
+        `boot-${Date.now()}`,
+      )) as InitializeResult;
+      // What the engine said about itself. `/version` and the empty-state copy both read this, so
+      // neither has to guess a version or a capability.
+      state = reduceLocal(
+        state,
+        { kind: 'engine.meta', version: result.engine_version, capabilities: result.capabilities },
+        opts(),
+      );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      engineLog(`initialize failed: ${message}`);
+      state = reduceLocal(state, { kind: 'protocolError', message: `engine did not start: ${message}` }, opts());
+    }
+  };
+
+  /**
+   * Sends whatever the reducer decided to send. The reducer is pure, so it records the intent in
+   * `state.outbox` and this is the only place that puts it on the wire.
+   */
+  const flushOutbox = async (): Promise<void> => {
+    while (state.outbox.length > 0) {
+      const pending = state.outbox[state.outbox.length - 1]!;
+      state = reduceLocal(state, { kind: 'outbox.clear' }, opts());
+      try {
+        await client.request(
+          { method: pending.method, params: pending.params } as ClientRequest,
+          pending.traceId,
+        );
+      } catch (e) {
+        engineLog(`${pending.method} failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  };
+
+  /**
+   * Hands the terminal to `$EDITOR` and takes it back.
+   *
+   * The alt screen is left and raw mode dropped for exactly as long as the editor runs; anything
+   * else leaves the user's scrollback full of escape sequences. With no `$EDITOR` the shell says
+   * so instead of pretending an edit happened.
+   */
+  const runEditor = (): void => {
+    const editor = process.env.EDITOR ?? process.env.VISUAL;
+    if (!editor) {
+      state = reduceLocal(state, { kind: 'notice.push', text: 'no $EDITOR is set', level: 'warning' }, opts());
+      return;
+    }
+    process.stdout.write(seq.pasteOff + seq.mouseOff + seq.cursorShow + seq.altScreenOff);
+    process.stdin.setRawMode?.(false);
+    const result = spawnSync(editor, [], { stdio: 'inherit', shell: true });
+    process.stdout.write(seq.altScreenOn + seq.cursorHide + seq.mouseOn + seq.pasteOn);
+    process.stdin.setRawMode?.(true);
+    paint();
+    if (result.error || result.status !== 0) {
+      engineLog(`editor exited: status ${String(result.status)} ${result.error?.message ?? ''}`);
+      state = reduceLocal(state, { kind: 'notice.push', text: `${editor} exited without editing`, level: 'warning' }, opts());
+      return;
+    }
+    state = reduceLocal(state, { kind: 'notice.push', text: 'editor closed — nothing was sent', level: 'info' }, opts());
+  };
+
+  /** `/reload`: a fresh engine process, the same wiring, then a fresh handshake. */
+  const reload = async (): Promise<void> => {
+    await client.stop();
+    client = new EngineClient({
+      command: engine,
+      args: ['serve', ...engineArgs],
+      onEngineStderr: engineLog,
+    });
+    attach();
+    state = reduceLocal(state, { kind: 'notice.push', text: 'reconnected to the engine', level: 'info' }, opts());
+    await initialize();
+    paint();
+  };
+
+  await initialize();
 
   instance = render(
     React.createElement(App, { state, theme, charset, reducedMotion, sweepTick: 0 }),
@@ -198,6 +281,25 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   process.stdin.resume();
   process.stdin.setEncoding('utf8');
   const parser = new InputParser();
+  // The activity sweep: the only thing in the shell that repaints on a timer. It exists while
+  // something is in flight and is torn down the moment nothing is, so an idle shell owns no
+  // timer, schedules no redraw and costs no CPU. "Motion stops at idle" only means something if
+  // motion exists while work is happening.
+  const restopSweep = (): void => {
+    if (sweepTimer !== null) {
+      clearInterval(sweepTimer);
+      sweepTimer = null;
+    }
+    if (reducedMotion || !state.activity) return;
+    sweepTimer = setInterval(() => {
+      sweepTick = (sweepTick + 1) % 4;
+      paint();
+    }, sweepIntervalMs({
+      toolInFlight: state.activity.toolInFlight,
+      runningMs: Date.now() - state.activity.startedAtMs,
+    }));
+  };
+
   process.stdin.on('data', (chunk: string) => {
     for (const keyEvent of parser.push(chunk)) {
       const outcome = handleKey(state, keyEvent);
@@ -210,7 +312,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
             .request(
               {
                 method: 'turn.start',
-                params: { prompt: action.prompt, permission_mode: state.session?.permission_mode ?? 'manual' },
+                params: {
+                  prompt: action.prompt,
+                  // The posture the user asked for wins; otherwise the engine's own. The shell never
+                  // picks one the user did not choose and the engine did not report.
+                  permission_mode: state.permissionOverride ?? state.session?.permission_mode ?? 'manual',
+                },
               },
               `turn-${Date.now()}`,
             )
@@ -247,11 +354,26 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         void shutdown(client, instance, cleanup);
         return;
       }
+      // Requests a command decided on: a resume, a settings save that reached the wire. The
+      // reducer recorded the intent; this is the only place that sends it.
+      if (state.outbox.length > 0) {
+        void flushOutbox().then(paint);
+      }
+      if (state.editorRequested) {
+        state = reduceLocal(state, { kind: 'flag.clear', flag: 'editorRequested' }, opts());
+        runEditor();
+      }
+      if (state.reloadRequested) {
+        state = reduceLocal(state, { kind: 'flag.clear', flag: 'reloadRequested' }, opts());
+        void reload();
+      }
     }
+    restopSweep();
     paint();
   });
 
   await instance.waitUntilExit();
+  if (sweepTimer !== null) clearInterval(sweepTimer);
   await shutdown(client, instance, cleanup);
   return 0;
 }

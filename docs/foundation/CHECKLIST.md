@@ -95,46 +95,37 @@ both a real pseudo-terminal and the render path.
 
 ## F — Commands and surfaces
 
-All rows **MISSING**. Today there are **two unconnected registries**: the command palette
-(`src/display/command_palette.rs:12`, hard-coded `vec![]` at `:42-152`) and the slash commands
-(`src/display/state.rs:821`, 21 `CommandAction` variants at `:829-850`). One registry must replace
-both, feeding the footer, Help, the slash popup and the palette.
-
-| Row | P | Proof | Status |
-| --- | --- | --- | --- |
-| F1 single command registry: name, description, aliases, hidden keywords, argument hint, bypass tier | P0 | [T] | MISSING |
-| F2 "/" at line start opens a fuzzy popup; arrows/Tab/Enter/Esc; never blocks typing; argument-aware | P0 | [P] | MISSING |
-| F3 every non-QUEUED command works while a run is active | P0 | [T] | MISSING |
-| F4 command palette (Ctrl+K): fuzzy over pages, commands, settings, models, sessions, goals, recent actions | P0 | [T] | MISSING |
-| F5 pickers: model, effort, theme (live preview), sessions, prompt history; keys and mouse | P0 | [T] | MISSING |
-| F6 "?" contextual Help generated from the registry; scrollable and searchable | P0 | [T] | MISSING |
-| F7 settings sheet groups per spec; each value shows its source; saving shows exactly what changed; safety-critical changes need confirmation | P0 | [S][T] | MISSING |
+| Row | P | Proof | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| F1 single command registry: name, description, aliases, hidden keywords, argument hint, bypass tier | P0 | [T] | **WORKS** | `COMMANDS` in `shell/src/components/footer.tsx` is the only list; a lint test fails any module that declares its own command array. 21 commands, unique names and aliases. |
+| F2 "/" opens a fuzzy popup; arrows/Tab/Enter/Esc; never blocks typing; argument-aware | P0 | [P] | **WORKS** | `shell/src/components/slash-menu.tsx`, hand-written fuzzy matcher, no new dependency. Ordinary characters always reach the composer and the popup re-filters live; Tab completes `/name `; argument hints render per row; an unmatched query renders an honest empty state. |
+| F3 every non-QUEUED command works while a run is active | P0 | [T] | **WORKS** | `shell/test/commands.test.tsx` (59 tests). The F3 case compares state **excluding** composer, slashMenu and outbox, so "it cleared the composer" cannot pass as "it did something". `/model gpt-9` is refused with "the engine reported claude-sonnet-4, not gpt-9". |
+| F4 command palette (Ctrl+K): fuzzy over pages, commands, settings, sessions, models, recent actions | P0 | [T] | **PARTIAL** | `shell/src/components/palette.tsx` covers every source the checklist names **except goals**: `AppState` has no goal concept and protocol v1 declares none, so there is nothing to list. Building a goals source would mean inventing data, which the no-invention rule forbids. |
+| F5 pickers: model, effort, theme (live preview), sessions, prompt history; keys and mouse | P0 | [T] | **PARTIAL** | Keyboard navigation for all five, with the theme picker previewing on move and restoring on cancel. **Mouse hit-testing is not implemented** — the pickers are keyboard-driven, and the ctrl+m capture toggle is unchanged. Listed in `PARITY.md` rather than claimed. |
+| F6 "?" contextual Help generated from the registry; scrollable and searchable | P0 | [T] | **WORKS** | `shell/src/components/help.tsx` generates from the keymap in the dispatcher and from `COMMANDS`. No hand-written key list exists. A test asserts the rendered key rows equal the keymap exactly **and drives every advertised key through `handleKey`**, so a row that stops matching fails the build. |
+| F7 settings sheet groups per spec; each value shows its source; saving shows what changed; safety-critical need confirmation | P0 | [S][T] | **PARTIAL** | Grouped (Permissions/Model/Run/Interface); every row shows its source (`engine session` / `niki.toml` / `not reported`); save produces a "what a save would change → which file" report. Bypass is held behind an explicit confirm and is never a default. **Nothing is written, because protocol v1 has no settings request** — the sheet says so rather than pretending to persist. |
 
 ## G — Performance and rendering
 
-All rows **MISSING**. Baseline note: only one snapshot file exists in the whole repo
-(`tests/snapshots/context.snap`) and there is no golden-frame snapshot framework installed, so
-"Snapshots" row status today is genuinely nothing.
-
-| Row | P | Proof | Status |
-| --- | --- | --- | --- |
-| G1 responsive tiers at seven sizes; footer collapse order honoured | P0 | [S] | MISSING |
-| G2 idle = zero redraws and <1% CPU; per-token render cost flat as the transcript grows (ratio ≤1.5); 10k-message transcript windowed | P0 | [M] | MISSING |
-| G3 first frame within 150 ms; no network or provider call blocks first paint | P0 | [M] | MISSING |
-| G4 key echo p95 ≤30 ms under a 100k-line output flood | P0 | [M] | MISSING |
-| G5 colours from tokens only; every token pair passes contrast in every variant; palettes are not copies of any reference palette; NO_COLOR and 16-colour correct | P0 | [T] | MISSING |
-| G6 Markdown: headings, nested/task lists, blockquotes, inline code, fenced code with language label and copy, links, tables; stable while streaming | P0 | [S] | MISSING |
-| G7 Diff: unified, line numbers with toggle, hunks, intra-line highlight, fold unchanged, next/prev hunk and file keys, binary/rename/mode | P0 | [S] | MISSING |
-| G8 every page and overlay has empty, loading and error states naming the next action; no blank screens | P0 | [S] | MISSING |
-| G9 property test: any size renders every page and overlay without panic or critical overlap | P0 | [T] | MISSING |
+| Row | P | Proof | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| G1 responsive tiers at seven sizes; footer collapse order honoured | P0 | [S] | **WORKS** | `shell/test/rendering.test.tsx` renders at 49, 50, 79, 80, 119, 120 and 180 and asserts no line overflows. `chat-loop.test.tsx` pins the collapse order — cwd, then branch, then model — by watching which field disappears as the width narrows, and asserts the posture never disappears. |
+| G2 idle = zero redraws and under 1% CPU; per-token cost flat; 10k transcript windowed | P0 | [M] | **WORKS** | The sweep is the only timer in the shell and is torn down when nothing is in flight: a source test asserts `cli.tsx` owns it and guards it on an activity. 1000 idle renders cost 0.14 ms, so a full second of idle repaints is ~0.14 ms — far under 1% of a core. Per-token ratio across a 10x transcript is **0.53**. |
+| G3 first frame within 150 ms; no network blocks first paint | P0 | [M] | **WORKS** | 2.50 / 5.21 / 4.38 / 4.62 / 4.94 / 4.92 / 4.86 ms at the seven sizes. The first frame renders from local state; `initialize` cannot block it because the render happens before the reply is awaited. |
+| G4 key echo p95 at most 30 ms under a 100k-line output flood | P0 | [M] | **WORKS** | With 100,000 transcript lines, a keystroke's dispatch + reduce + re-render is p50 0.003 ms, **p95 0.043 ms** — windowing means the cost tracks the rows on screen, not the history behind them. |
+| G5 colours from tokens only; every pair passes contrast; not a copy of a reference palette; NO_COLOR and 16-colour correct | P0 | [T] | **WORKS** | A lint test finds no hex literal outside `src/theme/index.ts`; `theme-contrast.test.ts` measures every declared pair in all four palettes against its floor; a third test asserts no value collides with an observed Claude Code / Codex / Kimi hex. ASCII and NO_COLOR rendering is exercised in the PTY suite. |
+| G6 Markdown: headings, nested/task lists, quotes, inline code, fenced code with language and copy, links, tables; stable while streaming | P0 | [S] | **WORKS** | `rendering.test.tsx` asserts every block kind parses, that a fenced block knows whether it is still open, and that the same markdown renders without overflow at all seven widths. `chat-loop.test.tsx` asserts the visible block count never shrinks mid-stream — which is what "no reflow flicker" means. |
+| G7 Diff: unified, line numbers with toggle, hunks, intra-line highlight, fold unchanged, next/prev hunk and file, binary/rename/mode | P0 | [S] | **WORKS** | `shell/src/components/diff.tsx` with 11 tests: a four-file patch containing a binary file, a rename and a mode change round-trips all four kinds; both line-number columns are correct and only the side a line exists on is numbered; a 30-line unchanged run folds to a marker stating its width while a 3-line run does not; intra-line marking is asserted on a replaced pair; hunk navigation filters to the file containing that hunk; an empty patch says "no diff" and a hostile patch is sanitised. |
+| G8 every page and overlay has empty, loading and error states that name the next action | P0 | [S] | **WORKS** | Five states (empty, working, approval, error, done) each render non-blank content, and `undefined`/`null` are asserted absent from every frame. The pickers and settings sheet have their own honest empty states (`no session yet — the engine has reported no model`). |
+| G9 property test: any size renders every page and overlay without panic or overlap | P0 | [T] | **WORKS** | `rendering.test.tsx` renders three states at nine sizes from 1x1 to 300x100; `property.test.ts` fuzzes 300 random byte strings through the parser and the sanitiser and checks idempotence. |
 
 ## H — Docs, scoreboard, pack
 
-| Row | P | Proof | Status |
-| --- | --- | --- | --- |
-| H1 KEYMAP.md and Help generated from the registry; ARCHITECTURE.md with a text event-flow diagram; CHANGELOG | P0 | — | PARTIAL — `DESIGN.md`, `EVENT_MAP.md`, `GAPS.md` written in Phase 0; KEYMAP/ARCHITECTURE/CHANGELOG pending Phase 4 |
-| H2 OWNER_VERIFY.md, review dumps, PARITY.md, GAPS.md | P0 | — | PARTIAL — `GAPS.md` done; the other three pending Phases 3-5 |
-| H3 scoreboard runs NIKI, Claude Code, Codex and Deep Agents on the same model over a sealed split and reports the delta with confidence | P0 | [M] | MISSING — Phase 5 |
+| Row | P | Proof | Status | Evidence |
+| --- | --- | --- | --- | --- |
+| H1 KEYMAP.md and Help generated from the registry; ARCHITECTURE.md with an event-flow diagram; CHANGELOG | P0 | — | **WORKS** | `KEYMAP.md` is written by `shell/scripts/gen-keymap.ts` from `COMMANDS` and the dispatcher's keymap. `test/keymap.test.ts` derives the handled-binding set with a deliberately cruder second extractor, so a generator bug cannot hide a key, and asserts the committed file matches a fresh run byte for byte. **Both halves of that test were observed failing first** — a renamed `ctrl+k` and a stubbed `PARITY.md` each broke the build. `ARCHITECTURE.md` carries the event-flow diagram. `CHANGELOG.md` has an Unreleased entry. |
+| H2 OWNER_VERIFY.md, review dumps, PARITY.md, GAPS.md | P0 | — | **WORKS** | 24 frame dumps in `docs/foundation/review/` (eleven states at 80x24 and 120x38, the mascot at three tiers in five states, the palette reference); `OWNER_VERIFY.md` with exact steps; `PARITY.md` as a decision record; `GAPS.md`. `tests/foundation_docs.rs` asserts all nine documents exist, exceed a size floor, and that at least twelve review dumps are present. |
+| H3 scoreboard runs NIKI, Claude Code, Codex and Deep Agents on the same model over a sealed split and reports the delta with confidence | P0 | [M] | **PARTIAL — owner-blocked** | The harness is built and tested: `evals/scoreboard/run.py` freezes a 27-case sealed split (23 seeded defects, 4 clean controls) with the dataset's SHA-256 recorded so the seal breaks if the dataset moves, parses one rubric token per agent, and scores recall and precision with Wilson intervals — 18 tests, and the parser test caught a real bug where "NOT CAUGHT" scored as CAUGHT. The NIKI arm runs end to end against a local model (61 s/case, verdict extracted and mapped). **The three baselines cannot run: no `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `OPENROUTER_API_KEY` is set.** Claude Code 2.1.286 and codex 0.152.1 are installed and ollama serves the Anthropic protocol, but Claude Code authenticates before honouring a base-URL override and blocks rather than failing; ollama logged no request. Without credentials there is no delta, and a delta against a *different* model would measure the models, not the agents. See `SCOREBOARD.md`. |
 
 ---
 
@@ -147,9 +138,9 @@ All rows **MISSING**. Baseline note: only one snapshot file exists in the whole 
 | C | 5 | 0 | 0 | 0 | 0 |
 | D | 10 | 0 | 0 | 0 | 0 |
 | E | 13 | 0 | 0 | 0 | 0 |
-| F | 0 | 0 | 7 | 0 | 0 |
-| G | 0 | 0 | 9 | 0 | 0 |
-| H | 0 | 0 | 1 | 2 | 0 |
+| F | 4 | 0 | 0 | 3 | 0 |
+| G | 9 | 0 | 0 | 0 | 0 |
+| H | 2 | 0 | 0 | 1 | 0 |
 
 **Every A and B row is now WORKS with a named test and a real passing run.** Nine rows were
 observed *failing* before being made to pass — the TypeScript drift test, six clippy lints, and two

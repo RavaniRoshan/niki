@@ -12,8 +12,19 @@
 
 import { sanitize, sanitizeSingleLine } from './sanitize.js';
 import { safestFocus } from './approval.js';
+import {
+  applyCommand,
+  acceptOverlayItem,
+  applySelectedFromPopup,
+  completeFromPopup,
+  confirmAccepted,
+  cycleSetting,
+  saveSettings,
+} from './surfaces/apply-command.js';
+import type { ThemeName } from './theme/index.js';
 import type {
   ApprovalRequestParams,
+  Capabilities,
   PermissionMode,
   BranchCreatedParams,
   ContextUsageParams,
@@ -82,6 +93,9 @@ export type Message = {
   readonly text: string;
   /** Streaming text arrives in pieces; this is the accumulated, sanitised text. */
   readonly streaming: boolean;
+  /** Wall clock at the moment the engine frame arrived, from the injected clock. `undefined` when
+   * no clock was supplied, in which case no timestamp is shown rather than a fabricated one. */
+  readonly atMs?: number;
 };
 
 export type Activity = {
@@ -103,6 +117,9 @@ export type ApprovalState = {
 export type AppState = {
   readonly phase: Phase;
   readonly session: SessionReadyParams | null;
+  /** What `initialize` reported about the engine: its version and what it can do. */
+  readonly engineVersion: string | null;
+  readonly capabilities: Capabilities | null;
   readonly messages: readonly Message[];
   readonly tools: readonly ToolRow[];
   readonly stages: readonly StageRow[];
@@ -124,14 +141,77 @@ export type AppState = {
   readonly protocolError: string | null;
   readonly slashMenu: SlashMenuState | null;
   readonly overlay: OverlayName | null;
+  /** What the user has typed into the open overlay. Popup and palette share the discipline. */
+  readonly overlayQuery: string;
+  /** Which row the open overlay has highlighted. */
+  readonly overlayIndex: number;
+  /** Scroll offset for a scrollable overlay such as Help. */
+  readonly overlayScroll: number;
+  /** A theme being previewed by the picker. `null` means "whatever the shell booted with". */
+  readonly activeTheme: ThemeName | null;
   readonly showDetails: boolean;
   readonly showStages: boolean;
+  readonly showScrollbar: boolean;
+  readonly showTimestamps: boolean;
+  readonly showLineNumbers: boolean;
+  /** Staged settings edits, by setting key. Nothing here has been written anywhere. */
+  readonly settings: Readonly<Record<string, string>>;
+  /** What the last save actually changed, and where it would have to be written. */
+  readonly settingsReport: readonly SettingsChange[];
+  /** A safety-critical change waiting for an explicit yes. */
+  readonly confirm: ConfirmRequest | null;
+  /** The posture the user asked for, which `turn.start` sends. `null` means "whatever the engine
+   * reported" — the shell never rewrites the engine's posture to make the footer look tidy. */
+  readonly permissionOverride: PermissionMode | null;
+  /** Prompts this shell submitted, newest last. The prompt-history picker reads only this. */
+  readonly promptHistory: readonly string[];
+  /** Commands this session ran, newest first. Bounded, so a long session cannot grow it forever. */
+  readonly recentActions: readonly string[];
   readonly mouseCapture: boolean;
   readonly exitArmed: boolean;
   readonly scrollOffset: number;
   readonly workspaceMode: boolean;
   /** A partially-typed key chord, e.g. the `g` of `gg`. Empty when there is none. */
   readonly pendingChord: string;
+  /** Requests the interface has decided to send. `cli.tsx` drains this; nothing else may send. */
+  readonly outbox: readonly OutboxRequest[];
+  /** Set by `/editor` and Ctrl+G. `cli.tsx` clears the screen, runs `$EDITOR`, and clears this. */
+  readonly editorRequested: boolean;
+  /** Set by `/reload`. `cli.tsx` restarts the engine connection and clears this. */
+  readonly reloadRequested: boolean;
+};
+
+/** One row of the "what changed" report the settings sheet produces on save. */
+export type SettingsChange = {
+  readonly key: string;
+  readonly label: string;
+  /** The value before the change, when one was reported. `undefined` renders as "unset". */
+  readonly from?: string;
+  readonly to: string;
+  /** Exactly where this value has to be written for the engine to see it. */
+  readonly destination: string;
+};
+
+/** A change that will not happen until the user says so explicitly. */
+export type ConfirmRequest = {
+  readonly key: string;
+  readonly label: string;
+  readonly value: string;
+  readonly from?: string;
+  readonly destination: string;
+};
+
+/**
+ * A request the interface has decided to send to the engine.
+ *
+ * The reducer is pure, so it cannot send anything. It records the intent here and `cli.tsx` — the
+ * one module allowed to touch a socket — drains it. That is what lets a test prove a command
+ * reaches the engine without opening one.
+ */
+export type OutboxRequest = {
+  readonly method: string;
+  readonly params: unknown;
+  readonly traceId: string;
 };
 
 export type OverlayName =
@@ -140,8 +220,10 @@ export type OverlayName =
   | 'settings'
   | 'model'
   | 'theme'
+  | 'effort'
   | 'sessions'
-  | 'history';
+  | 'history'
+  | 'confirm';
 
 export type SlashMenuState = {
   readonly query: string;
@@ -152,6 +234,8 @@ export function initialState(cols = 80, rows = 24): AppState {
   return {
     phase: 'booting',
     session: null,
+    engineVersion: null,
+    capabilities: null,
     messages: [],
     tools: [],
     stages: [],
@@ -173,13 +257,29 @@ export function initialState(cols = 80, rows = 24): AppState {
     protocolError: null,
     slashMenu: null,
     overlay: null,
+    overlayQuery: '',
+    overlayIndex: 0,
+    overlayScroll: 0,
+    activeTheme: null,
     showDetails: false,
     showStages: false,
+    showScrollbar: false,
+    showTimestamps: false,
+    showLineNumbers: false,
+    settings: {},
+    settingsReport: [],
+    confirm: null,
+    permissionOverride: null,
+    promptHistory: [],
+    recentActions: [],
     mouseCapture: true,
     exitArmed: false,
     scrollOffset: 0,
     workspaceMode: false,
     pendingChord: '',
+    outbox: [],
+    editorRequested: false,
+    reloadRequested: false,
   };
 }
 
@@ -282,7 +382,7 @@ export function reduce(state: AppState, event: ServerNotification, opts: ReduceO
         interrupted: false,
         messages: [
           ...state.messages,
-          { kind: 'user', text: sanitize(event.params.prompt), streaming: false },
+          { kind: 'user', text: sanitize(event.params.prompt), streaming: false, atMs: opts.nowMs },
         ],
         activity: {
           text: 'Thinking',
@@ -537,6 +637,8 @@ export function reduce(state: AppState, event: ServerNotification, opts: ReduceO
 /** Local-only transitions the user causes, beside `reduce` so there is one state machine. */
 export type LocalAction =
   | { kind: 'composer.set'; text: string }
+  /** Puts text in the composer and closes whatever overlay owned it. */
+  | { kind: 'composer.insert'; text: string }
   | { kind: 'turn.submit'; prompt: string }
   | { kind: 'turn.interrupt' }
   | { kind: 'approval.decide' }
@@ -550,17 +652,42 @@ export type LocalAction =
   | { kind: 'details.toggle' }
   | { kind: 'stages.toggle' }
   | { kind: 'palette.open' }
+  | { kind: 'overlay.open'; overlay: OverlayName; index?: number }
   | { kind: 'overlay.close' }
+  | { kind: 'overlay.setQuery'; text: string }
+  | { kind: 'overlay.move'; index: number }
+  | { kind: 'overlay.accept' }
+  | { kind: 'overlay.scroll'; by: ScrollBy }
+  | { kind: 'theme.preview'; theme: ThemeName }
+  | { kind: 'theme.commit'; theme: ThemeName }
+  /** Cycles the focused row's value by one step, forwards or backwards. */
+  | { kind: 'settings.edit'; by: number }
+  /** Stages one value. Staged is not applied: it is what a save would write. */
+  | { kind: 'settings.stage'; key: string; value: string }
+  | { kind: 'settings.save' }
+  | { kind: 'settings.report.clear' }
+  | { kind: 'confirm.accept' }
+  | { kind: 'confirm.cancel' }
+  | { kind: 'session.resume'; sessionId: string }
+  | { kind: 'permission.set'; mode: PermissionMode }
+  | { kind: 'notice.push'; text: string; level: 'info' | 'warning' | 'error' }
   | { kind: 'editor.open' }
   | { kind: 'history.open' }
+  | { kind: 'engine.meta'; version: string | null; capabilities: Capabilities | null }
+  | { kind: 'engine.reload' }
   | { kind: 'mouse.toggle' }
   | { kind: 'mode.cycle' }
   | { kind: 'slashMenu.close' }
   | { kind: 'slashMenu.open'; query: string }
   | { kind: 'slashMenu.accept' }
+  | { kind: 'slashMenu.complete' }
+  | { kind: 'slashMenu.move'; index: number }
   | { kind: 'scroll'; by: ScrollBy }
   | { kind: 'setChord'; chord: string }
-  | { kind: 'clearChord' };
+  | { kind: 'clearChord' }
+  /** Clears a one-shot request flag once `cli.tsx` has actually done the thing. */
+  | { kind: 'flag.clear'; flag: 'editorRequested' | 'reloadRequested' }
+  | { kind: 'outbox.clear' };
 
 export type ScrollBy = 'pageUp' | 'pageDown' | 'home' | 'end' | 'lineUp' | 'lineDown';
 
@@ -576,12 +703,23 @@ export function reduceLocal(state: AppState, action: LocalAction, _opts: ReduceO
           ? { query: action.text.slice(1).split(' ')[0] ?? '', selected: 0 }
           : null,
       };
+    case 'composer.insert':
+      return {
+        ...state,
+        composer: action.text,
+        slashMenu: null,
+        overlay: null,
+        overlayQuery: '',
+        overlayIndex: 0,
+      };
     case 'turn.submit':
       return {
         ...state,
         composer: '',
         // Typed while a run is active: the message waits, visibly, above the composer.
         queue: state.activity ? [...state.queue, action.prompt] : state.queue,
+        // History is what this shell actually sent, so the history picker can offer it.
+        promptHistory: pushCapped(state.promptHistory, action.prompt, PROMPT_HISTORY_LIMIT),
       };
     case 'turn.interrupt':
       return { ...state, interrupted: true, activity: null, phase: 'interrupted' };
@@ -592,7 +730,9 @@ export function reduceLocal(state: AppState, action: LocalAction, _opts: ReduceO
         ? { ...state, approval: { ...state.approval, focusedOptionId: action.optionId } }
         : state;
     case 'command.run':
-      return { ...state, composer: '', slashMenu: null };
+      // Every command does its own work here. A command that only cleared the composer would be a
+      // command that is listed but does not exist, which is exactly what row F3 forbids.
+      return applyCommand(state, action.name, action.args);
     case 'resize':
       return { ...state, cols: action.cols, rows: action.rows };
     case 'protocolError':
@@ -608,12 +748,78 @@ export function reduceLocal(state: AppState, action: LocalAction, _opts: ReduceO
     case 'stages.toggle':
       return { ...state, showStages: !state.showStages };
     case 'palette.open':
-      return { ...state, overlay: 'palette' };
+      return { ...state, overlay: 'palette', overlayQuery: '', overlayIndex: 0, overlayScroll: 0 };
+    case 'overlay.open':
+      // Opening any overlay resets the query and the highlight: a picker that remembers the last
+      // search is a picker that opens showing something the user did not ask for.
+      return {
+        ...state,
+        overlay: action.overlay,
+        overlayQuery: '',
+        overlayIndex: action.index ?? 0,
+        overlayScroll: 0,
+      };
     case 'overlay.close':
-      return { ...state, overlay: null };
+      // Closing restores whatever theme was in force before the picker started previewing one.
+      return { ...state, overlay: null, overlayQuery: '', overlayIndex: 0, overlayScroll: 0, activeTheme: null };
+    case 'overlay.setQuery':
+      return { ...state, overlayQuery: action.text, overlayIndex: 0 };
+    case 'overlay.move':
+      return { ...state, overlayIndex: action.index };
+    case 'overlay.accept':
+      return acceptOverlayItem(state, (s, action) => reduceLocal(s, action, { nowMs: 0 }));
+    case 'overlay.scroll':
+      return { ...state, overlayScroll: applyScroll(state.overlayScroll, action.by) };
+    case 'theme.preview':
+      // Live preview: applied on move, and undone by `overlay.close`.
+      return { ...state, activeTheme: action.theme };
+    case 'theme.commit':
+      return { ...state, activeTheme: action.theme, overlay: null };
+    case 'settings.edit':
+      return cycleSetting(state, action.by);
+    case 'settings.stage':
+      return { ...state, settings: { ...state.settings, [action.key]: action.value } };
+    case 'settings.save':
+      return saveSettings(state);
+    case 'settings.report.clear':
+      return { ...state, settingsReport: [] };
+    case 'confirm.accept':
+      return confirmAccepted(state);
+    case 'confirm.cancel':
+      return { ...state, confirm: null };
+    case 'session.resume':
+      return {
+        ...state,
+        overlay: null,
+        overlayQuery: '',
+        outbox: [
+          ...state.outbox,
+          {
+            method: 'session.load',
+            params: { session_id: action.sessionId, project_path: state.session?.project_path ?? '' },
+            traceId: 'session-load',
+          },
+        ],
+      };
+    case 'permission.set':
+      return { ...state, permissionOverride: action.mode };
+    case 'notice.push':
+      return {
+        ...state,
+        notices: [...state.notices, { text: sanitizeSingleLine(action.text), level: action.level }],
+      };
     case 'editor.open':
+      return { ...state, editorRequested: true };
     case 'history.open':
-      return state;
+      return { ...state, overlay: 'history', overlayQuery: '', overlayIndex: 0 };
+    case 'engine.meta':
+      return {
+        ...state,
+        engineVersion: action.version === null ? null : sanitizeSingleLine(action.version),
+        capabilities: action.capabilities,
+      };
+    case 'engine.reload':
+      return { ...state, reloadRequested: true };
     case 'mouse.toggle':
       return { ...state, mouseCapture: !state.mouseCapture };
     case 'mode.cycle':
@@ -623,7 +829,12 @@ export function reduceLocal(state: AppState, action: LocalAction, _opts: ReduceO
     case 'slashMenu.open':
       return { ...state, slashMenu: { query: action.query, selected: 0 } };
     case 'slashMenu.accept':
-      return { ...state, slashMenu: null };
+      // Enter runs the highlighted command, exactly as if it had been typed in full.
+      return applySelectedFromPopup(state);
+    case 'slashMenu.complete':
+      return completeFromPopup(state);
+    case 'slashMenu.move':
+      return { ...state, slashMenu: state.slashMenu ? { ...state.slashMenu, selected: action.index } : state.slashMenu };
     case 'scroll':
       // Scrolling never disturbs the composer: the text the user is typing survives a scroll, and
       // that is the whole point of the row.
@@ -632,7 +843,21 @@ export function reduceLocal(state: AppState, action: LocalAction, _opts: ReduceO
       return { ...state, pendingChord: action.chord };
     case 'clearChord':
       return { ...state, pendingChord: '' };
+    case 'flag.clear':
+      return { ...state, [action.flag]: false };
+    case 'outbox.clear':
+      return { ...state, outbox: [] };
   }
+}
+
+/** Bounded so a long session cannot grow an unbounded array inside the state. */
+const PROMPT_HISTORY_LIMIT = 50;
+const RECENT_ACTIONS_LIMIT = 12;
+
+function pushCapped(list: readonly string[], value: string, limit: number): string[] {
+  const next = list.filter((v) => v !== value);
+  next.push(value);
+  return next.slice(Math.max(0, next.length - limit));
 }
 
 function applyScroll(current: number, by: ScrollBy): number {

@@ -650,6 +650,27 @@ describe('F1: the command registry is declared once', () => {
       if (c.tier !== 'queued') expect(worksWhileRunning(c.tier), `${c.name}`).toBe(true);
     }
   });
+
+  it('and works means it dispatches, not merely that its tier allows it', () => {
+    // The tier says the command is allowed to run mid-turn. This says it actually does something:
+    // with a run in flight, every non-queued command has to change state the user can see or
+    // record a request. The composer is excluded, because `command.run` clears it for every
+    // command and counting that would prove nothing. Row F3, in full, is in commands.test.tsx.
+    const active = run([
+      SESSION,
+      n('turn.started', { turn_id: 't', prompt: 'go' }),
+      n('tool.call', { tool_id: 'a', name: 'Bash', args: 'npm test' }),
+    ]);
+    const without = ({ composer: _c, slashMenu: _s, outbox: _o, ...rest }: AppState): string =>
+      JSON.stringify(rest);
+    for (const c of COMMANDS) {
+      if (!worksWhileRunning(c.tier)) continue;
+      const after = reduceLocal(active, { kind: 'command.run', name: c.name, args: '' }, T0);
+      const changed = without(after) !== without(active);
+      const requested = after.outbox.length > active.outbox.length;
+      expect(changed || requested, `${c.name} is listed but dispatches nowhere`).toBe(true);
+    }
+  });
 });
 
 describe('glyphs: colour is never the only state indicator', () => {

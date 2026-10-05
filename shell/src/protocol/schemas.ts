@@ -13,7 +13,11 @@
 import { z } from 'zod';
 
 const severity = z.enum(['info', 'warning', 'error']);
-const permissionMode = z.enum(['manual', 'auto', 'dont_ask', 'bypass']);
+/**
+ * Exported so the permission picker and the settings sheet offer exactly the modes the protocol
+ * declares, instead of a hand-copied list that can drift from the wire.
+ */
+export const permissionMode = z.enum(['manual', 'auto', 'dont_ask', 'bypass']);
 const provenance = z.enum(['independent', 'self_verification']);
 const stageRole = z.enum([
   'planner',

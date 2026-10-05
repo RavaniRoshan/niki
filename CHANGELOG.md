@@ -6,6 +6,72 @@ All notable changes to NIKI are documented here. The format is based on
 
 ## [Unreleased]
 
+The foundation: one typed seam between the engine and any shell, a server on
+the far side of it, a replacement terminal shell built against the seam, and
+the harness that checks both. `niki run` is unchanged and still needs no
+shell.
+
+### Added
+- `crates/niki-protocol` — the one protocol between the engine and a shell.
+  Newline-delimited JSON-RPC 2.0 over stdio: 21 server notifications and 5
+  client requests, every payload a declared struct, no `serde_json::Value` in
+  the crate's public surface. Three properties are enforced rather than
+  intended: every frame carries a `trace_id`; an undeclared method is a parse
+  error instead of a shrug; and a shell refuses to run against an engine whose
+  `PROTOCOL_VERSION` it does not recognise.
+- TypeScript bindings exported from the Rust source, with a drift test in each
+  direction. Adding a variant to `ServerNotification` without teaching the
+  shell about it fails the build rather than sitting there until a user hits
+  it.
+- `niki serve` — the engine as a protocol server over stdio. stdout carries
+  protocol frames and nothing else, because a shell draws its whole view from
+  those lines and one stray `println!` inside the pipeline would corrupt the
+  stream being parsed. The pipeline was not re-plumbed to make this work:
+  `AgenticDisplay::attach_sink` re-points the display's existing event channel
+  at an adapter that maps each `DisplayEvent` onto a declared notification.
+  Approval requests cross the same seam without a type changing, even though
+  `DisplayEvent::PermissionRequest` embeds an oneshot sender inside a `Clone`
+  enum.
+- `shell/` — a TypeScript/Ink terminal shell, a pure client that speaks
+  `niki-protocol` and never calls a model API. The view is a pure function of
+  state and terminal size; the event loop, the key matcher and the reducer are
+  three modules with three jobs. One incremental input parser owns every escape
+  sequence, so a paste split across two reads is one paste. A sanitiser strips
+  CSI, OSC, DCS, SOS, PM and APC from anything the engine sends, so a hostile
+  response cannot drive the terminal. A failed tool renders its error inline in
+  the error colour — the defect the previous TUI captured and then never drew
+  is recorded in `docs/foundation/GAPS.md` §G5.
+- A test harness for the shell: render snapshots at seven terminal sizes, a
+  PTY driver that boots the real shell through a real pseudo-terminal and
+  asserts against a terminal emulator rather than against markup, a debug-only
+  scripted engine runtime (`fixture-runtime`, which `compile_error!`s in a
+  release build so a script-answering binary can never ship), property and fuzz
+  suites over the reducer and the parser, a lint test that reads the shell's
+  own source for the rules it must not break, and measured performance
+  baselines including a round-trip p95 latency probe against a real
+  `niki serve` over a real pipe.
+- `docs/foundation/` — the design, the architecture, the event map, the
+  row-by-row proof ledger with the command and the real output behind every
+  `WORKS` row, the gaps, the owner's manual verification list, the review frame
+  dumps, and `KEYMAP.md`, which is **generated** from the command registry and
+  the key dispatcher by `shell/scripts/gen-keymap.ts`. A test fails if it goes
+  stale, names a key the dispatcher does not handle, or names a command that is
+  not in the registry. `PARITY.md` records, as a decision rather than a work
+  order, the reference capabilities NIKI does not have; none of them is built
+  until every P0 and P1 checklist row is `WORKS` and the owner approves.
+
+### Changed
+- **`VerificationStatus` replaces a boolean on the tester's result.**
+  `TestExecution.status` is now `unverified` / `passed` / `failed` / `errored`.
+  A consumer reading only `passed` could not tell "verified, and broken" from
+  "never verified" — a project with no resolvable test command, or with no
+  `Cargo.toml` at all, reported the same thing as a green suite, and the second
+  is the one that must never be read as a pass. `Unverified` is the default, so
+  an artifact written before the field existed reads as an absence of evidence
+  rather than as a silent success, and it deliberately does not block delivery:
+  a repository with no recognisable manifest is not a repository with failing
+  tests.
+
 ## [0.9.0] - 2026-09-30
 
 **Breaking.** A run's verdict now carries its provenance, and a verdict that

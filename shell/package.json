@@ -14,6 +14,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test --max-warnings=0",
     "gen:bindings": "cp ../crates/niki-protocol/bindings/*.ts src/protocol/generated/ 2>/dev/null || true",
+    "gen:keymap": "tsx scripts/gen-keymap.ts",
+    "check:keymap": "tsx scripts/gen-keymap.ts --check",
     "test:unit": "vitest run --exclude 'test/pty.test.ts' --exclude 'test/fixture-loop.test.tsx' --exclude 'test/roundtrip-latency.test.ts'",
     "test:pty": "vitest run test/pty.test.ts && vitest run test/fixture-loop.test.tsx && vitest run test/roundtrip-latency.test.ts"
   },

@@ -85,33 +85,38 @@ export type Command = {
   readonly aliases: readonly string[];
   /** Fuzzy keywords that do not appear in the name, e.g. "money" for /cost. */
   readonly keywords: readonly string[];
-  readonly argumentHint?: string;
+  /**
+   * What to type after the name, shown in the popup before the command is chosen. Empty means the
+   * command takes no argument — declared, so the popup never has to guess whether a hint is missing
+   * or simply empty.
+   */
+  readonly argumentHint: string;
   /** Everything except `queued` works while a run is active. */
   readonly tier: BypassTier;
 };
 
 export const COMMANDS: readonly Command[] = [
-  { name: '/help', description: 'Show this help', aliases: ['/?'], keywords: ['keys'], tier: 'always' },
-  { name: '/model', description: 'Choose the model', aliases: [], keywords: ['llm', 'switch'], tier: 'always' },
-  { name: '/theme', description: 'Choose the theme', aliases: [], keywords: ['colour', 'color', 'palette'], tier: 'always' },
-  { name: '/clear', description: 'Clear the transcript', aliases: [], keywords: ['reset', 'wipe'], tier: 'always' },
-  { name: '/copy', description: 'Copy the last response', aliases: [], keywords: ['clipboard'], tier: 'sideEffectFree' },
-  { name: '/context', description: 'Show context usage', aliases: [], keywords: ['tokens', 'window'], tier: 'sideEffectFree' },
-  { name: '/cost', description: 'Show spend for this run', aliases: [], keywords: ['money', 'usd', 'spend'], tier: 'sideEffectFree' },
-  { name: '/tokens', description: 'Show token counts', aliases: [], keywords: ['usage'], tier: 'sideEffectFree' },
-  { name: '/effort', description: 'Choose reasoning effort', aliases: [], keywords: ['thinking'], tier: 'always' },
-  { name: '/threads', description: 'Sessions and resume', aliases: ['/sessions'], keywords: ['history', 'resume'], tier: 'always' },
-  { name: '/prompts', description: 'Search prompt history', aliases: [], keywords: ['history', 'recall'], tier: 'always' },
-  { name: '/editor', description: 'Edit the prompt in $EDITOR', aliases: [], keywords: ['external'], tier: 'always' },
-  { name: '/version', description: 'Show the version', aliases: [], keywords: ['about'], tier: 'always' },
-  { name: '/reload', description: 'Reconnect to the engine', aliases: [], keywords: ['reconnect'], tier: 'always' },
-  { name: '/quit', description: 'Quit', aliases: ['/q'], keywords: ['exit', 'bye'], tier: 'always' },
-  { name: '/auto', description: 'Permission mode: auto', aliases: [], keywords: ['permissions'], tier: 'always' },
-  { name: '/manual', description: 'Permission mode: manual', aliases: [], keywords: ['permissions'], tier: 'always' },
-  { name: '/yolo', description: 'Permission mode: bypass (asks first)', aliases: [], keywords: ['permissions', 'bypass'], tier: 'always' },
-  { name: '/scrollbar', description: 'Toggle the scrollbar', aliases: [], keywords: ['scroll'], tier: 'sideEffectFree' },
-  { name: '/timestamps', description: 'Toggle timestamps', aliases: [], keywords: ['time', 'clock'], tier: 'sideEffectFree' },
-  { name: '/line-numbers', description: 'Toggle diff line numbers', aliases: [], keywords: ['diff', 'numbers'], tier: 'sideEffectFree' },
+  { name: '/help', description: 'Show this help', aliases: ['/?'], keywords: ['keys'], argumentHint: '', tier: 'always' },
+  { name: '/model', description: 'Choose the model', aliases: [], keywords: ['llm', 'switch'], argumentHint: '<model reported by the engine>', tier: 'always' },
+  { name: '/theme', description: 'Choose the theme', aliases: [], keywords: ['colour', 'color', 'palette'], argumentHint: '<theme name>', tier: 'always' },
+  { name: '/clear', description: 'Clear the transcript', aliases: [], keywords: ['reset', 'wipe'], argumentHint: '', tier: 'always' },
+  { name: '/copy', description: 'Copy the last response', aliases: [], keywords: ['clipboard'], argumentHint: '', tier: 'sideEffectFree' },
+  { name: '/context', description: 'Show context usage', aliases: [], keywords: ['tokens', 'window'], argumentHint: '', tier: 'sideEffectFree' },
+  { name: '/cost', description: 'Show spend for this run', aliases: [], keywords: ['money', 'usd', 'spend'], argumentHint: '', tier: 'sideEffectFree' },
+  { name: '/tokens', description: 'Show token counts', aliases: [], keywords: ['usage'], argumentHint: '', tier: 'sideEffectFree' },
+  { name: '/effort', description: 'Choose reasoning effort', aliases: [], keywords: ['thinking'], argumentHint: '<low|medium|high>', tier: 'always' },
+  { name: '/threads', description: 'Sessions and resume', aliases: ['/sessions'], keywords: ['history', 'resume'], argumentHint: '<session id>', tier: 'always' },
+  { name: '/prompts', description: 'Search prompt history', aliases: [], keywords: ['history', 'recall'], argumentHint: '', tier: 'always' },
+  { name: '/editor', description: 'Edit the prompt in $EDITOR', aliases: [], keywords: ['external'], argumentHint: '', tier: 'always' },
+  { name: '/version', description: 'Show the version', aliases: [], keywords: ['about'], argumentHint: '', tier: 'always' },
+  { name: '/reload', description: 'Reconnect to the engine', aliases: [], keywords: ['reconnect'], argumentHint: '', tier: 'always' },
+  { name: '/quit', description: 'Quit', aliases: ['/q'], keywords: ['exit', 'bye'], argumentHint: '', tier: 'always' },
+  { name: '/auto', description: 'Permission mode: auto', aliases: [], keywords: ['permissions'], argumentHint: '', tier: 'always' },
+  { name: '/manual', description: 'Permission mode: manual', aliases: [], keywords: ['permissions'], argumentHint: '', tier: 'always' },
+  { name: '/yolo', description: 'Permission mode: bypass (asks first)', aliases: [], keywords: ['permissions', 'bypass'], argumentHint: '', tier: 'always' },
+  { name: '/scrollbar', description: 'Toggle the scrollbar', aliases: [], keywords: ['scroll'], argumentHint: '', tier: 'sideEffectFree' },
+  { name: '/timestamps', description: 'Toggle timestamps', aliases: [], keywords: ['time', 'clock'], argumentHint: '', tier: 'sideEffectFree' },
+  { name: '/line-numbers', description: 'Toggle diff line numbers', aliases: [], keywords: ['diff', 'numbers'], argumentHint: '', tier: 'sideEffectFree' },
 ];
 
 /** Commands that must work while a run is in flight. */
@@ -143,7 +148,11 @@ export function Footer({ state, theme, charset, overlayOpen = false }: FooterPro
   const c = paletteFor(theme);
   const g = glyphs(charset);
   const session = state.session;
-  const permission = session?.permission_mode ?? 'unknown';
+  // The posture the engine reported, and — only when the user has asked for a different one — the
+  // posture the next turn will actually be sent with. Both are real; neither replaces the other.
+  const reported = session?.permission_mode ?? 'unknown';
+  const override = state.permissionOverride;
+  const permission = override !== null && override !== reported ? `${reported} → ${override}` : reported;
 
   const pieces = {
     model: session?.model,

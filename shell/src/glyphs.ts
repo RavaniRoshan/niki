@@ -38,6 +38,9 @@ export type Glyphs = {
   /** Context meter's filled and empty cells. */
   readonly meterFull: string;
   readonly meterEmpty: string;
+  /** Scrollbar: the thumb and the track behind it. */
+  readonly scrollThumb: string;
+  readonly scrollTrack: string;
 };
 
 const UNICODE: Glyphs = {
@@ -55,6 +58,8 @@ const UNICODE: Glyphs = {
   rule: '─',
   meterFull: '█',
   meterEmpty: '░',
+  scrollThumb: '█',
+  scrollTrack: '│',
 };
 
 const ASCII: Glyphs = {
@@ -72,6 +77,8 @@ const ASCII: Glyphs = {
   rule: '-',
   meterFull: '#',
   meterEmpty: '.',
+  scrollThumb: '#',
+  scrollTrack: '|',
 };
 
 export function glyphs(charset: Charset): Glyphs {

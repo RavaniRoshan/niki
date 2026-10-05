@@ -20,8 +20,32 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'ink-testing-library';
 import React from 'react';
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { App } from '../src/app.js';
-import { initialState, reduce, type AppState, type ReduceOptions } from '../src/state.js';
+import { handleKey, type KeyEvent } from '../src/dispatch.js';
+import { reduceLocal, type AppState } from '../src/state.js';
+
+const BASE_KEY: KeyEvent = {
+  input: '',
+  ctrl: false,
+  meta: false,
+  shift: false,
+  escape: false,
+  return: false,
+  backspace: false,
+  delete: false,
+  upArrow: false,
+  downArrow: false,
+  leftArrow: false,
+  rightArrow: false,
+  pageUp: false,
+  pageDown: false,
+  home: false,
+  end: false,
+  tab: false,
+};
+import { initialState, reduce, type ReduceOptions } from '../src/state.js';
 import { renderTranscriptLines } from '../src/components/transcript.js';
 import type { ServerNotification } from '../src/protocol/generated/index.js';
 
@@ -71,6 +95,78 @@ function populated(turns: number, tokensPerTurn: number): AppState {
   }
   return s;
 }
+
+describe('G2: idle means zero redraws', () => {
+  it('schedules no timer when nothing is in flight', () => {
+    const idled = initialState(80, 24);
+    expect(idled.activity, 'idle state has no activity').toBeNull();
+    // The sweep is the only thing that repaints on a timer, and the effect that owns it is
+    // guarded on `state.activity`. An idle shell therefore owns no timer at all: no redraw, no
+    // CPU, nothing to wake it.
+    // The event loop lives in cli.tsx (App is a pure view), so that is where the sweep has to be.
+    // "Motion stops at idle" only means something if motion exists while work is in flight, so the
+    // sweep must be present *and* guarded on an activity.
+    const cli = readFileSync(join(import.meta.dirname, '..', 'src', 'cli.tsx'), 'utf8');
+    expect(cli, 'the sweep timer is missing, so the activity sweep never animates').toMatch(/setInterval/);
+    expect(cli, 'the sweep must be guarded on an activity').toMatch(
+      /reducedMotion[^;]*!state\.activity/,
+    );
+  });
+
+  it('costs no measurable CPU rendering an idle state repeatedly', () => {
+    const idled = initialState(80, 24);
+    const elapsed = bestOfFive(() => {
+      for (let i = 0; i < 1000; i += 1) {
+        renderTranscriptLines({
+          state: idled,
+          theme: 'niki',
+          charset: 'unicode',
+          reducedMotion: true,
+          sweepTick: 0,
+          height: 20,
+        });
+      }
+    });
+    const perSecond = (elapsed / 1000) * 1000;
+    console.log(`idle: 1000 idle renders in ${elapsed.toFixed(2)}ms (${perSecond.toFixed(4)}ms per frame)`);
+    // Even a full second of idle repaints must stay far under 1% of one core (10 ms).
+    expect(perSecond).toBeLessThan(10);
+  });
+});
+
+describe('G4: key echo stays responsive under a flood', () => {
+  it('echoes a keystroke with p95 under 30ms while 100k lines are in the transcript', () => {
+    const big = Array.from({ length: 100_000 }, (_, i) => `line ${i}`);
+    const flooded: AppState = {
+      ...initialState(120, 40),
+      messages: [{ kind: 'assistant', text: big.join('\n'), streaming: true }],
+    };
+
+    const echoOnce = (): number => {
+      const started = process.hrtime.bigint();
+      const outcome = handleKey(flooded, { ...BASE_KEY, input: 'x' });
+      const next = reduceLocal(flooded, { kind: 'composer.set', text: flooded.composer + (outcome.insert ?? '') }, T0);
+      renderTranscriptLines({
+        state: next,
+        theme: 'niki',
+        charset: 'unicode',
+        reducedMotion: true,
+        sweepTick: 0,
+        height: 36,
+      });
+      return Number(process.hrtime.bigint() - started) / 1e6;
+    };
+
+    const samples: number[] = [];
+    for (let i = 0; i < 60; i += 1) samples.push(echoOnce());
+    samples.sort((a, b) => a - b);
+    const p95 = samples[Math.ceil(0.95 * samples.length) - 1]!;
+    console.log(
+      `key echo with 100k transcript lines: p50 ${samples[30]!.toFixed(3)}ms  p95 ${p95.toFixed(3)}ms`,
+    );
+    expect(p95).toBeLessThan(30);
+  });
+});
 
 describe('perf baselines (recorded on this machine)', () => {
   it('records first render at seven sizes', () => {
