@@ -55,6 +55,7 @@ const seq = {
   pasteOff: `${ESC}[?2004l`,
   // The title body is stripped of control bytes first: an engine-supplied topic must not be
   // able to smuggle an escape sequence into the window title.
+  // eslint-disable-next-line no-control-regex
   title: (t: string) => `${ESC}]0;${t.replace(/[\u0000-\u001f]/g, '')}${BEL}`,
 };
 

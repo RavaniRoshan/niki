@@ -852,7 +852,6 @@ export function reduceLocal(state: AppState, action: LocalAction, _opts: ReduceO
 
 /** Bounded so a long session cannot grow an unbounded array inside the state. */
 const PROMPT_HISTORY_LIMIT = 50;
-const RECENT_ACTIONS_LIMIT = 12;
 
 function pushCapped(list: readonly string[], value: string, limit: number): string[] {
   const next = list.filter((v) => v !== value);

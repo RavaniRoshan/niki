@@ -13,7 +13,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { HANDLED_METHODS, NOTIFICATION_SCHEMAS, RESULT_SCHEMAS } from '../src/protocol/schemas.js';
+import { HANDLED_METHODS, RESULT_SCHEMAS } from '../src/protocol/schemas.js';
 import { reduce, initialState, type ReduceOptions } from '../src/state.js';
 
 const REPO = join(import.meta.dirname, '..', '..');

@@ -23,6 +23,9 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -1030,6 +1033,10 @@ jobs:
           node-version: 22
       - name: Install shell dependencies
         run: npm --prefix shell ci
+      - name: Shell lint (typecheck + oxlint)
+        run: npm --prefix shell run lint
+      - name: Production dependency security audit
+        run: npm --prefix shell audit --omit=dev
       # `scripts/test-shell.sh` builds the engine with `fixture-runtime` first, because a plain
       # `cargo build` leaves out that feature, `niki serve --fixture` does not exist, and
       # `shell/test/fixture-loop.test.tsx` — the only leg that drives the real binary end to end

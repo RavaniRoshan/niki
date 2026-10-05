@@ -1,3 +1,4 @@
+/* eslint-disable no-control-regex */
 /**
  * A small terminal emulator, enough to answer "what does the screen actually look like?".
  *
@@ -311,7 +312,7 @@ export function charWidth(ch: string): number {
     (cp >= 0xac00 && cp <= 0xd7a3) ||
     (cp >= 0xf900 && cp <= 0xfaff) ||
     (cp >= 0xff00 && cp <= 0xff60) ||
-    (cp >= 0x1f004 && cp <= 0x1f004)
+    cp === 0x1f004
   ) {
     return 2;
   }

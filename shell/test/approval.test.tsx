@@ -17,7 +17,6 @@ import {
   escapeDecision,
   firstDenyingOption,
   isApproving,
-  safestFocus,
 } from '../src/approval.js';
 import { handleKey, type KeyEvent } from '../src/dispatch.js';
 import { initialState, reduce, reduceLocal, type AppState, type ReduceOptions } from '../src/state.js';

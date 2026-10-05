@@ -165,8 +165,6 @@ export function Footer({ state, theme, charset, overlayOpen = false }: FooterPro
   const width = state.cols;
   const showHints = width >= 50;
   const showCwd = width >= 60;
-  const showBranch = width >= 70;
-  const showModel = width >= 80;
 
   const branchArrow = (): string => {
     if (!session?.branch) return '';

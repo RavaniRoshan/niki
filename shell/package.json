@@ -12,7 +12,7 @@
     "test": "npm run test:unit && npm run test:pty",
     "test:watch": "vitest --exclude 'test/pty.test.ts' --exclude 'test/fixture-loop.test.tsx' --exclude 'test/roundtrip-latency.test.ts'",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src test --max-warnings=0",
+    "lint": "tsc --noEmit && oxlint --deny-warnings src test",
     "gen:bindings": "cp ../crates/niki-protocol/bindings/*.ts src/protocol/generated/ 2>/dev/null || true",
     "gen:keymap": "tsx scripts/gen-keymap.ts",
     "check:keymap": "tsx scripts/gen-keymap.ts --check",
@@ -31,9 +31,10 @@
     "@types/react": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "ink-testing-library": "^4.0.0",
+    "oxlint": "^1.87.0",
+    "react-devtools-core": "file:./shims/react-devtools-core",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8",
-    "react-devtools-core": "file:./shims/react-devtools-core"
+    "vitest": "^2.1.8"
   }
 }

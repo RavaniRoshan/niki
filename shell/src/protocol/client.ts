@@ -10,7 +10,7 @@
  * process at all, and so a PTY test can drive it from the real binary.
  */
 
-import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn as nodeSpawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { notificationSchema, responseSchema } from './schemas.js';
 import type { ClientRequest, ClientResult, ServerNotification } from './generated/index.js';
