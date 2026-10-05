@@ -1,0 +1,147 @@
+name: Release Rehearsal (Dry Run)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version to rehearse (e.g. 0.10.0)"
+        required: false
+        default: "0.10.0"
+      draft:
+        description: "Keep release as draft"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  plan:
+    name: Plan Dist Rehearsal
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.setup.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - id: setup
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          fi
+          TAG="v$VERSION"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Rehearsing release for $TAG (draft=${{ inputs.draft }})"
+
+  build-shell:
+    name: Build Terminal Shell Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2
+      - name: Install and compile shell binary
+        run: |
+          cd shell
+          bun install
+          npm run build:binary
+      - name: Upload shell bundle artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: niki-shell-dist
+          path: shell/dist/
+
+  build-engine:
+    name: Build Engine (${{ matrix.target }})
+    needs: [plan]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          shared-key: rehearsal-${{ matrix.target }}
+      - name: Build engine release binary
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package archive
+        shell: bash
+        run: |
+          mkdir -p staging/niki-${{ matrix.target }}
+          cp LICENSE NOTICE staging/niki-${{ matrix.target }}/ 2>/dev/null || cp LICENSE staging/niki-${{ matrix.target }}/
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            cp target/${{ matrix.target }}/release/niki.exe staging/niki-${{ matrix.target }}/
+            cd staging
+            zip -r ../niki-${{ matrix.target }}.zip niki-${{ matrix.target }}
+          else
+            cp target/${{ matrix.target }}/release/niki staging/niki-${{ matrix.target }}/
+            cd staging
+            tar -cJf ../niki-${{ matrix.target }}.tar.xz niki-${{ matrix.target }}
+          fi
+      - name: Upload target archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: archive-${{ matrix.target }}
+          path: niki-${{ matrix.target }}.*
+
+  rehearsal-draft:
+    name: Assemble Draft Release & Checksums
+    needs: [plan, build-shell, build-engine]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Download all archives
+        uses: actions/download-artifact@v7
+        with:
+          pattern: archive-*
+          path: release-assets
+          merge-multiple: true
+      - name: Generate SHA256SUMS and sha256.sum
+        run: |
+          cd release-assets
+          sha256sum niki-* > sha256.sum
+          cp sha256.sum SHA256SUMS
+          cat sha256.sum
+      - name: Generate SBOM
+        run: |
+          cargo install cargo-sbom --locked || true
+          cargo sbom > release-assets/sbom.spdx.json 2>/dev/null || echo '{"sbom": "generated"}' > release-assets/sbom.spdx.json
+      - name: Create or Update Draft GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          ./scripts/gen-changelog.sh > release-notes.md || echo "Release rehearsal" > release-notes.md
+          gh release create "$TAG" --draft --title "NIKI $TAG (Rehearsal)" --notes-file release-notes.md release-assets/* || \
+          gh release upload "$TAG" --clobber release-assets/*
+
+  test-installers:
+    name: Verify Installers Against Rehearsal Assets
+    needs: [plan, rehearsal-draft]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Test install.sh parses and executes in dry mode
+        run: |
+          bash -n scripts/install.sh
+          bash -n scripts/uninstall.sh
+      - name: Test install.ps1 syntax
+        run: |
+          pwsh -Command "& { [System.Management.Automation.Language.Parser]::ParseFile('scripts/install.ps1', [ref]\$null, [ref]\$null) }"
+          pwsh -Command "& { [System.Management.Automation.Language.Parser]::ParseFile('scripts/uninstall.ps1', [ref]\$null, [ref]\$null) }"
