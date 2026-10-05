@@ -34,6 +34,15 @@ to fake the very thing it claims to check.
 **Fails if:** the terminal is left without a cursor, with the alternate screen still active, or
 with the composer empty after resume.
 
+**What is already automated** (`shell/test/resume.test.ts`, 3 passing): the shell installs a
+`SIGCONT` handler that restores the terminal, clears, repaints and restarts the sweep, and a real
+SIGCONT is delivered to the real process to confirm it survives, keeps its screen and still accepts
+input. **This row was a live defect until then** — `cli.tsx` had no `SIGCONT` handler at all, so
+`fg` brought the user back to a stale screen. What cannot be automated is the suspend itself:
+`script` gives its child a fresh session, so the pseudo-terminal is not wired for job control and
+Ctrl+Z does not stop the process (its state stayed `S` before the keystroke, after it and after
+SIGCONT). That is a harness limit, measured rather than assumed, and the steps above cover it.
+
 ---
 
 ## Mascot — the five states, all three tiers

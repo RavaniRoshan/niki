@@ -115,6 +115,21 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.exit(0);
     });
   }
+
+  // Ctrl+Z: the OS stops us, so there is nothing to handle here. But `fg` sends SIGCONT, and by
+  // then the terminal may have been cleared or run by something else while we slept. Ink still
+  // believes the screen holds our last frame, so without this the user comes back to a stale or
+  // blank terminal. Restoring the terminal and forcing a full repaint is the only correct answer.
+  process.on('SIGCONT', () => {
+    restoreTerminal(terminal);
+    if (sweepTimer !== null) {
+      clearInterval(sweepTimer);
+      sweepTimer = null;
+    }
+    instance?.clear();
+    paint();
+    restopSweep();
+  });
   // A panic must still give the user their terminal back.
   process.on('uncaughtException', (e) => {
     engineLog(`uncaught: ${e.stack ?? String(e)}`);
