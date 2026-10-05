@@ -17,7 +17,8 @@
     "gen:keymap": "tsx scripts/gen-keymap.ts",
     "check:keymap": "tsx scripts/gen-keymap.ts --check",
     "test:unit": "vitest run --exclude 'test/pty.test.ts' --exclude 'test/fixture-loop.test.tsx' --exclude 'test/roundtrip-latency.test.ts'",
-    "test:pty": "vitest run test/pty.test.ts && vitest run test/fixture-loop.test.tsx && vitest run test/roundtrip-latency.test.ts"
+    "test:pty": "vitest run test/pty.test.ts && vitest run test/fixture-loop.test.tsx && vitest run test/roundtrip-latency.test.ts",
+    "build:binary": "bun build --compile --outfile dist/niki-shell src/bin/niki-shell.ts"
   },
   "dependencies": {
     "ink": "^6.0.1",
@@ -32,6 +33,7 @@
     "ink-testing-library": "^4.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "react-devtools-core": "file:./shims/react-devtools-core"
   }
 }

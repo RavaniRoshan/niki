@@ -67,12 +67,32 @@ curl -fsSL https://raw.githubusercontent.com/RavaniRoshan/niki/master/scripts/in
 # https://github.com/RavaniRoshan/niki/releases/latest
 ```
 
+Then open the interface:
+
+```bash
+niki ui
+```
+
+`niki ui` launches the NIKI terminal interface. It ships as a self-contained executable beside
+`niki`, so there is nothing else to install — no Node, no bun.
+
 Then, inside your project:
 
 ```bash
 niki init --interactive          # guided setup; pick Ollama when offered — no API key needed
+niki ui                          # or work on a task interactively from here
 niki run "Add a /health endpoint" --backend worktree
 ```
+
+The interface is also available on its own if you are working on it:
+
+```bash
+cd shell && bun install && npm run build:binary   # builds shell/dist/niki-shell
+niki ui --shell shell/dist/niki-shell             # or set NIKI_SHELL_BIN
+```
+
+If the interface executable cannot be found, `niki ui` says so and names the command to build it,
+rather than opening an empty screen.
 
 With a small local model this may stop at a stage: each one must emit a schema-conformant
 JSON artifact. `./scripts/dogfood.sh` reproduces the check against a real project.

@@ -25,5 +25,6 @@ pub mod session;
 pub mod skills;
 pub mod smoke;
 pub mod status;
+pub mod ui;
 pub mod verify;
 pub mod voice;

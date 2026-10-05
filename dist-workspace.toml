@@ -19,3 +19,10 @@ install-updater = true
 # exist for upload-artifact, and v8 downloads reject v7 uploads). Without this,
 # `cargo dist` aborts on the dirty CI file instead of building the release.
 allow-dirty = ["ci"]
+
+# The terminal interface is TypeScript, so cargo cannot build it and cargo-dist would not ship it.
+# It is produced by `cd shell && bun install && npm run build:binary` before the release runs, and
+# attached here so it lands in the same archive as the engine. Without this the install contains
+# `niki` and no way to reach the interface at all.
+[dist.extra-artifacts]
+shell-dist = ["shell/dist/niki-shell", "shell/dist/niki-shell.exe"]

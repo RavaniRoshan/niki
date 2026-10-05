@@ -54,15 +54,15 @@ date above. Where a number is a judgement rather than a count, it says so.
 |---|---|---|
 | Crate version | 0.9.0 | `Cargo.toml:3` |
 | Edition / MSRV | 2024 / 1.88 | `Cargo.toml:4-5` |
-| Rust source files | 206 | `find src -name '*.rs'` |
+| Rust source files | 207 | `find src -name '*.rs'` |
 | Rust lines in `src/` | ~85,700 | `find src -name '*.rs' -exec cat {} + \| wc -l` |
 | Module directories | 29 | `ls -d src/*/` |
-| CLI subcommands | 23 | `enum Commands` in `src/main.rs` |
+| CLI subcommands | 24 | `enum Commands` in `src/main.rs` |
 | Baseline tools registered | 22 | `build_baseline_registry()`, `src/runtime/tools.rs:2704-2737` |
 | Distinct LLM client implementations | 4 | `anthropic.rs`, `openai.rs`, `google.rs`, `ollama.rs` |
 | Release targets | 5 | `dist-workspace.toml` |
 | Documentation pages | 39 | `find docs/content -name '*.mdx'` |
-| Test binaries | 52 | `ls tests/*.rs` |
+| Test binaries | 123 | `ls tests/*.rs` |
 | Canary defects | 11 | `mutants/canaries.toml` |
 
 **One of these is worth reading twice, because the number and the implication
