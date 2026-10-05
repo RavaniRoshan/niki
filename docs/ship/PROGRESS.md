@@ -561,3 +561,56 @@ they are accurate: they describe `niki bench` as a P2 deliverable, not as someth
 gate is not weakened and the scan is not narrowed — the fix is to build `niki bench`, at which
 point all four sources go quiet. Recorded here rather than hidden, because a red gate that is
 explained in one place is a task and a red gate that is quietly exempted is a lie.
+
+### P1.17 — W2 the config is validated against the schema, and the schema was badly wrong
+
+The last W2 gap. `NikiConfig::validate_against_schema` checks a raw `niki.toml` against
+`config_schema_json()` — the same document `niki config schema` hands an editor — so a key added
+to one is automatically known to the other. `load()` **warns**, `load_file_only()` **refuses**,
+which is the split that function exists for. It catches unknown keys inside a section, scalar
+types, and enumerated values.
+
+Wiring it up turned up **far more than the gap it was built to close.**
+
+**The schema was missing most of the product.** Measured before the fix, over the 23 sections
+`NikiConfig` actually has:
+
+| What | Count |
+| --- | --- |
+| Sections the schema never declared | 4 — `budget`, `tools`, `hooks`, `commands` |
+| Sections declared with no field list at all | 9 |
+| Sections with a field list that was incomplete | 7 |
+| Individual fields missing | `general.language`, `docker.network_disabled`, `docker.network_allowlist`, `session.max_messages`→`max_sessions`, `mcp.servers`, `permissions.rules`, `risk.denylist_patterns`, and more |
+
+`niki.example.toml` documents `docker.network_disabled`, which the engine reads and the schema
+did not declare — so an editor consuming that schema would have flagged a correct line as invalid.
+
+The schema literal is now **generated from the config structs** rather than hand-maintained, which
+is the only way it stays complete. Fields whose Rust type is not a primitive declare **no type at
+all** rather than a guessed one: a wrong `type` makes the validator reject correct files, which is
+worse than not checking the field. Verified complete — 23 sections, 0 gaps.
+
+**Six pre-existing test fixtures were wrong**, and had been wrong silently:
+
+```
+-  ("[session]", "max_messages = 10"),          → max_sessions
+-  ("[hooks]", "enabled = true"),                → timeout_seconds
+-  ("[knowledge]", "enabled = true"),            → doc_globs
+-  ("[risk]", "enabled = true"),                 → mode
+-  ("[goal]", "enabled = true"),                 → max_iterations
+-  ("[commands]", "enabled = true"),             → extra_dirs
+-  ("[permissions]", "enabled = true"),          → prompt_timeout_seconds
+```
+
+Each asserted "this section must be usable with one setting on its own", and each named a field
+that never existed. The assertions passed because nothing checked. `tests/claims.rs`-style gates
+only catch what they were written to look for.
+
+**One finding is yours, not mine:** `~/.config/niki/niki.toml` on this machine sets
+`providers.nvidia.api_key_env`, which `ProviderConfig` has never had. The validator says so on
+every `niki config check`. That is the product telling you something true about your own config;
+I did not edit it.
+
+`tests/config_schema_validation.rs` — 10/10, including a test that fails if any declared section
+is left without its field list (the escape hatch this design deliberately closed), one that a
+`[ui]` typo is caught, and one that `niki.example.toml` matches the schema.

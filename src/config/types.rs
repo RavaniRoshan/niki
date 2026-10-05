@@ -1787,6 +1787,12 @@ impl NikiConfig {
                         );
                     }
                 }
+                // The same failure one level down: a key inside a real section that parses, is
+                // swallowed by `#[serde(default)]`, and does nothing. Warned here and refused by
+                // `load_file_only`, which is the split that function exists for.
+                for problem in Self::validate_against_schema(&raw) {
+                    eprintln!("warning: {problem} ({})", path.display());
+                }
             }
         }
     }
@@ -1833,6 +1839,18 @@ impl NikiConfig {
                      of real sections.",
                 );
                 return Err(msg);
+            }
+
+            // Inside a section, the same failure one level down. Checked against the schema this
+            // type generates, so the validator and `niki config schema` cannot disagree.
+            let schema_problems = Self::validate_against_schema(&raw);
+            if !schema_problems.is_empty() {
+                return Err(format!(
+                    "{} does not match the configuration schema:\n  - {}\n\
+                     Run `niki config schema` for the settings that exist.",
+                    path.display(),
+                    schema_problems.join("\n  - ")
+                ));
             }
 
             let dead: Vec<&str> = Self::DEAD_TABLES
@@ -2314,46 +2332,102 @@ impl NikiConfig {
         }
     }
 
+    /// Check a raw `niki.toml` against the schema this type generates.
+    ///
+    /// **The schema is the source of truth, not a copy of it.** `config_schema_json()` is what
+    /// `niki config schema` hands an editor, so validating against the same document means a key
+    /// added to one is automatically known to the other. A validator with its own hand-written key
+    /// list is the version of this that drifts and then lies.
+    ///
+    /// What it checks, and why only this:
+    ///
+    /// * **unknown keys inside a section** — `[general] spend_cap = 1` parses perfectly and does
+    ///   nothing. Serde cannot catch it because `#[serde(default)]` swallows it, and it is the
+    ///   exact failure `config check` exists for one level up.
+    /// * **scalar types** — `max_revision_rounds = "three"`.
+    /// * **enumerated values** — `docker.backend = "pods"`.
+    ///
+    /// A section the schema declares as a bare `"type": "object"` carries no property list, so
+    /// nothing is checked inside it. Every section that has fields now declares them, so that
+    /// escape hatch is unused — `every_section_the_schema_declares_lists_its_fields` is what
+    /// holds it that way.
+    pub fn validate_against_schema(raw: &toml::Value) -> Vec<String> {
+        let schema: serde_json::Value = match serde_json::from_str(&Self::config_schema_json()) {
+            Ok(v) => v,
+            Err(_) => {
+                return vec![
+                    "the generated config schema is not valid JSON, so this file could not be \
+                     validated against it"
+                        .to_string(),
+                ];
+            }
+        };
+        let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
+            return vec!["the generated config schema declares no properties".to_string()];
+        };
+        let Some(table) = raw.as_table() else {
+            return vec!["niki.toml must be a table of sections".to_string()];
+        };
+
+        let mut problems = Vec::new();
+        for (section, value) in table {
+            let Some(decl) = props.get(section) else {
+                // Unknown *sections* are already reported by `warn_unknown_sections` and
+                // `load_file_only`; repeating them here would make every message appear twice.
+                continue;
+            };
+            // A map of named objects (`[providers.openai]`) is described by
+            // `additionalProperties`, not `properties`.
+            if let Some(inner) = decl
+                .get("additionalProperties")
+                .and_then(|v| v.get("properties"))
+                .and_then(|p| p.as_object())
+            {
+                if let Some(entries) = value.as_table() {
+                    for (name, entry) in entries {
+                        problems.extend(check_keys(&format!("{section}.{name}"), entry, inner));
+                    }
+                }
+                continue;
+            }
+            let Some(declared) = decl.get("properties").and_then(|p| p.as_object()) else {
+                continue;
+            };
+            problems.extend(check_keys(section, value, declared));
+        }
+        problems
+    }
+
     /// Generate the JSON schema for niki.toml and return it as a pretty-printed string.
     /// This can be used to set up editor autocomplete (VSCode, Neovim, etc.).
     pub fn config_schema_json() -> String {
         let schema = serde_json::json!({
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "NikiConfig",
-            "description": "NIKI configuration file (niki.toml)",
+            "description": "NIKI configuration file (niki.toml). Every section and field below is the config struct it describes.",
             "type": "object",
             "properties": {
                 "general": {
                     "type": "object",
                     "properties": {
-                        "max_revision_rounds": {"type": "integer", "default": 3},
-                        "output_dir": {"type": "string", "default": ".niki"},
-                        "spend_cap_usd": {"type": "number", "default": 0.0, "description": "Hard per-run USD ceiling; aborts before the next stage if exceeded."},
-                        "max_diff_lines": {"type": "integer", "default": 0, "description": "Diff-size guardrail; reviewer nudged toward tighter deltas and report.md flags overflows."},
-                        "max_context_chars": {"type": "integer", "default": 48000, "description": "Hard character budget for the Planner's assembled repo context."}
-                    }
-                },
-                "providers": {
-                    "type": "object",
-                    "description": "Provider configurations (api_key, base_url, default_model)",
-                    "additionalProperties": {
-                        "type": "object",
-                        "properties": {
-                            "api_key": {"type": "string", "description": "API key (prefer env var or keyring)"},
-                            "base_url": {"type": "string"},
-                            "default_model": {"type": "string"}
-                        }
+                        "max_revision_rounds": {"type": "integer", "description": "Maximum Reviewer to Coder feedback rounds before forced completion."},
+                        "language": {"type": "string", "description": "ISO-639-1 language hint used by niki voice."},
+                        "output_dir": {"type": "string", "description": "Task output directory, relative to the project root."},
+                        "spend_cap_usd": {"type": "number", "description": "Hard per-run USD ceiling; aborts before the next stage if exceeded."},
+                        "max_diff_lines": {"type": "integer", "description": "Diff-size guardrail; 0 = off."},
+                        "max_context_chars": {"type": "integer", "description": "Hard character budget for the Planner's assembled repo context."},
                     }
                 },
                 "agents": {
                     "type": "object",
                     "properties": {
-                        "planner": {"$ref": "#/$defs/agent"},
-                        "coder": {"$ref": "#/$defs/agent"},
-                        "tester": {"$ref": "#/$defs/agent"},
-                        "reviewer": {"$ref": "#/$defs/agent"},
-                        "synthesizer": {"$ref": "#/$defs/agent"},
-                        "security_auditor": {"$ref": "#/$defs/agent"}
+                        "planner": {},
+                        "coder": {},
+                        "tester": {},
+                        "reviewer": {},
+                        "synthesizer": {},
+                        "security_auditor": {},
+                        "red": {},
                     }
                 },
                 "docker": {
@@ -2363,35 +2437,204 @@ impl NikiConfig {
                         "extra_packages": {"type": "array", "items": {"type": "string"}},
                         "memory_limit": {"type": "string"},
                         "cpu_limit": {"type": "number"},
-                        "backend": {"type": "string", "enum": ["docker", "worktree"]}
+                        "pids_limit": {"type": "integer"},
+                        "cap_drop_all": {"type": "boolean"},
+                        "network_disabled": {"type": "boolean", "description": "Block all outbound network from the sandbox; default true."},
+                        "network_allowlist": {"type": "array", "items": {"type": "string"}, "description": "Domains permitted egress. A single * allows all."},
+                        "readonly_rootfs": {"type": "boolean"},
+                        "backend": {"type": "string", "enum": ["docker", "worktree"]},
                     }
                 },
-                "pipeline": {"type": "object"},
-                "knowledge": {"type": "object"},
-                "security": {"type": "object"},
-                "parallel": {"type": "object"},
-                "red_blue": {"type": "object"},
-                "goal": {"type": "object"},
-                "ui": {"type": "object"},
-                "session": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
-                "compaction": {"type": "object", "properties": {"strategy": {"type": "string"}}},
-                "mcp": {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
-                "permissions": {"type": "object", "properties": {"mode": {"type": "string"}, "disable_worktree": {"type": "boolean"}, "fail_closed_headless": {"type": "boolean"}, "auto_approve": {"type": "boolean"}}},
-                "instructions": {"type": "object"},
-                "repo_intel": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "structural_index": {"type": "boolean"}, "history": {"type": "boolean"}, "max_units": {"type": "integer"}, "disk_budget_mb": {"type": "integer"}, "on_failure": {"type": "string"}, "ast": {"type": "boolean"}}},
-                "risk": {"type": "object", "properties": {"mode": {"type": "string", "enum": ["auto", "low", "normal", "high", "security"]}, "file_count_threshold": {"type": "integer"}}},
-                "snapshot": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "retention_days": {"type": "integer"}}},
-                "critic": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "provider": {"type": "string"}, "model": {"type": "string"}, "max_tokens": {"type": "integer"}, "temperature": {"type": "number"}}}
-            },
-            "$defs": {
-                "agent": {
+                "pipeline": {
                     "type": "object",
                     "properties": {
-                        "provider": {"type": "string"},
-                        "model": {"type": "string"}
+                        "stages": {"type": "array"},
+                        "max_revision_rounds": {"type": "integer", "description": "Maximum Reviewer to Coder feedback rounds before forced completion."},
+                        "topology": {"type": "string"},
+                        "single_agent_max_complexity": {},
                     }
-                }
-            }
+                },
+                "knowledge": {
+                    "type": "object",
+                    "properties": {
+                        "doc_globs": {"type": "array", "items": {"type": "string"}},
+                        "urls": {"type": "array", "items": {"type": "string"}},
+                        "max_source_chars": {"type": "integer"},
+                        "skills_dir": {"type": "string"},
+                    }
+                },
+                "security": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "provider": {"type": "string"},
+                        "model": {"type": "string"},
+                        "policies": {"type": "object"},
+                    }
+                },
+                "parallel": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "coder_count": {"type": "integer"},
+                    }
+                },
+                "red_blue": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "provider": {"type": "string"},
+                        "model": {"type": "string"},
+                    }
+                },
+                "goal": {
+                    "type": "object",
+                    "properties": {
+                        "max_iterations": {"type": "integer"},
+                        "branch_prefix": {"type": "string"},
+                        "state_dir": {"type": "string"},
+                        "fail_fast": {"type": "boolean"},
+                        "retry_attempts": {"type": "integer"},
+                        "retry_delay_ms": {"type": "integer"},
+                    }
+                },
+                "ui": {
+                    "type": "object",
+                    "properties": {
+                        "tips": {},
+                        "theme": {"type": "string"},
+                        "transcript": {},
+                        "ime_anchor": {"type": "boolean"},
+                        "reduced_motion": {"type": "boolean"},
+                        "keybindings": {"type": "object"},
+                    }
+                },
+                "session": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "max_sessions": {"type": "integer"},
+                        "auto_save": {"type": "boolean"},
+                    }
+                },
+                "compaction": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "threshold_pct": {"type": "integer"},
+                        "reserved_tokens": {"type": "integer"},
+                        "auto_compact": {"type": "boolean"},
+                    }
+                },
+                "mcp": {
+                    "type": "object",
+                    "properties": {
+                        "servers": {"type": "array"},
+                        "enabled": {"type": "boolean"},
+                        "timeout_ms": {"type": "integer"},
+                        "read_only": {"type": "boolean"},
+                        "domain_allowlist": {"type": "array", "items": {"type": "string"}},
+                    }
+                },
+                "permissions": {
+                    "type": "object",
+                    "properties": {
+                        "auto_approve": {"type": "boolean"},
+                        "rules": {"type": "array"},
+                        "mode": {"type": "string"},
+                        "disable_worktree": {"type": "boolean"},
+                        "fail_closed_headless": {"type": "boolean"},
+                        "prompt_timeout_seconds": {"type": "integer"},
+                        "classifier": {},
+                    }
+                },
+                "hooks": {
+                    "type": "object",
+                    "properties": {
+                        "commands": {"type": "object"},
+                        "timeout_seconds": {"type": "integer"},
+                    }
+                },
+                "commands": {
+                    "type": "object",
+                    "properties": {
+                        "extra_dirs": {"type": "array", "items": {"type": "string"}},
+                    }
+                },
+                "instructions": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "paths": {"type": "array", "items": {"type": "string"}},
+                        "auto_detect_agents_md": {"type": "boolean"},
+                    }
+                },
+                "repo_intel": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "structural_index": {"type": "boolean"},
+                        "history": {"type": "boolean"},
+                        "max_units": {"type": "integer"},
+                        "disk_budget_mb": {"type": "integer"},
+                        "on_failure": {"type": "string"},
+                        "ast": {"type": "boolean"},
+                    }
+                },
+                "risk": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {"type": "string"},
+                        "file_count_threshold": {"type": "integer"},
+                        "denylist_patterns": {"type": "array", "items": {"type": "string"}},
+                        "severity_keywords": {"type": "array", "items": {"type": "string"}},
+                    }
+                },
+                "snapshot": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "retention_days": {"type": "integer"},
+                    }
+                },
+                "critic": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "provider": {"type": "string"},
+                        "model": {"type": "string"},
+                        "max_tokens": {"type": "integer"},
+                        "temperature": {"type": "number"},
+                    }
+                },
+                "tools": {
+                    "type": "object",
+                    "properties": {
+                        "experimental_tool_loop": {"type": "boolean"},
+                        "max_steps": {"type": "integer"},
+                    }
+                },
+                "budget": {
+                    "type": "object",
+                    "properties": {
+                        "max_steps": {"type": "integer"},
+                        "max_usd": {"type": "number"},
+                        "max_wallclock_secs": {"type": "integer"},
+                    }
+                },
+                "providers": {
+                    "type": "object",
+                    "description": "Named provider configurations.",
+                    "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                            "api_key": {"type": "string", "description": "API key; prefer an env var or the keyring."},
+                            "base_url": {"type": "string"},
+                            "default_model": {"type": "string"}
+                        }
+                    }
+                },
+            },
         });
         serde_json::to_string_pretty(&schema).unwrap_or_else(|_| "{}".to_string())
     }
@@ -2419,6 +2662,73 @@ fn apply_env_model_to_agents(agents: &mut AgentsConfig, provider: &str, model: &
         if a.provider == provider && a.model == default_model {
             a.model = model.to_string();
         }
+    }
+}
+
+/// Compare one table's keys and scalars against a schema fragment.
+fn check_keys(
+    path: &str,
+    value: &toml::Value,
+    declared: &serde_json::Map<String, serde_json::Value>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(table) = value.as_table() else {
+        return out;
+    };
+    for (key, v) in table {
+        let Some(spec) = declared.get(key) else {
+            out.push(format!(
+                "`{path}.{key}` is not a setting NIKI reads — it will be ignored. Check the \
+                 spelling, or run `niki config schema` for the full list."
+            ));
+            continue;
+        };
+        if let Some(want) = spec.get("type").and_then(|t| t.as_str())
+            && !type_matches(want, v)
+        {
+            out.push(format!(
+                "`{path}.{key}` is a {want} in the schema but the file gives a {}",
+                toml_type(v)
+            ));
+        }
+        if let Some(allowed) = spec.get("enum").and_then(|e| e.as_array())
+            && !allowed.iter().any(|a| a.as_str() == v.as_str())
+        {
+            out.push(format!(
+                "`{path}.{key}` is `{}`, which is not one of: {}",
+                v.as_str().unwrap_or("?"),
+                allowed
+                    .iter()
+                    .filter_map(|a| a.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
+    out
+}
+
+fn toml_type(v: &toml::Value) -> &'static str {
+    match v {
+        toml::Value::String(_) => "string",
+        toml::Value::Integer(_) => "integer",
+        toml::Value::Float(_) => "number",
+        toml::Value::Boolean(_) => "boolean",
+        toml::Value::Array(_) => "array",
+        toml::Value::Table(_) => "table",
+        toml::Value::Datetime(_) => "datetime",
+    }
+}
+
+fn type_matches(want: &str, v: &toml::Value) -> bool {
+    match want {
+        // JSON-Schema says an integer satisfies "number", and a TOML integer is not a float.
+        "number" => matches!(v, toml::Value::Integer(_) | toml::Value::Float(_)),
+        // TOML calls a nested table a "table"; JSON-Schema calls the same thing an "object".
+        // Reporting "is a object" to a user because TOML and JSON disagree on the word is the
+        // kind of message that teaches people to ignore messages.
+        "object" => matches!(v, toml::Value::Table(_)),
+        other => toml_type(v) == other,
     }
 }
 
@@ -2966,19 +3276,19 @@ mod topology_spellings {
             ("[budget]", "max_steps = 20"),
             ("[tools]", "experimental_tool_loop = true"),
             ("[ui]", "reduced_motion = true"),
-            ("[session]", "max_messages = 10"),
+            ("[session]", "max_sessions = 10"),
             ("[compaction]", "enabled = true"),
             ("[mcp]", "enabled = true"),
-            ("[hooks]", "enabled = true"),
-            ("[knowledge]", "enabled = true"),
+            ("[hooks]", "timeout_seconds = 30"),
+            ("[knowledge]", "doc_globs = [\"docs/**/*.md\"]"),
             ("[repo_intel]", "enabled = true"),
-            ("[risk]", "enabled = true"),
+            ("[risk]", "mode = \"auto\""),
             ("[snapshot]", "enabled = true"),
             ("[critic]", "enabled = true"),
-            ("[goal]", "enabled = true"),
+            ("[goal]", "max_iterations = 5"),
             ("[instructions]", "enabled = true"),
-            ("[commands]", "enabled = true"),
-            ("[permissions]", "enabled = true"),
+            ("[commands]", "extra_dirs = [\".niki/commands\"]"),
+            ("[permissions]", "prompt_timeout_seconds = 60"),
         ];
         for (section, line) in cases {
             let dir = tempfile::tempdir().expect("tmp");
