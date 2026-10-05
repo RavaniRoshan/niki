@@ -14,7 +14,7 @@
 
 <div align="center">
 
-<img src="assets/logo.svg" alt="NIKI — four agents in a pipeline, above the wordmark" width="340" />
+
 
 <br>
 
