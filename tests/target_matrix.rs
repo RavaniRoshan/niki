@@ -170,3 +170,16 @@ fn windows_has_its_own_smoke_job() {
          runs"
     );
 }
+
+#[test]
+fn unsupported_combinations_are_documented() {
+    let install_doc = read("docs/INSTALL.md");
+    assert!(
+        install_doc.contains("Alpine") || install_doc.contains("alpine"),
+        "docs/INSTALL.md must document Alpine/musl support status so unsupported combinations are not silently broken"
+    );
+    assert!(
+        install_doc.contains("musl"),
+        "docs/INSTALL.md must document musl support status"
+    );
+}
