@@ -1,0 +1,43 @@
+{
+  "agent": "niki",
+  "model": "qwen2.5-coder:3b",
+  "blocked": "",
+  "records": [
+    {
+      "description": "Add a typed error enum mapping domain failures to messages",
+      "expected_caught": false,
+      "id": "clean-error-enum",
+      "label": "Exhaustive error mapping with no unreachable branch",
+      "verdict": "CAUGHT",
+      "raw": "CAUGHT",
+      "seconds": 102.05
+    },
+    {
+      "description": "Add a paginated list endpoint returning page metadata",
+      "expected_caught": false,
+      "id": "clean-paginated-query",
+      "label": "Correct offset/limit pagination with bounds checks",
+      "verdict": "CAUGHT",
+      "raw": "CAUGHT",
+      "seconds": 52.94
+    },
+    {
+      "description": "Add a helper that trims and lowercases a display name",
+      "expected_caught": false,
+      "id": "clean-string-helper",
+      "label": "Routine string normalisation with no defect to find",
+      "verdict": "CAUGHT",
+      "raw": "CAUGHT",
+      "seconds": 33.69
+    },
+    {
+      "description": "Add a typed config struct with defaults and validation",
+      "expected_caught": false,
+      "id": "clean-typed-config",
+      "label": "A plain data type with a validating constructor",
+      "verdict": "CAUGHT",
+      "raw": "CAUGHT",
+      "seconds": 102.9
+    }
+  ]
+}

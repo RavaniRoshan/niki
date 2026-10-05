@@ -4,8 +4,17 @@ The scoreboard answers one question: **when every agent is given the same task a
 who catches what?** It is not `niki eval` — that replays NIKI's own recorded artifacts against a
 maintainer's grades and asks "does NIKI agree with a human?". Different question, different method.
 
-**Status: the harness is finished and tested; three of the four arms cannot run on this machine.**
-Nothing below is a claim the reader has to take on trust; every number was printed.
+**Status: the harness is finished and tested. The NIKI arm runs. The three baselines will not.**
+
+**The owner has decided not to supply credentials for Claude Code, Codex or Deep Agents**, so those
+arms are not pending — they are closed. Nothing below is a claim the reader has to take on trust;
+every number was printed, and where there is no number it says so rather than filling the gap.
+
+What this means for checklist row H3: the row asked for a four-agent comparison, and a four-agent
+comparison needs three vendors' credentials. Without them the row **cannot be met on this machine**,
+so it is recorded as NOT RUN BY DECISION rather than left looking like outstanding work. The
+harness stays because it is finished, tested and correct — the day someone runs it with a key is a
+one-command event, not a rebuild.
 
 ---
 
@@ -34,9 +43,9 @@ The three baselines are installed and reachable. They cannot be *pointed at a mo
 | Agent | Installed | Blocked by | Evidence |
 | --- | --- | --- | --- |
 | NIKI | yes | — | runs against `ollama` with a generated per-project `niki.toml` pinning every agent to the shared model |
-| Claude Code | **2.1.286** | no credential | `oauthAccount: None` in `~/.claude.json`; `ANTHROPIC_API_KEY` unset. It authenticates *before* honouring `ANTHROPIC_BASE_URL`, so redirecting at `http://127.0.0.1:11434` does not help — it blocks rather than fails. ollama logged no request (`/api/ps` → `{"models":[]}`) and the box sat at load 0.08 while it waited. |
-| Codex | **0.152.1** | no credential | `OPENAI_API_KEY` unset. |
-| Deep Agents | not installed | installable but not installed | `deepagents-0.7.21` downloads fine; the blocker is the same missing credential for the model behind it. |
+| Claude Code | **2.1.286** | closed by decision | `oauthAccount: None` in `~/.claude.json`; `ANTHROPIC_API_KEY` unset. It authenticates *before* honouring `ANTHROPIC_BASE_URL`, so redirecting at `http://127.0.0.1:11434` does not help — it blocks rather than fails. ollama logged no request (`/api/ps` → `{"models":[]}`) and the box sat at load 0.08 while it waited. |
+| Codex | **0.152.1** | closed by decision | `OPENAI_API_KEY` unset. |
+| Deep Agents | not installed | closed by decision | `deepagents-0.7.21` downloads fine; the blocker is the same missing credential for the model behind it. |
 
 Also relevant: the machine's own `~/.config/niki/niki.toml` pins **every** NIKI agent to NVIDIA
 with `api_key_env = "ANTHROPIC_API_KEY"`. That config loads before the project's, so a scoreboard
@@ -46,9 +55,9 @@ throwaway `niki.toml` per case that pins planner, coder, tester and reviewer to 
 
 ---
 
-## What an owner has to supply
+## What would have unblocked the baselines (no longer being asked for)
 
-Any **one** of these unblocks the baselines:
+Recorded for completeness, not as a request. Any **one** of these would have been enough:
 
 1. `ANTHROPIC_API_KEY` — lets Claude Code run. Codex and Deep Agents can then be pointed at the
    same model through it if you prefer one provider.
@@ -78,3 +87,33 @@ infrastructure is the deliverable here; the delta becomes meaningful when it is 
 frontier model, over a larger sealed split, with credentials. Producing a confident-sounding
 number from 23 cases and a 3B model would be the dishonest outcome, so the harness prints the
 interval rather than a bare percentage.
+
+---
+
+## What the NIKI arm measured before it was stopped
+
+The arm ran to completion for the first four cases and was then stopped: with no baselines to
+compare against, a single-agent number over 27 cases answers nothing, and it cost roughly four
+minutes per case on this machine.
+
+Those four cases happen to be the **clean controls** — the ones where the change is correct and
+flagging it is a false positive. All four were flagged.
+
+| Case | Ground truth | NIKI said |
+| --- | --- | --- |
+| `clean-error-enum` | correct change | CAUGHT |
+| `clean-paginated-query` | correct change | CAUGHT |
+| `clean-string-helper` | correct change | CAUGHT |
+| `clean-typed-config` | correct change | CAUGHT |
+
+**Measured precision on clean controls: 0/4 — zero.** Recall is unknown, because none of the 23
+seeded defects were reached.
+
+This is a real finding, and it is why the dataset carries negative controls at all. With only
+defects in the split, "the reviewer caught it" measures nothing: a reviewer that flags everything
+scores 100%. On `qwen2.5-coder:3b` — a 1.9 GB local model, far below the frontier models the
+reviewer is written for — NIKI flags every clean change it was shown. That is a statement about the
+model, not a defect in the pipeline, and it is exactly what a scoreboard exists to make visible
+rather than hide behind a headline percentage.
+
+It is still not a scoreboard, and no delta is published.
