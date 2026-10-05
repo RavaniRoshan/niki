@@ -649,3 +649,34 @@ always been `manual` and is unchanged.
 `bypass`; both are deliberate acts with the badge on screen. Adding a modal to a key cycle would
 be a different design decision, and it is recorded here as unaddressed rather than quietly
 assumed done.
+
+### P1.19 — W2: the source of *every* value, not eleven of them
+
+`niki config explain` listed 11 hand-written settings out of the 23 sections the product has, and
+would have gone stale the next time one was added — the same drift the config schema itself had.
+The list is now **derived from `config_schema_json()`**, so it cannot be a second copy:
+
+```
+$ niki config explain
+  133 settings, from the generated config schema.
+  docker.backend                    worktree                      /tmp/cexp/niki.toml
+  general.spend_cap_usd             2.5                           /tmp/cexp/niki.toml
+  providers.anthropic.default_model claude-x                      environment ANTHROPIC_MODEL
+  providers.openai.api_key          (set)                         environment OPENAI_API_KEY
+  providers.openai.base_url         http://127.0.0.1:8080         /tmp/cexp/niki.toml
+```
+
+Environment overrides are a table of the variables `NikiConfig::apply_env_lookup` really reads —
+the same lesson as P1.9, where an invented `NIKI_CODER_MODEL` made a test pass against a variable
+nothing consulted. Named providers and agents come from the union of what the files mention plus
+the providers the loader always materialises. Secrets still print `(set)`.
+
+The hand-copied defaults ("3", ".niki", "docker") are gone: a second copy of the defaults can
+disagree with the code, and anything not copied printed nothing at all. Unset values now say
+`(default)`.
+
+Two assertion bugs of my own while measuring this, both about counting report *furniture* as
+report *content*: a column header and a `user file:` line were counted as settings, so 135
+"distinct paths" came out of 133 settings. The assertion now matches a dotted identifier rather
+than guessing which lines are settings — a gate that flags its own headings is a gate people
+learn to disable.

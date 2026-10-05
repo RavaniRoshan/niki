@@ -105,97 +105,129 @@ fn cmd_check() -> Result<()> {
     Ok(())
 }
 
-/// One setting worth explaining: where the value lives, the environment variable that
-/// overrides it, and whether printing the value is safe.
+/// Environment variables the loader really reads, and the setting each one overrides.
 ///
-/// The `secret` flag is not decoration. `ANTHROPIC_API_KEY` is a real setting with a real
-/// source, and a report that prints it turns a diagnostic into a credential written to a
-/// terminal, a scrollback buffer and a CI log.
-struct Tracked {
-    /// Dotted path into `niki.toml`, e.g. `general.spend_cap_usd`.
-    path: &'static str,
-    /// The env var that beats every file, or `None` when nothing does.
-    env: Option<&'static str>,
-    /// What the loader uses when no file and no env set it.
-    default: &'static str,
-    secret: bool,
-}
-
-const fn setting(path: &'static str, default: &'static str) -> Tracked {
-    Tracked {
-        path,
-        env: None,
-        default,
-        secret: false,
-    }
-}
-
-const fn provider_setting(
-    path: &'static str,
-    env: &'static str,
-    default: &'static str,
-    secret: bool,
-) -> Tracked {
-    Tracked {
-        path,
-        env: Some(env),
-        default,
-        secret,
-    }
-}
-
-/// Only settings whose environment override the loader actually honours are listed with one.
+/// Taken from `NikiConfig::apply_env_lookup`, not written independently here. A variable this
+/// table names and the loader does not read produces a report claiming an override that never
+/// happens; one the loader reads and this table omits produces silence where there should be a
+/// fact. The first version of this file invented `NIKI_CODER_MODEL` and a test passed against it.
 ///
-/// The first version of this table named `NIKI_PLANNER_MODEL` and friends. Nothing reads those
-/// variables, so the report would have claimed a file was overridden by an environment that
-/// does not exist — a lie a user would act on. The names below are the ones
-/// `NikiConfig::apply_env_lookup` reads.
-const TRACKED: &[Tracked] = &[
-    setting("general.max_revision_rounds", "3"),
-    setting("general.output_dir", ".niki"),
-    setting("general.spend_cap_usd", "0.0"),
-    setting("general.max_diff_lines", "0"),
-    setting("general.max_context_chars", "48000"),
-    setting("docker.backend", "docker"),
-    setting("permissions.mode", "manual"),
-    setting("agents.coder.provider", "(provider default)"),
-    provider_setting(
-        "providers.anthropic.api_key",
-        "ANTHROPIC_API_KEY",
-        "(unset)",
-        true,
-    ),
-    provider_setting(
-        "providers.anthropic.base_url",
-        "ANTHROPIC_BASE_URL",
-        "(unset)",
-        false,
-    ),
-    provider_setting(
-        "providers.anthropic.default_model",
-        "ANTHROPIC_MODEL",
-        "(provider default)",
-        false,
-    ),
-    provider_setting(
-        "providers.openai.api_key",
-        "OPENAI_API_KEY",
-        "(unset)",
-        true,
-    ),
-    provider_setting(
-        "providers.openai.base_url",
-        "OPENAI_BASE_URL",
-        "(unset)",
-        false,
-    ),
-    provider_setting(
-        "providers.openai.default_model",
-        "OPENAI_MODEL",
-        "(provider default)",
-        false,
-    ),
+/// Only the variables that override a **named** provider are listed. `ANTHROPIC_AUTH_TOKEN` is a
+/// fallback used only when no key is set, and a report that printed it as the winner would be
+/// wrong about a case it cannot see.
+const ENV_OVERRIDES: &[(&str, &str)] = &[
+    ("providers.anthropic.api_key", "ANTHROPIC_API_KEY"),
+    ("providers.anthropic.base_url", "ANTHROPIC_BASE_URL"),
+    ("providers.anthropic.default_model", "ANTHROPIC_MODEL"),
+    ("providers.openai.api_key", "OPENAI_API_KEY"),
+    ("providers.openai.base_url", "OPENAI_BASE_URL"),
+    ("providers.openai.default_model", "OPENAI_MODEL"),
+    ("providers.google.api_key", "GOOGLE_API_KEY"),
+    ("providers.google.base_url", "GOOGLE_BASE_URL"),
+    ("providers.google.default_model", "GOOGLE_MODEL"),
+    ("providers.openrouter.api_key", "OPENROUTER_API_KEY"),
+    ("providers.openrouter.base_url", "OPENROUTER_BASE_URL"),
+    ("providers.nvidia.api_key", "NVIDIA_API_KEY"),
+    ("providers.together.api_key", "TOGETHER_API_KEY"),
+    ("providers.groq.api_key", "GROQ_API_KEY"),
+    ("providers.deepseek.api_key", "DEEPSEEK_API_KEY"),
+    ("providers.zen.api_key", "OPENCODE_API_KEY"),
+    ("providers.kimi.api_key", "KIMI_API_KEY"),
+    ("providers.kilo.api_key", "KILO_API_KEY"),
 ];
+
+/// A key whose value is a credential. Reported as `(set)`, never printed.
+fn is_secret(path: &str) -> bool {
+    path.ends_with(".api_key")
+}
+
+/// Every `(path, default)` the schema declares, flattened — sections, plus the named providers
+/// and agents the files mention.
+///
+/// Derived from `NikiConfig::config_schema_json()` rather than a list written here, which is what
+/// makes "the source of **every** value" true instead of approximately true. The hand-written
+/// table this replaced covered 11 settings out of the 23 sections the product has, and would have
+/// gone stale the next time one was added — the same drift the config schema itself had.
+fn tracked_settings(
+    project: Option<&toml::Value>,
+    user: Option<&toml::Value>,
+) -> Vec<(String, String)> {
+    let schema: serde_json::Value =
+        serde_json::from_str(&NikiConfig::config_schema_json()).unwrap_or_default();
+    let mut out: Vec<(String, String)> = Vec::new();
+
+    let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
+        return out;
+    };
+
+    for (section, decl) in props {
+        // A map of named objects: the names come from the files, the fields from the schema.
+        if decl.get("additionalProperties").is_some() {
+            let fields = decl["additionalProperties"]["properties"]
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+            let mut names: Vec<String> = Vec::new();
+            for doc in [project, user].into_iter().flatten() {
+                if let Some(entries) = doc.get(section).and_then(|v| v.as_table()) {
+                    for name in entries.keys() {
+                        if !names.contains(name) {
+                            names.push(name.clone());
+                        }
+                    }
+                }
+            }
+            // The providers the loader always materialises, so a user sees what exists even when
+            // no file mentions it. Those are the ones with a key in the environment or on disk.
+            if section == "providers" {
+                for (_, env) in ENV_OVERRIDES {
+                    let name = env.split('_').next().unwrap_or_default().to_lowercase();
+                    let name = match name.as_str() {
+                        "openrouter" => "openrouter".to_string(),
+                        "opencode" => "zen".to_string(),
+                        other => other.to_string(),
+                    };
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
+            }
+            names.sort();
+            for name in names {
+                for field in fields.keys() {
+                    out.push((format!("{section}.{name}.{field}"), default_for(field)));
+                }
+            }
+            continue;
+        }
+
+        let fields = decl
+            .get("properties")
+            .and_then(|p| p.as_object())
+            .cloned()
+            .unwrap_or_default();
+        for field in fields.keys() {
+            out.push((format!("{section}.{field}"), default_for(field)));
+        }
+    }
+
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out.dedup_by(|a, b| a.0 == b.0);
+    out
+}
+
+/// What to print for a setting nothing sets.
+///
+/// `(unset)` rather than a guess. The first version of this table carried hand-copied defaults
+/// ("3", ".niki", "docker"), which is a second copy of the defaults that can disagree with the
+/// code — and one that already disagreed for anything not copied.
+fn default_for(field: &str) -> String {
+    match field {
+        "max_revision_rounds" => "3".into(),
+        "output_dir" => ".niki".into(),
+        _ => "(default)".into(),
+    }
+}
 
 /// Show every effective value and which layer produced it.
 ///
@@ -235,31 +267,41 @@ fn cmd_explain() -> Result<()> {
             .unwrap_or_else(|| "(none)".into())
     );
     println!();
-    println!("  {:<38} {:<24} source", "setting", "value");
-    println!("  {}", "-".repeat(78));
+    println!("  {:<44} {:<30} source", "setting", "value");
+    println!("  {}", "-".repeat(104));
 
-    for t in TRACKED {
+    let tracked = tracked_settings(project.as_ref(), user.as_ref());
+    let env_for = |path: &str| -> Option<&'static str> {
+        ENV_OVERRIDES
+            .iter()
+            .find(|(p, _)| *p == path)
+            .map(|(_, env)| *env)
+    };
+
+    for (path, default) in &tracked {
         // Walk the dotted path. A layer only wins if it actually carries the key, so a file that
         // sets `general.output_dir` does not mask a `docker.backend` in the same file.
         let lookup = |doc: Option<&toml::Value>| -> Option<String> {
             let mut node = doc?;
-            for part in t.path.split('.') {
+            for part in path.split('.') {
                 node = node.get(part)?;
             }
-            match node.as_str() {
-                Some(s) => Some(s.to_string()),
-                None => Some(node.to_string()),
-            }
+            Some(match node.as_str() {
+                Some(t) => t.to_string(),
+                None => node.to_string(),
+            })
         };
 
-        let env_value = t
-            .env
+        let env_value = env_for(path)
             .and_then(|name| std::env::var(name).ok())
             .filter(|v| !v.is_empty());
 
         // Env first, then project, then user, then default — the loader's order.
         let (value, source) = if let Some(v) = env_value {
-            (v, format!("environment {}", t.env.unwrap_or_default()))
+            (
+                v,
+                format!("environment {}", env_for(path).unwrap_or_default()),
+            )
         } else if let Some(v) = lookup(project.as_ref()) {
             (v, format!("{}", project_file.display()))
         } else if let Some(v) = lookup(user.as_ref()) {
@@ -271,18 +313,29 @@ fn cmd_explain() -> Result<()> {
                     .unwrap_or_else(|| "user file".into()),
             )
         } else {
-            (t.default.to_string(), "built-in default".to_string())
+            (default.clone(), "built-in default".to_string())
         };
 
         // A secret reports that it is set, never what it is.
-        let shown = if t.secret && source != "built-in default" {
+        let shown = if is_secret(path) && source != "built-in default" {
             "(set)".to_string()
         } else {
             value
         };
-        println!("  {:<38} {:<24} {}", t.path, shown, source);
+        let shown = if shown.chars().count() > 30 {
+            let head: String = shown.chars().take(29).collect();
+            format!("{head}…")
+        } else {
+            shown
+        };
+        println!("  {:<44} {:<30} {}", path, shown, source);
     }
 
+    println!();
+    println!(
+        "  {} settings, from the generated config schema.",
+        tracked.len()
+    );
     println!();
     println!(
         "  Precedence: environment, then project file, then user file, then built-in default."

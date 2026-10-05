@@ -72,6 +72,52 @@ fn line_for<'a>(out: &'a str, setting: &str) -> &'a str {
 }
 
 #[test]
+fn the_report_covers_every_setting_the_schema_declares() {
+    // The hand-written table this replaced covered 11 settings out of 23 sections. "The source of
+    // every value" is only true if the list is derived, not typed.
+    let env = Env::new(None, None);
+    let out = env.run(&[]);
+
+    let claimed: usize = out
+        .lines()
+        .find(|l| l.contains("settings, from"))
+        .and_then(|l| l.split_whitespace().next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0);
+    assert!(
+        claimed > 100,
+        "only {claimed} settings reported; the derived list has gone back to being a table:\n{out}"
+    );
+
+    // Count unique setting paths, not lines. Line-counting counts the column header and the
+    // file-name lines, which is how the first version of this assertion read 136 rows against a
+    // claimed 133 — three pieces of furniture, not three phantom settings.
+    // A setting row's path is a dotted identifier. Matching that shape rather than guessing at
+    // which lines are furniture — the first version of this counted the column header and the
+    // "user file:" line as settings, which is how 135 distinct paths came out of 133 settings.
+    let printed: Vec<&str> = out
+        .lines()
+        .filter_map(|l| {
+            let path = l.split_whitespace().next()?;
+            let mut parts = path.split('.');
+            let valid = (0..2).all(|_| {
+                parts.next().is_some_and(|p| {
+                    !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                })
+            });
+            valid.then_some(path)
+        })
+        .collect();
+    let unique: std::collections::HashSet<&str> = printed.iter().copied().collect();
+    assert_eq!(
+        unique.len(),
+        claimed,
+        "{claimed} settings were claimed and {} distinct paths printed:\n{out}",
+        unique.len()
+    );
+}
+
+#[test]
 fn a_value_set_in_the_project_file_names_that_file() {
     let env = Env::new(
         Some("[general]\nspend_cap_usd = 2.50\n[docker]\nbackend = \"worktree\"\n"),
@@ -119,7 +165,10 @@ fn a_secret_is_reported_as_set_and_never_printed() {
         Some("[providers.openai]\napi_key = \"sk-from-the-file\"\n"),
         None,
     );
-    let out = env.run(&[("ANTHROPIC_API_KEY", "sk-from-the-env")]);
+    let out = env.run(&[
+        ("ANTHROPIC_API_KEY", "sk-from-the-env"),
+        ("OPENAI_API_KEY", "sk-openai-from-env"),
+    ]);
     assert!(
         !out.contains("sk-from-the-env"),
         "the report printed a key from the environment:\n{out}"
@@ -128,13 +177,13 @@ fn a_secret_is_reported_as_set_and_never_printed() {
         !out.contains("sk-from-the-file"),
         "the report printed a key from a file:\n{out}"
     );
-    let line = line_for(&out, "providers.openai.api_key");
+    let line = line_for(&out, "providers.anthropic.api_key");
     assert!(
         line.contains("(set)"),
         "a set key must still be reported as set:\n{line}"
     );
     assert!(
-        line.contains("niki.toml"),
+        line.contains("environment ANTHROPIC_API_KEY"),
         "the source must still be reported, secret or not:\n{line}"
     );
 }
