@@ -55,3 +55,30 @@ Phases 1–3 partial; Phase 4 partial (A6 approval prompt, A5 full-output-to-dis
 A4 schema validation, A3 verified via PTY only). Remaining goals (P5 MCP live,
 P7 taste review, P9 sessions crash-safety proof, perf benchmarks, debug view)
 are UNVERIFIED. See CHECKLIST.md.
+
+## 2026-10-07 — Extended pass
+- Full output bounding: shell tool >4KB persists to temp file with truncation
+  note; read_file capped at 2000 lines (A5).
+- Args validation against per-tool minimal JSON schema (A4, TestSchemaValidation).
+- mvdan.cc/sh fail-closed shell AST allowlist (A7).
+- Registry.Batch: concurrent only when all calls report safe, cap 10,
+  sequential fallback, order preserved (A2).
+- MCP persisted tool-catalog cache + state test (M2 partial).
+- Context compaction circuit breaker tripped at 3 failed compactions (X2).
+- Subagent isolated context (test).
+- contextwin package: static prefix / dynamic suffix / marked boundary + lint
+  test (C6).
+- Session: fsync on every event append, reopen-preserves-events (P2).
+- TUI: footer/header collapses below 60 cols, `/` command menu, `@` file
+  picker (U5/U6, tests), snapshot determinism at 50x16/80x24/120x38/160x45,
+  docs/review frame dumps written.
+- Sanitize untrusted rendering text; fuzz test (L6).
+- Sandbox: SanitizedEnv scrubs AWS/SSH/token vars; ExecIsolated test (S2).
+- engine emits real Usage on the turn (P4 partial).
+- Fuzz targets: AnalyzeShell, parseSkill, Sanitize (all run clean).
+- golangci-lint v2 config; errcheck fixed; LINT_OK.
+- CI workflow (.github/workflows/ci.yml): vet, lint, race tests, PTY e2e,
+  fuzz, benchmark compile. Release workflow: goreleaser on tags v*.
+- Benchmarks: BenchmarkView80x24 ≈ 71µs, BenchmarkView120x38 ≈ 110µs
+  (AMD Ryzen 7 4800H, 100 history items).
+- Boot probe: `niki exec` ≈ 10 ms wall.

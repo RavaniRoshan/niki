@@ -72,3 +72,34 @@ func TestSubagentIsolatedContext(t *testing.T) {
 		t.Fatalf("expected fresh context, got %d messages", len(sub.Runner.Context.Messages))
 	}
 }
+
+func TestUsageEventEmitted(t *testing.T) {
+	reg := tools.DefaultRegistry()
+	prov := provider.NewMockProvider()
+	prov.ChunkDelay = time.Millisecond
+	eng, cmdChan, eventChan := NewEngine(100, prov, reg, permissions.NewGuard(permissions.ModeFullAccess))
+	go eng.Run()
+	defer eng.Stop()
+	cmdChan <- protocol.EngineCommand{Type: protocol.CmdSubmitPrompt, Prompt: "hi"}
+	sawUsage := false
+	deadline := time.After(5 * time.Second)
+	for !sawUsage {
+		select {
+		case evt, ok := <-eventChan:
+			if !ok {
+				t.Fatal("closed")
+			}
+			if evt.Usage != nil {
+				sawUsage = true
+			}
+			if evt.Type == protocol.EventTurnCompleted {
+				if !sawUsage {
+					t.Fatal("no usage event before turn completed")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timeout")
+		}
+	}
+}

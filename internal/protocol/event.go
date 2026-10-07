@@ -2,6 +2,8 @@ package protocol
 
 import (
 	"time"
+
+	"github.com/RavaniRoshan/niki/internal/provider"
 )
 
 type EventType string
@@ -43,7 +45,10 @@ type EngineEvent struct {
 	Error     string        `json:"error,omitempty"`
 	Duration  time.Duration `json:"duration,omitempty"`
 	Plan      []PlanStep    `json:"plan,omitempty"`
+	Usage     *Usage        `json:"usage,omitempty"`
 }
+
+type Usage = provider.Usage
 
 type PlanStep struct {
 	Description string `json:"description"`

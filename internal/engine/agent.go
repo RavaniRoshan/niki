@@ -48,7 +48,7 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 			t.Context.Add(provider.Message{Role: "tool", Content: res.Output, Name: d.ToolName})
 		case provider.DeltaUsage:
 			if d.Usage != nil {
-				emit(protocol.EngineEvent{Type: protocol.EventAssistantMessageDone, Timestamp: time.Now(), TurnID: turnID, Text: ""})
+				emit(protocol.EngineEvent{Type: protocol.EventAssistantMessageDone, Timestamp: time.Now(), TurnID: turnID, Usage: d.Usage})
 			}
 		case provider.DeltaDone:
 		}
