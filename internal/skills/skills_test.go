@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"strings"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,5 +32,29 @@ func TestInstructions(t *testing.T) {
 	found := Instructions(sub)
 	if len(found) == 0 {
 		t.Fatal("expected AGENTS.md discovered upward")
+	}
+}
+
+func TestMalformedSkillSkipped(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "bad"), 0o755)
+	os.WriteFile(filepath.Join(dir, "bad", "SKILL.md"), []byte("no frontmatter at all\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "good"), 0o755)
+	os.WriteFile(filepath.Join(dir, "good", "SKILL.md"), []byte("---\nname: ok\n---\nbody\n"), 0o644)
+	found, err := Discover(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || found[0].Name != "ok" {
+		t.Fatalf("found=%v", found)
+	}
+}
+
+func TestInstructionsBounded(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(strings.Repeat("x", 100)), 0o644)
+	got := InstructionsBounded(dir, 50)
+	if len(got) != 1 || len(got[0].Content) > 50 {
+		t.Fatalf("got=%v len=%d", got, len(got))
 	}
 }

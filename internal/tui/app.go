@@ -30,6 +30,33 @@ func NewAppModel(cmdChan chan<- protocol.EngineCommand, eventChan <-chan protoco
 
 type engineEventMsg protocol.EngineEvent
 
+func applyEvent(m *AppModel, evt protocol.EngineEvent) {
+	switch evt.Type {
+	case protocol.EventAssistantTextDelta:
+		m.history.AppendDelta(evt.Text)
+	case protocol.EventTurnStarted:
+		m.state.Busy = true
+	case protocol.EventTurnCompleted:
+		m.state.Busy = false
+	case protocol.EventTurnCancelled:
+		m.state.Busy = false
+		m.history.Append("system", "[turn cancelled]")
+	case protocol.EventTurnFailed:
+		m.state.Busy = false
+		m.history.Append("error", evt.Error)
+	case protocol.EventToolStarted:
+		m.history.Append("tool", "started "+evt.ToolName)
+	case protocol.EventToolCompleted:
+		m.history.Append("tool", evt.ToolName+" done")
+	case protocol.EventToolFailed:
+		m.history.Append("error", evt.ToolName+": "+evt.Error)
+	case protocol.EventError:
+		m.history.Append("error", evt.Error)
+	case protocol.EventWarning:
+		m.history.Append("system", "[warning] "+evt.Text)
+	}
+}
+
 func waitForEvent(ch <-chan protocol.EngineEvent) tea.Cmd {
 	return func() tea.Msg {
 		evt, ok := <-ch
@@ -78,29 +105,19 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case engineEventMsg:
 		evt := protocol.EngineEvent(msg)
-		switch evt.Type {
-		case protocol.EventAssistantTextDelta:
-			m.history.AppendDelta(evt.Text)
-		case protocol.EventTurnStarted:
-			m.state.Busy = true
-		case protocol.EventTurnCompleted:
-			m.state.Busy = false
-		case protocol.EventTurnCancelled:
-			m.state.Busy = false
-			m.history.Append("system", "[turn cancelled]")
-		case protocol.EventTurnFailed:
-			m.state.Busy = false
-			m.history.Append("error", evt.Error)
-		case protocol.EventToolStarted:
-			m.history.Append("tool", "started "+evt.ToolName)
-		case protocol.EventToolCompleted:
-			m.history.Append("tool", evt.ToolName+" done")
-		case protocol.EventToolFailed:
-			m.history.Append("error", evt.ToolName+": "+evt.Error)
-		case protocol.EventError:
-			m.history.Append("error", evt.Error)
-		case protocol.EventWarning:
-			m.history.Append("system", "[warning] "+evt.Text)
+		applyEvent(&m, evt)
+		// Coalesce any already-queued events into this same frame.
+		for drained := true; drained; {
+			select {
+			case evt, ok := <-m.eventChan:
+				if !ok {
+					drained = false
+					break
+				}
+				applyEvent(&m, protocol.EngineEvent(evt))
+			default:
+				drained = false
+			}
 		}
 		m.viewport.SetContent(m.RenderHistory())
 		m.viewport.GotoBottom()

@@ -176,8 +176,11 @@ func main() {
 		Use:   "config",
 		Short: "Show resolved configuration",
 		Run: func(cmd *cobra.Command, args []string) {
-			cfg, _ := config.Load(configPath)
+			cfg, _ := config.LoadWithSources(configPath)
 			fmt.Printf("model=%s provider=%s mode=%s\n", cfg.Model.Name, cfg.Provider.Name, cfg.Permissions.Mode)
+			for section, src := range cfg.Sources {
+				fmt.Printf("  %s: %s\n", section, src)
+			}
 		},
 	})
 

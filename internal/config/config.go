@@ -19,9 +19,21 @@ func Default() Config {
 
 // Load resolves config from defaults -> user (~/.config/niki/niki.toml) -> project (./niki.toml) -> explicit path overlay.
 func Load(explicitPath string) (Config, error) {
-	cfg := Default()
+	cfg, err := LoadWithSources(explicitPath)
+	return cfg.Config, err
+}
 
-	candidates := []string{}
+// ConfigWithSources pairs the resolved config with the origin of each section.
+type ConfigWithSources struct {
+	Config
+	Sources map[string]string // section -> source path or "default"
+}
+
+// LoadWithSources records which layer supplied each TOML section (C1).
+func LoadWithSources(explicitPath string) (ConfigWithSources, error) {
+	out := ConfigWithSources{Config: Default(), Sources: map[string]string{}}
+
+	candidates := []string{"defaults"}
 	if home, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates, filepath.Join(home, ".config", "niki", "niki.toml"))
 	}
@@ -31,15 +43,28 @@ func Load(explicitPath string) (Config, error) {
 	}
 
 	for _, path := range candidates {
+		if path == "defaults" {
+			for _, s := range []string{"model", "provider", "ui", "permissions", "mcp"} {
+				out.Sources[s] = "default"
+			}
+			continue
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		if err := toml.Unmarshal(data, &cfg); err != nil {
-			return cfg, err
+		var probe map[string]interface{}
+		if err := toml.Unmarshal(data, &probe); err != nil {
+			return out, err
+		}
+		for section := range probe {
+			out.Sources[section] = path
+		}
+		if err := toml.Unmarshal(data, &out.Config); err != nil {
+			return out, err
 		}
 	}
-	return cfg, nil
+	return out, nil
 }
 
 // ResolveAPIKey returns the key from config, env, or the configured env var name.

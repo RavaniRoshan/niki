@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,8 +32,10 @@ func Discover(roots ...string) ([]Skill, error) {
 				return nil
 			}
 			if strings.EqualFold(d.Name(), "SKILL.md") {
-				s := parseSkill(path)
-				out = append(out, s)
+				s, err := parseSkill(path)
+				if err == nil {
+					out = append(out, s)
+				}
 			}
 			return nil
 		})
@@ -40,14 +43,17 @@ func Discover(roots ...string) ([]Skill, error) {
 	return out, nil
 }
 
-func parseSkill(path string) Skill {
+func parseSkill(path string) (Skill, error) {
 	s := Skill{Path: path, ID: filepath.Base(filepath.Dir(path))}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return s
+		return s, err
 	}
 	content := string(data)
-	if strings.HasPrefix(content, "---") {
+	if !strings.HasPrefix(content, "---") {
+		return s, fmt.Errorf("missing frontmatter")
+	}
+	{
 		parts := strings.SplitN(content, "---", 3)
 		if len(parts) == 3 {
 			fm := parts[1]
@@ -60,9 +66,14 @@ func parseSkill(path string) Skill {
 				}
 			}
 			s.Body = strings.TrimSpace(parts[2])
+		} else {
+			return s, fmt.Errorf("bad frontmatter")
 		}
 	}
-	return s
+	if s.Name == "" {
+		return s, fmt.Errorf("missing name")
+	}
+	return s, nil
 }
 
 // LoadBody lazily reads the body.
@@ -94,6 +105,35 @@ func Instructions(dir string) []string {
 			p := filepath.Join(dir, name)
 			if _, err := os.Stat(p); err == nil {
 				out = append(out, p)
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return out
+}
+
+// Instruction is a loaded instruction file.
+type Instruction struct {
+	Path    string
+	Content string
+}
+
+// InstructionsBounded loads instruction files walking upward, bounding each file's content (C2).
+func InstructionsBounded(dir string, maxBytes int) []Instruction {
+	var out []Instruction
+	for {
+		for _, name := range []string{"AGENTS.md", "NIKI.md"} {
+			p := filepath.Join(dir, name)
+			if data, err := os.ReadFile(p); err == nil {
+				content := string(data)
+				if maxBytes > 0 && len(content) > maxBytes {
+					content = content[:maxBytes]
+				}
+				out = append(out, Instruction{Path: p, Content: content})
 			}
 		}
 		parent := filepath.Dir(dir)
