@@ -11,7 +11,9 @@ import (
 	"strings"
 )
 
-type GrepTool struct{}
+type GrepTool struct {
+	Base
+}
 
 func NewGrepTool() *GrepTool { return &GrepTool{} }
 
@@ -75,3 +77,6 @@ func (t *GrepTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, e
 	}
 	return ToolResult{Output: strings.Join(out, "\n")}, nil
 }
+
+func (t *GrepTool) IsConcurrencySafe() bool { return true }
+func (t *GrepTool) IsReadOnly() bool        { return true }

@@ -8,7 +8,9 @@ import (
 	"strings"
 )
 
-type EditFileTool struct{}
+type EditFileTool struct {
+	Base
+}
 
 func NewEditFileTool() *EditFileTool { return &EditFileTool{} }
 

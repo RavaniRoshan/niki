@@ -9,7 +9,9 @@ import (
 	"time"
 )
 
-type ShellTool struct{}
+type ShellTool struct {
+	Base
+}
 
 func NewShellTool() *ShellTool { return &ShellTool{} }
 

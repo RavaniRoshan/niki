@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 )
 
-type WriteFileTool struct{}
+type WriteFileTool struct {
+	Base
+}
 
 func NewWriteFileTool() *WriteFileTool { return &WriteFileTool{} }
 

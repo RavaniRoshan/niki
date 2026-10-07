@@ -9,7 +9,9 @@ import (
 	"strings"
 )
 
-type GlobTool struct{}
+type GlobTool struct {
+	Base
+}
 
 func NewGlobTool() *GlobTool { return &GlobTool{} }
 
@@ -63,3 +65,6 @@ func (t *GlobTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, e
 	}
 	return ToolResult{Output: strings.Join(uniq, "\n")}, nil
 }
+
+func (t *GlobTool) IsConcurrencySafe() bool { return true }
+func (t *GlobTool) IsReadOnly() bool        { return true }

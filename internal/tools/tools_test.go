@@ -77,3 +77,26 @@ func TestRegistry(t *testing.T) {
 		t.Fatal("shell missing")
 	}
 }
+
+func TestBatchConcurrencyGate(t *testing.T) {
+	r := DefaultRegistry()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.txt")
+	os.WriteFile(p, []byte("hi"), 0o644)
+	// All read-only/safe tools -> concurrent batch OK.
+	res := r.Batch(context.Background(), []Call{
+		{ID: "1", Name: "read_file", Args: json.RawMessage(`{"path":"` + p + `"}`)},
+		{ID: "2", Name: "glob", Args: json.RawMessage(`{"pattern":"*.txt","root":"` + dir + `"}`)},
+	})
+	if len(res) != 2 || res[0].IsError || res[1].IsError {
+		t.Fatalf("res=%v", res)
+	}
+	// Mixed batch with unsafe tool -> sequential path, order preserved.
+	res = r.Batch(context.Background(), []Call{
+		{ID: "1", Name: "read_file", Args: json.RawMessage(`{"path":"` + p + `"}`)},
+		{ID: "2", Name: "write_file", Args: json.RawMessage(`{"path":"` + filepath.Join(dir, "b.txt") + `","content":"x"}`)},
+	})
+	if len(res) != 2 || res[0].IsError || res[1].IsError {
+		t.Fatalf("res=%v", res)
+	}
+}

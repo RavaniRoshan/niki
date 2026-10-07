@@ -11,7 +11,9 @@ import (
 
 const maxReadLines = 2000
 
-type ReadFileTool struct{}
+type ReadFileTool struct {
+	Base
+}
 
 func NewReadFileTool() *ReadFileTool { return &ReadFileTool{} }
 
@@ -57,3 +59,6 @@ func (t *ReadFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResul
 	}
 	return ToolResult{Output: b.String()}, nil
 }
+
+func (t *ReadFileTool) IsConcurrencySafe() bool { return true }
+func (t *ReadFileTool) IsReadOnly() bool        { return true }

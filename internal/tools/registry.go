@@ -13,10 +13,68 @@ type ToolResult struct {
 	IsError bool
 }
 
+// Base embeds fail-closed tool metadata: concurrency is unsafe and the tool
+// is not read-only unless the tool opts in.
+type Base struct{}
+
+func (Base) IsConcurrencySafe() bool { return false }
+func (Base) IsReadOnly() bool        { return false }
+
 type Tool interface {
 	Name() string
 	Description() string
 	Run(ctx context.Context, args json.RawMessage) (ToolResult, error)
+	IsConcurrencySafe() bool
+	IsReadOnly() bool
+}
+
+// Call is one tool invocation in a batch.
+type Call struct {
+	ID   string
+	Name string
+	Args json.RawMessage
+}
+
+// Batch runs calls concurrently iff every tool reports IsConcurrencySafe;
+// otherwise calls run sequentially. Concurrency is capped; results return in
+// the original call order (A2).
+func (r *Registry) Batch(ctx context.Context, calls []Call) []ToolResult {
+	allSafe := len(calls) > 0
+	for _, c := range calls {
+		t, ok := r.Get(c.Name)
+		if !ok || !t.IsConcurrencySafe() {
+			allSafe = false
+			break
+		}
+	}
+	results := make([]ToolResult, len(calls))
+	if !allSafe {
+		for i, c := range calls {
+			res, err := r.Run(ctx, c.Name, c.Args)
+			if err != nil {
+				res = ToolResult{Output: err.Error(), IsError: true}
+			}
+			results[i] = res
+		}
+		return results
+	}
+	sem := make(chan struct{}, 10)
+	var wg sync.WaitGroup
+	for i, c := range calls {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, c Call) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			res, err := r.Run(ctx, c.Name, c.Args)
+			if err != nil {
+				res = ToolResult{Output: err.Error(), IsError: true}
+			}
+			results[i] = res
+		}(i, c)
+	}
+	wg.Wait()
+	return results
 }
 
 type Registry struct {
