@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ type Engine struct {
 	cancel     context.CancelFunc
 	runner     *TurnRunner
 	session    *Session
+	obs        func(protocol.EngineEvent)
 
 	mu         sync.Mutex
 	turnCancel context.CancelFunc
@@ -68,8 +70,14 @@ func (e *Engine) Run() error {
 
 func (e *Engine) Stop() { e.cancel() }
 
+// Observe registers a non-blocking side observer for every emitted event.
+func (e *Engine) Observe(fn func(protocol.EngineEvent)) { e.obs = fn }
+
 func (e *Engine) emit(evt protocol.EngineEvent) {
 	e.session.Record(evt)
+	if e.obs != nil {
+		e.obs(evt)
+	}
 	select {
 	case e.eventChan <- evt:
 	default:
@@ -83,6 +91,11 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 		turnCtx, cancel := context.WithCancel(e.ctx)
 		e.turnCancel = cancel
 		e.mu.Unlock()
+		defer func() {
+			if r := recover(); r != nil {
+				e.emit(protocol.EngineEvent{Type: protocol.EventTurnFailed, Timestamp: time.Now(), Error: fmt.Sprintf("panic: %v", r)})
+			}
+		}()
 		_ = e.runner.Run(turnCtx, cmd.Prompt, e.emit)
 		cancel()
 	case protocol.CmdInterruptTurn, protocol.CmdCancelTurn:

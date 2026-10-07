@@ -82,3 +82,11 @@ are UNVERIFIED. See CHECKLIST.md.
 - Benchmarks: BenchmarkView80x24 ≈ 71µs, BenchmarkView120x38 ≈ 110µs
   (AMD Ryzen 7 4800H, 100 history items).
 - Boot probe: `niki exec` ≈ 10 ms wall.
+
+## 2026-10-07 — PTY e2e + measured probes
+- TestPTYCodingLoop: types "hello", mock provider streams "Acknowledged: hello", Ctrl+C clean exit.
+- Fixed intermittent 0x0 window-size (pty.Setsize) causing degenerate layout; all PTY tests now pass.
+- TestNonTTYExec: no escapes; TestPTYRestoreOnCtrlC/SIGTERM: clean ≤5s exits.
+- TestColdStartFirstFrame probe: 42 ms to first frame (target ≤60 ms). NOTE: terminals that never answer the DSR/OSC queries stall first frame for ~5 s (Bubble Tea v1 behavior); real terminals reply instantly.
+- BenchmarkViewFlatness100vs5000: 58.7 µs (100 msgs) vs 59.5 µs (5000 msgs), ratio ~1.01 (target ratio ≤1.5).
+- Engine.Observe added; TUI session events persisted to ~/.niki/sessions.db + JSONL (P1/P2 wiring).

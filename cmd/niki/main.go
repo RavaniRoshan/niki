@@ -44,6 +44,10 @@ func main() {
 		Version: version,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _ := config.Load(configPath)
+			store, _ := session.Open(filepath.Join(os.Getenv("HOME"), ".niki", "sessions.db"))
+			if store != nil {
+				defer func() { _ = store.Close() }()
+			}
 			mode := permissions.ModeWorkspaceWrite
 			switch cfg.Permissions.Mode {
 			case "readonly":
@@ -52,6 +56,14 @@ func main() {
 				mode = permissions.ModeFullAccess
 			}
 			eng, cmdChan, eventChan := engine.NewEngine(100, buildProvider(cfg), tools.DefaultRegistry(), permissions.NewGuard(mode))
+			if store != nil {
+				_ = store.CreateSession(eng.SessionID(), "tui")
+			}
+			if store != nil {
+				eng.Observe(func(evt protocol.EngineEvent) {
+					_ = store.AppendEvent(eng.SessionID(), evt)
+				})
+			}
 			go func() {
 				if err := eng.Run(); err != nil {
 					fmt.Fprintf(os.Stderr, "Engine error: %v\n", err)

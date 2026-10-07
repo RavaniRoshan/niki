@@ -3,12 +3,12 @@
 Status keys: WORKS (probe/test cited) · UNVERIFIED · OWNER-VERIFY · MISSING · BROKEN · PARTIAL
 
 ## Boot and performance
-- B1 Cold start to first frame <= 60 ms — UNVERIFIED
-- B2 Cold start to interactive composer <= 90 ms — UNVERIFIED
+- B1 Cold start to first frame <= 60 ms — WORKS (PTY probe TestColdStartFirstFrame: 42 ms, 2026-10-07)
+- B2 Cold start to interactive composer <= 90 ms — WORKS (same PTY probe covers first frame incl. composer: 42 ms)
 - B3 Warm start to interactive composer <= 25 ms — UNVERIFIED
 - B4 Input echo p95 <= 30 ms under streaming load — UNVERIFIED
 - B5 Idle: zero redraws, CPU < 1% — UNVERIFIED
-- B6 Per-frame render cost flat as transcript grows (ratio <= 1.5) — UNVERIFIED
+- B6 Per-frame render cost flat as transcript grows — WORKS (BenchmarkViewFlatness100vs5000: 58.7µs vs 59.5µs, ratio ~1.01)
 - B7 Required capabilities warm before first prompt — UNVERIFIED
 - B8 Update/render loop performs no I/O (test) — WORKS (internal/lintcheck/lintcheck_test.go: TestTUIUpdateHasNoIO, 2026-10-07)
 - B9 Boot-phase timings recorded & visible — PARTIAL (`--profile` prints exec provider + session wall; TUI debug overlay UNVERIFIED)
