@@ -21,3 +21,37 @@ at each phase start and after any context compaction.
 - This file is the chronological ledger; docs/CHECKLIST.md holds per-row
   conformance state; docs/DESIGN.md is the architecture; docs/DECISIONS.md is
   the decision log. Do not track state anywhere else.
+
+## 2026-10-07 — P0 approved, began execution
+Decisions confirmed by owner: fullscreen default; git = shell out; TOML
+comment-preservation accepted; app-server deferred; readiness contract
+approved as written in DESIGN.md §3.
+
+## 2026-10-07 — Phase 1 progress (goal-1 items)
+- `go vet ./...` clean; `go test ./... -race` clean on full suite.
+- Binary boots; mock turn works (`niki exec`).
+- Added internal/lintcheck: TUI render path has no I/O (B8), no color literals
+  outside theme (U7 source-scan).
+- TUI coalesces queued event bursts into one frame (B10, coalesce_test.go).
+- PTY e2e tests pass (NIKI_PTY_TESTS=1): Ctrl+C exit, SIGTERM exit within 5s,
+  non-TTY exec emits no escapes (L4).
+- Config: LoadWithSources tracks per-section origin; `niki config` prints it
+  (C1, test).
+- Skills: strict frontmatter parse; malformed skill skipped, never fatal (C3,
+  test). InstructionsBounded caps instruction file size (C2, test).
+- Boot probe (`niki exec`): ~10 ms wall per invocation, 3 runs.
+
+## 2026-10-07 — Phase 4 progress (goal-2 items)
+- mvdan.cc/sh/v3 parser-based fail-closed shell AST allowlist added
+  (permissions/shell_ast.go); pipes/subshells/substitution/control flow all
+  classify too-complex; unparsable → parse-unavailable (A7, test).
+- Tool interface extended: Base provides fail-closed IsConcurrencySafe=false /
+  IsReadOnly=false; read_file/glob/grep opt into safe+read-only; Registry.Batch
+  runs concurrently only when all calls safe (cap 10), else sequentially in
+  call order (A2, test).
+
+## State
+Phases 1–3 partial; Phase 4 partial (A6 approval prompt, A5 full-output-to-disk,
+A4 schema validation, A3 verified via PTY only). Remaining goals (P5 MCP live,
+P7 taste review, P9 sessions crash-safety proof, perf benchmarks, debug view)
+are UNVERIFIED. See CHECKLIST.md.
