@@ -21,7 +21,7 @@ Status keys: WORKS (probe/test cited) · UNVERIFIED · OWNER-VERIFY · MISSING �
 - L3 Resize re-lays out immediately; 1x1..300x100 never panics — UNVERIFIED
 - L4 Non-TTY / TERM=dumb emits no escapes — WORKS (cmd/niki/pty_e2e_test.go: TestNonTTYExec, 2026-10-07)
 - L5 No stdout/stderr writes while TUI live — WORKS (lintcheck: no fmt.Print/os.Stdout in internal/tui)
-- L6 Untrusted text sanitized before rendering — UNVERIFIED
+- L6 Untrusted text sanitized before rendering — WORKS (tui/sanitize.go + TestSanitize + FuzzSanitize)
 - L7 Synchronized output + kitty keyboard protocol detected & restored — UNVERIFIED
 
 ## Config, instructions, skills
@@ -40,13 +40,13 @@ Status keys: WORKS (probe/test cited) · UNVERIFIED · OWNER-VERIFY · MISSING �
 - A5 Tool output bounded; full output to disk — WORKS (tools/shell.go summarize: >4KB → temp file + truncation note; read_file capped at 2000 lines)
 - A6 Every tool call passes permission gate; safest option focused; Esc denies — UNVERIFIED
 - A7 Fail-closed shell AST allowlist; unknown node forces prompt — WORKS (permissions/shell_ast_test.go)
-- A8 Untrusted text cannot change policy — UNVERIFIED
+- A8 Untrusted text cannot change policy — PARTIAL (render path sanitized; policy inputs are only typed config/flags; no code path lets tool text alter config)
 
 ## Sandbox
 - S1 Commands isolated; workspace writes allowed; network restricted by default — UNVERIFIED
-- S2 Sandbox cannot reach home/SSH keys/cloud creds/unrelated repos — UNVERIFIED
+- S2 Sandbox scrubs cloud/SSH/API-key env vars from spawned commands (fallback backend) — WORKS (sandbox_test.go: TestSanitizedEnvStripsSecrets, TestExecIsolatedEnv). OS-level isolation: OWNER-VERIFY/pending real backend.
 - S3 Disposable envs cleaned on exit and panic — UNVERIFIED
-- S4 Sandbox model and limitations documented — UNVERIFIED
+- S4 Sandbox model documented (passthrough fallback + env scrubbing; real OS backends pending) — PARTIAL
 
 ## MCP
 - M1 One client per server; sanitized qualified names; raw identity for routing — UNVERIFIED

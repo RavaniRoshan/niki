@@ -4,6 +4,7 @@ package tui
 func (m AppModel) RenderHistory() string {
 	var out string
 	for _, c := range m.history.Cells {
+		c.Text = Sanitize(c.Text)
 		switch c.Role {
 		case "user":
 			out += m.theme.User.Render("You: ") + c.Text + "\n\n"
