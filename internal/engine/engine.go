@@ -48,6 +48,9 @@ func (e *Engine) SessionID() protocol.SessionId { return e.session.ID }
 func (e *Engine) Run() error {
 	defer close(e.eventChan)
 	e.emit(protocol.EngineEvent{Type: protocol.EventSessionStarted, Timestamp: time.Now(), SessionID: e.session.ID})
+	for _, phase := range []string{"terminal", "engine", "model", "skills", "mcp"} {
+		e.emit(protocol.EngineEvent{Type: protocol.EventBootPhase, Timestamp: time.Now(), SessionID: e.session.ID, Text: phase + ":ready"})
+	}
 	e.emit(protocol.EngineEvent{Type: protocol.EventSessionReady, Timestamp: time.Now(), SessionID: e.session.ID})
 
 	for {

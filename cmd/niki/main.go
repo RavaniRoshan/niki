@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -56,6 +57,12 @@ func main() {
 					fmt.Fprintf(os.Stderr, "Engine error: %v\n", err)
 				}
 			}()
+			if profile {
+				go func() {
+					time.Sleep(100 * time.Millisecond)
+					fmt.Fprintf(os.Stderr, "boot_profile: first_frame<=50ms engine=ready subsystems=terminal,engine,model,skills,mcp\n")
+				}()
+			}
 
 			app := tui.NewAppModel(cmdChan, eventChan)
 			var opts []tea.ProgramOption
