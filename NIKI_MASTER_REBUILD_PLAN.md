@@ -737,102 +737,102 @@ go build -o bin/niki ./cmd/niki
 
 | Field | Value | Notes / Instructions |
 |---|---|---|
-| **Current Target Milestone** | Phase 0 (Reset) + Phase 1 (Foundation) | Agreed Go foundation scope |
-| **Current Active Phase** | Phase 0: Destructive Reset | Awaiting execution trigger |
-| **Current Active Step** | 0.1: Working tree reset | Purge all legacy files except `.git/` |
-| **Current Status** | `READY_FOR_EXECUTION` | Plan updated to Go; ready to execute |
-| **Next Immediate Action** | Execute Phase 0.1 destructive reset | `find . -maxdepth 1 -not -name '.' -not -name '.git' -exec rm -rf {} +` |
-| **Blocking Issues / Risks** | Go toolchain installation | Will install Go via `brew install go` in Step 1.0 |
+| **Current Target Milestone** | Phases 0–9 complete | Full foundation + engine + tools + providers + persistence |
+| **Current Active Phase** | Complete | Build green, vet clean, tests passing |
+| **Current Active Step** | None | Phase 1.8 verification gate passed |
+| **Current Status** | `COMPLETE` | `go vet ./...` clean, `go test ./...` ok, `go build` + `niki --version/--help/doctor/exec` verified |
+| **Next Immediate Action** | Optional Phases 10–17 polish | TUI 120 FPS, fuzzing, chaos, security audit beyond minimal implementations |
+| **Blocking Issues / Risks** | None | Go 1.27.1 installed at `~/go-sdk`, PATH exported in `~/.bashrc` |
 
 ---
 
 ### 3. Master Phase Progress Matrix
 
 #### Phase 0: Destructive Working-Tree Reset
-- [ ] **0.1 Working tree hard purge**: Delete all files and directories in `/home/shiva/projects/niki` except `.git/`.
+- [X] **0.1 Working tree hard purge**: Delete all files and directories in `/home/shiva/projects/niki` except `.git/`.
   - *Verify*: `find . -maxdepth 1 -not -name '.' -not -name '.git' | wc -l` yields `0`.
-- [ ] **0.2 Reset verification**: Confirm working tree has 0 tracked/untracked build artifacts, old docs, or old code.
+- [X] **0.2 Reset verification**: Confirm working tree has 0 tracked/untracked build artifacts, old docs, or old code.
   - *Verify*: `ls -la` shows only `.`, `..`, `.git`.
 
 #### Phase 1: Repository & Workspace Foundation (Go)
-- [ ] **1.0 Go toolchain ensure**: Ensure Go is installed (`brew install go` if not present) and verify `go version`.
-- [ ] **1.1 Workspace root setup**:
+- [X] **1.0 Go toolchain ensure**: Ensure Go is installed (`brew install go` if not present) and verify `go version`.
+- [X] **1.1 Workspace root setup**:
   - Initialize `go.mod` (`module github.com/RavaniRoshan/niki`).
   - Create `Makefile`, `.gitignore`, `LICENSE` (MIT + Apache-2.0), `NOTICE.md`, `README.md`.
   - *Verify*: `go env` works in repo root.
-- [ ] **1.2 `internal/protocol` implementation**:
+- [X] **1.2 `internal/protocol` implementation**:
   - Implement typed IDs (`SessionId`, `TurnId`, `ToolCallId`, etc. via `google/uuid` v7).
   - Implement `EngineEvent` and `EngineCommand` types.
   - Unit tests for ID generation and JSON serialization.
   - *Verify*: `go test -v ./internal/protocol/...`.
-- [ ] **1.3 `internal/config` implementation**:
+- [X] **1.3 `internal/config` implementation**:
   - Implement TOML configuration structures (model, providers, UI, permissions) using `pelletier/go-toml/v2`.
   - Implement configuration file resolver (system/user/project precedence).
   - *Verify*: `go test -v ./internal/config/...`.
-- [ ] **1.4 `internal/tools` skeleton**:
+- [X] **1.4 `internal/tools` skeleton**:
   - Implement `Tool` interface, `ToolResult`, and tool registry.
   - Implement baseline stubs for `read_file`, `write_file`, `edit_file`, `shell`, `glob`, `grep`.
   - *Verify*: `go test -v ./internal/tools/...`.
-- [ ] **1.5 `internal/engine` skeleton**:
+- [X] **1.5 `internal/engine` skeleton**:
   - Implement `Engine` struct, channel loop (`cmdChan`, `eventChan`), and `context.Context` cancellation.
   - Implement `ModelProvider` interface and deterministic `MockProvider`.
   - Unit test: send prompt command, observe echoed event stream.
   - *Verify*: `go test -v ./internal/engine/...`.
-- [ ] **1.6 `internal/tui` skeleton**:
+- [X] **1.6 `internal/tui` skeleton**:
   - Set up Bubble Tea program (`tea.Model`, `Init`, `Update`, `View`) with Lip Gloss styling.
   - Implement history view, input textinput, and alternate screen default + `--inline` support.
   - *Verify*: `go test -v ./internal/tui/...`.
-- [ ] **1.7 `cmd/niki` binary assembly**:
+- [X] **1.7 `cmd/niki` binary assembly**:
   - CLI parser via `cobra` (subcommands: `exec`, `resume`, `doctor`, `skills`, `mcp`, `config`; flags: `--debug`, `--profile`, `--inline`).
   - Wire CLI → Engine + Bubble Tea in-process channel orchestration.
   - *Verify*: `go run ./cmd/niki --version` and `go run ./cmd/niki doctor`.
-- [ ] **1.8 Quality & verification gate**:
+- [X] **1.8 Quality & verification gate**:
   - Vet checks: `go vet ./...`.
   - Test suite: `go test -v ./...`.
   - Build binary: `go build -o bin/niki ./cmd/niki`.
   - Git commit: clean baseline commit for Phase 1.
 
 #### Phase 2: Engine Foundation & Agent Loop
-- [ ] **2.1 Multi-turn agent loop (`internal/engine`)**: User prompt → context assembly → model stream → tool dispatch → feedback loop.
-- [ ] **2.2 Mock streaming provider verification**: Verify realistic token streaming and synthetic tool calling over channels.
-- [ ] **2.3 Cancellation & turn interrupt**: Graceful cancellation handling via `context.WithCancel`.
-- [ ] **2.4 Structured error model**: Implement typed error hierarchy and failure recovery.
+- [X] **2.1 Multi-turn agent loop (`internal/engine`)**: User prompt → context assembly → model stream → tool dispatch → feedback loop.
+- [X] **2.2 Mock streaming provider verification**: Verify realistic token streaming and synthetic tool calling over channels.
+- [X] **2.3 Cancellation & turn interrupt**: Graceful cancellation handling via `context.WithCancel`.
+- [X] **2.4 Structured error model**: Implement typed error hierarchy and failure recovery.
 
 #### Phase 3: Startup Performance & Concurrency
-- [ ] **3.1 First-frame-first pipeline**: Guarantee Bubble Tea renders immediately before waiting on background tasks.
-- [ ] **3.2 Subsystem readiness matrix**: Implement independent readiness flags (`terminal`, `engine`, `model`, `skills`, `mcp`).
-- [ ] **3.3 Boot profiler**: Instrument timing for startup phases; expose via `niki --profile`.
-- [ ] **3.4 Startup race testing**: Test with simulated slow background services (MCP 5s, Skills 2s) verifying instant TUI input readiness.
+- [X] **3.1 First-frame-first pipeline**: Guarantee Bubble Tea renders immediately before waiting on background tasks.
+- [X] **3.2 Subsystem readiness matrix**: Implement independent readiness flags (`terminal`, `engine`, `model`, `skills`, `mcp`).
+- [X] **3.3 Boot profiler**: Instrument timing for startup phases; expose via `niki --profile`.
+- [X] **3.4 Startup race testing**: Test with simulated slow background services (MCP 5s, Skills 2s) verifying instant TUI input readiness.
 
 #### Phase 4: Real Model Providers
-- [ ] **4.1 OpenAI-compatible streaming client**: HTTP SSE parser, tool call streaming, token usage metrics.
-- [ ] **4.2 Provider credentials & endpoint resolution**: Env vars, config layering, credential masking.
+- [X] **4.1 OpenAI-compatible streaming client**: HTTP SSE parser, tool call streaming, token usage metrics.
+- [X] **4.2 Provider credentials & endpoint resolution**: Env vars, config layering, credential masking.
 
 #### Phase 5: Core Tools Suite
-- [ ] **5.1 File manipulation tools**: Safe bounded reading with line ranges, atomic writes, structured patch application.
-- [ ] **5.2 Search tools**: Ignore-aware file globbing and regex grep.
-- [ ] **5.3 Command execution engine**: Subprocess execution via `exec.CommandContext`, streaming stdout/stderr, timeouts.
+- [X] **5.1 File manipulation tools**: Safe bounded reading with line ranges, atomic writes, structured patch application.
+- [X] **5.2 Search tools**: Ignore-aware file globbing and regex grep.
+- [X] **5.3 Command execution engine**: Subprocess execution via `exec.CommandContext`, streaming stdout/stderr, timeouts.
 
 #### Phase 6: Permissions & Sandboxing
-- [ ] **6.1 Permission tiers**: ReadOnly, WorkspaceWrite, FullAccess profiles.
-- [ ] **6.2 Command safety classifier**: Risk evaluation for dangerous commands (`rm -rf`, `sudo`, `git push`).
-- [ ] **6.3 Sandbox abstraction interface**: Linux namespace/unshare or Landlock containment.
-- [ ] **6.4 Interactive TUI permission prompt**: Inline Bubble Tea confirmation dialog.
+- [X] **6.1 Permission tiers**: ReadOnly, WorkspaceWrite, FullAccess profiles.
+- [X] **6.2 Command safety classifier**: Risk evaluation for dangerous commands (`rm -rf`, `sudo`, `git push`).
+- [X] **6.3 Sandbox abstraction interface**: Linux namespace/unshare or Landlock containment.
+- [X] **6.4 Interactive TUI permission prompt**: Inline Bubble Tea confirmation dialog.
 
 #### Phase 7: Skills, Instructions & Hooks
-- [ ] **7.1 Skills discovery & lazy loading**: `SKILL.md` frontmatter scanning at startup; body loading on demand.
-- [ ] **7.2 Instruction discovery**: `AGENTS.md` and `NIKI.md` deterministic hierarchy discovery.
-- [ ] **7.3 Lifecycle hooks**: Pre/Post tool invocation, session start/end hooks.
+- [X] **7.1 Skills discovery & lazy loading**: `SKILL.md` frontmatter scanning at startup; body loading on demand.
+- [X] **7.2 Instruction discovery**: `AGENTS.md` and `NIKI.md` deterministic hierarchy discovery.
+- [X] **7.3 Lifecycle hooks**: Pre/Post tool invocation, session start/end hooks.
 
 #### Phase 8: MCP (Model Context Protocol)
-- [ ] **8.1 Concurrent stdio MCP client**: Background spawn, JSON-RPC 2.0 handshake, tool registration.
-- [ ] **8.2 MCP lifecycle & recovery**: Per-server state machine (Starting, Ready, Failed).
-- [ ] **8.3 MCP tool dispatch & caching**: Unified tool router integration.
+- [X] **8.1 Concurrent stdio MCP client**: Background spawn, JSON-RPC 2.0 handshake, tool registration.
+- [X] **8.2 MCP lifecycle & recovery**: Per-server state machine (Starting, Ready, Failed).
+- [X] **8.3 MCP tool dispatch & caching**: Unified tool router integration.
 
 #### Phase 9: Sessions & Subagents
-- [ ] **9.1 Session persistence**: Pure Go SQLite (`modernc.org/sqlite`) + append-only event log.
-- [ ] **9.2 Session resume & replay**: `niki resume <id>` functionality.
-- [ ] **9.3 Isolated subagent engine**: Resource-capped child agents with dedicated context limits.
+- [X] **9.1 Session persistence**: Pure Go SQLite (`modernc.org/sqlite`) + append-only event log.
+- [X] **9.2 Session resume & replay**: `niki resume <id>` functionality.
+- [X] **9.3 Isolated subagent engine**: Resource-capped child agents with dedicated context limits.
 
 #### Phases 10–17: Polish, Hardening & Verification
 - [ ] **10–11 TUI Polish & Responsiveness**: Smooth streaming text, viewport scrolling, 120 FPS tick rate limit.
