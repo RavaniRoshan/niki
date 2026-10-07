@@ -1,93 +1,15 @@
-/target
-.niki/
-.niki-worktrees/
-niki.toml
-skills-lock.json
+# Binaries
+bin/
+*.exe
+*.out
 
-# Agent configs (local, not repo)
-.agents/
-.claude/
-.opencode/
+# Go workspace
+/go.work
 
-# Untracked directories. evals/ is a deliberate exception: the replay fixtures
-# and the dataset travel with the repo, because they are what the false-positive
-# measurement runs on.
-#
-# This rule used to ignore all of evals/ except evals/grades/. The four
-# `clean-*` negative-control fixtures were therefore never committed, so every
-# fresh clone — including CI — had 23 of 27 cases and no negative controls at
-# all. `negative_controls_are_not_flagged` could not pass anywhere but on the
-# machine that happened to have them lying around untracked.
-examples/
-evals/grades/*
-!evals/grades/
-!evals/grades/*.json
-.kilo/
-research/
+# Editor
+.vscode/
+.idea/
 
-# Dev-only and temporary demo scripts.
-#
-# Anchored to the repository root, deliberately. A bare `demo.sh` matches at
-# EVERY depth, so it silently excluded `scripts/demo.sh` — the one demo script
-# that ships, the one the README tells a stranger to run, and the one the CI
-# `demo` job executes. That job failed in CI with "No such file or directory"
-# while passing everywhere the file happened to exist on disk.
-#
-# Anything deeper in scripts/ that is a local scratch file should be named
-# explicitly, the way the three lines below are.
-# /demo.sh
-*.tape
-scripts/render_demo_terminal.py
-scripts/generate_screenshots.py
-scripts/render_buffers.py
-
-# Reference screenshots, images, and attachments (root and subdirs)
-Screenshot*
-screenshot*
-*.png
-*.gif
-*.jpg
-*.jpeg
-*.webp
-*.mp4
-!assets/*.svg
-!assets/*.png
-!assets/*.gif
-!assets/*.mp4
-*Zone.Identifier*
-*.identifier
-
-# Internal strategy docs — not for the public repo
-CLOUD_BACKEND_SPEC.md
-BUILD_PLAN.md
-10x-deep-research.md
-problem-statements.md
-docs/screenshots/
-
-# Temporary files and scratch logs
-*.tmp
-*.bak
-*.swp
-*.log
-Add
-__pycache__/
-
-# TUI smoke suite transient captures
-tui-smoke-logs/
-.wrangler/
-
-# NIKI writes this into the repository root while applying a run's patch and
-# removes it on the normal path. If the process is killed mid-run it stays, and
-# it was not ignored — so it showed up in `git status` after a run and could be
-# committed. Written in a user's repo, so it has to be ignored like everything
-# else NIKI leaves behind.
-.niki-tmp*.patch
-.odw/*/runs/
-
-# NIKI shell (TypeScript/Ink). Dependencies and build output are never committed; the generated
-# protocol bindings under shell/src/protocol/generated/ are, because they are part of the
-# contract and are checked by a drift test.
-shell/node_modules/
-shell/dist/
-shell/.ink-cache/
-*.tsbuildinfo
+# Secrets
+*.local
+.env

@@ -1,0 +1,79 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestWriteAndReadFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.txt")
+	w := NewWriteFileTool()
+	r, err := w.Run(context.Background(), json.RawMessage(`{"path":"`+p+`","content":"hello\nworld\n"}`))
+	if err != nil || r.IsError {
+		t.Fatalf("write: %v %v", err, r)
+	}
+	rd := NewReadFileTool()
+	res, _ := rd.Run(context.Background(), json.RawMessage(`{"path":"`+p+`"}`))
+	if !strings.Contains(res.Output, "hello") {
+		t.Fatalf("read: %q", res.Output)
+	}
+	res, _ = rd.Run(context.Background(), json.RawMessage(`{"path":"`+p+`","offset":1,"limit":1}`))
+	if res.Output != "world\n" {
+		t.Fatalf("offset read: %q", res.Output)
+	}
+}
+
+func TestEditFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "b.txt")
+	os.WriteFile(p, []byte("foo bar baz"), 0o644)
+	e := NewEditFileTool()
+	res, _ := e.Run(context.Background(), json.RawMessage(`{"path":"`+p+`","old_string":"bar","new_string":"qux"}`))
+	if res.IsError {
+		t.Fatal(res.Output)
+	}
+	data, _ := os.ReadFile(p)
+	if string(data) != "foo qux baz" {
+		t.Fatalf("got %q", data)
+	}
+}
+
+func TestGlobAndGrep(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "x.go"), []byte("package main\nfunc main() {}\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+	os.WriteFile(filepath.Join(dir, "sub", "y.go"), []byte("package sub\n"), 0o644)
+	g := NewGlobTool()
+	res, _ := g.Run(context.Background(), json.RawMessage(`{"pattern":"*.go","root":"`+dir+`"}`))
+	if !strings.Contains(res.Output, "x.go") || !strings.Contains(res.Output, "y.go") {
+		t.Fatalf("glob: %q", res.Output)
+	}
+	gr := NewGrepTool()
+	res, _ = gr.Run(context.Background(), json.RawMessage(`{"pattern":"func main","root":"`+dir+`","glob":"*.go"}`))
+	if !strings.Contains(res.Output, "func main") {
+		t.Fatalf("grep: %q", res.Output)
+	}
+}
+
+func TestShell(t *testing.T) {
+	s := NewShellTool()
+	res, _ := s.Run(context.Background(), json.RawMessage(`{"command":"echo hi"}`))
+	if res.IsError || !strings.Contains(res.Output, "hi") {
+		t.Fatalf("shell: %v %q", res, res.Output)
+	}
+}
+
+func TestRegistry(t *testing.T) {
+	r := DefaultRegistry()
+	if len(r.List()) != 6 {
+		t.Fatalf("expected 6 tools, got %d", len(r.List()))
+	}
+	if _, ok := r.Get("shell"); !ok {
+		t.Fatal("shell missing")
+	}
+}
