@@ -8,8 +8,7 @@ if any should change before P1.
    catalog, model catalog (cache-valid is acceptable), renderer warm. Optional
    (lazy): git snapshot, model prewarm, MCP beyond cached-catalog required
    servers, syntax highlighting, history hydration.
-2. **Viewport**: Inline (native scrollback) with a small live region. A
-   fullscreen owned mode stays out of v1 unless a concrete need appears.
+2. **Viewport**: Fullscreen owned alternate screen by default (owner decision). Native-scrollback inline mode is a documented future option, not v1 default.
 3. **Git backend**: Shell out to `git` for correctness; the binary has a
    documented dependency on the `git` CLI. `go-git` revisit only if the
    self-contained binary becomes a hard requirement.

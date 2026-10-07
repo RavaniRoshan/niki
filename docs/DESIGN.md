@@ -115,9 +115,9 @@ Required vs optional (THE readiness contract):
 
 ## 7. TUI architecture
 
-- Inline viewport anchored at the real cursor: finalized history scrolls into
-  native scrollback; a small live region streams at the bottom. Fullscreen
-  owned mode only if a proven need exists.
+- Fullscreen owned alternate screen by default (owner decision). History is a
+  retained semantic document in the viewport; an inline native-scrollback
+  mode is a documented future option.
 - One border level (the composer); hierarchy via weight/dimness/whitespace.
 - Header scrolls away: NIKI mark+version, model, cwd+branch, readiness.
 - Transcript is a retained semantic document with width/theme/height caches;
