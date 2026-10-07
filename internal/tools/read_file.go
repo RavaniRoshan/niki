@@ -15,7 +15,7 @@ type ReadFileTool struct {
 	Base
 }
 
-func NewReadFileTool() *ReadFileTool { return &ReadFileTool{} }
+func NewReadFileTool() *ReadFileTool { return &ReadFileTool{Base: Base{SchemaStr: `{"required":["path"],"fields":{"path":"string","offset":"number","limit":"number"}}`}} }
 
 func (t *ReadFileTool) Name() string        { return "read_file" }
 func (t *ReadFileTool) Description() string { return "Read a file with optional line offset/limit" }

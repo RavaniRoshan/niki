@@ -42,7 +42,7 @@ func Open(path string) (*Store, error) {
 }
 
 func (s *Store) Close() error {
-	s.log.Close()
+	_ = s.log.Close()
 	return s.db.Close()
 }
 
@@ -66,11 +66,11 @@ func (s *Store) ListSessions() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
 		var id string
-		rows.Scan(&id)
+		_ = rows.Scan(&id)
 		ids = append(ids, id)
 	}
 	return ids, nil
@@ -81,13 +81,13 @@ func (s *Store) Events(sessionID protocol.SessionId) ([]protocol.EngineEvent, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var evts []protocol.EngineEvent
 	for rows.Next() {
 		var payload string
-		rows.Scan(&payload)
+		_ = rows.Scan(&payload)
 		var e protocol.EngineEvent
-		json.Unmarshal([]byte(payload), &e)
+		_ = json.Unmarshal([]byte(payload), &e)
 		evts = append(evts, e)
 	}
 	return evts, nil

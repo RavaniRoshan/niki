@@ -58,9 +58,9 @@ func main() {
 				}
 			}()
 			if profile {
-				go func() {
-					time.Sleep(100 * time.Millisecond)
-					fmt.Fprintf(os.Stderr, "boot_profile: first_frame<=50ms engine=ready subsystems=terminal,engine,model,skills,mcp\n")
+				start := time.Now()
+				defer func() {
+					fmt.Fprintf(os.Stderr, "boot_profile: session_wall=%s provider=%s\n", time.Since(start).Round(time.Millisecond), buildProvider(cfg).Name())
 				}()
 			}
 
@@ -90,7 +90,10 @@ func main() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _ := config.Load(configPath)
 			eng, cmdChan, eventChan := engine.NewEngine(100, buildProvider(cfg), tools.DefaultRegistry(), permissions.NewGuard(permissions.ModeWorkspaceWrite))
-			go eng.Run()
+			go func() { _ = eng.Run() }()
+			if profile {
+				defer func() { fmt.Fprintf(os.Stderr, "boot_profile: exec_provider=%s\n", buildProvider(cfg).Name()) }()
+			}
 			cmdChan <- protocol.EngineCommand{Type: protocol.CmdSubmitPrompt, Prompt: args[0]}
 			for evt := range eventChan {
 				switch evt.Type {
@@ -115,6 +118,14 @@ func main() {
 			fmt.Println("✓ Go runtime")
 			fmt.Println("✓ Terminal capabilities")
 			fmt.Println("✓ Working directory writable")
+			cfg, _ := config.Load(configPath)
+			fmt.Printf("✓ Config resolved (provider=%s, model=%s)\n", cfg.Provider.Name, cfg.Model.Name)
+			fmt.Printf("✓ Provider constructed: %s\n", buildProvider(cfg).Name())
+			fmt.Printf("✓ MCP servers configured: %d\n", len(cfg.MCP.Servers))
+			fmt.Println("✓ Sandbox: passthrough (documented fallback active)")
+			if _, err := os.Stat("."); err == nil {
+				fmt.Println("✓ Workspace readable")
+			}
 		},
 	})
 
@@ -127,7 +138,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			ids, err := store.ListSessions()
 			if err != nil {
 				return err

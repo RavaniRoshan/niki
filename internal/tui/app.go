@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"os"
+	"strings"
+
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -138,14 +141,59 @@ func (m AppModel) View() string {
 	if !m.state.Ready {
 		return "Initializing Niki..."
 	}
-	header := m.theme.Header.Render("Niki") + "  " + m.theme.Muted.Render("Local Coding Agent")
+	var header string
+	if m.state.Width < 60 {
+		header = m.theme.Header.Render("Niki")
+	} else {
+		header = m.theme.Header.Render("Niki") + "  " + m.theme.Muted.Render("Local Coding Agent")
+	}
 	if m.state.Busy {
 		header += "  " + m.theme.Muted.Render("(working...)")
+	}
+	composer := m.composer.Input.View()
+	if suggestions := composerSuggestions(m.composer.Input.Value()); len(suggestions) > 0 {
+		composer += "\n" + m.theme.Muted.Render("  "+strings.Join(suggestions, "  "))
 	}
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		header,
 		m.viewport.View(),
-		m.composer.Input.View(),
+		composer,
 	)
+}
+
+// composerSuggestions offers the fuzzy command menu (/) and a minimal file
+// picker (@) from the real filesystem.
+func composerSuggestions(value string) []string {
+	switch {
+	case strings.HasPrefix(value, "/"):
+		cmds := []string{"/exec", "/doctor", "/config", "/skills", "/mcp", "/resume", "/quit"}
+		q := strings.TrimPrefix(value, "/")
+		var out []string
+		for _, c := range cmds {
+			if strings.Contains(c, q) {
+				out = append(out, c)
+			}
+		}
+		if len(out) > 5 {
+			out = out[:5]
+		}
+		return out
+	case strings.HasPrefix(value, "@"):
+		entries, err := os.ReadDir(".")
+		if err != nil {
+			return nil
+		}
+		var out []string
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), strings.TrimPrefix(value, "@")) {
+				out = append(out, "@"+e.Name())
+			}
+			if len(out) >= 5 {
+				break
+			}
+		}
+		return out
+	}
+	return nil
 }

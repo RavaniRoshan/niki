@@ -32,3 +32,24 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("evts=%v", evts)
 	}
 }
+
+func TestReopenPreservesEvents(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sessions.db")
+	s, _ := Open(path)
+	id := protocol.NewSessionId()
+	s.CreateSession(id, "x")
+	s.AppendEvent(id, protocol.EngineEvent{Type: protocol.EventSessionStarted, Timestamp: time.Now()})
+	s.Close()
+	// Simulate a crash: reopen without explicit close of prior (already closed),
+	// then write more and read everything back.
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	evs, _ := s2.Events(id)
+	if len(evs) != 1 {
+		t.Fatalf("evts=%d", len(evs))
+	}
+}

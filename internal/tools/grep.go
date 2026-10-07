@@ -15,7 +15,7 @@ type GrepTool struct {
 	Base
 }
 
-func NewGrepTool() *GrepTool { return &GrepTool{} }
+func NewGrepTool() *GrepTool { return &GrepTool{Base: Base{SchemaStr: `{"required":["pattern"],"fields":{"pattern":"string","root":"string","glob":"string"}}`}} }
 
 func (t *GrepTool) Name() string        { return "grep" }
 func (t *GrepTool) Description() string { return "Regex search across files" }
@@ -40,7 +40,7 @@ func (t *GrepTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, e
 		root = "."
 	}
 	var out []string
-	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}

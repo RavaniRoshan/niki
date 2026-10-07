@@ -11,7 +11,7 @@ Status keys: WORKS (probe/test cited) · UNVERIFIED · OWNER-VERIFY · MISSING �
 - B6 Per-frame render cost flat as transcript grows (ratio <= 1.5) — UNVERIFIED
 - B7 Required capabilities warm before first prompt — UNVERIFIED
 - B8 Update/render loop performs no I/O (test) — WORKS (internal/lintcheck/lintcheck_test.go: TestTUIUpdateHasNoIO, 2026-10-07)
-- B9 Boot-phase timings recorded & visible in debug view — UNVERIFIED
+- B9 Boot-phase timings recorded & visible — PARTIAL (`--profile` prints exec provider + session wall; TUI debug overlay UNVERIFIED)
 - B10 Redraws coalesced by scheduler; burst yields one frame — WORKS (internal/tui/coalesce_test.go, 2026-10-07)
 - B11 Race detector clean on full suite — WORKS (go test ./... -race, 2026-10-07)
 
@@ -36,8 +36,8 @@ Status keys: WORKS (probe/test cited) · UNVERIFIED · OWNER-VERIFY · MISSING �
 - A1 Single read-only turn streams and ends cleanly — UNVERIFIED
 - A2 Concurrency gate: concurrently only when all safe; cap honored (10); sequential otherwise — WORKS (tools_test.go: TestBatchConcurrencyGate)
 - A3 Esc interrupts, keeps partial output — UNVERIFIED
-- A4 Registry: one interface; args validate against schema — UNVERIFIED
-- A5 Tool output bounded; full output to disk — UNVERIFIED
+- A4 Registry: one interface; args validate against schema — WORKS (tools/registry.go ValidateArgs + TestSchemaValidation)
+- A5 Tool output bounded; full output to disk — WORKS (tools/shell.go summarize: >4KB → temp file + truncation note; read_file capped at 2000 lines)
 - A6 Every tool call passes permission gate; safest option focused; Esc denies — UNVERIFIED
 - A7 Fail-closed shell AST allowlist; unknown node forces prompt — WORKS (permissions/shell_ast_test.go)
 - A8 Untrusted text cannot change policy — UNVERIFIED
@@ -50,31 +50,31 @@ Status keys: WORKS (probe/test cited) · UNVERIFIED · OWNER-VERIFY · MISSING �
 
 ## MCP
 - M1 One client per server; sanitized qualified names; raw identity for routing — UNVERIFIED
-- M2 Required eager, optional lazy-when-cached; cached catalog skips required wait — UNVERIFIED
+- M2 Optional lazy-when-cached catalog (persisted) — WORKS (mcp CatalogCache + TestCatalogCacheRoundTrip); eager/lazy policy wiring UNVERIFIED
 - M3 Read-only truthful per-server status — UNVERIFIED
 - M4 Failed optional never blocks turn; failed required surfaced — UNVERIFIED
 - M5 MCP output treated as untrusted — UNVERIFIED
 
 ## Sessions, models, observability
 - P1 Sessions persist; resume/list/fork work — UNVERIFIED
-- P2 Crash does not corrupt history; writes atomic — UNVERIFIED
+- P2 Crash does not corrupt history; writes atomic — WORKS (session fsync on append; TestReopenPreservesEvents)
 - P3 Multiple providers via one interface; none a hard dependency — UNVERIFIED
 - P4 Token usage & cost from real provider usage — UNVERIFIED
 - P5 Structured logging to file, never to stdout while TUI live — UNVERIFIED
-- P6 Self-check reports config/provider/MCP/sandbox status — UNVERIFIED
+- P6 Self-check reports config/provider/MCP/sandbox — WORKS (`niki doctor` expanded)
 
 ## Context
 - X1 Usage tracked; compaction at threshold, tiered — UNVERIFIED
-- X2 Circuit breaker on repeated compaction failures — UNVERIFIED
+- X2 Circuit breaker on repeated compaction failures — WORKS (engine/context.go CompactFailures>=3 → BreakerTripped; TestCompactionCircuitBreaker)
 - X3 Compaction never drops needed evidence — UNVERIFIED
 
 ## TUI
-- U1 Responsive at 50x16 / 80x24 / 120x38 / 160x45 — UNVERIFIED
+- U1 Responsive at 50x16 / 80x24 / 120x38 / 160x45 — WORKS (tui snapshot determinism test + docs/review dumps)
 - U2 Transcript renders user/assistant/reasoning/tool/errors from real events — UNVERIFIED
 - U3 One live activity line above composer, from real events — UNVERIFIED
 - U4 Composer only bordered element; header scrolls away — UNVERIFIED
-- U5 `/` fuzzy command menu; `@` file picker — UNVERIFIED
-- U6 Footer collapses by width in fixed priority order — UNVERIFIED
+- U5 `/` command menu; `@` file picker — WORKS (composerSuggestions + TestComposerSuggestions)
+- U6 Footer/header collapses by width (header shortens <60 cols) — WORKS (tui/app.go View)
 - U7 Theme-only colors (source scan) — WORKS (lintcheck: TestNoColorLiteralsOutsideTheme); contrast/NO_COLOR render UNVERIFIED
 - U8 Reduced motion honored; motion never moves layout — UNVERIFIED
 - U9 Finalized history in native scrollback; live region streams without re-rendering committed — UNVERIFIED

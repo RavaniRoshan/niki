@@ -100,3 +100,19 @@ func TestBatchConcurrencyGate(t *testing.T) {
 		t.Fatalf("res=%v", res)
 	}
 }
+
+func TestSchemaValidation(t *testing.T) {
+	r := DefaultRegistry()
+	_, err := r.Get("read_file")
+	if !err {
+		t.Fatal("expected tool")
+	}
+	_, runErr := r.Run(context.Background(), "read_file", json.RawMessage(`{}`))
+	if runErr == nil {
+		t.Fatal("expected validation error for missing path")
+	}
+	res, runErr := r.Run(context.Background(), "read_file", json.RawMessage(`{"path":123}`))
+	if runErr == nil || res.IsError {
+		t.Fatalf("expected validation error for wrong type: %v %v", err, res)
+	}
+}

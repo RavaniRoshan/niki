@@ -21,7 +21,7 @@ type Skill struct {
 func Discover(roots ...string) ([]Skill, error) {
 	var out []Skill
 	for _, root := range roots {
-		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}

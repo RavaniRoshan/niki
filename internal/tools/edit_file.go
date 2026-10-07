@@ -12,7 +12,7 @@ type EditFileTool struct {
 	Base
 }
 
-func NewEditFileTool() *EditFileTool { return &EditFileTool{} }
+func NewEditFileTool() *EditFileTool { return &EditFileTool{Base: Base{SchemaStr: `{"required":["path","old_string","new_string"],"fields":{"path":"string","old_string":"string","new_string":"string"}}`}} }
 
 func (t *EditFileTool) Name() string        { return "edit_file" }
 func (t *EditFileTool) Description() string { return "Replace a unique string in a file" }

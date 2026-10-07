@@ -17,3 +17,15 @@ func TestAppModelUpdate(t *testing.T) {
 		t.Fatal("viewport should be ready after window size")
 	}
 }
+
+func TestComposerSuggestions(t *testing.T) {
+	if got := composerSuggestions("/do"); len(got) == 0 {
+		t.Fatal("expected command suggestions")
+	}
+	if got := composerSuggestions("@a"); len(got) == 0 {
+		t.Fatal("expected file suggestions")
+	}
+	if got := composerSuggestions("plain"); len(got) != 0 {
+		t.Fatalf("unexpected suggestions: %v", got)
+	}
+}

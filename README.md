@@ -29,11 +29,17 @@ Niki is a local-first AI coding harness: a streaming agent loop, a Bubble Tea TU
 Requires Go 1.24+.
 
 ```bash
+# Install from source
+go install github.com/RavaniRoshan/niki/cmd/niki@latest
+
+# Or build locally
 make build
 ./bin/niki            # interactive TUI
 ./bin/niki exec "explain this repo"
 ./bin/niki doctor
 ```
+
+Pre-built binaries for Linux/macOS/Windows are published via GitHub Releases (see the Release workflow; tags `v*` produce archives).
 
 For real model calls, point Niki at any OpenAI-compatible endpoint:
 

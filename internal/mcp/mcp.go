@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -153,3 +154,32 @@ func (c *Client) Stop() error {
 
 // StateOf returns the server state.
 func (c *Client) StateOf() State { return c.state }
+
+// CatalogCache persists a server's tool catalog so a cached catalog is usable
+// before the connection opens (lazy-when-cached startup).
+type CatalogCache struct {
+	Path string
+}
+
+type cachedCatalog struct {
+	Tools []string `json:"tools"`
+}
+
+func NewCatalogCache(path string) *CatalogCache { return &CatalogCache{Path: path} }
+
+func (c *CatalogCache) Save(tools []string) error {
+	data, _ := json.Marshal(cachedCatalog{Tools: tools})
+	return os.WriteFile(c.Path, data, 0o600)
+}
+
+func (c *CatalogCache) Load() ([]string, bool) {
+	data, err := os.ReadFile(c.Path)
+	if err != nil {
+		return nil, false
+	}
+	var cc cachedCatalog
+	if err := json.Unmarshal(data, &cc); err != nil {
+		return nil, false
+	}
+	return cc.Tools, len(cc.Tools) > 0
+}

@@ -72,7 +72,7 @@ func (o *OpenAIProvider) Stream(ctx context.Context, messages []Message) (<-chan
 			errs <- err
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode >= 400 {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			errs <- fmt.Errorf("provider error %d: %s", resp.StatusCode, string(b))
@@ -139,7 +139,7 @@ func (o *OpenAIProvider) doWithBackoff(ctx context.Context, req *http.Request) (
 			return resp, nil
 		}
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 	}
 	return resp, err

@@ -12,7 +12,7 @@ type WriteFileTool struct {
 	Base
 }
 
-func NewWriteFileTool() *WriteFileTool { return &WriteFileTool{} }
+func NewWriteFileTool() *WriteFileTool { return &WriteFileTool{Base: Base{SchemaStr: `{"required":["path","content"],"fields":{"path":"string","content":"string"}}`}} }
 
 func (t *WriteFileTool) Name() string        { return "write_file" }
 func (t *WriteFileTool) Description() string { return "Write a file atomically" }

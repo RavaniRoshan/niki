@@ -15,10 +15,13 @@ type ToolResult struct {
 
 // Base embeds fail-closed tool metadata: concurrency is unsafe and the tool
 // is not read-only unless the tool opts in.
-type Base struct{}
+type Base struct {
+	SchemaStr string
+}
 
 func (Base) IsConcurrencySafe() bool { return false }
 func (Base) IsReadOnly() bool        { return false }
+func (b Base) Schema() string        { return b.SchemaStr }
 
 type Tool interface {
 	Name() string
@@ -26,6 +29,44 @@ type Tool interface {
 	Run(ctx context.Context, args json.RawMessage) (ToolResult, error)
 	IsConcurrencySafe() bool
 	IsReadOnly() bool
+	Schema() string
+}
+
+// ValidateArgs checks required fields and JSON types against a minimal schema.
+func ValidateArgs(raw json.RawMessage, schema string) error {
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return err
+	}
+	var s struct {
+		Required []string          `json:"required"`
+		Fields   map[string]string `json:"fields"`
+	}
+	if err := json.Unmarshal([]byte(schema), &s); err != nil {
+		return err
+	}
+	for _, req := range s.Required {
+		if _, ok := m[req]; !ok {
+			return fmt.Errorf("missing required arg %q", req)
+		}
+	}
+	for name, typ := range s.Fields {
+		v, ok := m[name]
+		if !ok {
+			continue
+		}
+		switch typ {
+		case "string":
+			if _, ok := v.(string); !ok {
+				return fmt.Errorf("arg %q must be string", name)
+			}
+		case "number":
+			if _, ok := v.(float64); !ok {
+				return fmt.Errorf("arg %q must be number", name)
+			}
+		}
+	}
+	return nil
 }
 
 // Call is one tool invocation in a batch.
@@ -114,6 +155,11 @@ func (r *Registry) Run(ctx context.Context, name string, args json.RawMessage) (
 	t, ok := r.Get(name)
 	if !ok {
 		return ToolResult{}, fmt.Errorf("unknown tool: %s", name)
+	}
+	if sch := t.Schema(); sch != "" {
+		if err := ValidateArgs(args, sch); err != nil {
+			return ToolResult{}, fmt.Errorf("invalid args for %s: %w", name, err)
+		}
 	}
 	return t.Run(ctx, args)
 }

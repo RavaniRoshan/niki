@@ -9,6 +9,10 @@ const maxContextMessages = 40
 // ContextAssembler holds conversation history and performs naive compaction.
 type ContextAssembler struct {
 	Messages []provider.Message
+	// CompactFailures counts consecutive failed compaction attempts; the
+	// circuit breaker trips at 3 (X2).
+	CompactFailures int
+	BreakerTripped  bool
 }
 
 func NewContextAssembler() *ContextAssembler {
@@ -39,11 +43,19 @@ func (c *ContextAssembler) TokenEstimate() int {
 
 // Compact truncates history further when the estimate is large.
 func (c *ContextAssembler) Compact() (compacted bool) {
+	if c.BreakerTripped {
+		return false
+	}
 	if c.TokenEstimate() > 8000 {
 		keep := 8
 		if len(c.Messages) > keep+1 {
 			c.Messages = append([]provider.Message{c.Messages[0]}, c.Messages[len(c.Messages)-keep:]...)
+			c.CompactFailures = 0
 			return true
+		}
+		c.CompactFailures++
+		if c.CompactFailures >= 3 {
+			c.BreakerTripped = true
 		}
 	}
 	return false
