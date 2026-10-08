@@ -563,3 +563,22 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
 - **Parity Matrix Sign-off**:
   - All 9 rows in `docs/PARITY.md` marked **VERIFIED** with automated proof.
   - Full tool catalog (24 fail-closed tools), subagent hierarchy & runaway controls, plan mode & checkpoints, tiered memory & root-to-cwd instruction chain, extensions & plugins, MCP depth & server mode, app-server / ACP IDE seams, CI headless exec, model routing & fallback chain, and real-cost statusline are delivered and proven.
+
+## 2026-10-08 — Demo remake (skill-directed, original identity)
+- Loaded the `demo-gif` skill; read storyboard/palette/build refs. REJECTED
+  its cloning method: the skill forensically reproduces one specific
+  product demo (exact chrome/palette/beat grammar, "verbatim structure").
+  Shipping that would violate P17. Used only its generic discipline:
+  single-play, hold beats, 10fps, frame-level validation, palette encode.
+- Kimi Code reference (Tier A, shape-level only): demo at
+  docs/media/intro.gif, embedded right after their title (layout adopted:
+  ours now sits right after our title too). Beats noted: TUI cold open
+  with complete prompt, streaming reply, end. No asset copied; nothing
+  sampled into the repo. Claude demos untouched (Tier B).
+- Notable: our deleted intro.gif was byte-identical (3,517,259 B) to
+  Kimi's intro.gif — it was their file sitting untracked in our tree.
+  Deletion stands; nothing of theirs ships with NikiCode.
+- New cut (vhs, real binary, mock provider): TUI cold open with complete
+  prompt, streamed turn with live cost/context meters, /quit, do --plan
+  with resolved tools, version end card. 165KB, 11s, 720px, verified
+  frame by frame. Tape: docs/demo.tape. README embed moved to top.

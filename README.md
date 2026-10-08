@@ -31,6 +31,11 @@ curl -sSL https://raw.githubusercontent.com/RavaniRoshan/niki/main/install.sh | 
 
 </div>
 
+<p align="center">
+  <img src="demo.gif" width="720" alt="NikiCode demo: live TUI turn, plan preview, version">
+</p>
+<p align="center"><sub>Real footage of the actual binary (mock provider) — reproducible from <a href="docs/demo.tape">docs/demo.tape</a>.</sub></p>
+
 ---
 
 ## 📊 Performance Contracts: No Feelings, Just Measurements
@@ -51,17 +56,6 @@ Measured on host (`AMD Ryzen 7 4800H`, `Linux WSL2`, `go1.27.1`) using the inclu
 > **Startup**: NikiCode prints `--version` **3.3x faster** than Codex, paints first bytes **3.3x faster** (content paint **10x faster**), uses **77% less idle RSS**, and ships a binary **12x smaller**. Full table with method and caveats: [`docs/BENCH.md`](docs/BENCH.md).
 
 ---
-
-
-## 🎬 Demo
-
-<p align="center">
-  <img src="demo.gif" width="720" alt="NikiCode demo: version, plan preview, live TUI turn, explain with citations, git log, doctor">
-</p>
-
-Reproducible from [`docs/demo.tape`](docs/demo.tape) (`vhs docs/demo.tape`
-with `bin/nikicode` on `PATH`). Everything shown is the real binary on
-the mock provider — including the interactive TUI turn — not a mockup.
 
 
 ## 🚀 Quick Start
