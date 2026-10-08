@@ -106,6 +106,22 @@ func NewDefaultTheme() Theme {
 		StatusDir:      lipgloss.NewStyle().Foreground(slateMuted),
 		StatusGit:      lipgloss.NewStyle().Foreground(slateMuted),
 		StatusHints:    lipgloss.NewStyle().Foreground(slateMuted),
-		StatusMeter:    lipgloss.NewStyle().Foreground(slateDim),
 	}
+}
+
+// SelectTheme returns a Theme based on the requested name (default, dark, light, monochrome).
+func SelectTheme(name string) Theme {
+	th := NewDefaultTheme()
+	switch name {
+	case "monochrome":
+		mono := lipgloss.NewStyle()
+		th.Header = mono.Bold(true)
+		th.Accent = mono
+		th.User = mono.Bold(true)
+		th.ToolBullet = mono
+		th.ActivityGlyph = mono
+	case "light", "dark", "default":
+		// Standard palette
+	}
+	return th
 }

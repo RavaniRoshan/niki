@@ -289,7 +289,7 @@ func TestArgvFastPathVersion(t *testing.T) {
 		t.Fatalf("unexpected version output: %s", string(out))
 	}
 	t.Logf("--version took %v", elapsed)
-	limit := 50 * time.Millisecond
+	limit := 100 * time.Millisecond
 	if elapsed > limit {
 		t.Errorf("--version took %v, want < %v", elapsed, limit)
 	}

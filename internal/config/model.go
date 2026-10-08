@@ -10,7 +10,8 @@ type Config struct {
 }
 
 type ModelConfig struct {
-	Name string `toml:"name"`
+	Name      string   `toml:"name"`
+	Fallbacks []string `toml:"fallbacks,omitempty"`
 }
 
 type ProviderConfig struct {

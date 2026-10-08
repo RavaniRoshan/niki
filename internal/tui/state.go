@@ -31,9 +31,10 @@ type State struct {
 	Mode           string
 	GitBranch      string
 
-	// Token Context Meter
+	// Token Context Meter & Cost Accounting
 	UsedTokens int
 	MaxTokens  int
+	TotalCost  float64
 }
 
 // FrameTelemetry records render-cost and event

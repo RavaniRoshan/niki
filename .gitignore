@@ -17,3 +17,4 @@ bin/
 # Media & assets
 *.png
 *.gif
+tool-results/

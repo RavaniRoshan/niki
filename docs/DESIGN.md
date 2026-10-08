@@ -1,171 +1,69 @@
-# NIKI — Design Note (Phase 0)
+# NIKI — Final Capability Pack Design (Phase F0)
+Status: DRAFT for owner approval. Rule of proof holds: all items start UNVERIFIED.
 
-Status: DRAFT for approval. Nothing in this document is verified until a probe
-or test prints its number (see CHECKLIST.md).
+## 1. Final Tool List & Permission Classes (Fail-Closed Defaults)
+- web_search: read-only=true, safe=true, class=read, mode=disabled|cached|live|indexed. Hosted provider spec.
+- web_fetch: read-only=true, safe=true, class=network, 15m TTL cache, body cap, markdown extract, hard context cap.
+- view_image: read-only=true, safe=true, class=read, resize to token budget, base64 data URL, image modality check.
+- notebook_edit: read-only=false, safe=false, class=workspace_write, .ipynb JSON replace|insert|delete, reset output/exec_count.
+- update_plan: read-only=false, safe=false, class=read, emit PlanUpdate, <=1 in_progress, rejected in plan mode.
+- todo_write: read-only=false, safe=false, class=read, atomic rewrite, session-scoped.
+- tool_search: read-only=true, safe=true, class=read, exact-name fast path, select:A,B,C, mcp__ prefix, BM25 fallback.
+- exec_command: read-only=false, safe=false, class=shell_exec, PTY-backed (creack/pty), process group, return pid+preview.
+- write_stdin: read-only=false, safe=false, class=shell_exec, empty=poll, text=stdin, supports non-tty interrupt.
+- bash_output / kill_shell: read-only=true/false, safe=true/false, class=read/shell_exec, incremental read, group SIGTERM/KILL.
+- ask_user_question: read-only=true, safe=false, class=read, 1-4 questions, 2-4 options, escape hatch, unavailable in subagents.
+- apply_patch: read-only=false, safe=false, class=workspace_write, hand-rolled unified patch parser, fuzzy seek, reverse apply.
+- edit: read-only=false, safe=false, class=workspace_write, read-before-edit hash check, exact replace, diff preview.
+- Output Capping: helper for >50k chars; saves session/tool-results/<id>.txt, returns 2 KB preview; read tool paginates.
 
-## 1. Package graph
+## 2. Subagent Model & Delegation
+- Verbs: spawn_agent, send_input, wait_agent, close_agent, resume_agent. Addressable by runtime ID and path (/root/worker).
+- Storage: AgentGraphStore interface (parent->child edges, status, descendants).
+- Context & Fork: fork_turns in {none, all, N} (default none: prompt-only child). Full-history fork prefix byte-identical.
+- Isolation & Safety: git worktree from HEAD on demand (keep on commits). Propagate approval policy and sandbox posture.
+- Runaway Controls: depth cap (1-3, spawn withheld at max), concurrency semaphore (~6), delegation allowlist, spend budget.
+- Output & Transcript: child returns final report only; full transcript streamed to sidechain file in session dir.
 
-```
-cmd/niki                  binary: interactive / headless / (optional) app-server
-internal/protocol         flat Event + Submission types (the single seam)
-internal/config           layered config resolution + settings view model
-internal/llm              provider clients, streaming, catalog, cost
-internal/core             SQ/EQ runtime, Session spawn, manager bag, turn state machine
-internal/tools            tool registry + built-in tools (fail-closed factory)
-internal/mcp              MCP client, connection manager, startup policy, catalog cache
-internal/skills           skill discovery, parsing, catalog
-internal/contextwin       instruction assembly, static/dynamic boundary, compaction
-internal/permissions      policy, approval, fail-closed shell AST allowlist
-internal/sandbox          per-OS isolation backends + documented fallback
-internal/session          persistence, resume, list, fork, atomic writes
-internal/tui              Bubble Tea v2 client; render is pure, async by messages
-```
+## 3. Plan Mode, Checkpoints & Rewind
+- Plan Mode: read-only exploration; write/exec tools withheld; update_plan rejected. User approval required to exit.
+- Live Panels: plan checklist (pending ○, in_progress ▶, completed ✓) and todo list rendered from real events.
+- Checkpoints: snapshot modified files keyed by turn (max 100). Guard against clobbering with per-file SHA-256 hash.
+- Rewind: /rewind rolls back code, conversation, or both with pre-apply diff preview.
 
-Rules:
-- One runtime, one event type, one dispatcher, one keymap registry, one command
-  registry, one theme module, one config resolver, one tool registry, one MCP
-  connection manager, one session store, one prompt assembler with one
-  static/dynamic boundary.
-- `internal/core` never imports `internal/tui`. The TUI is one client.
-- Render is a pure function of (state, terminal size); it performs no I/O.
+## 4. Memory & Compaction
+- Memory: MEMORY.md pointer index (capped at 200 lines / 25 KB, line-then-byte truncate) + topic files.
+- Retrieval: cheap-model side-query ranks manifest, attaches <=5 memories. Extraction runs as stop hook on no-tool turn.
+- Instructions: AGENTS.md chain walked root->cwd, concatenated top-down, byte-budget capped.
+- Compaction: effective = window - min(maxOutput, 20000); threshold = effective - 13000. 3 tiers: microcompact tool results,
+  session-notes reuse, full forked summary. 3-failure circuit breaker and recursion guard. State persisted across compaction.
 
-## 2. SQ/EQ runtime shape
+## 5. Extension Plane (Hooks, Plugins, Skills)
+- Hooks: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, PreCompact, PostCompact, SubagentStart, SubagentStop.
+  JSON on stdin; exit code 0=success, 2=blocking; stdout permissionDecision: allow|deny|ask|defer. Per-event timeouts, SHA trust.
+- Plugins: manifest bundles skills, agents, hooks, MCP servers; plugin:<name>: namespace; strict-append/matcher-replace merge.
+- Skills Depth: cached frontmatter index, hot reload (fsnotify) after session configured, compat .agents/skills, context: fork.
 
-- `Submission` queue: bounded, cap 512.
-- `Event` queue: unbounded, flat interface with a marker method; consumers
-  type-switch on concrete event structs.
-- One loop goroutine: `select` over `ctx.Done()`, submission channel, and an
-  input mailbox. One turn goroutine per active turn; cancellation is
-  `context.Context` throughout.
-- Every state change emits a typed `Event`. The UI renders events; it never
-  invents them.
+## 6. MCP Depth & Server Mode
+- Depth: resources, prompts, OAuth bearer flow, reconnect loop with exponential backoff (1s->30s, Last-Event-ID resume).
+- Server Mode: niki serve-mcp exposes NIKI over stdio (tools, prompts, resources) for external agents.
 
-## 3. Boot pipeline & readiness contract
+## 7. IDE & CI Adapters
+- IDE Seam: Codex app-server (JSON-RPC stdio: thread/*, turn/*) and ACP server (JSON-RPC 2.0: session/*). Adapters over Op/Event.
+- CI Flow: headless exec produces JSONL artifact; net/http posts GitHub check run with annotations and blocking conclusion.
 
-Parallel pipeline, fire I/O side-effects before heavy work:
+## 8. Model Routing, Cost & Polish
+- Routing: ModelProfile in TOML, fallback chain <=3 (excludes auth/invalid/overflow), subagents support cheaper model.
+- Cost: per-turn Usage/Cost events, local pricing table, machine-readable headless cost, reset on /clear, optional OTLP.
+- Polish: statusline (model, mode, branch, meter, cost), /agents panel, question modal, notification row, command palette.
 
-1. Parse CLI; resolve config layers (defaults → user → project → env → flags).
-2. Detect terminal capabilities (via termenv / bubbletea).
-3. Prefetch goroutines: instruction files (root→cwd), skills index
-   (frontmatter only), model catalog (cache-valid), git snapshot, MCP servers
-   per policy, renderer warm-up (theme, glyphs).
-4. Draw first frame; open composer. User can type while optional prefetch runs.
-5. Publish readiness state. First submitted prompt waits only for REQUIRED.
-6. Background: model client prewarm handed to first turn; MCP refresh worker.
-
-Required vs optional (THE readiness contract):
-
-| Capability                | Class    | Blocks first prompt? |
-|---------------------------|----------|----------------------|
-| Config resolved           | required | yes                  |
-| Terminal capabilities     | required | yes                  |
-| Instruction files loaded  | required | yes                  |
-| Skills catalog indexed    | required | yes                  |
-| Git snapshot              | optional | no                   |
-| Model catalog resolved    | required | yes (from cache ok)  |
-| Model client prewarm      | optional | no (first turn may warm) |
-| MCP servers               | mixed    | required-server wait skipped when cached catalog exists |
-| Renderer glyph warm       | required | yes                  |
-| Tree-sitter/highlighting  | optional | no                   |
-| History hydration         | optional | no                   |
-
-## 4. Agent loop & tool model
-
-- Turn = user input → model stream → 0..n tool calls → tool results → repeat
-  until the model stops calling tools.
-- Each continue builds a complete new immutable state and records
-  `transition: { reason }`. Termination reasons: completed, interrupted,
-  too-long, model-error, max-turns. Diminishing-returns guard on repeated tiny
-  continuations.
-- Recovery is cheapest-first (free drain → one summarization call → surface);
-  circuit breakers on compaction and classifier denials.
-- Tools behind one interface: name, description, JSON-schema args, run,
-  permission class, `IsConcurrencySafe` (fail-closed: default false via
-  embedded base struct). A batch runs concurrently iff every call is safe; cap
-  ~10; deferred state changes applied in original call-id order.
-
-## 5. MCP / skills / config design
-
-- MCP: one client per server keyed by name; sanitized qualified names for the
-  model, raw identity preserved for routing; required = eager start, optional =
-  lazy-with-cached-catalog; persisted tool-catalog cache; read-only per-server
-  status; stdio + optional streamable HTTP; MCP output treated as untrusted.
-- Skills: `SKILL.md` + YAML frontmatter; ordered root list (global + project
-  ancestors); catalog prompt with progressive disclosure; body loaded on
-  invocation; skill injects into current context (cheap), subagent gets an
-  isolated context (expensive); malformed skill skipped, never fatal; bundled
-  skills install only on fingerprint change.
-- Config: defaults → managed → user → project → session flags; resolved to
-  effective values; every value shows its source in the settings view.
-
-## 6. Permissions & sandbox
-
-- Modes: read-only, ask, auto (allow-list), no-review (never default).
-  Deny wins. Safest option focused by default on approval prompts; Esc denies.
-- Shell analysis: fail-closed AST allowlist via `mvdan.cc/sh/v3/syntax`;
-  unknown node ⇒ `too-complex` ⇒ prompt. Compound commands split and checked
-  each (capped). No regex denylist.
-- Untrusted text (repo, tool output, MCP) never alters policy; sanitize
-  control chars on render; every decision logged; no credentials in files.
-- Sandbox: one type, per-OS backend (Linux landlock+seccomp or namespaces,
-  macOS seatbelt, Windows restricted token), documented fallback. Filesystem
-  allow-list + network off by default + resource limits + kill-on-parent-exit.
-  Never reach home, SSH keys, cloud creds, unrelated repos. Cleanup on exit and
-  on panic.
-
-## 7. TUI architecture
-
-- Fullscreen owned alternate screen by default (owner decision). History is a
-  retained semantic document in the viewport; an inline native-scrollback
-  mode is a documented future option.
-- One border level (the composer); hierarchy via weight/dimness/whitespace.
-- Header scrolls away: NIKI mark+version, model, cwd+branch, readiness.
-- Transcript is a retained semantic document with width/theme/height caches;
-  user band, assistant markdown (Glamour), collapsed reasoning line, tool rows
-  (`glyph Tool(args)` + indented result + expand hint), inline errors, live
-  activity line above the composer.
-- Composer: single rule, `>` prompt, textarea, history, `/` fuzzy menu, `@`
-  file picker, queue indicator during a run.
-- Footer: model/state left, cwd+branch center, hints+context meter right,
-  collapses by width.
-- Scheduler coalesces updates into one frame per deadline with a frame-rate
-  cap; idle costs nothing. Streaming paced with hysteresis; committed markdown
-  never re-rendered. Synchronized output (DEC 2026) where supported; kitty
-  keyboard protocol with restore on every exit path. termenv/NO_COLOR-aware
-  color in a pure, testable function. Reduced-motion honored.
-- TUI never writes to stdout while live; terminal restored on clean exit, Esc,
-  SIGTERM, SIGHUP, panic; Ctrl+Z suspend/resume redraws.
-
-## 8. Performance contract (honest Go budgets)
-
-| Metric                                        | Target        |
-|-----------------------------------------------|---------------|
-| Cold start → first frame                      | ≤ 60 ms       |
-| Cold start → interactive composer             | ≤ 90 ms       |
-| Warm start → interactive composer             | ≤ 25 ms       |
-| Input echo p95 under streaming                | ≤ 30 ms       |
-| Idle                                          | 0 redraws, CPU < 1% |
-| Render cost at 100 vs 5,000 messages          | ratio ≤ 1.5   |
-| Memory                                        | bounded idle RSS, no unbounded growth |
-| Required capabilities warm before first prompt| yes           |
-
-Every number requires a measured probe; otherwise UNVERIFIED.
-
-## 9. Testing strategy
-
-- Headless render harness → text/ANSI artifacts, golden files at 50x16,
-  80x24, 120x38, 160x45.
-- PTY e2e: real binary in a pseudo-terminal, raw bytes in, assert final
-  screen, hard timeout, child cleanup.
-- stdlib fuzzing: hostile bytes never wedge input; hostile markup never
-  reaches the terminal.
-- Fixture runtime behind a build tag (never release) replays a coding loop.
-- Lint tests: no color literals outside theme; no key handling outside
-  registry; no stdout writes while the TUI is live; no session-varying
-  conditional in the static prompt prefix.
-- `go test ./... -race`, `go vet`, `golangci-lint`, benchmarks with recorded
-  baselines. No test skipped/weakened/deleted to get green.
-
-## 10. Conformance matrix
-
-See docs/CHECKLIST.md. All rows start UNVERIFIED.
+## 9. Parity Checklist (Status: All UNVERIFIED)
+- Boot and core (boot DAG, streaming, sessions, compaction) [UNVERIFIED]
+- Tools (web_search, web_fetch, view_image, notebook_edit, update_plan, todo_write, tool_search, background terminals, ask_user_question, capping) [UNVERIFIED]
+- Agent depth (spawn/send/wait/close, fork, worktree, limits, /agents panel) [UNVERIFIED]
+- Plan and history (plan mode, checkpoints, rewind) [UNVERIFIED]
+- Memory and context (MEMORY.md, retrieval, extraction, AGENTS.md chain, compaction tiers, breaker) [UNVERIFIED]
+- Extensions (hooks, plugins, skills depth) [UNVERIFIED]
+- MCP (resources, prompts, OAuth, reconnect, server mode) [UNVERIFIED]
+- Integration (app-server, ACP, CI/GitHub) [UNVERIFIED]
+- Routing, cost, polish (ModelProfile, fallback, cost/usage, statusline, palette, themes) [UNVERIFIED]

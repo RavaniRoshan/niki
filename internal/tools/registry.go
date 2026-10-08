@@ -123,12 +123,25 @@ func (r *Registry) Batch(ctx context.Context, calls []Call) []ToolResult {
 }
 
 type Registry struct {
-	mu    sync.RWMutex
-	tools map[string]Tool
+	mu         sync.RWMutex
+	tools      map[string]Tool
+	sessionDir string
 }
 
 func NewRegistry() *Registry {
 	return &Registry{tools: map[string]Tool{}}
+}
+
+func (r *Registry) SetSessionDir(dir string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sessionDir = dir
+}
+
+func (r *Registry) SessionDir() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.sessionDir
 }
 
 func (r *Registry) Register(t Tool) {
@@ -165,7 +178,16 @@ func (r *Registry) Run(ctx context.Context, name string, args json.RawMessage) (
 			return ToolResult{}, fmt.Errorf("invalid args for %s: %w", name, err)
 		}
 	}
-	return t.Run(ctx, args)
+	res, err := t.Run(ctx, args)
+	if err != nil {
+		return res, err
+	}
+	r.mu.RLock()
+	sDir := r.sessionDir
+	r.mu.RUnlock()
+
+	res.Output, _ = CapOutput(name, res.Output, sDir)
+	return res, nil
 }
 
 func DefaultRegistry() *Registry {
@@ -177,5 +199,22 @@ func DefaultRegistry() *Registry {
 	r.Register(NewGlobTool())
 	r.Register(NewGrepTool())
 	r.Register(NewShellTool())
+	r.Register(NewWebSearchTool())
+	r.Register(NewWebFetchTool())
+	r.Register(NewViewImageTool())
+	r.Register(NewNotebookEditTool())
+	r.Register(NewUpdatePlanTool())
+	r.Register(NewTodoWriteTool())
+	r.Register(NewExecCommandTool(nil))
+	r.Register(NewWriteStdinTool(nil))
+	r.Register(NewBashOutputTool(nil))
+	r.Register(NewKillShellTool(nil))
+	r.Register(NewAskUserQuestionTool())
+	r.Register(NewToolSearchTool(r))
+	r.Register(NewSpawnAgentTool(nil))
+	r.Register(NewSendInputTool(nil))
+	r.Register(NewWaitAgentTool(nil))
+	r.Register(NewCloseAgentTool(nil))
+	r.Register(NewResumeAgentTool(nil))
 	return r
 }

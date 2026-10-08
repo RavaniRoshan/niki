@@ -162,14 +162,20 @@ func TestShellDisableSandboxArg(t *testing.T) {
 
 func TestRegistry(t *testing.T) {
 	r := DefaultRegistry()
-	if len(r.List()) != 7 {
-		t.Fatalf("expected 7 tools, got %d", len(r.List()))
+	if len(r.List()) != 24 {
+		t.Fatalf("expected 24 tools, got %d", len(r.List()))
 	}
-	if _, ok := r.Get("shell"); !ok {
-		t.Fatal("shell missing")
-	}
-	if _, ok := r.Get("apply_patch"); !ok {
-		t.Fatal("apply_patch missing")
+	for _, expected := range []string{
+		"shell", "apply_patch", "edit_file", "read_file", "write_file",
+		"glob", "grep", "web_search", "web_fetch", "view_image",
+		"notebook_edit", "update_plan", "todo_write", "exec_command",
+		"write_stdin", "bash_output", "kill_shell", "ask_user_question",
+		"tool_search", "spawn_agent", "send_input", "wait_agent",
+		"close_agent", "resume_agent",
+	} {
+		if _, ok := r.Get(expected); !ok {
+			t.Fatalf("tool %q missing from registry", expected)
+		}
 	}
 }
 

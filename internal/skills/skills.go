@@ -15,6 +15,7 @@ type Skill struct {
 	Path        string
 	Name        string
 	Description string
+	Context     string // "fork" | "inline"
 	Body        string // loaded lazily
 	Loaded      bool
 }
@@ -72,6 +73,14 @@ func CachedDiscover(roots ...string) ([]Skill, error) {
 	return skills, err
 }
 
+// InvalidateCache clears the cached roots and skill index to force a hot reload.
+func InvalidateCache() {
+	indexMu.Lock()
+	defer indexMu.Unlock()
+	cachedRoots = make(map[string]time.Time)
+	cachedIndex = nil
+}
+
 // Discover scans for SKILL.md or *.md files under roots (frontmatter only).
 func Discover(roots ...string) ([]Skill, error) {
 	var out []Skill
@@ -118,6 +127,9 @@ func parseSkill(path string) (Skill, error) {
 				}
 				if strings.HasPrefix(line, "description:") {
 					s.Description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+				}
+				if strings.HasPrefix(line, "context:") {
+					s.Context = strings.TrimSpace(strings.TrimPrefix(line, "context:"))
 				}
 			}
 			s.Body = strings.TrimSpace(parts[2])
@@ -196,6 +208,18 @@ func InstructionsBounded(dir string, maxBytes int) []Instruction {
 			break
 		}
 		dir = parent
+	}
+	return out
+}
+
+// InstructionsRootToCwd returns the AGENTS.md instruction chain ordered from repo root down to cwd.
+func InstructionsRootToCwd(dir string, maxBytes int) []Instruction {
+	upward := InstructionsBounded(dir, maxBytes)
+	// Reverse upward slice [cwd...root] to root-to-cwd [root...cwd]
+	n := len(upward)
+	out := make([]Instruction, n)
+	for i, inst := range upward {
+		out[n-1-i] = inst
 	}
 	return out
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,12 +12,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/RavaniRoshan/niki/internal/appserver"
 	"github.com/RavaniRoshan/niki/internal/config"
 	"github.com/RavaniRoshan/niki/internal/engine"
 	"github.com/RavaniRoshan/niki/internal/logx"
+	"github.com/RavaniRoshan/niki/internal/mcp"
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/protocol"
+	"github.com/RavaniRoshan/niki/internal/routing"
 	"github.com/RavaniRoshan/niki/internal/sandbox"
 	"github.com/RavaniRoshan/niki/internal/session"
 	"github.com/RavaniRoshan/niki/internal/skills"
@@ -85,12 +89,29 @@ func writeBootTrace() {
 }
 
 func buildProvider(cfg config.Config) provider.ModelProvider {
-	switch cfg.Provider.Name {
-	case "openai":
-		return provider.NewOpenAIProvider(cfg.Provider.BaseURL, cfg.ResolveAPIKey(), cfg.Model.Name)
-	default:
-		return provider.NewMockProvider()
+	constructSingle := func(name, model string) provider.ModelProvider {
+		switch name {
+		case "openai":
+			return provider.NewOpenAIProvider(cfg.Provider.BaseURL, cfg.ResolveAPIKey(), model)
+		case "anthropic":
+			return provider.NewAnthropicProvider(cfg.Provider.BaseURL, cfg.ResolveAPIKey(), model)
+		case "responses":
+			return provider.NewResponsesProvider(cfg.Provider.BaseURL, cfg.ResolveAPIKey(), model)
+		default:
+			return provider.NewMockProvider()
+		}
 	}
+
+	primary := constructSingle(cfg.Provider.Name, cfg.Model.Name)
+	if len(cfg.Model.Fallbacks) == 0 {
+		return primary
+	}
+
+	var fallbacks []provider.ModelProvider
+	for _, fb := range cfg.Model.Fallbacks {
+		fallbacks = append(fallbacks, constructSingle(cfg.Provider.Name, fb))
+	}
+	return routing.NewFallbackProvider(primary, fallbacks...)
 }
 
 // buildRegistry constructs the tool registry and
@@ -330,7 +351,12 @@ func main() {
 	rootCmd.PersistentFlags().BoolVar(&inline, "inline", false, "Use inline terminal output instead of alternate screen")
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Path to niki.toml")
 
-	rootCmd.AddCommand(&cobra.Command{
+	var (
+		execJSONL       bool
+		execGitHubCheck bool
+		execOutputFile  string
+	)
+	execCmd := &cobra.Command{
 		Use:   "exec [prompt]",
 		Short: "Execute a prompt and exit",
 		Args:  cobra.ExactArgs(1),
@@ -353,19 +379,122 @@ func main() {
 				defer func() { fmt.Fprintf(os.Stderr, "boot_profile: exec_provider=%s\n", buildProvider(cfg).Name()) }()
 			}
 			cmdChan <- protocol.EngineCommand{Type: protocol.CmdSubmitPrompt, Prompt: args[0]}
+
+			var (
+				fullText   strings.Builder
+				eventCount int
+				outLines   []string
+			)
+
 			for evt := range eventChan {
+				eventCount++
+				if execJSONL {
+					b, _ := json.Marshal(evt)
+					line := string(b)
+					outLines = append(outLines, line)
+					if execOutputFile == "" {
+						fmt.Println(line)
+					}
+				}
+
 				switch evt.Type {
 				case protocol.EventAssistantTextDelta:
-					fmt.Print(evt.Text)
+					fullText.WriteString(evt.Text)
+					if !execJSONL && !execGitHubCheck {
+						fmt.Print(evt.Text)
+					}
 				case protocol.EventTurnCompleted:
-					fmt.Println()
+					if !execJSONL && !execGitHubCheck {
+						fmt.Println()
+					}
 					eng.Stop()
+
+					if execGitHubCheck {
+						check := map[string]any{
+							"name":       "niki",
+							"head_sha":   detectGitBranch("."),
+							"status":     "completed",
+							"conclusion": "success",
+							"output": map[string]any{
+								"title":   "Niki Turn Execution",
+								"summary": fmt.Sprintf("Turn completed successfully across %d events", eventCount),
+								"text":    fullText.String(),
+							},
+						}
+						b, _ := json.MarshalIndent(check, "", "  ")
+						if execOutputFile == "" {
+							fmt.Println(string(b))
+						} else {
+							outLines = append(outLines, string(b))
+						}
+					}
+
+					if execOutputFile != "" {
+						_ = os.WriteFile(execOutputFile, []byte(strings.Join(outLines, "\n")+"\n"), 0o644)
+					}
 					return nil
 				case protocol.EventTurnFailed:
+					eng.Stop()
+					if execGitHubCheck {
+						check := map[string]any{
+							"name":       "niki",
+							"head_sha":   detectGitBranch("."),
+							"status":     "completed",
+							"conclusion": "failure",
+							"output": map[string]any{
+								"title":   "Niki Turn Execution Failed",
+								"summary": fmt.Sprintf("Turn failed: %s", evt.Error),
+								"text":    fullText.String(),
+							},
+						}
+						b, _ := json.MarshalIndent(check, "", "  ")
+						if execOutputFile == "" {
+							fmt.Println(string(b))
+						} else {
+							outLines = append(outLines, string(b))
+						}
+					}
+					if execOutputFile != "" {
+						_ = os.WriteFile(execOutputFile, []byte(strings.Join(outLines, "\n")+"\n"), 0o644)
+					}
 					return fmt.Errorf("%s", evt.Error)
 				}
 			}
 			return nil
+		},
+	}
+	execCmd.Flags().BoolVar(&execJSONL, "jsonl", false, "Output events as JSON Lines")
+	execCmd.Flags().BoolVar(&execGitHubCheck, "github-check", false, "Output conclusion formatted as GitHub Check Run JSON")
+	execCmd.Flags().StringVar(&execOutputFile, "output", "", "Write output to specified file")
+	rootCmd.AddCommand(execCmd)
+
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "serve-codex",
+		Short: "Start Niki as a Codex App-Server over stdio",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _ := config.Load(configPath)
+			reg, guard, err := buildRegistry(cfg, permissions.ModeWorkspaceWrite)
+			if err != nil {
+				return err
+			}
+			srv := appserver.NewCodexServer(buildProvider(cfg), reg, guard)
+			defer srv.Stop()
+			return srv.Serve(os.Stdin, os.Stdout)
+		},
+	})
+
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "serve-acp",
+		Short: "Start Niki as an Agent Client Protocol (ACP) server over stdio",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _ := config.Load(configPath)
+			reg, guard, err := buildRegistry(cfg, permissions.ModeWorkspaceWrite)
+			if err != nil {
+				return err
+			}
+			srv := appserver.NewACPServer(buildProvider(cfg), reg, guard)
+			defer srv.Stop()
+			return srv.Serve(os.Stdin, os.Stdout)
 		},
 	})
 
@@ -475,6 +604,16 @@ Brief description of the repository and architecture.
 			for name, srv := range cfg.MCP.Servers {
 				fmt.Printf("%s: %s %v\n", name, srv.Command, srv.Args)
 			}
+		},
+	})
+
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "serve-mcp",
+		Short: "Start Niki as an MCP server over stdio",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reg := tools.DefaultRegistry()
+			srv := mcp.NewServer(reg)
+			return srv.Serve(os.Stdin, os.Stdout)
 		},
 	})
 

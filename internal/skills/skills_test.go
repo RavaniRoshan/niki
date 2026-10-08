@@ -61,6 +61,26 @@ func TestInstructionsBounded(t *testing.T) {
 	}
 }
 
+func TestInstructionsRootToCwd(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "pkg", "core")
+	os.MkdirAll(sub, 0o755)
+
+	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("root instructions\n"), 0o644)
+	os.WriteFile(filepath.Join(sub, "AGENTS.md"), []byte("sub instructions\n"), 0o644)
+
+	chain := InstructionsRootToCwd(sub, 0)
+	if len(chain) != 2 {
+		t.Fatalf("expected 2 instruction files, got %d", len(chain))
+	}
+	if !strings.Contains(chain[0].Content, "root instructions") {
+		t.Fatalf("first instruction must be root, got %s", chain[0].Content)
+	}
+	if !strings.Contains(chain[1].Content, "sub instructions") {
+		t.Fatalf("second instruction must be sub, got %s", chain[1].Content)
+	}
+}
+
 func TestCompatAgentsSkillsDiscovery(t *testing.T) {
 	dir := t.TempDir()
 	agentsSkills := filepath.Join(dir, ".agents", "skills")

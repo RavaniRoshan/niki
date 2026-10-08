@@ -1,6 +1,7 @@
 package permissions
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -13,22 +14,53 @@ const (
 )
 
 type Guard struct {
-	Mode Mode
-	// SandboxedShell permits the shell tool in
-	// read-only mode when a real sandbox backend
-	// enforces the read-only boundary at the OS
-	// level: writes land nowhere outside the
-	// bound workspace, so the mode's guarantee
-	// still holds (S1 auto-allow).
+	Mode           Mode
+	PlanMode       bool
 	SandboxedShell bool
 	AuditLog       []DecisionRecord
 }
 
 func NewGuard(mode Mode) *Guard { return &Guard{Mode: mode} }
 
-var readOnlyTools = map[string]bool{"read_file": true, "glob": true, "grep": true}
+func (g *Guard) EnterPlanMode() {
+	g.PlanMode = true
+}
+
+func (g *Guard) ExitPlanMode(approved bool) error {
+	if !approved {
+		return fmt.Errorf("explicit user approval is required to exit plan mode")
+	}
+	g.PlanMode = false
+	return nil
+}
+
+func (g *Guard) InPlanMode() bool {
+	return g.PlanMode
+}
+
+var readOnlyTools = map[string]bool{
+	"read_file":         true,
+	"glob":              true,
+	"grep":              true,
+	"web_search":        true,
+	"web_fetch":         true,
+	"view_image":        true,
+	"tool_search":       true,
+	"bash_output":       true,
+	"ask_user_question": true,
+}
+
+// IsReadOnlyTool reports whether a tool is known to be read-only.
+func IsReadOnlyTool(toolName string) bool {
+	return readOnlyTools[toolName]
+}
 
 func (g *Guard) Allow(toolName string) bool {
+	// Plan mode: strictly read-only exploration state; withhold write & exec tools
+	if g.PlanMode {
+		return readOnlyTools[toolName]
+	}
+
 	switch g.Mode {
 	case ModeFullAccess:
 		return true

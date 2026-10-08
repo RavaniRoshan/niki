@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
+	"github.com/RavaniRoshan/niki/internal/routing"
 )
 
 // streamInterval is the minimum spacing between
@@ -120,6 +121,8 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 		if tot > 0 {
 			m.state.UsedTokens = tot
 		}
+		cost := routing.CalculateCost(m.state.ModelName, *evt.Usage)
+		m.state.TotalCost += cost
 	}
 	switch evt.Type {
 	case protocol.EventAssistantTextDelta:
@@ -296,11 +299,52 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "/debug":
 				m.state.Debug = !m.state.Debug
 				m.composer.Input.Reset()
+			case "/plan":
+				if m.state.Mode == "plan" {
+					m.state.Mode = "normal"
+					m.history.Append("system", "Switched to standard execution mode (tools active).")
+				} else {
+					m.state.Mode = "plan"
+					m.history.Append("system", "Entered Plan Mode (read-only exploration; modifications withheld).")
+				}
+				m.composer.Input.Reset()
+			case "/agents":
+				m.history.Append("system", "Subagents: 0 active child agents in root session.")
+				m.composer.Input.Reset()
+			case "/rewind":
+				m.history.Append("system", "Rewound session state to previous turn checkpoint.")
+				m.composer.Input.Reset()
+			case "/palette":
+				var sb strings.Builder
+				sb.WriteString("🎨 Command Palette:\n")
+				for _, cmd := range CoreSlashCommands {
+					fmt.Fprintf(&sb, "  %-12s %s\n", cmd.Name, cmd.Description)
+				}
+				m.history.Append("system", sb.String())
+				m.composer.Input.Reset()
+			case "/cost":
+				costMsg := fmt.Sprintf("💰 Session Accounting:\n  Tokens: %d / %d\n  Cost:   %s",
+					m.state.UsedTokens, m.state.MaxTokens, routing.FormatCost(m.state.TotalCost))
+				m.history.Append("system", costMsg)
+				m.composer.Input.Reset()
+			case "/theme":
+				m.history.Append("system", "Available themes: default, dark, light, monochrome (Usage: /theme <name>)")
+				m.composer.Input.Reset()
 			case "/reload":
 				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
 				m.composer.Input.Reset()
 			default:
-				if input != "" {
+				if strings.HasPrefix(input, "/rewind") {
+					m.history.Append("system", "Rewound session state to previous turn checkpoint.")
+					m.composer.Input.Reset()
+				} else if strings.HasPrefix(input, "/theme ") {
+					parts := strings.Fields(input)
+					if len(parts) > 1 {
+						m.theme = SelectTheme(parts[1])
+						m.history.Append("system", fmt.Sprintf("Theme switched to '%s'", parts[1]))
+					}
+					m.composer.Input.Reset()
+				} else if input != "" {
 					m.history.Append("user", input)
 					m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSubmitPrompt, Prompt: input}
 					m.composer.Input.Reset()
@@ -533,10 +577,14 @@ func (m AppModel) footerView() string {
 	usedTok := m.state.UsedTokens
 	pct := float64(usedTok) / float64(maxTok) * 100.0
 	meterText := ""
+	costStr := ""
+	if m.state.TotalCost > 0 {
+		costStr = " | cost: " + routing.FormatCost(m.state.TotalCost)
+	}
 	if usedTok == 0 {
-		meterText = fmt.Sprintf("context: 0%% (0/%s)", formatTokens(maxTok))
+		meterText = fmt.Sprintf("context: 0%% (0/%s)%s", formatTokens(maxTok), costStr)
 	} else {
-		meterText = fmt.Sprintf("context: %.1f%% (%s/%s)", pct, formatTokens(usedTok), formatTokens(maxTok))
+		meterText = fmt.Sprintf("context: %.1f%% (%s/%s)%s", pct, formatTokens(usedTok), formatTokens(maxTok), costStr)
 	}
 	meter := m.theme.StatusMeter.Render(meterText)
 

@@ -222,3 +222,174 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
   - `docs/ARCHITECTURE.md`, `CONFIG.md`, `docs/FEATURE_ATLAS.md`, `THIRD_PARTY.md`, and `docs/DOGFOOD.md` delivered.
   - Full gates passed: `golangci-lint run` (0 issues), `go vet ./...` (clean), `go test -race ./...` (17/17 packages pass).
 
+## 2026-10-08 — Phase F1 (Tool Set Completion)
+- **Output Capping (`internal/tools/capping.go`)**:
+  - Implemented `CapOutput`: persists outputs exceeding 50,000 characters to `tool-results/<id>.txt` with a ~2 KB clean newline-cut preview.
+  - Implemented `SplitLongLines`: splits single lines exceeding 2,000 characters.
+  - `read_file` safely opts out of capping. Integrated transparently into `Registry.Run`.
+- **Capability Tools (`internal/tools/`)**:
+  - `web_search`: modes (`disabled|cached|live|indexed`), allowed domains filtering, documentation lookup. Read-only and concurrency-safe.
+  - `web_fetch`: `net/http` GET, automatic HTTP->HTTPS upgrade for non-local addresses, 15m TTL memory cache, body cap, cross-host redirect detection & reporting, HTML to Markdown conversion, and hard cap ($\le 8,000$ chars) preventing raw page leaks into context.
+  - `view_image`: standard library decoding (PNG/JPEG/GIF), downscaling to max 1024x1024 to preserve token budget (unless `detail="original"`), base64 data URL formatting, and corrupt format detection. Read-only and concurrency-safe.
+  - `notebook_edit`: `.ipynb` JSON edit operations (`replace|insert|delete`), resets `execution_count` to null and clears outputs for code cells, and preserves unknown top-level keys. Fail-closed.
+  - `update_plan`: structured plan update emitting formatted status, enforces invariant of at most 1 `in_progress` step, and rejects updates during Plan Mode.
+  - `todo_write`: whole-list atomic rewrite of session-scoped todo items.
+  - `tool_search`: exact-name fast path, `select:A,B,C` multi-tool loader, `mcp__` namespace filter, BM25/keyword scoring, and session discovered tool set tracking. Read-only and concurrency-safe.
+  - Background Process Suite (`process_manager.go`, `exec_command.go`, `write_stdin.go`, `bash_output.go`, `kill_shell.go`): PTY-backed background process table (`creack/pty`), process groups, interactive input, signal injection (Ctrl+C / SIGINT, Ctrl+D / EOF), incremental/full output polling (`bash_output`, read-only), and process group termination (`kill_shell`).
+  - `ask_user_question`: structured multi-question prompt (1–4 questions, 2–4 options, header $\le 12$ chars, "Other" write-in escape hatch), fail-closed refusal within subagents.
+  - `edit_file`: read-before-edit SHA-256 hash verification, unified diff preview output, and `replace_all` support.
+  - `apply_patch`: fuzzy seek within a 20-line window for shifted hunks and reverse patch application (`reverse: true`).
+- **Permissions Whitelist (`internal/permissions/permissions.go`)**:
+  - Fail-closed defaults on `Base` (`IsReadOnly=false`, `IsConcurrencySafe=false`).
+  - Updated read-only whitelist: `read_file`, `glob`, `grep`, `web_search`, `web_fetch`, `view_image`, `tool_search`, `bash_output`, `ask_user_question`.
+- **Verification Gates**:
+  - `go test -v ./internal/tools/...`: 25/25 tests passing (including `TestCappingAndLineSplit`, `TestWebSearch`, `TestWebFetch`, `TestViewImage`, `TestNotebookEdit`, `TestUpdatePlanAndTodoWrite`, `TestToolSearch`, `TestProcessManagerAndProcessTools`, `TestAskUserQuestion`, `TestEditFileHashAndDiff`, `TestApplyPatchFuzzyAndReverse`, `TestPermissionsReadOnlyWhitelist`).
+  - `go test ./... -race`: All 17 packages passing clean.
+  - `golangci-lint run ./...`: 0 issues.
+  - `go vet ./...`: clean.
+  - Perf probe: TTFP 6.6 ms, input-ready 6.6 ms, idle RSS 15.0 MB (zero regression vs 20.0 ms budget).
+
+## 2026-10-08 — Phase F2 (Agent Depth & Subagents)
+- **Hierarchy & Storage (`internal/agent/graph.go`)**:
+  - Implemented `AgentNode` and `AgentGraphStore` with in-memory thread-safe implementation.
+  - Hierarchical canonical pathing computed from root (`/root/worker-1`, `/root/worker-1/sub-2`).
+- **Subagent Manager & Runaway Controls (`internal/agent/manager.go`)**:
+  - `Manager` orchestrates subagent instances with full concurrency safety (`sync.RWMutex`).
+  - Enforces depth limit (`maxDepth=3` by default; nesting beyond limit returns `ErrDepthLimit`).
+  - Enforces concurrency semaphore (capacity 6; concurrent attempts beyond capacity return `ErrConcurrencyLimit`).
+  - Enforces per-agent token budget caps (`ErrBudgetExceeded`).
+  - Enforces delegation allowlists (`ErrDelegationDenied`).
+  - Temporary git worktree directory isolation (`git worktree add -d <dir>` / removal on `Close`).
+  - Emits paired `EventSubagentStarted` and `EventSubagentCompleted` lifecycle events.
+- **Subagent Tool Family (`internal/tools/subagent_tools.go`, `agent_controller.go`)**:
+  - `spawn_agent`: creates subagent with context mode (`none`, `all`, `recent_N`), worktree option, token budget.
+  - `send_input`: appends follow-up instructions to active subagent.
+  - `wait_agent`: awaits turn completion, returns status, summary text, and token count.
+  - `close_agent`: terminates runners and cleans up worktree storage.
+  - `resume_agent`: resumes paused or waiting subagents.
+  - Registered all 5 tools in `DefaultRegistry()` (total 24 tools). Fail-closed in `ModeReadOnly`.
+- **UI Seam**:
+  - Added `/agents` slash command in `internal/tui/commands.go`.
+- **Verification Gates**:
+  - `go test -v ./internal/agent/... -race`: 4/4 tests pass with zero data races.
+  - `go test -v ./internal/tools/...`: 26/26 tests pass.
+  - `go test ./... -race`: All 18 packages pass clean.
+  - `golangci-lint run ./...`: 0 issues.
+  - `go vet ./...`: clean.
+  - Perf probe: TTFP 6.3 ms, input-ready 6.3 ms, idle RSS 15.0 MB.
+
+## 2026-10-08 — Phase F3 (Plan Mode & Checkpoints)
+- **Plan Mode (`internal/permissions/permissions.go`, `plan_mode_test.go`)**:
+  - `Guard.EnterPlanMode()` engages read-only exploration state where all 15 write and execution tools are withheld.
+  - Read-only tools (`read_file`, `glob`, `grep`, `web_search`, `web_fetch`, `view_image`, `tool_search`, `bash_output`, `ask_user_question`) remain active.
+  - `update_plan` rejection enforced during Plan Mode.
+  - Exiting Plan Mode strictly requires explicit user approval (`ExitPlanMode(approved=true)`).
+- **Checkpoints & Rewind (`internal/checkpoint/checkpoint.go`, `checkpoint_test.go`)**:
+  - Implemented `Manager` capturing file snapshots with SHA-256 hash checksums and conversation histories keyed by turn ID.
+  - `RewindCode`: restores files to snapshot state; performs pre-restoration SHA-256 verification to detect external modifications and prevent clobbering uncommitted edits (`force=false` skips conflicting files; `force=true` overrides).
+  - `RewindConversation`: restores conversation event stream to target turn.
+  - `RewindAll`: atomic rollback of both file changes and conversation events.
+- **UI Seam**:
+  - Added `/plan` and `/rewind` commands to `CoreSlashCommands` in `internal/tui/commands.go`.
+- **Verification Gates**:
+  - `go test -v ./internal/checkpoint/... -race`: passes cleanly with zero data races.
+  - `go test -v ./internal/permissions/...`: passes cleanly (including Plan Mode withholding and approval gate).
+  - `golangci-lint run ./...`: 0 issues.
+  - `go vet ./...`: clean.
+  - Perf probe: TTFP 6.4 ms, input-ready 6.4 ms, idle RSS 14.9 MB.
+
+## 2026-10-08 — Phase F4 (Memory and Context Depth)
+- **Memory Store (`internal/memory/memory.go`, `memory_test.go`)**:
+  - `MEMORY.md` index enforces strict bounds: at most 200 lines and at most 25 KB byte cap.
+  - Fact persistence into topic files (`topics/<topic>.md`) with automated index cross-referencing.
+  - Retrieval side-query: keyword relevance scoring, returns at most 5 relevant memory topics into context.
+  - End-of-turn extraction (`ExtractFromTurn`): parses durable preferences, decisions, and architectural guidelines from turn transcripts.
+  - Background consolidation (`Consolidate`): deduplicates facts across topic files.
+- **Instruction Precedence (`internal/skills/skills.go`, `skills_test.go`)**:
+  - `InstructionsRootToCwd`: assembles `AGENTS.md` / `NIKI.md` chains in root-to-cwd precedence (repo root foundation down to subdirectory overrides).
+- **Verification Gates**:
+  - `go test -v ./internal/memory/... -race`: passes cleanly (index line/byte bounds tested with 250 facts).
+  - `go test -v ./internal/skills/...`: passes cleanly (including root-to-cwd instruction chain).
+  - `golangci-lint run ./...`: 0 issues.
+  - `go vet ./...`: clean.
+  - Perf probe: TTFP 7.4 ms, input-ready 7.4 ms, idle RSS 15.0 MB.
+
+## 2026-10-08 — Phase F5 (Extension Plane: Hooks, Plugins, Skills Depth)
+- **Plugin System (`internal/plugins/plugin.go`, `plugin_test.go`)**:
+  - Implemented `PluginManager` loading `plugin.json` manifests specifying skills, hooks, and MCP server configurations.
+  - Automatic discovery and bundling of plugin-contained skills.
+- **Command Hooks & Trust Gating (`internal/plugins/plugin.go`)**:
+  - Command hooks receive JSON event payloads on stdin.
+  - Enforces execution timeouts and exit code semantics (exit 0 continues; non-zero blocks tool call or turn).
+  - Enforces SHA-256 trust verification: checks script/binary content against trusted hash prior to execution.
+- **Skills Depth (`internal/skills/skills.go`, `skills_test.go`)**:
+  - Added frontmatter parsing for `context: fork` (identifying skills designated for isolated subagent execution).
+  - Added `InvalidateCache()` to support hot-reloading skill directories on demand.
+- **Verification Gates**:
+  - `go test -v ./internal/plugins/... -race`: passes cleanly.
+  - `go test -v ./internal/skills/...`: passes cleanly.
+  - `golangci-lint run ./...`: 0 issues.
+  - `go vet ./...`: clean.
+  - Perf probe: TTFP 6.4 ms, input-ready 6.4 ms, idle RSS 14.8 MB.
+
+## 2026-10-08 — Phase F6 (MCP Depth & Server Mode)
+- **MCP Client Depth (`internal/mcp/depth.go`)**:
+  - Resources: `ListResources`, `ReadResource` for inspection of server data.
+  - Prompts: `ListPrompts`, `GetPrompt` with argument hydration.
+  - Reconnect loop: `Reconnect` with exponential backoff and jitter up to 5s.
+- **MCP Server Mode (`internal/mcp/server.go`, `server_test.go`)**:
+  - Exposes NIKI as an MCP server over stdio JSON-RPC.
+  - Supports `initialize` (protocolVersion `2024-11-05`), `tools/list` (all registered tools with JSON schemas), `tools/call` with execution, `resources/list`, `resources/read`, `prompts/list`, and `prompts/get`.
+  - Added CLI command `niki serve-mcp` in `cmd/niki/main.go`.
+- **Verification Gates**:
+  - `go test -v ./internal/mcp/... -race`: passes cleanly (including parse error, reconnect backoff, and full stdio roundtrip).
+  - `golangci-lint run ./...`: 0 issues.
+  - `go vet ./...`: clean.
+
+## 2026-10-08 — Phase F7 (Integration Seams: Codex App-Server, ACP, CI)
+- **Codex App-Server Adapter (`internal/appserver/codex.go`, `appserver_test.go`)**:
+  - Stdio JSON-RPC protocol adapter supporting `initialize`, `thread/create`, `turn/start`, `turn/interrupt`, and streaming turn notifications.
+  - CLI command `niki serve-codex` wired in `cmd/niki/main.go`.
+- **Agent Client Protocol (ACP) Adapter (`internal/appserver/acp.go`, `appserver_test.go`)**:
+  - JSON-RPC 2.0 protocol adapter for IDE integrations (Zed, VS Code, JetBrains).
+  - Supports `initialize`, `session/new`, `session/prompt`, `session/cancel`, and streaming `session/update` notifications.
+  - CLI command `niki serve-acp` wired in `cmd/niki/main.go`.
+- **CI Headless Execution (`cmd/niki/main.go`)**:
+  - Enhanced `niki exec`:
+    - `--jsonl`: streams all runtime engine events as JSON Lines.
+    - `--github-check`: outputs execution summary formatted as a GitHub Check Run JSON object (`success` / `failure`).
+    - `--output <file>`: saves run artifacts.
+- **Verification Gates**:
+  - `go test -v ./internal/appserver/... -race`: passes cleanly.
+  - `golangci-lint run ./...`: 0 issues.
+  - `go vet ./...`: clean.
+
+## 2026-10-08 — Phase F8 (Model Routing, Cost Accounting & Polish)
+- **Model Routing & Fallback Chain (`internal/routing/routing.go`, `routing_test.go`)**:
+  - `FallbackProvider` manages primary provider with up to 3 fallback providers.
+  - Non-fallback error filtering: 401 Unauthorized / auth errors and context cancellation fail fast immediately without fallback; 429 rate limits, 5xx server errors, and network disconnects trigger fallback.
+  - Configurable in `niki.toml` via `model.fallbacks`.
+- **Cost Accounting (`internal/routing/cost.go`)**:
+  - Local pricing table (`DefaultPricing`) for gpt-4o, gpt-4o-mini, claude-3-5-sonnet, claude-3-5-haiku, mock.
+  - Turn-level token usage cost calculation (`CalculateCost`) and formatting (`FormatCost`).
+- **TUI & Polish (`internal/tui/app.go`, `internal/tui/state.go`, `internal/tui/theme.go`)**:
+  - Statusline context meter renders real token usage and accumulated session cost.
+  - Slash commands: `/cost` (prints session token & cost ledger), `/palette` (command palette), `/theme` (`SelectTheme` with monochrome, light, dark, default).
+- **Verification Gates**:
+  - `go test -v ./internal/routing/... -race`: passes cleanly.
+  - `go test -v ./internal/tui/... -race`: passes cleanly.
+  - `golangci-lint run ./...`: 0 issues.
+  - `go vet ./...`: clean.
+
+## 2026-10-08 — Phase F9 (Final Verification & Parity Sign-Off)
+- **Full Suite Verification**:
+  - `go test -race ./...`: 100% passing across all 23 packages with zero data races.
+  - `go vet ./...`: 0 issues.
+  - `golangci-lint run ./...`: 0 issues.
+- **Performance Budget Verification**:
+  - TTFP: **6.6 ms** (budget $\le 20\text{ ms}$).
+  - InputReady: **6.6 ms** (budget $\le 20\text{ ms}$).
+  - Idle RSS: **15.0 MB** (budget $\le 30\text{ MB}$).
+- **Parity Matrix Sign-off**:
+  - All 9 rows in `docs/PARITY.md` marked **VERIFIED** with automated proof.
+  - Full tool catalog (24 fail-closed tools), subagent hierarchy & runaway controls, plan mode & checkpoints, tiered memory & root-to-cwd instruction chain, extensions & plugins, MCP depth & server mode, app-server / ACP IDE seams, CI headless exec, model routing & fallback chain, and real-cost statusline are delivered and proven.
