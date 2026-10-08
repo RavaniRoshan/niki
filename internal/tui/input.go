@@ -10,7 +10,7 @@ type Composer struct {
 
 func NewComposer() Composer {
 	ti := textinput.New()
-	ti.Placeholder = "Type a prompt or task..."
+	ti.Placeholder = "Type a prompt or task (type / for commands)..."
 	ti.Focus()
 	ti.CharLimit = 4096
 	ti.Width = 80

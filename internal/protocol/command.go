@@ -12,6 +12,7 @@ const (
 	CmdRefreshSkills CommandType = "refresh_skills"
 	CmdRefreshMcp    CommandType = "refresh_mcp"
 	CmdReloadConfig  CommandType = "reload_config"
+	CmdCompact       CommandType = "compact"
 	CmdShutdown      CommandType = "shutdown"
 )
 

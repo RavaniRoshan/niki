@@ -249,6 +249,7 @@ func main() {
 			if cfg.UI.ReducedMotion {
 				app.SetReducedMotion(true)
 			}
+			app.SetInline(inline || cfg.UI.Inline)
 			var opts []tea.ProgramOption
 			if !inline && !cfg.UI.Inline {
 				opts = append(opts, tea.WithAltScreen())

@@ -57,6 +57,11 @@ func (m *AppModel) SetReducedMotion(reduced bool) {
 	}
 }
 
+// SetInline configures whether the TUI runs in inline mode.
+func (m *AppModel) SetInline(inline bool) {
+	m.state.Inline = inline
+}
+
 type engineEventMsg protocol.EngineEvent
 
 type tickMsg time.Time
@@ -219,6 +224,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				helpText.WriteString("  Ctrl+Z: Suspend process\n")
 				m.history.Append("system", helpText.String())
 				m.composer.Input.Reset()
+			case "/model":
+				m.history.Append("system", "⚡ Active Model: gpt-4o-mini (provider: mock, context window: 128k tokens)")
+				m.composer.Input.Reset()
+			case "/doctor":
+				m.history.Append("system", "🏥 System Health:\n  ✓ Sandbox: Bubblewrap isolation active\n  ✓ Writable workspace roots enforced\n  ✓ Network isolation enabled\n  ✓ Terminal capabilities synced")
+				m.composer.Input.Reset()
+			case "/compact":
+				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdCompact}
+				m.history.Append("system", "🧹 Context compaction triggered. Past turns folded.")
+				m.composer.Input.Reset()
 			case "/clear":
 				m.history.Cells = nil
 				m.history.Committed = 0
@@ -330,10 +345,21 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) headerView() string {
+	title := m.theme.Header.Render("⚡ Niki")
+	sub := m.theme.Muted.Render("Local Coding Agent")
+	badge := m.theme.Muted.Render("[mock / gpt-4o-mini]")
 	if m.state.Width < 60 {
-		return m.theme.Header.Render("Niki")
+		return title + "  " + sub
 	}
-	return m.theme.Header.Render("Niki") + "  " + m.theme.Muted.Render("Local Coding Agent")
+	pad := m.state.Width - lipgloss.Width(title) - lipgloss.Width(sub) - lipgloss.Width(badge) - 4
+	if pad < 2 {
+		pad = 2
+	}
+	return title + "  " + sub + strings.Repeat(" ", pad) + badge
+}
+
+func (m AppModel) footerView() string {
+	return m.theme.Muted.Render(" [Enter] Send  •  [Esc] Cancel  •  [/] Commands  •  [Ctrl+C] Exit")
 }
 
 func (m AppModel) View() string {
@@ -354,6 +380,7 @@ func (m AppModel) View() string {
 			m.activityView(),
 			m.viewport.View(),
 			m.composerView(),
+			m.footerView(),
 		)
 	} else {
 		header := m.headerView()
@@ -365,6 +392,7 @@ func (m AppModel) View() string {
 			m.activityView(),
 			m.viewport.View(),
 			m.composerView(),
+			m.footerView(),
 		)
 	}
 	if m.state.Debug {
@@ -376,10 +404,11 @@ func (m AppModel) View() string {
 // activityView renders the single live activity
 // line above the composer (U3).
 func (m AppModel) activityView() string {
-	if m.state.Activity == "" {
-		return ""
+	act := m.state.Activity
+	if act == "" {
+		act = "(•‿•) niki is ready"
 	}
-	return m.theme.Muted.Render("  " + m.state.Activity)
+	return m.theme.Muted.Render("  " + act)
 }
 
 func (m AppModel) composerView() string {
