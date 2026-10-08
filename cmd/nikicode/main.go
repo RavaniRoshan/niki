@@ -146,7 +146,7 @@ func buildProvider(cfg config.Config) provider.ModelProvider {
 		case "responses":
 			return provider.NewResponsesProvider(cfg.Provider.BaseURL, cfg.ResolveAPIKey(), model)
 		default:
-			return provider.NewMockProvider()
+			return demoMockProvider()
 		}
 	}
 

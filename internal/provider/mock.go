@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 )
@@ -11,6 +12,15 @@ type MockProvider struct {
 	ChunkDelay time.Duration
 	// Script maps a prompt substring to a scripted response.
 	Scripts map[string]string
+	// ToolScripts maps a prompt substring to tool calls the mock
+	// performs first (proving the tool loop without a model).
+	ToolScripts map[string][]ToolCall
+}
+
+// ToolCall is one scripted model tool request.
+type ToolCall struct {
+	Tool string
+	Args string
 }
 
 func NewMockProvider() *MockProvider {
@@ -25,6 +35,16 @@ func NewMockProvider() *MockProvider {
 
 func (m *MockProvider) Name() string { return "mock" }
 
+// sortedKeys makes script matching deterministic (longest first).
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	return keys
+}
+
 func (m *MockProvider) Stream(ctx context.Context, messages []Message) (<-chan Delta, <-chan error) {
 	deltas := make(chan Delta, 16)
 	errs := make(chan error, 1)
@@ -38,9 +58,16 @@ func (m *MockProvider) Stream(ctx context.Context, messages []Message) (<-chan D
 	}
 
 	response := "Acknowledged: " + user
-	for k, v := range m.Scripts {
+	for _, k := range sortedKeys(m.Scripts) {
 		if strings.Contains(strings.ToLower(user), k) {
-			response = v
+			response = m.Scripts[k]
+			break
+		}
+	}
+	var calls []ToolCall
+	for _, k := range sortedKeys(m.ToolScripts) {
+		if strings.Contains(strings.ToLower(user), k) {
+			calls = m.ToolScripts[k]
 			break
 		}
 	}
@@ -48,6 +75,20 @@ func (m *MockProvider) Stream(ctx context.Context, messages []Message) (<-chan D
 	go func() {
 		defer close(deltas)
 		defer close(errs)
+		for _, c := range calls {
+			select {
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			case <-time.After(m.ChunkDelay):
+			}
+			select {
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			case deltas <- Delta{Kind: DeltaToolCall, ToolName: c.Tool, ToolArgs: c.Args}:
+			}
+		}
 		for _, word := range strings.Split(response, " ") {
 			select {
 			case <-ctx.Done():

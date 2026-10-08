@@ -582,3 +582,15 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
   prompt, streamed turn with live cost/context meters, /quit, do --plan
   with resolved tools, version end card. 165KB, 11s, 720px, verified
   frame by frame. Tape: docs/demo.tape. README embed moved to top.
+
+## 2026-10-08 — Demo loop-tour remake (storyboard-driven)
+- Storyboard first: docs/demo-storyboard.md (7 beats, glyph/state key,
+  decode validation). Mock gained scripted tool calls (ToolScripts,
+  longest-first deterministic matching) + NIKICODE_DEMO_TOUR=1 tour mode
+  with slowed mock pacing so states read on camera. Off unless enabled
+  (tested both ways).
+- Cut: TUI cold open, 2 scripted tool turns (read_file + grep cells with
+  green done-dots, footer cost/context ticking), end card on the full
+  ledger. 148KB, 720px, 10fps, single-play; verified frame by frame.
+- Embed stays top-of-README. Kimi reference used shape-only (cold open,
+  stream, end; their layout adopted); no asset copied, /tmp copy deleted.

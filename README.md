@@ -34,7 +34,7 @@ curl -sSL https://raw.githubusercontent.com/RavaniRoshan/niki/main/install.sh | 
 <p align="center">
   <img src="demo.gif" width="720" alt="NikiCode demo: live TUI turn, plan preview, version">
 </p>
-<p align="center"><sub>Real footage of the actual binary (mock provider) — reproducible from <a href="docs/demo.tape">docs/demo.tape</a>.</sub></p>
+<p align="center"><sub>Real footage of the actual binary (mock provider) — the agent loop: prompt → thinking → running tool → committed tool cells → streaming reply, twice. Storyboard: <a href="docs/demo-storyboard.md">docs/demo-storyboard.md</a>; reproducible from <a href="docs/demo.tape">docs/demo.tape</a>.</sub></p>
 
 ---
 
