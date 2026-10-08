@@ -13,3 +13,7 @@ bin/
 # Secrets
 *.local
 .env
+
+# Media & assets
+*.png
+*.gif

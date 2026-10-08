@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	version     = "0.1.0"
+	version     = "0.11.0"
 	debug       bool
 	profile     bool
 	inline      bool
@@ -250,6 +250,25 @@ func main() {
 				app.SetReducedMotion(true)
 			}
 			app.SetInline(inline || cfg.UI.Inline)
+
+			cwd, _ := os.Getwd()
+			app.SetDirectory(cwd)
+			app.SetGitBranch(detectGitBranch(cwd))
+			app.SetSessionID(string(eng.SessionID()))
+			mName := cfg.Model.Name
+			if cfg.Provider.Name != "" && mName != "" {
+				mName = cfg.Provider.Name + ": " + mName
+			} else if mName == "" {
+				mName = "mock: gpt-4o-mini"
+			}
+			app.SetModel(mName, 128000)
+			pMode := cfg.Permissions.Mode
+			if pMode == "" {
+				pMode = "workspace_write"
+			}
+			app.SetPermissionMode(pMode)
+			app.SetVersion(version)
+
 			var opts []tea.ProgramOption
 			if !inline && !cfg.UI.Inline {
 				opts = append(opts, tea.WithAltScreen())
@@ -569,4 +588,20 @@ Brief description of the repository and architecture.
 func userHome() string {
 	h, _ := os.UserHomeDir()
 	return h
+}
+
+func detectGitBranch(dir string) string {
+	headPath := filepath.Join(dir, ".git", "HEAD")
+	data, err := os.ReadFile(headPath)
+	if err != nil {
+		return ""
+	}
+	content := strings.TrimSpace(string(data))
+	if strings.HasPrefix(content, "ref: refs/heads/") {
+		return strings.TrimPrefix(content, "ref: refs/heads/")
+	}
+	if len(content) > 7 {
+		return content[:7]
+	}
+	return content
 }

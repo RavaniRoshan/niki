@@ -21,6 +21,19 @@ type State struct {
 	// ReducedMotion disables non-essential animation
 	// (U8).
 	ReducedMotion bool
+
+	// Environment & Session Metadata
+	Directory      string
+	SessionID      string
+	ModelName      string
+	Version        string
+	PermissionMode string
+	Mode           string
+	GitBranch      string
+
+	// Token Context Meter
+	UsedTokens int
+	MaxTokens  int
 }
 
 // FrameTelemetry records render-cost and event

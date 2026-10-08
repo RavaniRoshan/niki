@@ -1,5 +1,9 @@
 package tui
 
+import (
+	"strings"
+)
+
 // renderCells renders transcript cells into a
 // single string. Text is sanitized before it
 // reaches the terminal (L6).
@@ -9,15 +13,26 @@ func renderCells(m AppModel, cells []HistoryCell) string {
 		c.Text = Sanitize(c.Text)
 		switch c.Role {
 		case "user":
-			out += m.theme.User.Render("You: ") + c.Text + "\n\n"
+			out += m.theme.UserPrompt.Render("✨ ") + m.theme.UserText.Render(c.Text) + "\n\n"
 		case "assistant":
-			out += m.theme.Assistant.Render("Niki: ") + c.Text + "\n\n"
+			out += m.theme.Accent.Render("● ") + m.theme.Assistant.Render(c.Text) + "\n\n"
 		case "tool":
-			out += m.theme.Muted.Render("[tool] " + c.Text + "\n\n")
+			bullet := m.theme.ToolBullet.Render("● ")
+			tree := m.theme.ToolTree.Render("  └ ")
+			if idx := strings.Index(c.Text, ": "); idx != -1 {
+				toolName := c.Text[:idx]
+				detail := c.Text[idx+2:]
+				out += bullet + m.theme.ToolName.Render(toolName) + "\n" +
+					tree + m.theme.ToolDetail.Render(detail) + "\n\n"
+			} else {
+				out += bullet + m.theme.ToolName.Render(c.Text) + "\n\n"
+			}
 		case "error":
-			out += m.theme.Error.Render("[error] " + c.Text + "\n\n")
+			bullet := m.theme.Error.Render("● ")
+			out += bullet + m.theme.Error.Render("[error] "+c.Text) + "\n\n"
 		default:
-			out += m.theme.Muted.Render(c.Text) + "\n\n"
+			bullet := m.theme.Accent.Render("✦ ")
+			out += bullet + m.theme.Muted.Render(c.Text) + "\n\n"
 		}
 	}
 	return out

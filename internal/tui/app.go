@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -21,27 +22,70 @@ type AppModel struct {
 	cmdChan   chan<- protocol.EngineCommand
 	eventChan <-chan protocol.EngineEvent
 
-	viewport viewport.Model
-	composer Composer
-	history  History
-	theme    Theme
-	state    State
+	viewport  viewport.Model
+	composer  Composer
+	history   History
+	theme     Theme
+	state     State
 	telemetry *FrameTelemetry
-	pacer    renderPacer
+	pacer     renderPacer
 	// headerPrinted tracks whether the header
 	// was flushed to native scrollback (U4).
 	headerPrinted bool
 }
 
 func NewAppModel(cmdChan chan<- protocol.EngineCommand, eventChan <-chan protocol.EngineEvent) AppModel {
+	cwd, _ := os.Getwd()
+	th := NewDefaultTheme()
 	return AppModel{
 		cmdChan:   cmdChan,
 		eventChan: eventChan,
-		composer:  NewComposer(),
-		theme:     NewDefaultTheme(),
+		composer:  NewComposer(th),
+		theme:     th,
 		telemetry: &FrameTelemetry{},
 		pacer:     renderPacer{minInterval: streamInterval},
+		state: State{
+			Directory:      cwd,
+			SessionID:      "",
+			ModelName:      "mock: gpt-4o-mini",
+			Version:        "0.11.0",
+			PermissionMode: "workspace_write",
+			Mode:           "plan",
+			GitBranch:      "main",
+			MaxTokens:      128000,
+		},
 	}
+}
+
+func (m *AppModel) SetDirectory(dir string) {
+	m.state.Directory = dir
+}
+
+func (m *AppModel) SetGitBranch(branch string) {
+	m.state.GitBranch = branch
+}
+
+func (m *AppModel) SetSessionID(id string) {
+	m.state.SessionID = id
+}
+
+func (m *AppModel) SetModel(modelName string, maxTokens int) {
+	m.state.ModelName = modelName
+	if maxTokens > 0 {
+		m.state.MaxTokens = maxTokens
+	}
+}
+
+func (m *AppModel) SetPermissionMode(mode string) {
+	m.state.PermissionMode = mode
+}
+
+func (m *AppModel) SetMode(mode string) {
+	m.state.Mode = mode
+}
+
+func (m *AppModel) SetVersion(ver string) {
+	m.state.Version = ver
 }
 
 // SetReducedMotion applies the reduced-motion
@@ -68,6 +112,15 @@ type tickMsg time.Time
 
 func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 	m.telemetry.Events++
+	if evt.Usage != nil {
+		tot := evt.Usage.TotalTokens
+		if tot == 0 {
+			tot = evt.Usage.PromptTokens + evt.Usage.CompletionTokens
+		}
+		if tot > 0 {
+			m.state.UsedTokens = tot
+		}
+	}
 	switch evt.Type {
 	case protocol.EventAssistantTextDelta:
 		m.history.AppendDelta(evt.Text)
@@ -259,10 +312,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.state.Width = msg.Width
 		m.state.Height = msg.Height
-		// Resize safety (L3): the chrome (composer + footer)
-		// reserves four lines; degenerate sizes clamp rather
-		// than panic.
-		chrome := 4
+		chrome := 6
 		if msg.Height <= chrome {
 			chrome = msg.Height - 1
 		}
@@ -272,6 +322,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Width < 1 {
 			msg.Width = 1
 		}
+		if msg.Width > 6 {
+			m.composer.Input.Width = msg.Width - 6
+		}
 		if !m.state.Ready {
 			m.viewport = viewport.New(msg.Width, chrome)
 			m.state.Ready = true
@@ -279,7 +332,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// The header scrolls away into
 				// native scrollback (U4).
 				m.headerPrinted = true
-				cmds = append(cmds, tea.Printf("%s", m.headerView()))
+				cmds = append(cmds, tea.Printf("%s\n\n", m.welcomeCardView()))
 			}
 		} else {
 			m.viewport.Width = msg.Width
@@ -344,10 +397,73 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func (m AppModel) renderMascot() string {
+	top := m.theme.MascotTop.Render("        ")
+	mid := m.theme.MascotMid.Render("  ■  ■  ")
+	bot := m.theme.MascotBot.Render("        ")
+	return lipgloss.JoinVertical(lipgloss.Left, top, mid, bot)
+}
+
+func (m AppModel) welcomeCardView() string {
+	width := m.state.Width
+	if width <= 0 {
+		width = 80
+	}
+	cardWidth := width - 4
+	if cardWidth < 50 {
+		cardWidth = 50
+	}
+
+	mascot := m.renderMascot()
+	headerText := lipgloss.JoinVertical(lipgloss.Left,
+		m.theme.CardTitle.Render("Welcome to Niki!"),
+		m.theme.CardSubtitle.Render("Send /help for help information."),
+		m.theme.CardDesc.Render("Local Coding Agent"),
+	)
+	topRow := lipgloss.JoinHorizontal(lipgloss.Center, mascot, "  ", headerText)
+
+	dir := m.state.Directory
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	sessionID := m.state.SessionID
+	model := m.state.ModelName
+	if model == "" {
+		model = "mock: gpt-4o-mini"
+	}
+	ver := m.state.Version
+	if ver == "" {
+		ver = "0.11.0"
+	}
+
+	metaLines := []string{
+		m.theme.CardLabel.Render(fmt.Sprintf("%-12s", "Directory:")) + m.theme.CardValue.Render(dir),
+		m.theme.CardLabel.Render(fmt.Sprintf("%-12s", "Session:")) + m.theme.CardValue.Render(sessionID),
+		m.theme.CardLabel.Render(fmt.Sprintf("%-12s", "Model:")) + m.theme.CardValue.Render(model),
+		m.theme.CardLabel.Render(fmt.Sprintf("%-12s", "Version:")) + m.theme.CardValue.Render(ver),
+	}
+	metaBlock := strings.Join(metaLines, "\n")
+
+	cardInner := topRow + "\n\n" + metaBlock
+	card := m.theme.CardBorder.
+		Border(lipgloss.RoundedBorder()).
+		Padding(1, 2).
+		Width(cardWidth).
+		Render(cardInner)
+
+	announcement := m.theme.AnnounceIcon.Render("✦ ") +
+		m.theme.AnnounceTitle.Render("Niki Coding Agent") +
+		m.theme.AnnounceDesc.Render(" – Fast, local-first personal harness in Go\n") +
+		m.theme.AnnounceLink.Render("  Run /help for commands or visit https://github.com/RavaniRoshan/niki\n\n") +
+		m.theme.AnnounceLink.Render("  No session yet — one will be created on your first message.")
+
+	return card + "\n\n" + announcement
+}
+
 func (m AppModel) headerView() string {
 	title := m.theme.Header.Render("⚡ Niki")
 	sub := m.theme.Muted.Render("Local Coding Agent")
-	badge := m.theme.Muted.Render("[mock / gpt-4o-mini]")
+	badge := m.theme.Muted.Render("[" + m.state.ModelName + "]")
 	if m.state.Width < 60 {
 		return title + "  " + sub
 	}
@@ -359,7 +475,107 @@ func (m AppModel) headerView() string {
 }
 
 func (m AppModel) footerView() string {
-	return m.theme.Muted.Render(" [Enter] Send  •  [Esc] Cancel  •  [/] Commands  •  [Ctrl+C] Exit")
+	permLabel := "Never Ask"
+	switch m.state.PermissionMode {
+	case "readonly":
+		permLabel = "Read Only"
+	case "full_access":
+		permLabel = "Full Access"
+	case "workspace_write":
+		permLabel = "Never Ask"
+	}
+	perm := m.theme.BadgePerm.Render(permLabel)
+
+	modeLabel := m.state.Mode
+	if modeLabel == "" {
+		modeLabel = "plan"
+	}
+	mode := m.theme.BadgeMode.Render(modeLabel)
+
+	modelName := m.state.ModelName
+	if modelName == "" {
+		modelName = "mock: gpt-4o-mini"
+	}
+	model := m.theme.BadgeModel.Render(modelName)
+	thinking := m.theme.StatusThinking.Render("thinking: high")
+
+	dir := m.state.Directory
+	if dir == "" {
+		dir = "~"
+	} else {
+		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(dir, home) {
+			dir = "~" + strings.TrimPrefix(dir, home)
+		}
+	}
+	dirStyle := m.theme.StatusDir.Render(dir)
+
+	var gitInfo string
+	if m.state.GitBranch != "" {
+		gitInfo = " " + m.theme.StatusGit.Render(m.state.GitBranch)
+	}
+
+	leftParts := perm + " " + mode + "  " + model + " " + thinking + "  " + dirStyle + gitInfo
+
+	rightHints := m.theme.StatusHints.Render("@: mention files | ! to run a shell command")
+	if m.state.Busy {
+		rightHints = m.theme.StatusHints.Render("ctrl+c: cancel | /help: commands")
+	}
+
+	w := m.state.Width
+	if w < 40 {
+		w = 80
+	}
+
+	maxTok := m.state.MaxTokens
+	if maxTok <= 0 {
+		maxTok = 128000
+	}
+	usedTok := m.state.UsedTokens
+	pct := float64(usedTok) / float64(maxTok) * 100.0
+	meterText := ""
+	if usedTok == 0 {
+		meterText = fmt.Sprintf("context: 0%% (0/%s)", formatTokens(maxTok))
+	} else {
+		meterText = fmt.Sprintf("context: %.1f%% (%s/%s)", pct, formatTokens(usedTok), formatTokens(maxTok))
+	}
+	meter := m.theme.StatusMeter.Render(meterText)
+
+	leftLen := lipgloss.Width(leftParts)
+	rightLen := lipgloss.Width(rightHints)
+	meterLen := lipgloss.Width(meter)
+
+	var line1, line2 string
+	if leftLen+rightLen+2 <= w {
+		pad := w - leftLen - rightLen - 1
+		line1 = leftParts + strings.Repeat(" ", pad) + rightHints
+		if meterLen < w {
+			line2 = strings.Repeat(" ", w-meterLen-1) + meter
+		} else {
+			line2 = meter
+		}
+	} else {
+		line1 = leftParts
+		if rightLen+meterLen+2 <= w {
+			pad := w - rightLen - meterLen - 1
+			line2 = rightHints + strings.Repeat(" ", pad) + meter
+		} else if meterLen < w {
+			line2 = strings.Repeat(" ", w-meterLen-1) + meter
+		} else {
+			line2 = meter
+		}
+	}
+
+	return line1 + "\n" + line2
+}
+
+func formatTokens(n int) string {
+	if n >= 1000 {
+		if n%1000 == 0 {
+			return fmt.Sprintf("%dk", n/1000)
+		}
+		return fmt.Sprintf("%.1fk", float64(n)/1000.0)
+	}
+	return fmt.Sprintf("%d", n)
 }
 
 func (m AppModel) View() string {
@@ -372,10 +588,6 @@ func (m AppModel) View() string {
 
 	var body string
 	if m.state.Inline {
-		// Inline mode: no header in the live
-		// view (it scrolled away), one
-		// activity line, then the composer —
-		// the only bordered element (U4).
 		body = lipgloss.JoinVertical(lipgloss.Left,
 			m.activityView(),
 			m.viewport.View(),
@@ -383,17 +595,27 @@ func (m AppModel) View() string {
 			m.footerView(),
 		)
 	} else {
-		header := m.headerView()
-		if m.state.Busy {
-			header += "  " + m.theme.Muted.Render("(working...)")
+		if len(m.history.Cells) == 0 {
+			body = lipgloss.JoinVertical(lipgloss.Left,
+				m.welcomeCardView(),
+				"",
+				m.activityView(),
+				m.composerView(),
+				m.footerView(),
+			)
+		} else {
+			header := m.headerView()
+			if m.state.Busy {
+				header += "  " + m.theme.Muted.Render("(working...)")
+			}
+			body = lipgloss.JoinVertical(lipgloss.Left,
+				header,
+				m.activityView(),
+				m.viewport.View(),
+				m.composerView(),
+				m.footerView(),
+			)
 		}
-		body = lipgloss.JoinVertical(lipgloss.Left,
-			header,
-			m.activityView(),
-			m.viewport.View(),
-			m.composerView(),
-			m.footerView(),
-		)
 	}
 	if m.state.Debug {
 		body += "\n" + m.debugView()
@@ -406,17 +628,32 @@ func (m AppModel) View() string {
 func (m AppModel) activityView() string {
 	act := m.state.Activity
 	if act == "" {
-		act = "(•‿•) niki is ready"
+		return m.theme.Muted.Render("  (•‿•) niki is ready")
 	}
-	return m.theme.Muted.Render("  " + act)
+	glyph := m.theme.ActivityGlyph.Render("✱ ")
+	actText := m.theme.ActivityText.Render(act)
+	hint := m.theme.ActivityHint.Render(" (esc to interrupt)")
+	return "  " + glyph + actText + hint
 }
 
 func (m AppModel) composerView() string {
-	composer := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Render(m.composer.Input.View())
-	if suggestions := composerSuggestions(m.composer.Input.Value()); len(suggestions) > 0 {
-		composer += "\n" + m.theme.Muted.Render("  "+strings.Join(suggestions, "  "))
+	width := m.state.Width
+	if width < 20 {
+		width = 80
 	}
-	return composer
+	cardWidth := width - 4
+	if cardWidth < 50 {
+		cardWidth = 50
+	}
+	composerBox := m.theme.ComposerBorder.
+		Border(lipgloss.RoundedBorder()).
+		Width(cardWidth).
+		Render(m.composer.Input.View())
+
+	if suggestions := composerSuggestions(m.composer.Input.Value()); len(suggestions) > 0 {
+		composerBox += "\n" + m.theme.Muted.Render("  "+strings.Join(suggestions, "  "))
+	}
+	return composerBox
 }
 
 // debugView renders boot-phase timings and frame
