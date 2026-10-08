@@ -55,7 +55,9 @@ Measured on host (`AMD Ryzen 7 4800H`, `Linux WSL2`, `go1.27.1`) using the inclu
 
 ## 🎬 Demo
 
-![NikiCode demo: version, plan preview, live TUI turn, explain with citations, git log, doctor](demo.gif)
+<p align="center">
+  <img src="demo.gif" width="720" alt="NikiCode demo: version, plan preview, live TUI turn, explain with citations, git log, doctor">
+</p>
 
 Reproducible from [`docs/demo.tape`](docs/demo.tape) (`vhs docs/demo.tape`
 with `bin/nikicode` on `PATH`). Everything shown is the real binary on
