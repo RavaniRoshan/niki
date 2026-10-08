@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/cursor"
@@ -74,5 +76,37 @@ func TestSlashCommandsIntercepted(t *testing.T) {
 	m = m2.(AppModel)
 	if len(m.history.Cells) < 2 || m.history.Cells[len(m.history.Cells)-1].Role != "system" {
 		t.Fatal("expected /doctor to append system cell")
+	}
+}
+
+func TestSlashExplainCites(t *testing.T) {
+	dir := t.TempDir()
+	content := "package demo\n\n// ComputeThing does the thing.\nfunc ComputeThing() int {\n\treturn 42\n}\n"
+	if err := os.WriteFile(dir+"/demo.go", []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmdChan := make(chan protocol.EngineCommand, 8)
+	eventChan := make(chan protocol.EngineEvent, 8)
+	m := NewAppModel(cmdChan, eventChan)
+	m.state.Directory = dir
+
+	m.composer.Input.SetValue("/explain `ComputeThing`")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = m2.(AppModel)
+	if len(m.history.Cells) == 0 {
+		t.Fatal("expected /explain to append a cell")
+	}
+	last := m.history.Cells[len(m.history.Cells)-1]
+	if last.Role != "system" || !strings.Contains(last.Text, "demo.go:") {
+		t.Fatalf("expected cited answer, got role=%q text=%q", last.Role, last.Text)
+	}
+
+	// Unknown symbols are refused, not invented.
+	m.composer.Input.SetValue("/explain `NoSuchSymbolZZZ`")
+	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = m2.(AppModel)
+	last = m.history.Cells[len(m.history.Cells)-1]
+	if !strings.Contains(last.Text, "Cannot answer") {
+		t.Fatalf("expected refusal, got %q", last.Text)
 	}
 }

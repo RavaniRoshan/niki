@@ -91,7 +91,7 @@ func measure(cmdArgs []string, idleWait time.Duration) Measurement {
 					// Heuristic for interactive prompt:
 					// prompt marker like ">", or cursor placement escape like "\x1b[?25h", or clear screen
 					text := accumulated.String()
-					if strings.Contains(text, ">") || strings.Contains(text, "?") || strings.Contains(text, "\x1b[H") || strings.Contains(text, "Niki") || strings.Contains(text, "Codex") {
+					if strings.Contains(text, ">") || strings.Contains(text, "?") || strings.Contains(text, "\x1b[H") || strings.Contains(text, "NikiCode") || strings.Contains(text, "Codex") {
 						sawInputReady = true
 						inputReadyDuration = now.Sub(start)
 					}

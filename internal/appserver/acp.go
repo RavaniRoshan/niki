@@ -164,7 +164,7 @@ func (s *ACPServer) handleRequest(req RPCRequest, out io.Writer) {
 				"tools":     true,
 			},
 			"serverInfo": map[string]string{
-				"name":    "niki-acp-server",
+				"name":    "nikicode-acp-server",
 				"version": "0.11.0",
 			},
 		}

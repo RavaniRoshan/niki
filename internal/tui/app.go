@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/RavaniRoshan/niki/internal/explain"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/routing"
 )
@@ -334,7 +335,19 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
 				m.composer.Input.Reset()
 			default:
-				if strings.HasPrefix(input, "/rewind") {
+				if strings.HasPrefix(input, "/explain ") || input == "/explain" {
+					question := strings.TrimSpace(strings.TrimPrefix(input, "/explain"))
+					dir := m.state.Directory
+					if dir == "" {
+						dir, _ = os.Getwd()
+					}
+					if question == "" {
+						m.history.Append("system", "Usage: /explain <symbol | file | question> — answers with file:line citations, refuses unknown symbols.")
+					} else {
+						m.history.Append("system", explain.Format(explain.AnswerQuestion(dir, question)))
+					}
+					m.composer.Input.Reset()
+				} else if strings.HasPrefix(input, "/rewind") {
 					m.history.Append("system", "Rewound session state to previous turn checkpoint.")
 					m.composer.Input.Reset()
 				} else if strings.HasPrefix(input, "/theme ") {
@@ -460,7 +473,7 @@ func (m AppModel) welcomeCardView() string {
 
 	mascot := m.renderMascot()
 	headerText := lipgloss.JoinVertical(lipgloss.Left,
-		m.theme.CardTitle.Render("Welcome to Niki!"),
+		m.theme.CardTitle.Render("Welcome to NikiCode!"),
 		m.theme.CardSubtitle.Render("Send /help for help information."),
 		m.theme.CardDesc.Render("Local Coding Agent"),
 	)
@@ -496,17 +509,20 @@ func (m AppModel) welcomeCardView() string {
 		Render(cardInner)
 
 	announcement := m.theme.AnnounceIcon.Render("✦ ") +
-		m.theme.AnnounceTitle.Render("Niki Coding Agent") +
-		m.theme.AnnounceDesc.Render(" – Fast, local-first personal harness in Go\n") +
-		m.theme.AnnounceLink.Render("  Run /help for commands or visit https://github.com/RavaniRoshan/niki\n\n") +
+		m.theme.AnnounceTitle.Render("NikiCode coding agent") +
+		m.theme.AnnounceDesc.Render(" – Fast, local-first personal harness in Go") + "\n" +
+		m.theme.AnnounceLink.Render("  Run /help for commands or visit https://github.com/RavaniRoshan/niki") + "\n\n" +
 		m.theme.AnnounceLink.Render("  No session yet — one will be created on your first message.")
 
 	return card + "\n\n" + announcement
 }
 
 func (m AppModel) headerView() string {
-	title := m.theme.Header.Render("⚡ Niki")
-	sub := m.theme.Muted.Render("Local Coding Agent")
+	title := m.theme.Header.Render(CompactMark(m.state.Width, UseASCII()))
+	if m.state.Width < 50 {
+		return title
+	}
+	sub := m.theme.Muted.Render(BrandLine())
 	badge := m.theme.Muted.Render("[" + m.state.ModelName + "]")
 	if m.state.Width < 60 {
 		return title + "  " + sub
@@ -631,7 +647,7 @@ func (m AppModel) View() string {
 	defer func() { m.telemetry.RecordRender(time.Since(start)) }()
 
 	if !m.state.Ready {
-		return "Initializing Niki..."
+		return "Initializing NikiCode..."
 	}
 
 	var body string
@@ -676,7 +692,7 @@ func (m AppModel) View() string {
 func (m AppModel) activityView() string {
 	act := m.state.Activity
 	if act == "" {
-		return m.theme.Muted.Render("  (•‿•) niki is ready")
+		return m.theme.Muted.Render("  ○ NikiCode is ready")
 	}
 	glyph := m.theme.ActivityGlyph.Render("✱ ")
 	actText := m.theme.ActivityText.Render(act)

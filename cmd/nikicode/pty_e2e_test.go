@@ -16,7 +16,7 @@ import (
 
 func ptyRun(t *testing.T, args ...string) (restore func()) {
 	t.Helper()
-	cmd := exec.Command("../../bin/niki", args...)
+	cmd := exec.Command("../../bin/nikicode", args...)
 	f, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func ptyRun(t *testing.T, args ...string) (restore func()) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		cmd.Process.Kill()
-		t.Fatal("niki did not exit within 5s of Ctrl+C")
+		t.Fatal("nikicode did not exit within 5s of Ctrl+C")
 	}
 	f.Close()
 	return nil
@@ -60,7 +60,7 @@ func TestPTYRestoreOnSIGTERM(t *testing.T) {
 	if os.Getenv("NIKI_PTY_TESTS") == "" {
 		t.Skip("set NIKI_PTY_TESTS=1 to run")
 	}
-	cmd := exec.Command("../../bin/niki")
+	cmd := exec.Command("../../bin/nikicode")
 	f, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestPTYRestoreOnSIGTERM(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		cmd.Process.Kill()
-		t.Fatal("niki did not exit within 5s of SIGTERM")
+		t.Fatal("nikicode did not exit within 5s of SIGTERM")
 	}
 	f.Close()
 }
@@ -84,7 +84,7 @@ func TestNonTTYExec(t *testing.T) {
 	if os.Getenv("NIKI_PTY_TESTS") == "" {
 		t.Skip("set NIKI_PTY_TESTS=1 to run")
 	}
-	out, err := exec.Command("../../bin/niki", "exec", "hello").Output()
+	out, err := exec.Command("../../bin/nikicode", "exec", "hello").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestPTYCodingLoop(t *testing.T) {
 	if os.Getenv("NIKI_PTY_TESTS") == "" {
 		t.Skip("set NIKI_PTY_TESTS=1 to run")
 	}
-	cmd := exec.Command("../../bin/niki")
+	cmd := exec.Command("../../bin/nikicode")
 	f, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestPTYCodingLoop(t *testing.T) {
 func min(a, b int) int { if a < b { return a }; return b }
 
 // answerTerminalQueries replies to the terminal
-// queries niki (and the TUI framework) send, the way
+// queries nikicode (and the TUI framework) send, the way
 // a real terminal would, so capability detection
 // completes immediately instead of waiting out its
 // budget. Each query is answered at most once.
@@ -177,7 +177,7 @@ func answerTerminalQueries(chunk []byte, f *os.File, answered map[string]bool) {
 }
 
 // waitFirstFrame reads PTY output until the first
-// rendered frame (the Niki header) appears, answering
+// rendered frame (the NikiCode header) appears, answering
 // terminal queries so rendering is not delayed.
 // Returns the elapsed time.
 func waitFirstFrame(t *testing.T, f *os.File, start time.Time) time.Duration {
@@ -188,7 +188,7 @@ func waitFirstFrame(t *testing.T, f *os.File, start time.Time) time.Duration {
 		n, err := f.Read(buf)
 		if n > 0 {
 			answerTerminalQueries(buf[:n], f, answered)
-			if bytes.Contains(buf[:n], []byte("Niki")) {
+			if bytes.Contains(buf[:n], []byte("NikiCode")) {
 				return time.Since(start)
 			}
 		}
@@ -210,7 +210,7 @@ func TestColdAndWarmStartToComposer(t *testing.T) {
 	var cold, warm time.Duration
 	for i := 0; i < 2; i++ {
 		start := time.Now()
-		cmd := exec.Command("../../bin/niki")
+		cmd := exec.Command("../../bin/nikicode")
 		f, err := pty.Start(cmd)
 		if err != nil {
 			t.Fatal(err)
@@ -243,7 +243,7 @@ func TestColdStartFirstFrame(t *testing.T) {
 		t.Skip("set NIKI_PTY_TESTS=1 to run")
 	}
 	start := time.Now()
-	cmd := exec.Command("../../bin/niki")
+	cmd := exec.Command("../../bin/nikicode")
 	f, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -263,7 +263,7 @@ func TestColdStartFirstFrame(t *testing.T) {
 
 func ensureBinary(t *testing.T) string {
 	t.Helper()
-	binPath := "../../bin/niki"
+	binPath := "../../bin/nikicode"
 	if _, err := os.Stat(binPath); err == nil {
 		return binPath
 	}
@@ -275,7 +275,7 @@ func ensureBinary(t *testing.T) string {
 	return binPath
 }
 
-// TestArgvFastPathVersion asserts niki --version runs via the fast path without heavy init.
+// TestArgvFastPathVersion asserts nikicode --version runs via the fast path without heavy init.
 func TestArgvFastPathVersion(t *testing.T) {
 	bin := ensureBinary(t)
 	cmd := exec.Command(bin, "--version")
@@ -285,7 +285,7 @@ func TestArgvFastPathVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("--version execution failed: %v", err)
 	}
-	if !strings.Contains(string(out), "niki version") {
+	if !strings.Contains(string(out), "nikicode version") {
 		t.Fatalf("unexpected version output: %s", string(out))
 	}
 	t.Logf("--version took %v", elapsed)
@@ -303,13 +303,13 @@ func TestBootWith5MCPAnd50Skills(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	// 1. Create niki.toml with 5 MCP servers
+	// 1. Create nikicode.toml with 5 MCP servers
 	var tomlContent strings.Builder
 	tomlContent.WriteString("[model]\nname = \"mock\"\n")
 	for i := 1; i <= 5; i++ {
 		fmt.Fprintf(&tomlContent, "[mcp.servers.srv%d]\ncommand = \"echo\"\nargs = [\"server%d\"]\n\n", i, i)
 	}
-	_ = os.WriteFile(filepath.Join(dir, "niki.toml"), []byte(tomlContent.String()), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "nikicode.toml"), []byte(tomlContent.String()), 0o644)
 
 	// 2. Create .agents/skills with 50 skills
 	skillsDir := filepath.Join(dir, ".agents", "skills")
@@ -320,12 +320,12 @@ func TestBootWith5MCPAnd50Skills(t *testing.T) {
 		_ = os.WriteFile(skillPath, []byte(content), 0o644)
 	}
 
-	nikiBin, err := filepath.Abs("../../bin/niki")
+	nikiBin, err := filepath.Abs("../../bin/nikicode")
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	cmd := exec.Command(nikiBin, "--config", filepath.Join(dir, "niki.toml"))
+	cmd := exec.Command(nikiBin, "--config", filepath.Join(dir, "nikicode.toml"))
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "NIKI_BOOT_TRACE=1", "NIKI_TRUST_PROJECT=1", "HOME="+dir)
 
@@ -349,8 +349,22 @@ func TestBootWith5MCPAnd50Skills(t *testing.T) {
 	}
 
 	// Read boot trace
-	traceData, err := os.ReadFile(filepath.Join(dir, ".niki", "log", "boot-trace.log"))
+	traceData, err := os.ReadFile(filepath.Join(dir, ".nikicode", "log", "boot-trace.log"))
 	if err == nil {
 		t.Logf("boot trace:\n%s", string(traceData))
+	}
+}
+
+// TestArgvFastPathScoped asserts the B0 fast path fires only for a sole
+// version arg: incidental tokens (e.g. `exec version`) must reach
+// their command instead of printing the version.
+func TestArgvFastPathScoped(t *testing.T) {
+	bin := ensureBinary(t)
+	out, err := exec.Command(bin, "exec", "version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("exec version failed: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "nikicode version") {
+		t.Fatalf("fast path hijacked exec version: %s", out)
 	}
 }

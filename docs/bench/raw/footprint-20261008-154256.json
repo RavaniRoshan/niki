@@ -1,0 +1,19 @@
+{
+  "rows": [
+    {
+      "metric": "footprint",
+      "binary": "/home/shiva/.codex/packages/standalone/current/bin/codex",
+      "unit": "MB",
+      "n": 1,
+      "stats": {
+        "N": 1,
+        "Min": 243.66867065429688,
+        "Max": 243.66867065429688,
+        "Mean": 243.66867065429688,
+        "P50": 243.66867065429688,
+        "P95": 243.66867065429688
+      }
+    }
+  ],
+  "samples": {}
+}

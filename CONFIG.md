@@ -1,23 +1,30 @@
-# NIKI Configuration Guide (`CONFIG.md`)
+# NikiCode Configuration Guide (`CONFIG.md`)
 
-NIKI uses a layered configuration system designed for predictable overrides, profile switching, and strict security sandboxing.
+NikiCode uses a layered configuration system designed for predictable overrides, profile switching, and strict security sandboxing.
+
+> G1 rename note: the canonical home is `~/.nikicode` (migrated one-time
+> from legacy `~/.niki`), the project file is `nikicode.toml` (`niki.toml`
+> still honored), instruction files are `AGENTS.md` / `NIKICODE.md`
+> (`NIKI.md` still honored), and env vars are `NIKICODE_*` (`NIKI_*`
+> still honored). The §2 schema example is under accuracy review in G6.
 
 ---
 
 ## 1. Configuration Precedence Layers
 
-When NIKI loads configuration, values are merged in order from lowest to highest precedence:
+When NikiCode loads configuration, values are merged in order from lowest to highest precedence (later layers win; `nikicode config show --sources` prints each value's source):
 
-1. **Built-in Defaults**: Hardcoded, reliable fallbacks (`gpt-4o`, inline TUI mode, sandbox enabled).
-2. **Global Configuration**: `~/.niki/config.toml` (system-wide user preferences).
-3. **Project Configuration**: `.niki/config.toml` (workspace-specific project settings).
-4. **Active Profile Layer**: `[profiles.<name>]` sections selected via `--profile` or `NIKI_PROFILE`.
-5. **Environment Variables**: `NIKI_*` variables (e.g. `NIKI_MODEL`, `NIKI_BOOT_TRACE`, `NIKI_NO_PRECONNECT`).
-6. **Command-Line Flags**: Explicit CLI flags (e.g. `--model`, `--profile`).
+1. **Built-in Defaults**: hardcoded fallbacks (see `config.Default()`).
+2. **Global Configuration**: `~/.config/niki/niki.toml` (legacy), then `~/.config/nikicode/nikicode.toml` (canonical wins).
+3. **Profile Layer** (API only, no CLI flag yet): `<home>/<profile>.config.toml` and `<xdg>/profiles/<profile>.toml`, legacy spellings first.
+4. **Project Configuration**: `./niki.toml` (legacy), then `./nikicode.toml` (canonical wins). An untrusted project cannot register MCP servers (§3).
+5. **Explicit File**: `--config <path>` overlay.
+6. **Environment Variables**: provider keys via the configured `EnvKey` (e.g. `OPENAI_API_KEY`); NikiCode flags via `NIKICODE_*` with `NIKI_*` fallback (`BOOT_TRACE`, `NO_PRECONNECT`, `TRUST_PROJECT`). `nikicode doctor` reports which spelling fired.
+7. **Command-Line Flags**: `--config <path>` today (`--model`/`--profile` selectors are not implemented; profiles load via API only).
 
 To inspect effective configuration values along with their source layer, run:
 ```bash
-niki config show --sources
+nikicode config show --sources
 ```
 
 ---
@@ -66,13 +73,13 @@ tool_timeout_sec = 30
 
 ## 3. Project Trust Boundary
 
-For defense-in-depth, project-level configurations (`.niki/config.toml`) cannot register arbitrary MCP servers or commands unless the project path is explicitly listed in `trusted_projects` in `~/.niki/config.toml`.
+For defense-in-depth, project-level configurations (`nikicode.toml`, or legacy `niki.toml`) cannot register arbitrary MCP servers or commands unless the project path is explicitly listed in `trusted_projects` in `~/.nikicode/` (migrated from legacy `~/.niki/`).
 
-- **Untrusted Projects**: Any `.niki/config.toml` in an unlisted directory will have its `[mcp.*]` sections ignored.
+- **Untrusted Projects**: Any project TOML in an unlisted directory will have its `[mcp.*]` sections ignored.
 - **Trusted Projects**: Full capabilities enabled. To mark a project trusted:
   ```toml
-  # In ~/.niki/config.toml
-  trusted_projects = ["/home/shiva/projects/niki"]
+  # In ~/.nikicode/trusted_projects (one path per line)
+  /home/shiva/projects/niki
   ```
 
 ---
@@ -90,5 +97,5 @@ The command execution sandbox is configured to isolate shell tool runs:
 
 To verify sandbox status and capabilities on your current system:
 ```bash
-niki doctor
+nikicode doctor
 ```

@@ -15,7 +15,7 @@ func TestDefaults(t *testing.T) {
 
 func TestLoadLayered(t *testing.T) {
 	dir := t.TempDir()
-	proj := filepath.Join(dir, "niki.toml")
+	proj := filepath.Join(dir, "nikicode.toml")
 	os.WriteFile(proj, []byte(`
 [model]
 name = "gpt-4o"
@@ -44,7 +44,7 @@ func TestResolveAPIKey(t *testing.T) {
 
 func TestLoadWithSources(t *testing.T) {
 	dir := t.TempDir()
-	proj := filepath.Join(dir, "niki.toml")
+	proj := filepath.Join(dir, "nikicode.toml")
 	os.WriteFile(proj, []byte("[model]\nname = \"gpt-4o\"\n"), 0o644)
 	c, err := LoadWithSources(proj)
 	if err != nil {
@@ -68,7 +68,7 @@ func TestUntrustedProjectCannotStartMCP(t *testing.T) {
 	_ = os.Chdir(dir)
 	defer func() { _ = os.Chdir(origWd) }()
 
-	proj := "niki.toml"
+	proj := "nikicode.toml"
 	_ = os.WriteFile(proj, []byte(`
 [mcp.servers.evil]
 command = "bash"
@@ -94,7 +94,7 @@ func TestTrustedProjectCanStartMCP(t *testing.T) {
 	_ = os.Chdir(dir)
 	defer func() { _ = os.Chdir(origWd) }()
 
-	proj := "niki.toml"
+	proj := "nikicode.toml"
 	_ = os.WriteFile(proj, []byte(`
 [mcp.servers.local]
 command = "echo"
@@ -117,7 +117,7 @@ func TestProfileLayering(t *testing.T) {
 	fakeHome := t.TempDir()
 	t.Setenv("HOME", fakeHome)
 
-	profileDir := filepath.Join(fakeHome, ".niki")
+	profileDir := filepath.Join(fakeHome, ".nikicode")
 	_ = os.MkdirAll(profileDir, 0o755)
 	profileFile := filepath.Join(profileDir, "fast.config.toml")
 	_ = os.WriteFile(profileFile, []byte(`
@@ -142,3 +142,36 @@ theme = "nord"
 	}
 }
 
+
+func TestProjectConfigLegacyFallback(t *testing.T) {
+	dir := t.TempDir()
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(dir)
+	defer func() { _ = os.Chdir(origWd) }()
+
+	_ = os.WriteFile("niki.toml", []byte("[model]\nname = \"legacy-model\"\n"), 0o644)
+	res, err := LoadWithSources("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Model.Name != "legacy-model" {
+		t.Fatalf("legacy project config not read: %q", res.Model.Name)
+	}
+}
+
+func TestProjectConfigCanonicalWins(t *testing.T) {
+	dir := t.TempDir()
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(dir)
+	defer func() { _ = os.Chdir(origWd) }()
+
+	_ = os.WriteFile("niki.toml", []byte("[model]\nname = \"legacy-model\"\n"), 0o644)
+	_ = os.WriteFile("nikicode.toml", []byte("[model]\nname = \"canonical-model\"\n"), 0o644)
+	res, err := LoadWithSources("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Model.Name != "canonical-model" {
+		t.Fatalf("canonical project config should win: %q", res.Model.Name)
+	}
+}

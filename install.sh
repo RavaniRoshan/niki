@@ -38,10 +38,11 @@ case "$OS" in
         ;;
 esac
 
-TARBALL="niki_${OS}_${ARCH}.tar.gz"
+TARBALL="nikicode_${OS}_${ARCH}.tar.gz"
 URL="https://github.com/${REPO}/releases/latest/download/${TARBALL}"
 
-echo "⚡ Installing NIKI for ${OS}/${ARCH}..."
+echo "Installing NikiCode for ${OS}/${ARCH}..."
+echo "(personal path is local: make install)"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -57,22 +58,26 @@ fi
 
 tar -xzf "$TMP_DIR/$TARBALL" -C "$TMP_DIR"
 
-if [ ! -f "$TMP_DIR/niki" ]; then
-    echo "Error: Failed to unpack niki binary."
+if [ ! -f "$TMP_DIR/nikicode" ]; then
+    echo "Error: Failed to unpack nikicode binary."
     exit 1
 fi
 
-chmod +x "$TMP_DIR/niki"
+chmod +x "$TMP_DIR/nikicode"
 
 if [ -w "$INSTALL_DIR" ]; then
-    mv "$TMP_DIR/niki" "$INSTALL_DIR/niki"
+    mv "$TMP_DIR/nikicode" "$INSTALL_DIR/nikicode"
+    ln -sf nikicode "$INSTALL_DIR/nc"
+    ln -sf nikicode "$INSTALL_DIR/niki"
 else
-    sudo mv "$TMP_DIR/niki" "$INSTALL_DIR/niki"
+    sudo mv "$TMP_DIR/nikicode" "$INSTALL_DIR/nikicode"
+    sudo ln -sf nikicode "$INSTALL_DIR/nc"
+    sudo ln -sf nikicode "$INSTALL_DIR/niki"
 fi
 
-echo "✓ NIKI installed successfully to $INSTALL_DIR/niki!"
+echo "NikiCode installed to $INSTALL_DIR/nikicode (aliases: nc, niki compat)!"
 
-if ! command -v niki >/dev/null 2>&1; then
+if ! command -v nikicode >/dev/null 2>&1; then
     if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
         echo ""
         echo "Note: $INSTALL_DIR is not currently in your PATH."
@@ -81,6 +86,6 @@ if ! command -v niki >/dev/null 2>&1; then
     fi
 fi
 
-if command -v niki >/dev/null 2>&1; then
-    niki --version
+if command -v nikicode >/dev/null 2>&1; then
+    nikicode --version
 fi

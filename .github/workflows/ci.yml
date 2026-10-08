@@ -23,13 +23,13 @@ jobs:
         with:
           version: latest
       - name: Build binary
-        run: go build -o bin/niki ./cmd/niki
+        run: go build -o bin/nikicode ./cmd/nikicode
       - name: Test (race)
         run: go test ./... -race
       - name: PTY end-to-end
         run: |
-          go build -o bin/niki ./cmd/niki
-          NIKI_PTY_TESTS=1 go test ./cmd/niki/ -run 'PTY|NonTTY' -v
+          go build -o bin/nikicode ./cmd/nikicode
+          NIKI_PTY_TESTS=1 go test ./cmd/nikicode/ -run 'PTY|NonTTY' -v
       - name: Fuzz (short)
         run: |
           go test -run=Fuzz -fuzz=FuzzAnalyzeShell -fuzztime=10s ./internal/permissions/

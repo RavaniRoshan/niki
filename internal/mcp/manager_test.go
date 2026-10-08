@@ -26,7 +26,7 @@ func fakeServerCmd() *exec.Cmd {
 var fakeServerBin string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "niki-mcp-bin")
+	dir, err := os.MkdirTemp("", "nikicode-mcp-bin")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -47,7 +47,7 @@ func TestMain(m *testing.M) {
 // server and starts it eagerly.
 func startFakeManager(t *testing.T, required bool) (*Manager, *[]protocol.EngineEvent, *sync.Mutex) {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "niki-mcp")
+	dir, err := os.MkdirTemp("", "nikicode-mcp")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestManagerFailedRequiredSurfaced(t *testing.T) {
 	})
 	m.Add(ServerConfig{
 		Name:     "broken",
-		Command:  "/nonexistent/niki-mcp-binary",
+		Command:  "/nonexistent/nikicode-mcp-binary",
 		Required: true,
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/RavaniRoshan/niki/internal/paths"
 )
 
 func Default() Config {
@@ -24,7 +26,10 @@ func Default() Config {
 	}
 }
 
-// Load resolves config from defaults -> user (~/.config/niki/niki.toml) -> project (./niki.toml) -> explicit path overlay.
+// Load resolves config from defaults -> user (~/.config/nikicode/nikicode.toml,
+// with ~/.config/niki/niki.toml as legacy fallback) -> project
+// (./nikicode.toml, ./niki.toml legacy) -> explicit path overlay.
+// Where both spellings exist, the nikicode spelling wins.
 func Load(explicitPath string) (Config, error) {
 	cfg, err := LoadWithSources(explicitPath)
 	return cfg.Config, err
@@ -47,13 +52,20 @@ func LoadWithProfile(explicitPath, profileName string) (ConfigWithSources, error
 
 	candidates := []string{"defaults"}
 	if home, err := os.UserHomeDir(); err == nil {
+		// Legacy spellings first so the canonical ones win.
 		candidates = append(candidates, filepath.Join(home, ".config", "niki", "niki.toml"))
+		candidates = append(candidates, filepath.Join(home, ".config", "nikicode", "nikicode.toml"))
 		if profileName != "" {
+			// Canonical home only: legacy profiles migrate
+			// into ~/.nikicode on first boot (see paths).
 			candidates = append(candidates, filepath.Join(home, ".niki", profileName+".config.toml"))
+			candidates = append(candidates, filepath.Join(paths.Dir(), profileName+".config.toml"))
 			candidates = append(candidates, filepath.Join(home, ".config", "niki", "profiles", profileName+".toml"))
+			candidates = append(candidates, filepath.Join(home, ".config", "nikicode", "profiles", profileName+".toml"))
 		}
 	}
 	candidates = append(candidates, "niki.toml")
+	candidates = append(candidates, "nikicode.toml")
 	if explicitPath != "" {
 		candidates = append(candidates, explicitPath)
 	}
@@ -75,7 +87,7 @@ func LoadWithProfile(explicitPath, profileName string) (ConfigWithSources, error
 		}
 		// Project trust check (B3 / EXEC safety):
 		// An untrusted project cannot start MCP servers or hooks from its own config.
-		isProjectConfig := (path == "niki.toml" || !filepath.IsAbs(path))
+		isProjectConfig := (path == "niki.toml" || path == "nikicode.toml" || !filepath.IsAbs(path))
 		trusted := !isProjectConfig || IsProjectTrusted(".")
 		if isProjectConfig && !trusted {
 			if _, hasMCP := probe["mcp"]; hasMCP {
@@ -100,14 +112,10 @@ func LoadWithProfile(explicitPath, profileName string) (ConfigWithSources, error
 
 // IsProjectTrusted reports whether the project directory is trusted to start MCP servers and hooks.
 func IsProjectTrusted(projectDir string) bool {
-	if os.Getenv("NIKI_TRUST_PROJECT") == "1" || os.Getenv("NIKI_TRUST_PROJECT") == "true" {
+	if paths.EnvIs("TRUST_PROJECT", "1", "true") {
 		return true
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	trustedFile := filepath.Join(home, ".niki", "trusted_projects")
+	trustedFile := filepath.Join(paths.Dir(), "trusted_projects")
 	data, err := os.ReadFile(trustedFile)
 	if err != nil {
 		return false

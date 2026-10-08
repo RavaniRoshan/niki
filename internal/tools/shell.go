@@ -49,7 +49,7 @@ func summarize(full string) string {
 	if len(full) <= maxInlineOutput {
 		return full
 	}
-	dir := filepath.Join(os.TempDir(), "niki-tool-output")
+	dir := filepath.Join(os.TempDir(), "nikicode-tool-output")
 	_ = os.MkdirAll(dir, 0o755)
 	path := filepath.Join(dir, "out.log")
 	_ = os.WriteFile(path, []byte(full), 0o600)

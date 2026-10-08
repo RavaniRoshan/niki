@@ -103,7 +103,7 @@ func Detect() (name string, ok bool) {
 // Network is unavailable inside the sandbox — a
 // documented v1 limitation: Claude Code's sandbox
 // proxies network through the host, which needs a
-// proxy layer niki does not have yet. Reads are
+// proxy layer nikicode does not have yet. Reads are
 // allowed across the filesystem; only writes and
 // network are confined.
 type Bubblewrap struct {
@@ -202,7 +202,7 @@ func seatbeltProfile(writableDirs []string) string {
 // panic — the deferred cleanup runs while the panic
 // unwinds and the panic itself keeps propagating.
 func withProfile(writableDirs []string, fn func(profilePath string) (string, string, error)) (stdout, stderr string, err error) {
-	f, err := os.CreateTemp("", "niki-seatbelt-*.sb")
+	f, err := os.CreateTemp("", "nikicode-seatbelt-*.sb")
 	if err != nil {
 		return "", "", fmt.Errorf("seatbelt profile: %w", err)
 	}

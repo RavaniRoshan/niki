@@ -161,7 +161,7 @@ func (s *CodexServer) handleRequest(req RPCRequest, out io.Writer) {
 		res := map[string]any{
 			"protocolVersion": "1.0",
 			"serverInfo": map[string]string{
-				"name":    "niki-codex-server",
+				"name":    "nikicode-codex-server",
 				"version": "0.11.0",
 			},
 			"capabilities": map[string]bool{

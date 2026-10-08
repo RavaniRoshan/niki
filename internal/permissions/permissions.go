@@ -48,6 +48,11 @@ var readOnlyTools = map[string]bool{
 	"tool_search":       true,
 	"bash_output":       true,
 	"ask_user_question": true,
+	"git_status":        true,
+	"git_blame":         true,
+	"git_log":           true,
+	"git_review":        true,
+	"git_changelog":     true,
 }
 
 // IsReadOnlyTool reports whether a tool is known to be read-only.

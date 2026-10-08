@@ -123,7 +123,7 @@ func TestBubblewrapIsolation(t *testing.T) {
 
 	// Writing outside the writable binds must
 	// fail: the root filesystem is read-only.
-	_, stderr, err := s.Run(context.Background(), dir, "sh", "-c", "echo x > /niki-probe-ro")
+	_, stderr, err := s.Run(context.Background(), dir, "sh", "-c", "echo x > /nikicode-probe-ro")
 	if err == nil {
 		t.Fatal("write to read-only root unexpectedly succeeded")
 	}
@@ -132,12 +132,12 @@ func TestBubblewrapIsolation(t *testing.T) {
 	}
 
 	// /tmp is a private writable tmpfs.
-	if _, _, err := s.Run(context.Background(), dir, "sh", "-c", "echo x > /tmp/niki-probe-tmp"); err != nil {
+	if _, _, err := s.Run(context.Background(), dir, "sh", "-c", "echo x > /tmp/nikicode-probe-tmp"); err != nil {
 		t.Fatalf("write to private /tmp failed: %v", err)
 	}
 
 	// The workspace bind is writable.
-	if _, _, err := s.Run(context.Background(), dir, "sh", "-c", "echo x > "+dir+"/niki-probe-ws"); err != nil {
+	if _, _, err := s.Run(context.Background(), dir, "sh", "-c", "echo x > "+dir+"/nikicode-probe-ws"); err != nil {
 		t.Fatalf("write to workspace failed: %v", err)
 	}
 

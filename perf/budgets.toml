@@ -1,4 +1,4 @@
-# NIKI Performance Budgets & Measured Baselines
+# NikiCode Performance Budgets & Measured Baselines
 # Measured on Linux WSL2 (AMD Ryzen 7 4800H 8C/16T, 7.5 GiB RAM)
 
 [budgets]
@@ -34,11 +34,13 @@ idle_rss_mb = 391.6
 bytes_before_prompt = 7
 binary_size_mb = 75.0
 
-[measured.niki]
-version_mean_ms = 6.8
-first_paint_ms = 5.9
-input_ready_ms = 5.9
-idle_rss_mb = 13.1
-bytes_before_prompt = 16
-binary_size_mb = 19.0
+[measured.nikicode]
+version_mean_ms = 6.5
+first_paint_ms = 6.3
+input_ready_ms = 6.3
+idle_rss_mb = 9.1
+bytes_before_prompt = 12
+binary_size_mb = 19.2
 idle_redraws = 0
+# G1 2026-10-08: renamed binary re-measured; no regression vs the niki row
+# (6.8/5.9/5.9/13.1/16/19.0/0); RSS improved ~30% via background store open.

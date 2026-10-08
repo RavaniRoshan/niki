@@ -1,6 +1,9 @@
-# NIKI Dogfooding Log (`docs/DOGFOOD.md`)
+# NikiCode Dogfooding Log (`docs/DOGFOOD.md`)
 
-This document records real dogfooding of the NIKI harness during its own construction, self-build, test runs, and issue fixes.
+This document records real dogfooding of the NikiCode harness during its own construction, self-build, test runs, and issue fixes.
+
+> Historical note: sessions 1–2 ran the `niki` binary before the G1
+> rename; commands are quoted verbatim. Session 3 uses `nikicode`.
 
 ---
 
@@ -49,3 +52,37 @@ This document records real dogfooding of the NIKI harness during its own constru
 1. **Bubble Tea v2 Package Ecosystem Split**: Bubble Tea v2 alpha (`github.com/charmbracelet/bubbletea/v2`) changed several API signatures from v1 (e.g. `tea.WindowSizeMsg` structure, standard commands). Using custom renderer primitives and clear inline split bounds avoided dependency churn.
 2. **Linux Bubblewrap Availability**: On minimal cloud containers without Bubblewrap installed, fallback execution must remain available while loudly reporting its degraded security posture through `niki doctor`.
 3. **Fast Path Budget Discipline**: Ensuring `niki --version` executes in <7ms required ruthless separation of Cobra commands: fast paths must inspect `os.Args` and exit before any CLI command trees or reflection-heavy modules are loaded.
+
+---
+
+## 3. Final-pack dogfood (G1–G6, 2026-10-08, honest scope)
+
+What actually ran inside NikiCode itself during this pack:
+
+- `nikicode doctor` after the rename caught the missing Ensure() wiring
+  (no migration on first run) — fixed before it could strand state.
+- `nikicode do --plan` / `do` recipes (scaffold, build, commit, explain)
+  ran the pack's own fixture tasks end to end; the correction bug
+  (computed target discarded, `last.Name` used) was found through a live
+  `do "no, name=svc …"` run, not a unit test.
+- `nikicode exec` fixture turns validated the headless path after every
+  invasive change (session backgrounding, fast-path scoping).
+- `nikicode bench` measured every table in docs/BENCH.md; the Codex
+  modal gate and the 0x0-PTTY lesson both came from live black-box runs.
+- `nikicode soak --turns 200` ran the stability evidence, not a demo.
+
+What hurt (friction log):
+
+- `do` with no matching routine prints the recipe list but not example
+  inputs; first-time users guess phrasing. Mitigation logged, unbuilt.
+- Multistep `do` journals each step: undo granularity is per-step, which
+  is right, but nothing tells the user that until they try it.
+- The update-modal episode (Codex) has no NikiCode equivalent to learn
+  from — our first paint never blocks on network by construction (boot
+  DAG), and the bench proves it.
+
+What did NOT happen: a full week of living in the NikiCode TUI. This
+pack was built in long sessions with frequent real-terminal verification,
+but the author drives multiple tools; a week-long single-harness log
+needs the owner's daily use (OWNER-VERIFY). Nothing above is invented:
+every claim links to a probe, a test, or a raw log.

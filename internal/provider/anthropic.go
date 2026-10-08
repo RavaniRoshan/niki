@@ -189,9 +189,9 @@ func (a *AnthropicProvider) doWithBackoff(ctx context.Context, req *http.Request
 		}
 		if attempt == 2 {
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("provider unreachable after retries (exhausted retries): %v. Check base_url, API key, and network connectivity (see `nikicode doctor`)", err)
 			}
-			return nil, fmt.Errorf("exhausted retries (last status %d)", resp.StatusCode)
+			return nil, fmt.Errorf("exhausted retries (last status %d). Check the provider status page and your quota/key, then retry", resp.StatusCode)
 		}
 		select {
 		case <-ctx.Done():

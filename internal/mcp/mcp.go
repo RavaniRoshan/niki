@@ -95,7 +95,7 @@ func (c *Client) Start(ctx context.Context) error {
 	handshake := Request{JSONRPC: "2.0", ID: c.nextID.Add(1), Method: "initialize", Params: map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "niki", "version": "0.1.0"},
+		"clientInfo":      map[string]any{"name": "nikicode", "version": "0.1.0"},
 	}}
 	resp, err := c.call(ctx, handshake)
 	if err != nil {

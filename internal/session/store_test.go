@@ -1,6 +1,8 @@
 package session
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -179,3 +181,72 @@ func TestKill9MidTurnThenResume(t *testing.T) {
 	}
 }
 
+
+// TestKill9RealProcess kills -9 a live writer mid-append, then reopens:
+// the store must open cleanly with a gap-free prefix of flushed events.
+func TestKill9RealProcess(t *testing.T) {
+	if os.Getenv("NIKI_SESSION_CRASH_CHILD") == "1" {
+		dbPath := os.Getenv("NIKI_SESSION_CRASH_DB")
+		sid := os.Getenv("NIKI_SESSION_CRASH_SID")
+		s, err := Open(dbPath)
+		if err != nil {
+			os.Exit(2)
+		}
+		// Never closes: the parent SIGKILLs mid-stream.
+		for i := 0; i < 500; i++ {
+			_ = s.AppendEvent(protocol.SessionId(sid), protocol.EngineEvent{
+				Type:      protocol.EventAssistantTextDelta,
+				Timestamp: time.Now(),
+				Text:      "delta",
+			})
+		}
+		os.Exit(0)
+	}
+	dbPath := filepath.Join(t.TempDir(), "sessions.db")
+	s0, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := protocol.NewSessionId()
+	if err := s0.CreateSession(sid, "crash"); err != nil {
+		t.Fatal(err)
+	}
+	_ = s0.Close()
+
+	child := exec.Command(os.Args[0], "-test.run=TestKill9RealProcess")
+	child.Env = append(os.Environ(),
+		"NIKI_SESSION_CRASH_CHILD=1",
+		"NIKI_SESSION_CRASH_DB="+dbPath,
+		"NIKI_SESSION_CRASH_SID="+string(sid),
+	)
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Let it flush a few events, then SIGKILL mid-append.
+	time.Sleep(300 * time.Millisecond)
+	if err := child.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = child.Wait()
+
+	s, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen after kill -9 failed: %v", err)
+	}
+	defer s.Close()
+	evts, err := s.Events(sid)
+	if err != nil {
+		t.Fatalf("events unreadable after kill -9: %v", err)
+	}
+	// Gap-free prefix: every stored event is a valid delta in order.
+	for i, e := range evts {
+		if e.Type != protocol.EventAssistantTextDelta || e.Text != "delta" {
+			t.Fatalf("event %d corrupt: %+v", i, e)
+		}
+	}
+	t.Logf("recovered %d events after kill -9, no corruption", len(evts))
+	// The session continues after restore.
+	if err := s.AppendEvent(sid, protocol.EngineEvent{Type: protocol.EventTurnCompleted, Timestamp: time.Now()}); err != nil {
+		t.Fatalf("append after restore failed: %v", err)
+	}
+}

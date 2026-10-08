@@ -149,6 +149,175 @@ approved as written in DESIGN.md §3.
      Consequence of accepting: battery-sensitive hosts see a small
      constant drain while Niki is open.
 
+## 2026-10-08 — G6 finishing pack DONE
+- THIRD_PARTY.md versions aligned to go.mod (licenses verified from the
+  local module cache); clean-room statement extended to G0–G6.
+- Demo GIF re-recorded with vhs (real runs: version, plan preview,
+  explain citations, git log, doctor) + docs/demo.tape; stale intro.gif
+  removed. Verified frame by frame.
+- README order: positioning → benchmark table → demo GIF → quickstart;
+  numbers synced to bench medians; packaging section marks distribution
+  OUT/unbuilt; docs map (install/config/tools/recipes/subagents/bench).
+- docs/VERDICT.md: clause→probe trace, per-metric speed verdict with
+  explicit non-wins, deliberately-unbuilt list.
+- docs/DOGFOOD.md: honest G1–G6 session log + friction + what did not
+  happen (no invented week).
+- Gates on final tree: vet/lint(0)/race 29+/PTY green; 4 fuzz targets
+  15s clean; tui benchmarks compile+run; govulncheck UNRUNNABLE offline
+  (OWNER-VERIFY with network). No test weakened (reviewed each rename);
+  no placeholders; no panics in prod paths.
+- Commit once at end (owner decision); C12 clean-clone install after.
+
+## 2026-10-08 — G5 daily-driver trust DONE
+- `nikicode soak` (internal/soak + CLI): 200 mock turns with direct
+  tool calls, subagent lifecycles, MCP fake-server calls, per-turn
+  hooks; RSS/heap/goroutines to CSV. Result: 0 crashes, RSS
+  12.4→17.2MB (+4.9, plateau after warmup), heap 2.7MB, 3 goroutines.
+  CSV: docs/soak/soak-g5.csv. C11 PROVEN.
+- Real kill-9 test (child process SIGKILLed mid-append): reopen clean,
+  16 gap-free events, session continues. (Prior simulated test kept.)
+- Degradation demos, each with what+hints: no-network (unroutable
+  provider) → "provider unreachable after retries… Check base_url, API
+  key, network (see nikicode doctor)"; MCP down → doctor prints
+  "✗ MCP dead: down (…); continuing without it" (new probing);
+  provider 5xx (local 503 server) → "exhausted retries (last status
+  503). Check status page, quota/key, then retry". Guidance wording
+  added to all three providers (conformance phrase kept).
+- Gates: vet/lint(0)/race green; --version 7.1ms (G4 6.5, overlapping
+  CIs, init max 0.29ms unchanged — recorded, not a regression).
+
+## 2026-10-08 — G4 speed proof DONE
+- `nikicode bench` (stdlib only): version/ttff/echo/peak/footprint/
+  skills/turn metrics, N>=30, median+p95, raw JSON under
+  docs/bench/raw/ (12 files). Tested: bench pkg (stats, version, PTY
+  rig, echo, footprint) + benchx smokes + fast-path scoping test
+  (fixed a real bug: any `version` token fired the B0 path).
+- Matrix, same machine: NikiCode first-bytes p50 5.38 vs Codex 17.56;
+  content paint 16.89 vs 170.72 (Codex sits behind an update modal —
+  dismissing risks its auto-update installer, so echo/input-usability
+  recorded unmeasurable, not guessed); --version 6.21 vs 20.20; echo
+  p95 5.63 (Codex n/a); idle RSS 16.12 vs 69.32, 0 redraws both;
+  peak 10.38MB; binary 19.70 vs 243.67MB; skills 1.64ms + 5-MCP boot
+  16ms; turn overhead 2.42ms (model excluded). Claude Code: uninstalled
+  (OWNER-VERIFY). End-to-end: declared model-bound tie (C10, no spend).
+- BENCH.md carries the table + per-metric WIN/TIE/reference-unmeasured
+  + honest non-wins; no blanket anywhere (C16 BLOCKED). README numbers
+  synced to bench medians. CLAIMS C7-C9 point at raw logs.
+- Gates: vet/lint(0)/race green; --version 6.5ms (no regression).
+
+## 2026-10-08 — G3 natural-language ergonomics DONE
+- `internal/mention`: @-extraction + fuzzy picker (exact/subsequence
+  ranking, top-8, NoMatchError refusal). 3/3.
+- `internal/intent`: SplitSteps ("then/and then/;/after that"),
+  IsCorrection/StripCorrection, SubstituteIt pronouns. Boundary + article
+  lessons applied (commits/commit, "check the formatting").
+- `internal/journal` (JSONL, fsync-append): action entries with file
+  pre-images, git tip before/after, branch bookkeeping, explain subjects.
+  Undo restores files / resets tip only when untouched (else refuses with
+  reason); redo re-executes as a fresh entry. 7/7.
+- `recipes.Execute` captures FileEffects (write/edit pre+post images).
+- `nikicode do`: always prints the plan before running; --plan dry-runs;
+  multistep runs in order (stops with step number on refusal);
+  corrections re-route with carried vars + var-keyed recipe pick (fixed a
+  live bug: target computed but last.Name used); pronouns resolve from
+  the journal; mentions substitute before routing; undo/redo wired.
+- Scripted NL set (7 tasks, zero tool names) passes; live demos ran
+  (--plan, multistep, correction, undo, redo, pronoun, mention).
+- C18 PROVEN; surfaces `do` tag C6 C18; claimcheck green.
+- Gates: vet/lint(0)/race all green; perf inside 10% (--version 7.1,
+  ttff 6.0, RSS 9.1). Commit deferred (once at end, owner decision).
+
+## 2026-10-08 — G2 three promises DONE
+- `internal/git` (shell-out, porcelain parse, hinted errors): status,
+  staged-diff commit messages derived from the real diff, branch, rebase
+  (+ConflictError cycle), PR draft (local only), changelog, staged review,
+  blame — 7/7 throwaway-repo tests incl. resolve/continue.
+- 8 git tools registered (read-only: status/blame/log/review/changelog;
+  write: commit/branch/rebase); plan-mode lists + registry count (32)
+  updated; registry + parser + dispatch tests green.
+- `internal/explain`: word-boundary symbol search (skips .git/binaries),
+  file outlines, verb routing; every citation stat-verified in tests;
+  unknown symbols refused with scope. 4/4. `/explain` slash added
+  (registry + dispatch + cited/refusal test).
+- `internal/recipes`: 7 embedded recipes (test/lint/build/commit/
+  scaffold/refactor/docs) with match phrases; loader honors user +
+  project overrides; executor substitutes vars, stops on error, gates
+  EVERY step through guard.Allow, refuses unsubstituted vars. 10/10
+  acceptance tests (each recipe end-to-end) + permission-gate test.
+- `internal/intent`: deterministic NL routing (recipes win, then git,
+  then explain) with word-boundary matching (fixed commits/commit,
+  commit/commits over-matches found by tests). 5/5.
+- `nikicode do` + `nikicode git` (10 subcommands) wired; live demos ran:
+  scaffold/refactor/commit/explain/status + refusal paths (exit 1).
+- Claims-as-code: `nikicode surfaces` (hidden) + `docs/SURFACE.txt` +
+  `internal/claimcheck` (anchors/tags must resolve to PROVEN rows; dup
+  rows fail). README title carries positioning line minus the blanket
+  speed clause (C16 BLOCKED until G4) + anchors; stale numbers fixed
+  (17ms frame, 6.5ms version, 9.1MB); Bubble Tea version corrected (v1).
+- Perf: lazy OnceValue regexps (init 0.30ms max); --version 6.9ms (+6%),
+  ttff 6.8 (+8%), RSS 9.2 (+1%), binary +1.5% — inside the 10% gate.
+- Gates: vet/lint(0)/race 29/29/PTY green. Renamed expectations are
+  equally-or-more strict (trust tests now on canonical filename + new
+  legacy-fallback tests). Commit NOT made (needs owner approval).
+
+## 2026-10-08 — G1 identity (nikicode rename) DONE
+- `internal/paths`: canonical `~/.nikicode`, one-time copy migration
+  (never move; MIGRATED_FROM; count+bytes verified), dual env
+  (`NIKICODE_*` wins, `NIKI_*` fallback, `doctor` reports source).
+  5/5 tests pass (lossless incl. modes+symlink, no-op re-run, no-legacy,
+  existing-canonical kept, dual env).
+- Wired into config (layering: legacy spellings first, canonical wins;
+  project `nikicode.toml` + `niki.toml`; `NIKICODE.md` + `NIKI.md`),
+  skills roots (`.nikicode` first), memory/checkpoint/capping defaults,
+  main (Ensure on tui/exec/resume/doctor paths, never on --version).
+- Binary `cmd/nikicode`; `make install` -> `~/.local/bin` + `nc` + `niki`
+  symlinks. Real migration: 8 files / 524045 bytes, all byte-identical
+  after, legacy untouched. `nc --version` + `niki --version` print
+  `nikicode version 0.11.0` (fast path, hyperfine 6.5ms).
+- Brand: original orb+name wordmark (full/compact/narrow + ASCII
+  fallback, tested); header/announce/activity/`/quit`/init template say
+  NikiCode; `⚡` and kaomoji removed; system prompt, MCP/ACP names, URI
+  scheme, temp prefixes renamed. C1 PROVEN (PTY loop + exec fixture).
+- Perf rerun: ttff 6.3/9.1MB (was 5.9/13.1), --version 6.5ms (was 6.8),
+  PTY cold 20-21/warm 17ms. No regression; RSS -30%.
+- Gates: vet/lint(0)/race 24/24/PTY green. No test weakened (renamed
+  expectations still assert exact new names; trust tests moved to the
+  canonical filename, legacy covered by new fallback tests).
+- NOTE: tree also holds one pre-existing hunk (tui/app.go announce
+  newlines, not mine). Commit NOT made (needs owner approval).
+
+## 2026-10-08 — Pre-G1 trim slice (funded): warm <=25ms + idle <1%
+- Acceptance: warm first-frame <=25ms (PTY probe), idle <1% settled.
+- Diagnosis (measured, python-PTy probe + boot trace): session.Open
+  (modernc sqlite init) cost 19.1ms ON the critical path; bubbletea v1
+  flushes the first frame only on a renderer tick (verified in
+  standard_renderer.go listen()), so tick interval bounds first paint.
+- Fixes (cmd/niki/main.go): session store opens in background with an
+  ordered, capped (4096) pending-event buffer flushed on open; failure
+  keeps the session in memory (fail-open persistence, fail-closed tools
+  unchanged). Detect budget 100ms -> 25ms. Boot-trace marks now close
+  spans (truthful phase durations; old labels were off by one).
+  Preconnect placeholder sleep replaced with a real background DNS-only
+  warm of the provider host (no connections, no app data; opt-outs kept).
+- Result: cold 20-21ms, warm 17ms (was 64/63) — 3.7x. Trace: boot 0.2,
+  config 0.0, registry 0.9, startup 0.8, detect 0.0, program 0.1ms.
+- Idle: 0 redraws, 0 bytes/3s. Unit gate green (0.67%). Production
+  settled idle 1.8% @120fps. Bare-120Hz-ticker proof program reads
+  2.3-2.7% (pure VM timer-wake cost; our app adds ~nothing), so no fixed
+  FPS satisfies worst-ff<=25 AND idle<1% on this VM. Owner decision:
+  ship fps=120, record deviation (bare metal will read lower).
+- Gates: go build/vet clean, golangci-lint 0 issues, go test ./... -race
+  23/23 pass, NIKI_PTY_TESTS=1 cmd+terminal pass. No test weakened
+  (no test file touched except deletion of temp zz_probe_test.go).
+
+## 2026-10-08 — Final pack G0 (DESIGN_V2) approved
+- Wrote docs/DESIGN_V2.md (name plan, claim audit, promise designs, bench
+  protocol), seeded docs/CLAIMS.md (C1–C12) and docs/BENCH.md (metric table).
+- Owner answers: name plan approved as written; dual NIKICODE_*/NIKI_* env;
+  Claude Code column = OWNER-VERIFY install then measure both; positioning
+  line FIXED (no cuts); fund pre-G1 trimming (warm <=25 ms, idle <1%).
+- No application code changed. Next: pre-G1 trim slice, then G1 identity.
+
 ## State
 Phases 1–7 complete. All checklist rows WORKS except the two
 measured misses above (B3, B5 PARTIAL), L1/S4 PARTIAL

@@ -10,7 +10,7 @@ import (
 
 func TestLogsStructuredLinesToFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "sub", "niki.log")
+	path := filepath.Join(dir, "sub", "nikicode.log")
 	l, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestNilLoggerSafe(t *testing.T) {
 // TestAppendAcrossReopens asserts the log grows
 // across reopen cycles.
 func TestAppendAcrossReopens(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "niki.log")
+	path := filepath.Join(t.TempDir(), "nikicode.log")
 	l, err := Open(path)
 	if err != nil {
 		t.Fatal(err)

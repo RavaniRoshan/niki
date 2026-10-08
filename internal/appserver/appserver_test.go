@@ -67,7 +67,7 @@ func TestCodexServer(t *testing.T) {
 		t.Errorf("expected ID 1, got %v", initResp.ID)
 	}
 	resBytes, _ := json.Marshal(initResp.Result)
-	if !strings.Contains(string(resBytes), "niki-codex-server") {
+	if !strings.Contains(string(resBytes), "nikicode-codex-server") {
 		t.Errorf("initialize response unexpected: %s", string(resBytes))
 	}
 
@@ -196,7 +196,7 @@ func TestACPServer(t *testing.T) {
 		Method:  "initialize",
 	})
 	resBytes, _ := json.Marshal(initResp.Result)
-	if !strings.Contains(string(resBytes), "niki-acp-server") {
+	if !strings.Contains(string(resBytes), "nikicode-acp-server") {
 		t.Errorf("initialize unexpected: %s", string(resBytes))
 	}
 

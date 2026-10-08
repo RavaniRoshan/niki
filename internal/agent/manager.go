@@ -114,7 +114,7 @@ func (m *Manager) Spawn(ctx context.Context, parentID, name, prompt, contextMode
 
 	var worktreeDir string
 	if worktree {
-		tmpDir, err := os.MkdirTemp("", "niki-worktree-*")
+		tmpDir, err := os.MkdirTemp("", "nikicode-worktree-*")
 		if err == nil {
 			worktreeDir = tmpDir
 			// Try git worktree add if inside a git repo

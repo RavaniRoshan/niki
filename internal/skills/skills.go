@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/RavaniRoshan/niki/internal/paths"
 )
 
 // Skill is a discovered SKILL.md document.
@@ -20,15 +22,18 @@ type Skill struct {
 	Loaded      bool
 }
 
-// StandardRoots returns standard and compat roots for skill discovery,
-// including ~/.niki/skills, <project>/.niki/skills, and .agents/skills.
+// StandardRoots returns standard and compat roots for skill discovery:
+// ~/.nikicode/skills, then the legacy ~/.niki/skills, then project
+// .nikicode/skills, .niki/skills, skills, and .agents/skills.
 func StandardRoots(projectDir string) []string {
 	var roots []string
-	if home, err := os.UserHomeDir(); err == nil {
-		roots = append(roots, filepath.Join(home, ".niki", "skills"))
+	roots = append(roots, filepath.Join(paths.Dir(), "skills"))
+	if home := paths.Home(); home != "" {
+		roots = append(roots, filepath.Join(paths.LegacyDir(), "skills"))
 	}
 	if projectDir != "" {
 		roots = append(roots,
+			filepath.Join(projectDir, ".nikicode", "skills"),
 			filepath.Join(projectDir, ".niki", "skills"),
 			filepath.Join(projectDir, "skills"),
 			filepath.Join(projectDir, ".agents", "skills"),
@@ -164,11 +169,12 @@ func (s *Skill) LoadBody() error {
 	return nil
 }
 
-// Instructions returns the AGENTS.md / NIKI.md hierarchy found walking upward from dir.
+// Instructions returns the AGENTS.md / NIKICODE.md hierarchy found walking
+// upward from dir (NIKI.md is the legacy spelling, still honored).
 func Instructions(dir string) []string {
 	var out []string
 	for {
-		for _, name := range []string{"AGENTS.md", "NIKI.md"} {
+		for _, name := range []string{"AGENTS.md", "NIKICODE.md", "NIKI.md"} {
 			p := filepath.Join(dir, name)
 			if _, err := os.Stat(p); err == nil {
 				out = append(out, p)
@@ -193,7 +199,7 @@ type Instruction struct {
 func InstructionsBounded(dir string, maxBytes int) []Instruction {
 	var out []Instruction
 	for {
-		for _, name := range []string{"AGENTS.md", "NIKI.md"} {
+		for _, name := range []string{"AGENTS.md", "NIKICODE.md", "NIKI.md"} {
 			p := filepath.Join(dir, name)
 			if data, err := os.ReadFile(p); err == nil {
 				content := string(data)

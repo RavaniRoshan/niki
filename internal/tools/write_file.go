@@ -30,7 +30,7 @@ func (t *WriteFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResu
 	if err := os.MkdirAll(filepath.Dir(a.Path), 0o755); err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(a.Path), ".niki-write-*")
+	tmp, err := os.CreateTemp(filepath.Dir(a.Path), ".nikicode-write-*")
 	if err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}

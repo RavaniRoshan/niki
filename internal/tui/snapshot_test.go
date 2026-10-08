@@ -30,7 +30,7 @@ func TestSnapshotSizesDeterministic(t *testing.T) {
 		if v1 != v2 {
 			t.Fatalf("snapshot at %dx%d not deterministic", size[0], size[1])
 		}
-		if !strings.Contains(v1, "Niki") {
+		if !strings.Contains(v1, "NikiCode") {
 			t.Fatalf("snapshot at %dx%d missing header", size[0], size[1])
 		}
 	}

@@ -1,13 +1,19 @@
 <div align="center">
 
-# ⚡ NIKI
+# NikiCode
 
-**A personal coding-agent harness in Go. One static binary. Instant to open.**
+**NikiCode is an agentic coding tool that lives in your terminal, understands your codebase, and helps you code faster by executing routine tasks, explaining complex code, and handling git workflows — all through natural language commands.**
+<!-- claims: C1 C2 C3 C4 C5 C6 -->
+> Speed: scoped startup and weight deltas against Codex are measured in the table below. A blanket comparison ships only with the reproducible G4 benchmark table.
+<!-- claims: C7 C8 C9 -->
+
+> Rename in progress (G1): `niki` → `nikicode`. This README is updated
+> slice by slice; the full rewrite with benchmark evidence lands in G6.
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=for-the-badge&logo=go)](go.mod)
 [![Release](https://img.shields.io/github/v/release/RavaniRoshan/niki?style=for-the-badge&color=blue)](https://github.com/RavaniRoshan/niki/releases)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
-[![Startup](https://img.shields.io/badge/Startup-5.9ms-orange?style=for-the-badge)](#-performance-contracts-no-feelings-just-measurements)
+[![Startup](https://img.shields.io/badge/Startup-6.3ms-orange?style=for-the-badge)](#-performance-contracts-no-feelings-just-measurements)
 [![Binary Size](https://img.shields.io/badge/Binary-19MB-purple?style=for-the-badge)](#-performance-contracts-no-feelings-just-measurements)
 [![Zero CGO](https://img.shields.io/badge/CGO-Disabled-success?style=for-the-badge)](#-architecture--principles)
 
@@ -15,7 +21,7 @@
 
 ```bash
 # Install instantly with Go
-go install github.com/RavaniRoshan/niki/cmd/niki@latest
+go install github.com/RavaniRoshan/niki/cmd/nikicode@latest
 
 # Or download the pre-compiled binary from GitHub Releases
 curl -sSL https://raw.githubusercontent.com/RavaniRoshan/niki/main/install.sh | bash
@@ -27,37 +33,33 @@ curl -sSL https://raw.githubusercontent.com/RavaniRoshan/niki/main/install.sh | 
 
 ---
 
-## 🌟 Why NIKI?
-
-Most modern coding agents are hundreds of megabytes of Node, Electron, or heavy runtimes that take seconds to boot, consume hundreds of megabytes of RAM just sitting idle, and execute unchecked commands directly on your workstation.
-
-**NIKI is different.** It was built from the ground up for developers who demand complete ownership, uncompromising speed, and verifiable safety:
-
-* 🚀 **Instant Boot**: Boots to an interactive frame in **5.9 ms** and outputs `--version` in **6.8 ms** (almost 3x faster than Codex).
-* 🪶 **Featherweight**: Consumes just **13.1 MB** of idle RSS in a single **19 MB** static binary with zero runtime dependencies.
-* 🛡️ **Safe by Default**: Sandboxed execution through unprivileged **Bubblewrap** (`bwrap`) with a read-only root, private `/tmp`, network namespace denial, dropped capabilities, and an approval prompt that defaults to **Deny**.
-* 🖥️ **Inline Terminal UI**: Custom Bubble Tea v2 inline viewport that commits finalized turns directly to your native terminal scrollback with `tea.Println`—no virtual scroll stutter, no UI thrashing.
-* 🔌 **Unblocked Extensibility**: Background parallel Model Context Protocol (MCP) startup, mtime-cached skills discovery (148x speedup), and `.agents/skills` compatibility.
-* 🧠 **Multi-Provider Engine**: Native streaming support for Anthropic Claude (`/messages`), OpenAI Responses API (`/v1/responses`), ChatCompletions, and local models (Ollama, vLLM) with automatic exponential backoff on 429/5xx and truncated stream recovery.
-* 💾 **Crash Resilience**: Atomic JSONL rollouts allow instant recovery from abrupt mid-turn termination (`kill -9`) with zero lost context.
-
----
-
 ## 📊 Performance Contracts: No Feelings, Just Measurements
 
 Measured on host (`AMD Ryzen 7 4800H`, `Linux WSL2`, `go1.27.1`) using the included PTY probe harness (`tools/ttff`) and `hyperfine 1.20.0`. Every number is real and stored in [`docs/PERF.md`](docs/PERF.md) and [`perf/budgets.toml`](perf/budgets.toml):
+<!-- claims: C7 C8 C9 -->
 
 | Tool / Agent | `--version` | TTFP (First Paint) | Input Ready | Idle Memory (2s) | Pre-Prompt Bytes | Binary Size |
 | :--- | ---:| ---:| ---:| ---:| ---:| ---:|
-| **Codex CLI** (`0.152.1`, Rust) | 20.0 ms | 23.4 ms | 23.4 ms | 21.7 MB | 88 B | 244 MB |
+| **Codex CLI** (`0.152.1`, Rust) | 20.2 ms | 17.6 ms | 170.7 ms* | 69.3 MB | 88 B | 244 MB |
 | **Google agy** (`1.3.1`, Go) | 19.3 ms | 778.5 ms | 778.5 ms | 225.5 MB | 7 B | 202 MB |
 | **Kimi Code** (`2.1.1`, TS/Node) | 188.4 ms | 1253.7 ms | 1253.7 ms | 391.6 MB | 7 B | 75 MB |
-| **NIKI** (`0.1.0`, Go) | **6.8 ms** | **5.9 ms** | **5.9 ms** | **13.1 MB** | **16 B** | **19 MB** |
+| **NikiCode** (`0.11.0`, Go) | **6.2 ms** | **5.4 ms** | **16.9 ms** | **16.1 MB** | **12 B** | **19.7 MB** |
 | *Contract Budget* | *≤ 20.0 ms* | *≤ 23.4 ms* | *≤ 23.4 ms* | *≤ 40.0 MB* | *minimized* | *< 25 MB* |
 
-> **Startup Victory**: NIKI boots to first frame **3.96x faster** than Codex, consumes **39% less memory**, and compiles to a binary **12.8x smaller**.
+> Medians, N=30, same machine (`nikicode bench`, raw in `docs/bench/raw/`). *Codex paints its header at 170.7ms but sits behind an update modal that blocks input; NikiCode RSS is 9.1MB with a real home (16.1MB fresh-home).
+
+> **Startup**: NikiCode prints `--version` **3.3x faster** than Codex, paints first bytes **3.3x faster** (content paint **10x faster**), uses **77% less idle RSS**, and ships a binary **12x smaller**. Full table with method and caveats: [`docs/BENCH.md`](docs/BENCH.md).
 
 ---
+
+
+## 🎬 Demo
+
+![NikiCode demo: version, plan preview, explain with citations, git log, doctor](demo.gif)
+
+Reproducible from [`docs/demo.tape`](docs/demo.tape) (`vhs docs/demo.tape`
+with `bin/nikicode` on `PATH`).
+
 
 ## 🚀 Quick Start
 
@@ -69,25 +71,48 @@ export OPENAI_API_KEY="sk-..."
 ```
 
 ### 2. Scaffold Your Project
-Initialize your workspace with an `AGENTS.md` instructions hierarchy and a `.niki/` directory:
+Initialize your workspace with an `AGENTS.md` instructions hierarchy:
 ```bash
-niki init
+nikicode init
 ```
 
 ### 3. Verify Health & Environment
 Run the built-in doctor command to check sandbox capabilities, provider credentials, and terminal state:
 ```bash
-niki doctor
+nikicode doctor
 ```
 
 ### 4. Start Pair Programming
 ```bash
-# Launch interactive inline TUI
-niki
+# Launch the interactive TUI
+nikicode
 
 # Or run non-interactive headless tasks
-niki exec "Audit the repo for open ports and write a summary to ports.md"
+nikicode exec "Audit the repo for open ports and write a summary to ports.md"
 ```
+
+---
+
+## Why NikiCode?
+
+Most modern coding agents are hundreds of megabytes of Node, Electron, or heavy runtimes that take seconds to boot, consume hundreds of megabytes of RAM just sitting idle, and execute unchecked commands directly on your workstation.
+
+**NikiCode is different.** It was built from the ground up for developers who demand complete ownership, uncompromising speed, and verifiable safety:
+
+* 🚀 **Instant Boot**: Boots to an interactive frame in **17 ms warm** and outputs `--version` in **6.2 ms** (3.3x faster than Codex, same machine, N=30).
+<!-- claims: C7 C8 -->
+* 🪶 **Featherweight**: Consumes just **9.1 MB** of idle RSS in a single **19.2 MB** static binary with zero runtime dependencies.
+<!-- claims: C9 -->
+* 🛡️ **Safe by Default**: Sandboxed execution through unprivileged **Bubblewrap** (`bwrap`) with a read-only root, private `/tmp`, network namespace denial, dropped capabilities, and an approval prompt that defaults to **Deny**.
+<!-- claims: C17 -->
+* 🖥️ **Inline Terminal UI**: Custom Bubble Tea inline viewport that commits finalized turns directly to your native terminal scrollback with `tea.Println`—no virtual scroll stutter, no UI thrashing.
+<!-- claims: C17 -->
+* 🔌 **Unblocked Extensibility**: Background parallel Model Context Protocol (MCP) startup, mtime-cached skills discovery (148x speedup), and `.agents/skills` compatibility.
+<!-- claims: C17 -->
+* 🧠 **Multi-Provider Engine**: Native streaming support for Anthropic Claude (`/messages`), OpenAI Responses API (`/v1/responses`), ChatCompletions, and local models (Ollama, vLLM) with automatic exponential backoff on 429/5xx and truncated stream recovery.
+<!-- claims: C17 -->
+* 💾 **Crash Resilience**: Atomic JSONL rollouts allow instant recovery from abrupt mid-turn termination (`kill -9`) with zero lost context.
+<!-- claims: C17 -->
 
 ---
 
@@ -115,16 +140,22 @@ Download pre-compiled static binaries directly from the [Releases](https://githu
 
 ```bash
 # Linux (amd64)
-curl -L https://github.com/RavaniRoshan/niki/releases/latest/download/niki_linux_amd64.tar.gz | tar -xz
-sudo mv niki /usr/local/bin/
+curl -L https://github.com/RavaniRoshan/niki/releases/latest/download/nikicode_linux_amd64.tar.gz | tar -xz
+sudo mv nikicode /usr/local/bin/nikicode
+sudo ln -sf nikicode /usr/local/bin/nc
+sudo ln -sf nikicode /usr/local/bin/niki
 
 # macOS (Apple Silicon arm64)
-curl -L https://github.com/RavaniRoshan/niki/releases/latest/download/niki_darwin_arm64.tar.gz | tar -xz
-sudo mv niki /usr/local/bin/
+curl -L https://github.com/RavaniRoshan/niki/releases/latest/download/nikicode_darwin_arm64.tar.gz | tar -xz
+sudo mv nikicode /usr/local/bin/nikicode
+sudo ln -sf nikicode /usr/local/bin/nc
+sudo ln -sf nikicode /usr/local/bin/niki
 
 # macOS (Intel amd64)
-curl -L https://github.com/RavaniRoshan/niki/releases/latest/download/niki_darwin_amd64.tar.gz | tar -xz
-sudo mv niki /usr/local/bin/
+curl -L https://github.com/RavaniRoshan/niki/releases/latest/download/nikicode_darwin_amd64.tar.gz | tar -xz
+sudo mv nikicode /usr/local/bin/nikicode
+sudo ln -sf nikicode /usr/local/bin/nc
+sudo ln -sf nikicode /usr/local/bin/niki
 ```
 
 ---
@@ -132,7 +163,7 @@ sudo mv niki /usr/local/bin/
 ### Option 2: Go Install
 If you have Go 1.24+ installed on your system:
 ```bash
-go install github.com/RavaniRoshan/niki/cmd/niki@latest
+go install github.com/RavaniRoshan/niki/cmd/nikicode@latest
 ```
 Ensure your `$GOPATH/bin` or `$HOME/go/bin` is in your `$PATH`.
 
@@ -143,15 +174,15 @@ Build a static, stripped binary in under 5 seconds:
 ```bash
 git clone https://github.com/RavaniRoshan/niki.git
 cd niki
-go build -ldflags="-s -w" -o bin/niki cmd/niki/main.go
-sudo cp bin/niki /usr/local/bin/niki
+go build -ldflags="-s -w" -o bin/nikicode ./cmd/nikicode
+make install  # installs nikicode + nc + niki (compat) to ~/.local/bin
 ```
 
 ---
 
 ## 🔒 Security & Sandbox by Default
 
-A coding model with arbitrary shell access is an inherent risk. NIKI implements defense-in-depth from day one:
+A coding model with arbitrary shell access is an inherent risk. NikiCode implements defense-in-depth from day one:
 
 ```
 [Untrusted Tool Request]
@@ -167,7 +198,7 @@ A coding model with arbitrary shell access is an inherent risk. NIKI implements 
                        │ Approved
                        ▼
 ┌───────────────────────────────────────────────┐
-│     Bubblewrap Sandbox (`niki sandbox-run`)   │
+│     Bubblewrap Sandbox (`nikicode sandbox-run`)   │
 │  - Read-only root filesystem (`/`)            │
 │  - Isolated private in-memory `/tmp`          │
 │  - Network namespace dropped (`--unshare-net`)│
@@ -178,7 +209,7 @@ A coding model with arbitrary shell access is an inherent risk. NIKI implements 
 
 * **Default Deny**: Interactive permission requests always focus **Deny** by default. Hitting `Esc` cancels immediately.
 * **Red-Team Verified**: Proven resistance against exfiltration traps (`README.md` curl payloads), symlink directory traversal escapes, and hostile package lifecycle scripts. Tested in [`internal/permissions/redteam_test.go`](internal/permissions/redteam_test.go).
-* **Project Trust Boundary**: Untrusted repositories cannot start MCP servers or execute hooks from local `.niki/config.toml` files unless explicitly declared in your global `trusted_projects` list.
+* **Project Trust Boundary**: Untrusted repositories cannot start MCP servers or execute hooks from a project `nikicode.toml` unless the project path is listed in `~/.nikicode/trusted_projects`.
 
 Read more in [`docs/SECURITY.md`](docs/SECURITY.md).
 
@@ -186,7 +217,7 @@ Read more in [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## 🛠️ Built-In Tool Suite
 
-NIKI ships with an uncompromised, zero-fluff set of core coding tools:
+NikiCode ships with an uncompromised, zero-fluff set of core coding tools:
 
 | Tool | Purpose | Safety Guarantees |
 | :--- | :--- | :--- |
@@ -202,7 +233,7 @@ NIKI ships with an uncompromised, zero-fluff set of core coding tools:
 
 ## ⌨️ Slash Commands & Terminal Controls
 
-Within the interactive inline TUI, control NIKI effortlessly:
+Within the interactive TUI, control NikiCode effortlessly:
 
 | Slash Command | Action |
 | :--- | :--- |
@@ -223,22 +254,21 @@ Within the interactive inline TUI, control NIKI effortlessly:
 
 ## ⚙️ Configuration & Profiles
 
-NIKI merges 6 hierarchical layers: `Defaults` → `~/.niki/config.toml` → `.niki/config.toml` → `[profiles.<name>]` → `Environment Variables` → `CLI Flags`.
+NikiCode merges layers (later wins): `Defaults` → global `~/.config/nikicode/nikicode.toml` → profile (API) → project `nikicode.toml` → `--config` file → environment → CLI flags. Legacy `niki` spellings are honored; see `CONFIG.md`.
 
 Inspect your effective configuration and see exactly where each setting originates:
 ```bash
-niki config show --sources
+nikicode config show --sources
 ```
 
-Example configuration (`~/.niki/config.toml`):
+Example configuration (global `~/.config/nikicode/nikicode.toml`):
 ```toml
 # Model settings
 model = "claude-3-5-sonnet"
 provider = "anthropic"            # "anthropic", "responses", "openai"
 
 # Performance
-disable_preconnect = false        # Warm TLS handshake in background
-boot_trace = false                # Write boot timeline to ~/.niki/log/boot-trace.log
+disable_preconnect = false        # Set true (or NIKICODE_NO_PRECONNECT=1) to skip the background DNS warm
 
 # Sandbox & Safety
 sandbox_backend = "bubblewrap"
@@ -246,7 +276,7 @@ deny_network = true
 writable_roots = ["."]
 trusted_projects = ["/home/user/projects/trusted"]
 
-# Profiles (switch via `niki --profile fast`)
+# Profiles (loadable via API; no --profile selector yet)
 [profiles.fast]
 model = "gpt-4o-mini"
 provider = "openai"
@@ -271,17 +301,36 @@ Read the full configuration guide in [`CONFIG.md`](CONFIG.md).
 ## 📖 Deep-Dive Documentation
 
 * 📐 [Architecture & Dependency Graph](docs/ARCHITECTURE.md) — Package DAG, acyclic invariants, and design principles.
+* ⚙️ [Configuration](CONFIG.md) — Layers, profiles, project trust, environment.
+* 🛠️ Routines: [`nikicode do`](docs/CLAIMS.md) (recipes in `internal/recipes/*.md`), [git workflows](docs/CLAIMS.md) (`nikicode git`), [code explanations](docs/CLAIMS.md) (`/explain`, `nikicode do "explain …"`).
+* 🤖 Subagents, plan mode, memory, MCP, and providers: [capability parity](docs/PARITY.md), [feature atlas](docs/FEATURE_ATLAS.md).
 * ⚡ [Performance Ledger](docs/PERF.md) — Inittrace audit, pprof analysis, runtime traces, and PGO benchstat data.
-* 🗺️ [Feature Atlas](docs/FEATURE_ATLAS.md) — Comprehensive feature comparison vs Codex, Kimi, pi, and Goose.
+* 🏁 [Benchmark Method & Table](docs/BENCH.md) — `nikicode bench` protocol, raw logs, per-metric verdicts.
 * 🛡️ [Security Posture](docs/SECURITY.md) — Bubblewrap sandbox model, trust boundaries, and red-team defenses.
 * 📜 [Third-Party & Attributions](THIRD_PARTY.md) — Dependency licenses, attributions, and clean-room provenance statement.
 * 🐶 [Dogfooding Journal](docs/DOGFOOD.md) — Real self-hosting sessions, bugs caught, and ergonomic friction logs.
+* ✅ [Claims Ledger](docs/CLAIMS.md) — Every user-facing claim with its proving probe.
+* 🏁 [Final Verdict](docs/VERDICT.md) — Positioning trace, speed verdict, what was not built.
+
+---
+
+## 📦 Packaging (out of scope, unbuilt)
+
+NikiCode is personal tooling, not a product. There is deliberately no
+distribution: no Homebrew formula, no website, no launch, no auto-update,
+no signing/notarization pipeline, and no release-channel QA. The
+`.goreleaser.yaml`, `install.sh` release-download path, and `release.yml`
+workflow exist from earlier scaffolding and are **dormant and unbuilt**:
+cutting a release would additionally need version stamping, checksums,
+signed artifacts, install-path conventions (`nc`/`niki` aliases), and a
+migration notice — none of that is done. Personal install is
+`make install` (local build + symlinks into `~/.local/bin`).
 
 ---
 
 ## 🤝 Philosophy & Clean-Room Commitment
 
-NIKI is dedicated to personal autonomy, performance, and transparency:
+NikiCode is dedicated to personal autonomy, performance, and transparency:
 1. **Rule of Proof**: "Works" means a real test or measurement ran and its output was verified.
 2. **Zero Proprietary Code**: No leaked, decompiled, or reconstructed proprietary source was ever accessed or copied.
 3. **Small and Boring**: Dependencies pass strict admission checks. Zero framework sprawl.

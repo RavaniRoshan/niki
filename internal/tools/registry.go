@@ -216,5 +216,13 @@ func DefaultRegistry() *Registry {
 	r.Register(NewWaitAgentTool(nil))
 	r.Register(NewCloseAgentTool(nil))
 	r.Register(NewResumeAgentTool(nil))
+	r.Register(NewGitStatusTool())
+	r.Register(NewGitCommitTool())
+	r.Register(NewGitBranchTool())
+	r.Register(NewGitRebaseTool())
+	r.Register(NewGitBlameTool())
+	r.Register(NewGitLogTool())
+	r.Register(NewGitReviewTool())
+	r.Register(NewGitChangelogTool())
 	return r
 }

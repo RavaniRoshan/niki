@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/RavaniRoshan/niki/internal/paths"
 	"sync"
 	"time"
 
@@ -52,11 +54,10 @@ type Manager struct {
 
 func NewManager(baseDir string) *Manager {
 	if baseDir == "" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			baseDir = filepath.Join(home, ".niki", "checkpoints")
+		if paths.Home() == "" {
+			baseDir = filepath.Join(os.TempDir(), "nikicode-checkpoints")
 		} else {
-			baseDir = filepath.Join(os.TempDir(), "niki-checkpoints")
+			baseDir = filepath.Join(paths.Dir(), "checkpoints")
 		}
 	}
 	_ = os.MkdirAll(baseDir, 0o700)

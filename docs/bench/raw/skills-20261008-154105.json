@@ -1,0 +1,30 @@
+{
+  "rows": [
+    {
+      "metric": "skills_discover",
+      "binary": "in-process",
+      "unit": "ms",
+      "n": 5,
+      "stats": {
+        "N": 5,
+        "Min": 1.36,
+        "Max": 3.673,
+        "Mean": 2.3094,
+        "P50": 1.64,
+        "P95": 3.335
+      },
+      "extra": {
+        "warm_p50_ms": 1.538
+      }
+    }
+  ],
+  "samples": {
+    "skills": [
+      3.673,
+      1.64,
+      3.335,
+      1.36,
+      1.539
+    ]
+  }
+}

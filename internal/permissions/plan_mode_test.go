@@ -26,6 +26,7 @@ func TestPlanModeWithholdingAndApproval(t *testing.T) {
 	for _, tool := range []string{
 		"read_file", "glob", "grep", "web_search", "web_fetch",
 		"view_image", "tool_search", "bash_output", "ask_user_question",
+		"git_status", "git_blame", "git_log", "git_review", "git_changelog",
 	} {
 		if !guard.Allow(tool) {
 			t.Fatalf("tool %q should be allowed in plan mode", tool)
@@ -37,6 +38,7 @@ func TestPlanModeWithholdingAndApproval(t *testing.T) {
 		"write_file", "edit_file", "apply_patch", "shell",
 		"notebook_edit", "exec_command", "write_stdin", "kill_shell",
 		"spawn_agent", "send_input", "close_agent", "resume_agent",
+		"git_commit", "git_branch", "git_rebase",
 	} {
 		if guard.Allow(tool) {
 			t.Fatalf("tool %q should be WITHHELD in plan mode", tool)

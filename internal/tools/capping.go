@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/RavaniRoshan/niki/internal/paths"
 	"strings"
 	"time"
 )
@@ -66,11 +68,10 @@ func CapOutput(toolName string, output string, sessionDir string) (string, bool)
 
 	outDir := sessionDir
 	if outDir == "" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			outDir = filepath.Join(home, ".niki", "cache", "tool-results")
+		if paths.Home() == "" {
+			outDir = filepath.Join(os.TempDir(), "nikicode-tool-results")
 		} else {
-			outDir = filepath.Join(os.TempDir(), "niki-tool-results")
+			outDir = filepath.Join(paths.Dir(), "cache", "tool-results")
 		}
 	} else {
 		outDir = filepath.Join(outDir, "tool-results")

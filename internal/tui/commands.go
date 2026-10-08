@@ -21,13 +21,36 @@ var CoreSlashCommands = []CommandDef{
 	{Name: "/plan", Description: "Toggle read-only plan mode exploration"},
 	{Name: "/rewind", Description: "Rewind code files or conversation to a checkpoint"},
 	{Name: "/agents", Description: "View active subagents and hierarchy"},
+	{Name: "/explain", Description: "Explain code with file:line citations (/explain <symbol|file|question>)"},
 	{Name: "/palette", Description: "Command palette to search all commands and actions"},
 	{Name: "/cost", Description: "Show session token usage and accumulated cost"},
 	{Name: "/theme", Description: "Switch color theme (default, dark, light, monochrome)"},
 	{Name: "/doctor", Description: "Check system health and environment"},
 	{Name: "/reload", Description: "Reload config without restart"},
 	{Name: "/debug", Description: "Toggle debug telemetry overlay"},
-	{Name: "/quit", Description: "Exit Niki"},
+	{Name: "/quit", Description: "Exit NikiCode"},
+}
+
+// SurfaceClaims maps slash commands to CLAIMS.md rows for claimcheck:
+// /explain proves C4; the rest are foundation capabilities (C17).
+func SurfaceClaims() map[string]string {
+	return map[string]string{"/explain": "C4"}
+}
+
+// SurfaceStrings lists TUI user-facing strings with claim tags.
+func SurfaceStrings() []string {
+	claims := SurfaceClaims()
+	var out []string
+	for _, c := range CoreSlashCommands {
+		tag, ok := claims[c.Name]
+		if !ok {
+			tag = "C17"
+		}
+		out = append(out, "slash:"+c.Name+" | "+c.Description+" ["+tag+"]")
+	}
+	out = append(out, "tui:brand | "+BrandLine()+" [C1]")
+	out = append(out, "tui:wordmark-tag | personal coding agent [C1]")
+	return out
 }
 
 // SuggestSlashCommands filters CoreSlashCommands based on user prefix.

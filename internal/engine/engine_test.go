@@ -117,7 +117,7 @@ func TestUsageEventEmitted(t *testing.T) {
 // the config file on disk are unchanged after
 // the turn.
 func TestAdversarialStreamCannotMutatePolicy(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "niki.toml")
+	cfgPath := filepath.Join(t.TempDir(), "nikicode.toml")
 	original := []byte("[provider]\nname = \"mock\"\n\n[permissions]\nmode = \"readonly\"\n\n[sandbox]\nenabled = false\n")
 	if err := os.WriteFile(cfgPath, original, 0o600); err != nil {
 		t.Fatal(err)

@@ -99,7 +99,7 @@ func TestMCPServer(t *testing.T) {
 		ID:      4,
 		Method:  "resources/list",
 	})
-	if !strings.Contains(string(resListResp.Result), "niki://config") {
+	if !strings.Contains(string(resListResp.Result), "nikicode://config") {
 		t.Errorf("resources/list unexpected: %s", string(resListResp.Result))
 	}
 
@@ -107,9 +107,9 @@ func TestMCPServer(t *testing.T) {
 		JSONRPC: "2.0",
 		ID:      5,
 		Method:  "resources/read",
-		Params:  map[string]any{"uri": "niki://config"},
+		Params:  map[string]any{"uri": "nikicode://config"},
 	})
-	if !strings.Contains(string(resReadResp.Result), "niki configuration resource text") {
+	if !strings.Contains(string(resReadResp.Result), "nikicode configuration resource text") {
 		t.Errorf("resources/read unexpected: %s", string(resReadResp.Result))
 	}
 

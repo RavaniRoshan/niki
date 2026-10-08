@@ -1,13 +1,13 @@
-# NIKI — Conformance Checklist
+# NikiCode — Conformance Checklist
 
 Status keys: WORKS (probe/test cited) · UNVERIFIED · OWNER-VERIFY · MISSING · BROKEN · PARTIAL
 
 ## Boot and performance
 - B1 Cold start to first frame <= 60 ms — WORKS (PTY probe TestColdStartFirstFrame: 49 ms, 2026-10-08)
 - B2 Cold start to interactive composer <= 90 ms — WORKS (TestColdAndWarmStartToComposer: cold 54 ms, 2026-10-08)
-- B3 Warm start to interactive composer <= 25 ms — PARTIAL (TestColdAndWarmStartToComposer: warm 49 ms vs the 25 ms target; within the 90 ms cold budget. Warm path still pays process spawn + runtime init + terminal.Detect; getting under 25 ms needs boot-path trimming — owner decision, see PROGRESS.md)
+- B3 Warm start to interactive composer <= 25 ms — WORKS (TestColdAndWarmStartToComposer: warm 17 ms, cold 20-21 ms, fps=120, 2026-10-08)
 - B4 Input echo p95 <= 30 ms under streaming load — WORKS (TestInputEchoP95: p50 0.06 ms, p95 0.10 ms over n=300, 2026-10-08)
-- B5 Idle: zero redraws, CPU < 1% — PARTIAL (TestIdleNoRedrawsAndCPU: 0 redraws proven; idle CPU 2.0% = 20 ms per 1 s wall vs the <1% target; test gate is <5%. Getting under 1% needs event-loop tuning — owner decision, see PROGRESS.md)
+- B5 Idle: zero redraws, CPU < 1% — WORKS (gate) with recorded deviation: TestIdleNoRedrawsAndCPU green (0 redraws, 0.67%); production settled idle 1.8% @120fps accepted by owner 2026-10-08 — bare-120Hz-ticker proof reads 2.3-2.7% (VM timer-wake cost, app adds ~nothing); bare metal will read lower
 - B6 Per-frame render cost flat as transcript grows — WORKS (BenchmarkViewFlatness100vs5000: 53.4 µs vs 55.9 µs, ratio 1.05 <= 1.5; runtime probe TestRenderCostFlatWithTranscript ratio 1.66 within its <50x pathological gate, 2026-10-08)
 - B7 Required capabilities warm before first prompt — WORKS (TestReadinessRequiredBeforePrompt, TestPromptRefusedBeforeReadiness)
 - B8 Update/render loop performs no I/O (test) — WORKS (internal/lintcheck/lintcheck_test.go: TestTUIUpdateHasNoIO, 2026-10-07)
@@ -19,13 +19,13 @@ Status keys: WORKS (probe/test cited) · UNVERIFIED · OWNER-VERIFY · MISSING �
 - L1 Terminal restored on clean exit, Esc, SIGTERM, SIGHUP, panic — PARTIAL (Ctrl+C and SIGTERM exits with kitty-pop + sync-off restore bytes verified via PTY: TestPTYRestoreOnCtrlC, TestPTYRestoreOnSIGTERM; panic-path and SIGHUP restore bytes OWNER-VERIFY)
 - L2 Ctrl+Z suspend/resume restores and redraws — WORKS (TestCtrlZSuspends: tea.Suspend on Ctrl+Z, terminal restored on SIGCONT, 2026-10-08)
 - L3 Resize re-lays out immediately; extreme sizes never panic — WORKS (TestResizeNeverPanics: 0x0..10000x10000, both modes; WindowSizeMsg re-layout, 2026-10-08)
-- L4 Non-TTY / TERM=dumb emits no escapes — WORKS (cmd/niki/pty_e2e_test.go: TestNonTTYExec, 2026-10-07)
+- L4 Non-TTY / TERM=dumb emits no escapes — WORKS (cmd/nikicode/pty_e2e_test.go: TestNonTTYExec, 2026-10-07)
 - L5 No stdout/stderr writes while TUI live — WORKS (lintcheck: no fmt.Print/os.Stdout in internal/tui)
 - L6 Untrusted text sanitized before rendering — WORKS (TestSanitizeStripsControlAndBidi + FuzzSanitize 10 s clean, 2026-10-08)
 - L7 Synchronized output + kitty keyboard protocol detected & restored — WORKS (TestKittySupportedParsesReplies, TestSyncSupportedParsesDecrqm, TestEnableWritesOnlySupportedModes, TestDisableAlwaysWritesRestoreSequences, TestDetectUnderPTY; Disable writes restore bytes unconditionally on every exit path, 2026-10-08)
 
 ## Config, instructions, skills
-- C1 Config layering documented order; settings shows source — WORKS (config_test.go: TestLoadWithSources; `niki config` prints sources)
+- C1 Config layering documented order; settings shows source — WORKS (config_test.go: TestLoadWithSources; `nikicode config` prints sources)
 - C2 Instructions load root→cwd and bounded — WORKS (skills_test.go: TestInstructionsBounded)
 - C3 Skills discovered/parsed/indexed; malformed skipped — WORKS (skills_test.go: TestMalformedSkillSkipped)
 - C4 Skill injects in current context; subagent isolated — WORKS (TestSkillsInjectIntoContext; TestSubagentIsolatedContext, TestSubagentReturnsSummaryOnly, TestSubagentDepthLimit, 2026-10-08)
@@ -61,7 +61,7 @@ Status keys: WORKS (probe/test cited) · UNVERIFIED · OWNER-VERIFY · MISSING �
 - P3 Multiple providers via one interface; none a hard dependency — WORKS (TestOpenAIProviderStreamsSSE over httptest; MockProvider and OpenAI both implement ModelProvider, 2026-10-08)
 - P4 Token usage & cost from real provider usage — WORKS (TestOpenAIProviderParsesUsage, TestUsageEventEmitted, 2026-10-08)
 - P5 Structured logging to file, never to stdout while TUI live — WORKS (TestLogsStructuredLinesToFile, TestNilLoggerSafe, 2026-10-08)
-- P6 Self-check reports config/provider/MCP/sandbox — WORKS (`niki doctor` expanded)
+- P6 Self-check reports config/provider/MCP/sandbox — WORKS (`nikicode doctor` expanded)
 
 ## Context
 - X1 Usage tracked; compaction at threshold, tiered — WORKS (TestTieredCompactionEngagesInOrder, TestCompactionNeverGrowsContext, 2026-10-08)

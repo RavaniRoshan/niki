@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/RavaniRoshan/niki/internal/paths"
 	"regexp"
 	"sort"
 	"strings"
@@ -39,11 +41,10 @@ type Store struct {
 
 func NewStore(baseDir string) (*Store, error) {
 	if baseDir == "" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			baseDir = filepath.Join(home, ".niki", "memory")
+		if paths.Home() == "" {
+			baseDir = filepath.Join(os.TempDir(), "nikicode-memory")
 		} else {
-			baseDir = filepath.Join(os.TempDir(), "niki-memory")
+			baseDir = filepath.Join(paths.Dir(), "memory")
 		}
 	}
 	topicDir := filepath.Join(baseDir, "topics")

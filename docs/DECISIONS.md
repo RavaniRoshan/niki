@@ -1,4 +1,4 @@
-# NIKI — Decisions (Phase 0)
+# NikiCode — Decisions (Phase 0)
 
 Recorded per `<decisions>`. These are the recommended defaults; say the word
 if any should change before P1.

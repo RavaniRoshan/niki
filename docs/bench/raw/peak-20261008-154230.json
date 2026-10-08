@@ -1,0 +1,30 @@
+{
+  "rows": [
+    {
+      "metric": "peak_rss",
+      "binary": "./bin/nikicode",
+      "unit": "MB",
+      "n": 5,
+      "stats": {
+        "N": 5,
+        "Min": 0,
+        "Max": 0,
+        "Mean": 0,
+        "P50": 0,
+        "P95": 0
+      },
+      "extra": {
+        "exec_wall_p50_ms": 11.518
+      }
+    }
+  ],
+  "samples": {
+    "peak": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+}

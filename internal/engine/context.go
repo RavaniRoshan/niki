@@ -51,7 +51,7 @@ type ContextAssembler struct {
 
 func NewContextAssembler() *ContextAssembler {
 	return &ContextAssembler{
-		Messages:   []provider.Message{{Role: "system", Content: "You are Niki, a fast local AI coding agent."}},
+		Messages:   []provider.Message{{Role: "system", Content: "You are NikiCode, a fast local personal coding agent."}},
 		TokenLimit: defaultContextLimit,
 	}
 }

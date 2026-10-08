@@ -94,7 +94,7 @@ func (s *Server) handleRequest(req Request) *Response {
 				"prompts":   map[string]any{},
 			},
 			"serverInfo": map[string]any{
-				"name":    "niki",
+				"name":    "nikicode",
 				"version": "0.1.0",
 			},
 		})
@@ -150,9 +150,9 @@ func (s *Server) handleRequest(req Request) *Response {
 		result, _ := json.Marshal(map[string]any{
 			"resources": []map[string]any{
 				{
-					"uri":         "niki://config",
-					"name":        "Niki Configuration",
-					"description": "Current effective configuration of Niki harness",
+					"uri":         "nikicode://config",
+					"name":        "NikiCode configuration",
+					"description": "Current effective configuration of the NikiCode harness",
 					"mimeType":    "text/plain",
 				},
 			},
@@ -169,7 +169,7 @@ func (s *Server) handleRequest(req Request) *Response {
 			"contents": []map[string]any{
 				{
 					"uri":  params.URI,
-					"text": "niki configuration resource text",
+					"text": "nikicode configuration resource text",
 				},
 			},
 		})

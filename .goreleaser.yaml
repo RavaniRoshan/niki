@@ -1,9 +1,9 @@
 version: 2
-project_name: niki
+project_name: nikicode
 builds:
-  - id: niki
-    main: ./cmd/niki
-    binary: niki
+  - id: nikicode
+    main: ./cmd/nikicode
+    binary: nikicode
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     ldflags:

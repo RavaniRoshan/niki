@@ -269,7 +269,7 @@ func TestPermissionGateDeniesTool(t *testing.T) {
 	// Script a provider turn that attempts a write via shell.
 	prov := &scriptedProvider{
 		deltas: []provider.Delta{
-			{Kind: provider.DeltaToolCall, ToolName: "shell", ToolArgs: `{"command":"touch /tmp/niki-should-not-exist"}`},
+			{Kind: provider.DeltaToolCall, ToolName: "shell", ToolArgs: `{"command":"touch /tmp/nikicode-should-not-exist"}`},
 			{Kind: provider.DeltaDone},
 		},
 	}

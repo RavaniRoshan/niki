@@ -1,4 +1,4 @@
-# NIKI Performance Ledger & Contract
+# NikiCode Performance Ledger & Contract
 
 Measured on host:
 - **OS**: Linux 6.6.87.2-microsoft-standard-WSL2 (x86_64)
@@ -17,21 +17,21 @@ All measurements were taken using `tools/ttff` (running inside a pseudo-terminal
 | **Codex CLI** (`0.152.1`, Rust) | 20.0 ms | 23.4 ms | 23.4 ms | 21.7 MB | 88 B | 244 MB | 0 |
 | **Google agy** (`1.3.1`, Go) | 19.3 ms | 778.5 ms | 778.5 ms | 225.5 MB | 7 B | 202 MB | 0 |
 | **Kimi Code** (`2.1.1`, TS/Node) | 188.4 ms | 1253.7 ms | 1253.7 ms | 391.6 MB | 7 B | 75 MB | 0 |
-| **NIKI** (`0.1.0`, Go) | **6.8 ms** | **5.9 ms** | **5.9 ms** | **13.1 MB** | **16 B** | **19 MB** | **0** |
+| **NikiCode** (`0.11.0`, Go) | **6.5 ms** | **6.3 ms** | **6.3 ms** | **9.1 MB** | **12 B** | **19.2 MB** | **0** |
 | *Budget / Aspiration* | *≤ 20.0 ms* | *≤ 23.4 ms* | *≤ 23.4 ms* | *≤ 40.0 MB* | *minimized* | *< 25 MB* | *0* |
 
-### Relative Comparison
-- **`--version`**: NIKI (6.8 ms) is **2.93x faster** than Codex (20.0 ms).
-- **Time to First Paint (TTFP)**: NIKI (5.9 ms) is **3.96x faster** than Codex (23.4 ms).
-- **Time to Input-Ready**: NIKI (5.9 ms) is **3.96x faster** than Codex (23.4 ms).
-- **Idle Memory (RSS)**: NIKI (13.1 MB) consumes **39% less memory** than Codex (21.7 MB) and 94% less than agy (225.5 MB).
-- **Binary Footprint**: NIKI (19 MB) is **12.8x smaller** than Codex (244 MB) and comfortably under the 25 MB budget.
+### Relative Comparison (G1 re-measured 2026-10-08)
+- **`--version`**: NikiCode (6.5 ms) is **3.1x faster** than Codex (20.0 ms).
+- **Time to First Paint (TTFP)**: NikiCode (6.3 ms) is **3.7x faster** than Codex (23.4 ms). Note: `ttff` stamps the first terminal bytes (capability queries); the first rendered frame is 17 ms warm / 20-21 ms cold per the PTY test.
+- **Time to Input-Ready**: NikiCode (6.3 ms) is **3.7x faster** than Codex (23.4 ms).
+- **Idle Memory (RSS)**: NikiCode (9.1 MB) consumes **58% less memory** than Codex (21.7 MB) and 96% less than agy (225.5 MB).
+- **Binary Footprint**: NikiCode (19.2 MB) is **12.7x smaller** than Codex (244 MB) and comfortably under the 25 MB budget.
 
 ---
 
 ## 2. Inittrace Audit (`GODEBUG=inittrace=1`)
 
-Executed `./bin/niki --version` with package init tracing:
+Executed `./bin/nikicode --version` with package init tracing:
 - Total package clock time across all imported packages: **< 1.5 ms**.
 - Top package init times:
   - `modernc.org/libc`: 0.27 ms clock
@@ -45,17 +45,31 @@ Executed `./bin/niki --version` with package init tracing:
 
 ## 3. Boot Timeline Traces (`NIKI_BOOT_TRACE=1`)
 
-Timeline trace written to `~/.niki/log/boot-trace.log` on startup:
+Marks close spans (each row = the phase that just completed). Timeline
+trace written to `~/.nikicode/log/boot-trace.log` on startup (fresh HOME,
+query-answering PTY, 2026-10-08, fps=120):
 ```
 task          start_ms    end_ms    duration_ms
-main          0.1         0.2       0.1
-config        0.2         0.2       0.0
-registry      0.2         0.2       0.0
-preconnect    0.2         4.0       3.8
+boot          0.0         0.2       0.2
+config        0.2         0.3       0.0
+registry      0.3         1.2       0.9
+startup       1.2         2.0       0.8
+detect        2.0         2.0       0.0
+program       2.0         2.0       0.1
 ```
-- Critical path to first paint executes in under 6 ms.
-- Background tasks (session store, preconnect, MCP) run asynchronously without blocking the first frame.
-- Opt-out via `NIKI_NO_PRECONNECT=1` or `disable_preconnect = true` cleanly suppresses preconnect.
+- Main-thread work to program start: ~2 ms. Session store (SQLite init,
+  ~19-20 ms) opens in the background with an ordered pending-event buffer;
+  provider DNS warms in the background (resolve only, no connections).
+- First frame: cold 20-21 ms, warm 17 ms (PTY test, answering terminal).
+  bubbletea v1 flushes only on renderer ticks, so fps=120 bounds first
+  paint to ~8 ms after program start; Detect budget is 25 ms.
+- Idle (settled 3 s window): 0 redraws, 0 bytes written, 1.8% CPU @120fps.
+  A bare 120 Hz Go ticker with an empty body reads 2.3-2.7% on this
+  WSL2 VM (timer-wake cost; pure-`sleep` reads 0.00%), so the renderer
+  tick — not application work — dominates idle CPU. Accepted deviation
+  (owner 2026-10-08); bare metal will read lower.
+- Opt-outs: `NIKI_NO_PRECONNECT=1` or `disable_preconnect = true` skips
+  the DNS warm.
 
 ---
 
