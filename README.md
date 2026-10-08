@@ -55,10 +55,11 @@ Measured on host (`AMD Ryzen 7 4800H`, `Linux WSL2`, `go1.27.1`) using the inclu
 
 ## 🎬 Demo
 
-![NikiCode demo: version, plan preview, explain with citations, git log, doctor](demo.gif)
+![NikiCode demo: version, plan preview, live TUI turn, explain with citations, git log, doctor](demo.gif)
 
 Reproducible from [`docs/demo.tape`](docs/demo.tape) (`vhs docs/demo.tape`
-with `bin/nikicode` on `PATH`).
+with `bin/nikicode` on `PATH`). Everything shown is the real binary on
+the mock provider — including the interactive TUI turn — not a mockup.
 
 
 ## 🚀 Quick Start
