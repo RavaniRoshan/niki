@@ -54,3 +54,25 @@ func TestComposerSuggestions(t *testing.T) {
 		t.Fatalf("unexpected suggestions: %v", got)
 	}
 }
+
+func TestSlashCommandsIntercepted(t *testing.T) {
+	cmdChan := make(chan protocol.EngineCommand, 8)
+	eventChan := make(chan protocol.EngineEvent, 8)
+	m := NewAppModel(cmdChan, eventChan)
+
+	// Test /model
+	m.composer.Input.SetValue("/model")
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = m2.(AppModel)
+	if len(m.history.Cells) == 0 || m.history.Cells[len(m.history.Cells)-1].Role != "system" {
+		t.Fatal("expected /model to append system cell")
+	}
+
+	// Test /doctor
+	m.composer.Input.SetValue("/doctor")
+	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = m2.(AppModel)
+	if len(m.history.Cells) < 2 || m.history.Cells[len(m.history.Cells)-1].Role != "system" {
+		t.Fatal("expected /doctor to append system cell")
+	}
+}
