@@ -166,7 +166,8 @@ approved as written in DESIGN.md §3.
   15s clean; tui benchmarks compile+run; govulncheck UNRUNNABLE offline
   (OWNER-VERIFY with network). No test weakened (reviewed each rename);
   no placeholders; no panics in prod paths.
-- Commit once at end (owner decision); C12 clean-clone install after.
+- Committed 106827d (once at end). C12 proven on clean local clone.
+  Tree clean.
 
 ## 2026-10-08 — G5 daily-driver trust DONE
 - `nikicode soak` (internal/soak + CLI): 200 mock turns with direct
