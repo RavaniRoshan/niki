@@ -50,11 +50,112 @@ approved as written in DESIGN.md §3.
   runs concurrently only when all calls safe (cap 10), else sequentially in
   call order (A2, test).
 
+## 2026-10-08 — Phases 5–7: runtime, MCP, TUI lifecycle, perf contract
+- Engine readiness matrix (B7): required capabilities (terminal,
+  engine, model) warm before the first prompt; a prompt submitted
+  early is refused with the missing list (TestReadinessRequired-
+  BeforePrompt, TestPromptRefusedBeforeReadiness). Optional
+  capabilities (skills, MCP) warm in the background and never
+  block readiness.
+- Engine turns run on their own goroutine; Esc interrupt keeps
+  partial output (TestInterruptKeepsPartialOutput); permission
+  gate denies with focus on the safest option (TestPermissionGate-
+  DeniesTool); single read-only turn streams end to end with typed
+  events (TestReadOnlyTurnEndToEnd, TestEngineEchoTurn).
+- Context (X1/X3): tiered compaction engages in order, never grows
+  context, preserves needed evidence (TestTieredCompactionEngages-
+  InOrder, TestCompactionNeverGrowsContext, TestCompactionPreserves-
+  Evidence). Circuit breaker already proven (X2).
+- Subagents (goal 3.1): isolated context, summary-only return to
+  the parent, depth limit (TestSubagentIsolatedContext,
+  TestSubagentReturnsSummaryOnly, TestSubagentDepthLimit).
+- Sessions (P1): fork works (TestForkSession); delete and append-
+  across-reopens covered (TestDeleteSession, TestAppendAcross-
+  Reopens).
+- MCP manager (M1–M5): one client per server, sanitized qualified
+  names with raw identity preserved, required servers eager,
+  optional lazy-when-cached (cached tools served with zero
+  connection wait; live tools/list refreshes the persisted catalog
+  in the background), truthful per-server status, fail-closed
+  routing, output sanitized as untrusted. Tests: TestManagerOne-
+  ClientPerServer, TestQualifySanitizesNames, TestManagerEager-
+  Required, TestManagerOptionalLazyWhenCached, TestManagerFailed-
+  RequiredSurfaced, TestManagerOutputSanitized, TestManagerFail-
+  ClosedRouting, TestCatalogCacheRoundTrip.
+- TUI: inline viewport split — finalized history lands in native
+  scrollback while the live region streams without re-rendering
+  committed history (TestLiveRegionSplit, TestInlineFlushOnTurnEnd);
+  transcript, composer, footer, commands and motion render from
+  real events only (TestTranscriptRendersFromRealEvents,
+  TestActivityLineFromEvents, TestComposerOnlyBorderedElement,
+  TestInlineHeaderScrollsAway); debug view shows boot-phase
+  timings and frame telemetry (TestDebugViewTelemetry).
+- Terminal lifecycle: terminal.Detect negotiates synchronized
+  output (DECRQM 2026) and the kitty keyboard protocol with a
+  bounded poll(2) wait — no leaked reader goroutine (a leaked
+  reader would steal bubbletea's keystrokes); restore sequences
+  written unconditionally on every exit path (L7, terminal tests
+  + TestDetectUnderPTY). Ctrl+Z returns tea.Suspend (L2,
+  TestCtrlZSuspends); resize safe 0x0..10000x10000 in both modes
+  (L3, TestResizeNeverPanics); NO_COLOR honored (TestNoColor-
+  StripsColor).
+- Skills inject into the runtime context (C4, TestSkillsInject-
+  IntoContext); config reloads without a restart — /reload swaps
+  provider and permission mode between turns, a failed reload
+  surfaces its error and keeps the current config, a reload
+  requested mid-turn is deferred (C5, TestConfigReloadsWithout-
+  Restart, TestConfigReloadFailedSurfacesError, TestConfigReload-
+  DeferredDuringTurn).
+- Providers (P3/P4): OpenAI provider streams SSE over httptest,
+  sends the auth header, parses usage, backs off on server errors
+  (TestOpenAIProviderStreamsSSE, TestOpenAIProviderSendsAuthHeader,
+  TestOpenAIProviderParsesUsage, TestOpenAIProviderBacksOffOnServer-
+  Error, TestOpenAIProviderSurfacesPersistentServerError).
+- Observability (P5): structured JSON-lines logger to file,
+  nil-logger safe, never stdout while the TUI is live
+  (TestLogsStructuredLinesToFile, TestNilLoggerSafe).
+- Race fixes found by the full -race run: MCP Client.state and
+  the manager's per-server entry fields (err/tools/cached) are now
+  mutex-guarded on every write; the engine's emit() drops events
+  after Run() closes the event channel instead of panicking on a
+  send to a closed channel (turn goroutines can outlive the loop).
+- Removed lint-flagged dead code: Readiness.toEvents and
+  Manager.nextCall.
+- Full gates, all green 2026-10-08:
+  go test ./... -race -count=1 (17 packages), go vet ./...,
+  golangci-lint run (0 issues), FuzzSanitize / FuzzAnalyzeShell /
+  FuzzParseSkill (10 s each), golden frame dumps at 50x16/80x24/
+  120x38/160x45, PTY e2e (NIKI_PTY_TESTS=1: 6 tests), benchmarks.
+- Measured vs the DESIGN.md §8 contract:
+  cold start → first frame 49 ms (≤60 ms) ✓; cold start →
+  interactive composer 54 ms (≤90 ms) ✓; input echo p50 0.06 ms /
+  p95 0.10 ms over n=300 (≤30 ms) ✓; idle 0 redraws ✓ but CPU
+  2.0% = 20 ms per 1 s (target <1%) ✗; render 53.4 µs @100 cells
+  vs 55.9 µs @5000 cells, ratio 1.05 (≤1.5) ✓; 2000-iteration
+  echo loop: heap 554 KB → 2941 KB, 18 GC cycles, max GC pause
+  0.45 ms (budget 16 ms) ✓; stream burst 51 deltas → 1 repaint ✓.
+- Two honest misses vs DESIGN.md §8 (owner decisions):
+  1. Warm start → composer measured 49 ms vs the ≤25 ms target.
+     The warm path still pays process spawn, Go runtime init and
+     terminal.Detect. Options: accept 49 ms (it sits well inside
+     the 90 ms cold budget), or fund boot-path trimming (lazy
+     skills index, shorter detect timeout on fast-reply terminals).
+     Consequence of accepting: the documented 25 ms target is
+     missed; nothing else degrades.
+  2. Idle CPU measured 2.0% vs the <1% target (0 redraws proven;
+     the event loop and renderer goroutine still tick). Options:
+     accept 2.0% (test gate is <5%), or tune the idle path
+     (deeper event-loop sleep, renderer goroutine parking).
+     Consequence of accepting: battery-sensitive hosts see a small
+     constant drain while Niki is open.
+
 ## State
-Phases 1–3 partial; Phase 4 partial (A6 approval prompt, A5 full-output-to-disk,
-A4 schema validation, A3 verified via PTY only). Remaining goals (P5 MCP live,
-P7 taste review, P9 sessions crash-safety proof, perf benchmarks, debug view)
-are UNVERIFIED. See CHECKLIST.md.
+Phases 1–7 complete. All checklist rows WORKS except the two
+measured misses above (B3, B5 PARTIAL), L1/S4 PARTIAL
+(panic-path and SIGHUP restore bytes, real sandbox backends:
+OWNER-VERIFY), and S1/S3/U8/A8 (real OS sandbox isolation,
+disposable-env cleanup on panic, reduced motion, policy-input
+hardening proof) UNVERIFIED. See CHECKLIST.md.
 
 ## 2026-10-07 — Extended pass
 - Full output bounding: shell tool >4KB persists to temp file with truncation

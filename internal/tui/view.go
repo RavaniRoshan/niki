@@ -1,9 +1,11 @@
 package tui
 
-// RenderHistory renders transcript cells into a single string.
-func (m AppModel) RenderHistory() string {
+// renderCells renders transcript cells into a
+// single string. Text is sanitized before it
+// reaches the terminal (L6).
+func renderCells(m AppModel, cells []HistoryCell) string {
 	var out string
-	for _, c := range m.history.Cells {
+	for _, c := range cells {
 		c.Text = Sanitize(c.Text)
 		switch c.Role {
 		case "user":
@@ -19,4 +21,12 @@ func (m AppModel) RenderHistory() string {
 		}
 	}
 	return out
+}
+
+// RenderHistory renders the full transcript
+// (committed + live). The inline view uses
+// renderCells over the live region only so
+// committed history is never re-rendered (U9).
+func (m AppModel) RenderHistory() string {
+	return renderCells(m, m.history.Cells)
 }

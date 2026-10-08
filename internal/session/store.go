@@ -57,8 +57,12 @@ func (s *Store) AppendEvent(sessionID protocol.SessionId, evt protocol.EngineEve
 	if err != nil {
 		return err
 	}
-	_, err = s.log.Write(append(payload, '\n'))
-	return err
+	if _, err := s.log.Write(append(payload, '\n')); err != nil {
+		return err
+	}
+	// fsync every append so a crash cannot corrupt or
+	// lose committed history (P2).
+	return s.log.Sync()
 }
 
 func (s *Store) ListSessions() ([]string, error) {
@@ -91,4 +95,33 @@ func (s *Store) Events(sessionID protocol.SessionId) ([]protocol.EngineEvent, er
 		evts = append(evts, e)
 	}
 	return evts, nil
+}
+
+// Fork creates a new session seeded with the events of
+// an existing one. The fork gets a fresh id and its own
+// event log; the source session is untouched.
+func (s *Store) Fork(srcID protocol.SessionId, title string) (protocol.SessionId, error) {
+	evts, err := s.Events(srcID)
+	if err != nil {
+		return "", err
+	}
+	newID := protocol.NewSessionId()
+	if err := s.CreateSession(newID, title); err != nil {
+		return "", err
+	}
+	for _, e := range evts {
+		if err := s.AppendEvent(newID, e); err != nil {
+			return "", err
+		}
+	}
+	return newID, nil
+}
+
+// Delete removes a session and its events.
+func (s *Store) Delete(sessionID protocol.SessionId) error {
+	if _, err := s.db.Exec(`DELETE FROM events WHERE session_id = ?`, string(sessionID)); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE id = ?`, string(sessionID))
+	return err
 }

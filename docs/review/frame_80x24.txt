@@ -1,22 +1,9 @@
-Niki  Local Coding Agent                                                        
-You: hello                                                                      
-                                                                                
-Niki: hi there                                                                  
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-> Type a prompt or task...                                                      
+Niki  Local Coding Agent                                                          
+                                                                                  
+You: hello                                                                        
+                                                                                  
+Niki: hi there                                                                    
+                                                                                  
+┌────────────────────────────────────────────────────────────────────────────────┐
+│> Type a prompt or task...                                                      │
+└────────────────────────────────────────────────────────────────────────────────┘

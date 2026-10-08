@@ -24,7 +24,16 @@ type Client struct {
 	stdout *bufio.Reader
 	pending map[int64]chan *Response
 	nextID atomic.Int64
-	state   State
+	state  State
+}
+
+// setState records a state transition. The state
+// is read from other goroutines (status polls), so
+// every transition is guarded by mu.
+func (c *Client) setState(s State) {
+	c.mu.Lock()
+	c.state = s
+	c.mu.Unlock()
 }
 
 type State string
@@ -57,22 +66,29 @@ func NewClient(name, command string, args ...string) *Client {
 }
 
 // Start spawns the server and runs the initialize handshake.
+// The server process lives until Stop(): the ctx passed
+// here bounds only the handshake, so callers may cancel
+// it once Start returns without killing the server.
 func (c *Client) Start(ctx context.Context) error {
-	c.cmd = exec.CommandContext(ctx, c.Command, c.Args...)
+	c.mu.Lock()
+	c.cmd = exec.CommandContext(context.Background(), c.Command, c.Args...)
 	var err error
 	c.stdin, err = c.cmd.StdinPipe()
 	if err != nil {
 		c.state = StateFailed
+		c.mu.Unlock()
 		return err
 	}
 	stdout, err := c.cmd.StdoutPipe()
 	if err != nil {
 		c.state = StateFailed
+		c.mu.Unlock()
 		return err
 	}
 	c.stdout = bufio.NewReader(stdout)
+	c.mu.Unlock()
 	if err := c.cmd.Start(); err != nil {
-		c.state = StateFailed
+		c.setState(StateFailed)
 		return err
 	}
 	go c.readLoop()
@@ -83,11 +99,19 @@ func (c *Client) Start(ctx context.Context) error {
 	}}
 	resp, err := c.call(ctx, handshake)
 	if err != nil {
-		c.state = StateFailed
+		c.setState(StateFailed)
+		// The handshake failed: the server is unusable,
+		// so reap it now rather than leak the process.
+		c.mu.Lock()
+		process := c.cmd.Process
+		c.mu.Unlock()
+		if process != nil {
+			_ = process.Kill()
+		}
 		return err
 	}
 	_ = resp
-	c.state = StateReady
+	c.setState(StateReady)
 	return nil
 }
 
@@ -144,16 +168,54 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	return resp.Result, nil
 }
 
+// ListTools fetches the server's tool names via
+// tools/list.
+func (c *Client) ListTools(ctx context.Context) ([]string, error) {
+	raw, err := c.Call(ctx, "tools/list", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(payload.Tools))
+	for _, t := range payload.Tools {
+		names = append(names, t.Name)
+	}
+	return names, nil
+}
+
+// CallTool invokes a tool on the server and
+// returns the raw JSON result.
+func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
+	if args == nil {
+		args = json.RawMessage("{}")
+	}
+	return c.Call(ctx, "tools/call", map[string]any{"name": name, "arguments": json.RawMessage(args)})
+}
+
 // Stop terminates the server process.
 func (c *Client) Stop() error {
-	if c.cmd != nil && c.cmd.Process != nil {
-		return c.cmd.Process.Kill()
+	c.mu.Lock()
+	cmd := c.cmd
+	c.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		return cmd.Process.Kill()
 	}
 	return nil
 }
 
 // StateOf returns the server state.
-func (c *Client) StateOf() State { return c.state }
+func (c *Client) StateOf() State {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.state
+}
 
 // CatalogCache persists a server's tool catalog so a cached catalog is usable
 // before the connection opens (lazy-when-cached startup).

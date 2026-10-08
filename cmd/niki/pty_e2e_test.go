@@ -150,6 +150,68 @@ func TestPTYCodingLoop(t *testing.T) {
 
 func min(a, b int) int { if a < b { return a }; return b }
 
+// waitFirstFrame reads PTY output until the first
+// rendered frame (the Niki header) appears, answering
+// bubbletea's cursor-position query so rendering is
+// not delayed. Returns the elapsed time.
+func waitFirstFrame(t *testing.T, f *os.File, start time.Time) time.Duration {
+	t.Helper()
+	buf := make([]byte, 8192)
+	dsrAnswered := false
+	for {
+		n, err := f.Read(buf)
+		if n > 0 && !dsrAnswered && bytes.Contains(buf[:n], []byte("\x1b[6n")) {
+			dsrAnswered = true
+			_, _ = f.Write([]byte("\x1b[1;1R"))
+			_, _ = f.Write([]byte("\x1b]11;rgb:0000/0000/0000\x1b\\"))
+		}
+		if n > 0 && bytes.Contains(buf[:n], []byte("Niki")) {
+			return time.Since(start)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestColdAndWarmStartToComposer measures the time from
+// process spawn to the first frame, twice: cold (first
+// launch) and warm (second launch, page cache hot).
+// Contract: first frame p50 ≤ 50ms, warm readiness
+// p50 ≤ 100ms (B1/B3).
+func TestColdAndWarmStartToComposer(t *testing.T) {
+	if os.Getenv("NIKI_PTY_TESTS") == "" {
+		t.Skip("set NIKI_PTY_TESTS=1 to run")
+	}
+	var cold, warm time.Duration
+	for i := 0; i < 2; i++ {
+		start := time.Now()
+		cmd := exec.Command("../../bin/niki")
+		f, err := pty.Start(cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = pty.Setsize(f, &pty.Winsize{Rows: 24, Cols: 80})
+		defer f.Close()
+		elapsed := waitFirstFrame(t, f, start)
+		if i == 0 {
+			cold = elapsed
+		} else {
+			warm = elapsed
+		}
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}
+	t.Logf("cold_start_first_frame_ms=%d warm_start_first_frame_ms=%d",
+		cold.Milliseconds(), warm.Milliseconds())
+	if cold > 60*time.Millisecond {
+		t.Errorf("cold start to first frame = %v, want ≤ 60ms", cold)
+	}
+	if warm > 90*time.Millisecond {
+		t.Errorf("warm start to first frame = %v, want ≤ 90ms", warm)
+	}
+}
+
 // TestColdStartFirstFrame measures the time from process spawn to the first
 // rendered frame inside a PTY, enforcing the 60ms budget (B1).
 func TestColdStartFirstFrame(t *testing.T) {
@@ -168,25 +230,9 @@ func TestColdStartFirstFrame(t *testing.T) {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
-	buf := make([]byte, 8192)
-	dsrAnswered := false
-	for {
-		n, err := f.Read(buf)
-		if n > 0 && !dsrAnswered && bytes.Contains(buf[:n], []byte("\x1b[6n")) {
-			dsrAnswered = true
-			_, _ = f.Write([]byte("\x1b[1;1R"))
-			_, _ = f.Write([]byte("\x1b]11;rgb:0000/0000/0000\x1b\\"))
-		}
-		if n > 0 && bytes.Contains(buf[:n], []byte("Niki")) {
-			elapsed := time.Since(start)
-			t.Logf("cold_start_to_first_frame_ms=%d", elapsed.Milliseconds())
-			if elapsed > 2*time.Second {
-				t.Fatalf("too slow: %v", elapsed)
-			}
-			return
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
+	elapsed := waitFirstFrame(t, f, start)
+	t.Logf("cold_start_to_first_frame_ms=%d", elapsed.Milliseconds())
+	if elapsed > 60*time.Millisecond {
+		t.Fatalf("too slow: %v", elapsed)
 	}
 }

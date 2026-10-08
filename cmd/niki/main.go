@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,11 +12,13 @@ import (
 
 	"github.com/RavaniRoshan/niki/internal/config"
 	"github.com/RavaniRoshan/niki/internal/engine"
+	"github.com/RavaniRoshan/niki/internal/logx"
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/session"
 	"github.com/RavaniRoshan/niki/internal/skills"
+	"github.com/RavaniRoshan/niki/internal/terminal"
 	"github.com/RavaniRoshan/niki/internal/tools"
 	"github.com/RavaniRoshan/niki/internal/tui"
 )
@@ -48,6 +51,13 @@ func main() {
 			if store != nil {
 				defer func() { _ = store.Close() }()
 			}
+			// Structured logging goes to a file, never
+			// to the terminal while the TUI owns it (P5).
+			logger, err := logx.Open(filepath.Join(os.Getenv("HOME"), ".niki", "niki.log"))
+			if err != nil {
+				logger = nil
+			}
+			defer logger.Close()
 			mode := permissions.ModeWorkspaceWrite
 			switch cfg.Permissions.Mode {
 			case "readonly":
@@ -56,9 +66,36 @@ func main() {
 				mode = permissions.ModeFullAccess
 			}
 			eng, cmdChan, eventChan := engine.NewEngine(100, buildProvider(cfg), tools.DefaultRegistry(), permissions.NewGuard(mode))
+			// Live config reload (C5): /reload re-reads the
+			// config file and swaps the provider and the
+			// permission mode without a restart.
+			eng.SetConfigReloader(func() (provider.ModelProvider, permissions.Mode, string) {
+				reloaded, err := config.Load(configPath)
+				if err != nil {
+					return nil, "", "config reload failed: " + err.Error()
+				}
+				reloadMode := permissions.ModeWorkspaceWrite
+				switch reloaded.Permissions.Mode {
+				case "readonly":
+					reloadMode = permissions.ModeReadOnly
+				case "full_access":
+					reloadMode = permissions.ModeFullAccess
+				}
+				return buildProvider(reloaded), reloadMode,
+					"provider=" + reloaded.Provider.Name + " model=" + reloaded.Model.Name + " mode=" + string(reloadMode)
+			})
 			if store != nil {
 				_ = store.CreateSession(eng.SessionID(), "tui")
 			}
+			go func() {
+				if found, err := skills.Discover("."); err == nil && len(found) > 0 {
+					var names []string
+					for _, s := range found {
+						names = append(names, s.Name)
+					}
+					eng.AddSystemMessage("Available skills: " + strings.Join(names, ", "))
+				}
+			}()
 			if store != nil {
 				eng.Observe(func(evt protocol.EngineEvent) {
 					_ = store.AppendEvent(eng.SessionID(), evt)
@@ -66,7 +103,7 @@ func main() {
 			}
 			go func() {
 				if err := eng.Run(); err != nil {
-					fmt.Fprintf(os.Stderr, "Engine error: %v\n", err)
+					logger.Error("engine.stopped", err, nil)
 				}
 			}()
 			if profile {
@@ -81,6 +118,26 @@ func main() {
 			if !inline && !cfg.UI.Inline {
 				opts = append(opts, tea.WithAltScreen())
 			}
+			// Terminal mode negotiation (L7): detect synchronized
+			// output and kitty keyboard support, enable the modes,
+			// and restore them on every exit path — normal return,
+			// error, and panic. Disable writes unconditionally;
+			// terminals that never enabled the modes ignore the
+			// pop sequences.
+			caps, err := terminal.Detect(400 * time.Millisecond)
+			if err != nil {
+				caps = terminal.Capabilities{}
+			}
+			out := os.Stdout
+			terminal.Enable(caps, out)
+			defer func() {
+				if r := recover(); r != nil {
+					terminal.Disable(out)
+					panic(r)
+				}
+				terminal.Disable(out)
+			}()
+			opts = append(opts, tea.WithOutput(terminal.NewSyncWriter(out, caps.SyncOutput)))
 			p := tea.NewProgram(app, opts...)
 			if _, err := p.Run(); err != nil {
 				return err
