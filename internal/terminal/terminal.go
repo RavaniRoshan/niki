@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
-	"golang.org/x/sys/unix"
 )
 
 // Escape sequences (L7). The disable sequences are safe to write
@@ -80,22 +79,6 @@ func Detect(timeout time.Duration) (Capabilities, error) {
 	return caps, nil
 }
 
-// drain reads bytes already pending on the tty without
-// waiting, so a zero-length poll cannot stall startup.
-func drain(tty *os.File) {
-	for i := 0; i < 16; i++ {
-		fds := []unix.PollFd{{Fd: int32(tty.Fd()), Events: unix.POLLIN}}
-		n, err := unix.Poll(fds, 0)
-		if err != nil || n == 0 {
-			return
-		}
-		buf := make([]byte, 512)
-		if _, err := tty.Read(buf); err != nil {
-			return
-		}
-	}
-}
-
 // readReplies collects tty output for up to timeout.
 // It waits with poll(2) in the calling goroutine: a
 // timeout must never leave a reader behind, because a
@@ -120,12 +103,10 @@ func readReplies(tty *os.File, timeout time.Duration) []byte {
 				wait = quiet
 			}
 		}
-		fds := []unix.PollFd{{Fd: int32(tty.Fd()), Events: unix.POLLIN}}
-		n, err := unix.Poll(fds, int(wait.Milliseconds()))
-		if err != nil || n == 0 {
+		if !pollRead(tty, wait) {
 			return reply
 		}
-		n, err = tty.Read(buf)
+		n, err := tty.Read(buf)
 		if n > 0 {
 			reply = append(reply, buf[:n]...)
 			if repliesComplete(reply) {
