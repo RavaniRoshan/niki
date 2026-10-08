@@ -23,11 +23,15 @@ func demoMockProvider() provider.ModelProvider {
 		"search for worker": {
 			{Tool: "grep", Args: `{"pattern":"Worker"}`},
 		},
+		"show the status": {
+			{Tool: "git_status", Args: `{}`},
+		},
 	}
 	// Slow the mock stream so the thinking/running/streaming states are
 	// visible in recordings. Mock-only pacing; never a product delay.
 	m.ChunkDelay = 120 * time.Millisecond
 	m.Scripts["read the main file"] = "Read complete — the file is in the tool cell above."
 	m.Scripts["search for worker"] = "Matches are in the tool cell above."
+	m.Scripts["show the status"] = "Status is in the tool cell above."
 	return m
 }

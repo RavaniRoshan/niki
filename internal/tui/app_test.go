@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/cursor"
 	tea "github.com/charmbracelet/bubbletea"
@@ -108,5 +109,75 @@ func TestSlashExplainCites(t *testing.T) {
 	last = m.history.Cells[len(m.history.Cells)-1]
 	if !strings.Contains(last.Text, "Cannot answer") {
 		t.Fatalf("expected refusal, got %q", last.Text)
+	}
+}
+
+func TestSpinnerAdvancesWhileBusy(t *testing.T) {
+	cmdChan := make(chan protocol.EngineCommand, 8)
+	eventChan := make(chan protocol.EngineEvent, 8)
+	m := NewAppModel(cmdChan, eventChan)
+
+	// Busy transition starts the sweep.
+	m2, _ := m.Update(engineEventMsg(protocol.EngineEvent{Type: protocol.EventTurnStarted}))
+	m = m2.(AppModel)
+	if !m.state.Busy {
+		t.Fatal("turn should be busy")
+	}
+	first := m.activityView()
+	m2, _ = m.Update(spinTickMsg(time.Now()))
+	m = m2.(AppModel)
+	m2, _ = m.Update(spinTickMsg(time.Now()))
+	m = m2.(AppModel)
+	if m.state.SpinFrame != 2 {
+		t.Fatalf("spin frame = %d, want 2", m.state.SpinFrame)
+	}
+	if m.activityView() == first {
+		t.Fatal("activity line did not animate while busy")
+	}
+
+	// Turn end freezes the sweep.
+	m2, _ = m.Update(engineEventMsg(protocol.EngineEvent{Type: protocol.EventTurnCompleted}))
+	m = m2.(AppModel)
+	frozen := m.state.SpinFrame
+	m2, _ = m.Update(spinTickMsg(time.Now()))
+	m = m2.(AppModel)
+	if m.state.SpinFrame != frozen {
+		t.Fatal("sweep advanced while idle (idle must schedule nothing)")
+	}
+}
+
+func TestSpinnerReducedMotionStatic(t *testing.T) {
+	cmdChan := make(chan protocol.EngineCommand, 8)
+	eventChan := make(chan protocol.EngineEvent, 8)
+	m := NewAppModel(cmdChan, eventChan)
+	m.SetReducedMotion(true)
+	m2, _ := m.Update(engineEventMsg(protocol.EngineEvent{Type: protocol.EventTurnStarted}))
+	m = m2.(AppModel)
+	before := m.activityView()
+	m2, _ = m.Update(spinTickMsg(time.Now()))
+	m = m2.(AppModel)
+	m2, _ = m.Update(spinTickMsg(time.Now()))
+	m = m2.(AppModel)
+	if m.activityView() != before {
+		t.Fatal("reduced motion must hold a static frame")
+	}
+	if !strings.Contains(before, "◐") {
+		t.Fatalf("static frame should be ◐: %q", before)
+	}
+}
+
+func TestSpinGlyphWidthStable(t *testing.T) {
+	seen := map[string]bool{}
+	for f := 0; f < 8; f++ {
+		for _, ascii := range []bool{false, true} {
+			g := spinGlyph(f, false, ascii)
+			if len([]rune(g)) != 1 {
+				t.Fatalf("frame %d ascii=%v is not one cell: %q", f, ascii, g)
+			}
+			seen[g] = true
+		}
+	}
+	if len(seen) < 8 {
+		t.Fatalf("sweep should show 8 distinct frames, got %v", seen)
 	}
 }

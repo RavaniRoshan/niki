@@ -12,17 +12,19 @@ every frame is terminal output. Pacing borrows only generic craft
 |---|---|---|---|
 | 1 | Cold open | Welcome card (orb mascot, "Welcome to NikiCode!"), announce line, `○ NikiCode is ready` idle, bordered composer, footer (model, dir, context meter) | 1.0s |
 | 2 | Prompt | `read the main file` typed fast into the composer, submitted | — |
-| 3 | thinking | Live line: `✱ thinking…` (TurnStarted). Flashes in real time. | — |
-| 4 | running + tool cell | Live line: `✱ running read_file`; transcript commits `● read_file` cell with the file content; assistant streams `Read complete …` (`streaming…`) | — |
+| 3 | thinking | Live line: sweep glyph + `thinking…` (TurnStarted). One sweep frame every 120ms while busy. | — |
+| 4 | running + tool cell | Live line: sweep + `running read_file`; transcript commits `● read_file` cell with the file content; assistant streams `Read complete …` (`streaming…`) | — |
 | 5 | Settle | Idle line back, footer cost/context ticked up. Ledger readable | 1.0s |
-| 6 | Loop again | Prompt 2: `search for worker` → thinking → `running grep` → grep cell → streaming text → idle | — |
-| 7 | End card | Full ledger: 2 prompts, 2 tool cells, 2 replies, idle line, footer. NO loop | 2.5s |
+| 6 | Loop again (grep, then git status) | Same sweep: thinking → running → committed cell → streaming → idle, footer ticking each turn | — |
+| 7 | End card | Full ledger: 3 prompts, 3 tool cells, 3 replies, idle line, footer. NO loop cut — the GIF itself loops | 2.5s |
 
-Total ~20s @10fps ≈ 200 frames, 720px, ~200KB.
+Shipped cut: 214 frames @10fps, 21.4s, 960px, 317KB, looping.
+Sweep frames verified in the encode (◑ streaming mid-turn).
 
 ## Glyph/state key (what the viewer learns)
 
-- `○` muted = idle/ready. `✱` orange + verb = live state.
+- `○` muted = idle/ready. Sweep `◐◓◑◒` (120ms) + verb = live state;
+  static `◐` under reduced motion; `-\\|/` on dumb terminals.
 - `thinking…` = turn accepted, model working.
 - `running <tool>` = tool executing; `● <tool>` cell = committed result.
 - `streaming…` = text deltas landing.

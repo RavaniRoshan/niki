@@ -21,6 +21,10 @@ type State struct {
 	// ReducedMotion disables non-essential animation
 	// (U8).
 	ReducedMotion bool
+	// SpinFrame is the activity-sweep position, advanced only
+	// while Busy (120ms cadence). Idle schedules no ticks, so
+	// the B5 zero-redraw gate is unaffected.
+	SpinFrame int
 
 	// Environment & Session Metadata
 	Directory      string

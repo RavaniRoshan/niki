@@ -594,3 +594,17 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
   ledger. 148KB, 720px, 10fps, single-play; verified frame by frame.
 - Embed stays top-of-README. Kimi reference used shape-only (cold open,
   stream, end; their layout adopted); no asset copied, /tmp copy deleted.
+
+## 2026-10-08 — Activity sweep animation + paced demo remake
+- Real 120ms ◐◓◑◒ sweep on the activity line while Busy (visual-spec
+  cadence), kicked on the Busy transition, self-rescheduling only while
+  busy (idle schedules zero ticks — B5 untouched). Static ◐ under
+  reduced motion (U8 now proven), ASCII -\|/ on dumb terminals, all
+  frames one cell wide (no layout shift). 3 spinner tests green.
+- Reference measured, not guessed: 1552x992, 414 frames, 100ms base +
+  400/200ms holds, 11MB, loops. Matched engineering only: 960px,
+  214 frames @10fps, 21.4s, holds on settled beats, looping, 317KB.
+  Chrome/palette/beat-grammar cloning refused again (P17).
+- Cut: TUI cold open, 3 scripted tool turns with visible sweep frames
+  (◑ streaming verified in the encode), committed cells, ticking
+  footer meters, end card on the ledger. Tape + storyboard current.

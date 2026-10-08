@@ -112,6 +112,17 @@ type engineEventMsg protocol.EngineEvent
 
 type tickMsg time.Time
 
+// spinTickMsg advances the activity sweep. It reschedules itself only
+// while Busy, so an idle session schedules zero ticks (B5).
+type spinTickMsg time.Time
+
+// spinTick returns a 120ms tick command (visual-spec cadence).
+func spinTick() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(t time.Time) tea.Msg {
+		return spinTickMsg(t)
+	})
+}
+
 func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 	m.telemetry.Events++
 	if evt.Usage != nil {
@@ -398,7 +409,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case engineEventMsg:
 		evt := protocol.EngineEvent(msg)
+		wasBusy := m.state.Busy
 		applyEvent(&m, evt)
+		if !wasBusy && m.state.Busy {
+			// Busy transition: start the 120ms sweep. It
+			// reschedules itself only while Busy.
+			cmds = append(cmds, spinTick())
+		}
 		// Coalesce any already-queued events into this same frame.
 		for drained := true; drained; {
 			select {
@@ -441,6 +458,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pacer.pending {
 			m.pacer.force()
 			m.renderLive()
+		}
+	case spinTickMsg:
+		if m.state.Busy && !m.state.ReducedMotion {
+			m.state.SpinFrame++
+			m.renderLive()
+			cmds = append(cmds, spinTick())
 		}
 	}
 
@@ -694,10 +717,29 @@ func (m AppModel) activityView() string {
 	if act == "" {
 		return m.theme.Muted.Render("  ○ NikiCode is ready")
 	}
-	glyph := m.theme.ActivityGlyph.Render("✱ ")
+	glyph := m.theme.ActivityGlyph.Render(spinGlyph(m.state.SpinFrame, m.state.ReducedMotion, UseASCII()) + " ")
 	actText := m.theme.ActivityText.Render(act)
 	hint := m.theme.ActivityHint.Render(" (esc to interrupt)")
 	return "  " + glyph + actText + hint
+}
+
+// spinGlyph is the activity-sweep frame: ◐◓◑◒ at 120ms while working
+// (visual spec cadence), a static ◐ under reduced motion, ASCII
+// -\|/ on dumb terminals. Every frame is one cell wide: the line
+// never shifts layout.
+func spinGlyph(frame int, reduced, ascii bool) string {
+	if ascii {
+		frames := []string{"-", "\\", "|", "/"}
+		if reduced {
+			return "-"
+		}
+		return frames[frame%len(frames)]
+	}
+	if reduced {
+		return "◐"
+	}
+	frames := []string{"◐", "◓", "◑", "◒"}
+	return frames[frame%len(frames)]
 }
 
 func (m AppModel) composerView() string {
