@@ -18,6 +18,9 @@ type State struct {
 	// above the composer, driven by real events
 	// only (U3).
 	Activity string
+	// ReducedMotion disables non-essential animation
+	// (U8).
+	ReducedMotion bool
 }
 
 // FrameTelemetry records render-cost and event

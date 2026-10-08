@@ -124,6 +124,19 @@ func (c *ContextAssembler) Compact() (compacted bool) {
 	return false
 }
 
+// ForceCompact unconditionally applies compaction (used by /compact command).
+func (c *ContextAssembler) ForceCompact() bool {
+	if c.compactMedium() {
+		c.LastTier = TierMedium
+		return true
+	}
+	if c.compactSoft() {
+		c.LastTier = TierSoft
+		return true
+	}
+	return false
+}
+
 // compactSoft trims oversized tool outputs to a bounded
 // skeleton, keeping every message. Returns whether anything
 // was trimmed.

@@ -103,7 +103,7 @@ func TestIdleNoRedrawsAndCPU(t *testing.T) {
 	cmdChan := make(chan protocol.EngineCommand, 1)
 	eventChan := make(chan protocol.EngineEvent, 1)
 	m := NewAppModel(cmdChan, eventChan)
-	p := tea.NewProgram(m, tea.WithInput(r), tea.WithOutput(out))
+	p := tea.NewProgram(m, tea.WithInput(r), tea.WithOutput(out), tea.WithFPS(30))
 	runDone := make(chan error, 1)
 	go func() {
 		_, err := p.Run()
@@ -114,10 +114,12 @@ func TestIdleNoRedrawsAndCPU(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	baseline, _ := out.snapshot()
 
-	// Idle window: no input, no events.
+	// Idle window: no input, no events. Three
+	// seconds give the /proc CPU counter (10ms
+	// ticks) enough resolution to read below 1%.
 	cpuBefore := cpuTime()
 	idleStart := time.Now()
-	time.Sleep(1 * time.Second)
+	time.Sleep(3 * time.Second)
 	idleWrites, _ := out.snapshot()
 	idleWrites -= baseline
 	idleCPU := cpuTime() - cpuBefore
@@ -138,8 +140,8 @@ func TestIdleNoRedrawsAndCPU(t *testing.T) {
 	if idleWrites != 0 {
 		t.Errorf("idle program performed %d redraws, want 0", idleWrites)
 	}
-	if cpuPercent > 5.0 {
-		t.Errorf("idle CPU = %.2f%%, want < 5%%", cpuPercent)
+	if cpuPercent > 1.0 {
+		t.Errorf("idle CPU = %.2f%%, want < 1%%", cpuPercent)
 	}
 }
 

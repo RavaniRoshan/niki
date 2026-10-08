@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -68,13 +69,107 @@ func TestShell(t *testing.T) {
 	}
 }
 
+// recordingSandbox records the commands routed
+// through it without executing anything.
+type recordingSandbox struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (r *recordingSandbox) Name() string { return "recording" }
+
+func (r *recordingSandbox) Run(ctx context.Context, dir, name string, args ...string) (string, string, error) {
+	r.mu.Lock()
+	r.calls = append(r.calls, name+" "+strings.Join(args, " "))
+	r.mu.Unlock()
+	return "sandboxed", "", nil
+}
+
+func (r *recordingSandbox) recorded() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.calls...)
+}
+
+// TestShellSandboxRouting (S1): with a sandbox
+// configured, commands run through the backend.
+func TestShellSandboxRouting(t *testing.T) {
+	rec := &recordingSandbox{}
+	s := NewShellTool()
+	s.Sandbox = rec
+	res, err := s.Run(context.Background(), json.RawMessage(`{"command":"echo hi"}`))
+	if err != nil || res.IsError {
+		t.Fatalf("run: %v %v", err, res)
+	}
+	if res.Output != "sandboxed" {
+		t.Fatalf("output = %q, want sandboxed", res.Output)
+	}
+	calls := rec.recorded()
+	if len(calls) != 1 || !strings.Contains(calls[0], "bash -c echo hi") {
+		t.Fatalf("backend calls = %v", calls)
+	}
+}
+
+// TestShellExcludedCommand: excluded commands
+// bypass the sandbox (and still execute).
+func TestShellExcludedCommand(t *testing.T) {
+	rec := &recordingSandbox{}
+	s := NewShellTool()
+	s.Sandbox = rec
+	s.ExcludedCommands = []string{"echo"}
+	res, err := s.Run(context.Background(), json.RawMessage(`{"command":"echo excluded-run"}`))
+	if err != nil || res.IsError {
+		t.Fatalf("run: %v %v", err, res)
+	}
+	if !strings.Contains(res.Output, "excluded-run") {
+		t.Fatalf("excluded command did not execute: %q", res.Output)
+	}
+	if len(rec.recorded()) != 0 {
+		t.Fatalf("excluded command reached the backend: %v", rec.recorded())
+	}
+}
+
+// TestShellDisableSandboxArg: the
+// dangerously_disable_sandbox escape hatch is
+// honored only when the config allows it.
+func TestShellDisableSandboxArg(t *testing.T) {
+	rec := &recordingSandbox{}
+	allowed := NewShellTool()
+	allowed.Sandbox = rec
+	allowed.AllowUnsandboxed = true
+	res, err := allowed.Run(context.Background(), json.RawMessage(`{"command":"echo hi","dangerously_disable_sandbox":true}`))
+	if err != nil || res.IsError {
+		t.Fatalf("run: %v %v", err, res)
+	}
+	if len(rec.recorded()) != 0 {
+		t.Fatalf("escape hatch was sandboxed: %v", rec.recorded())
+	}
+
+	denied := NewShellTool()
+	denied.Sandbox = rec
+	denied.AllowUnsandboxed = false
+	res, err = denied.Run(context.Background(), json.RawMessage(`{"command":"echo hi","dangerously_disable_sandbox":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(res.Output, "not permitted") {
+		t.Fatalf("escape hatch should be refused: %v %q", res, res.Output)
+	}
+	if len(rec.recorded()) != 0 {
+		t.Fatalf("refused command reached the backend: %v", rec.recorded())
+	}
+}
+
 func TestRegistry(t *testing.T) {
 	r := DefaultRegistry()
-	if len(r.List()) != 6 {
-		t.Fatalf("expected 6 tools, got %d", len(r.List()))
+	if len(r.List()) != 7 {
+		t.Fatalf("expected 7 tools, got %d", len(r.List()))
 	}
 	if _, ok := r.Get("shell"); !ok {
 		t.Fatal("shell missing")
+	}
+	if _, ok := r.Get("apply_patch"); !ok {
+		t.Fatal("apply_patch missing")
 	}
 }
 

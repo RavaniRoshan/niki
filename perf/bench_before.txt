@@ -1,0 +1,10 @@
+--- FAIL: TestIdleNoRedrawsAndCPU (3.20s)
+    perf_test.go:138: idle_redraws=0 idle_cpu_percent=1.33 (wall=3s cpu=40ms)
+    perf_test.go:144: idle CPU = 1.33%, want < 1%
+--- FAIL: TestIdleNoRedrawsAndCPU (3.20s)
+    perf_test.go:138: idle_redraws=0 idle_cpu_percent=1.33 (wall=3s cpu=40ms)
+    perf_test.go:144: idle CPU = 1.33%, want < 1%
+FAIL
+exit status 1
+FAIL	github.com/RavaniRoshan/niki/internal/tui	17.423s
+FAIL

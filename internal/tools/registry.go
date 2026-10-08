@@ -64,6 +64,10 @@ func ValidateArgs(raw json.RawMessage, schema string) error {
 			if _, ok := v.(float64); !ok {
 				return fmt.Errorf("arg %q must be number", name)
 			}
+		case "boolean":
+			if _, ok := v.(bool); !ok {
+				return fmt.Errorf("arg %q must be boolean", name)
+			}
 		}
 	}
 	return nil
@@ -169,6 +173,7 @@ func DefaultRegistry() *Registry {
 	r.Register(NewReadFileTool())
 	r.Register(NewWriteFileTool())
 	r.Register(NewEditFileTool())
+	r.Register(NewApplyPatchTool())
 	r.Register(NewGlobTool())
 	r.Register(NewGrepTool())
 	r.Register(NewShellTool())

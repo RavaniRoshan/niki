@@ -42,7 +42,7 @@ type Capabilities struct {
 // support, and restores the terminal. A timeout bounds the
 // wait for replies so a dumb terminal cannot stall startup.
 func Detect(timeout time.Duration) (Capabilities, error) {
-	tty, owns, err := openTTY()
+	tty, owns, err := openTTYFn()
 	if err != nil {
 		return Capabilities{}, err
 	}
@@ -65,8 +65,9 @@ func Detect(timeout time.Duration) (Capabilities, error) {
 
 	var caps Capabilities
 	// Drain anything already queued so stale bytes cannot be
-	// mistaken for a fresh reply.
-	_ = readReplies(tty, 20*time.Millisecond)
+	// mistaken for a fresh reply. Never waits: a poll(0)
+	// read of pending data only.
+	drain(tty)
 
 	queries := deviceAttrsQuery + kittyQuery + syncQuery
 	if _, err := tty.WriteString(queries); err != nil {
@@ -79,11 +80,31 @@ func Detect(timeout time.Duration) (Capabilities, error) {
 	return caps, nil
 }
 
+// drain reads bytes already pending on the tty without
+// waiting, so a zero-length poll cannot stall startup.
+func drain(tty *os.File) {
+	for i := 0; i < 16; i++ {
+		fds := []unix.PollFd{{Fd: int32(tty.Fd()), Events: unix.POLLIN}}
+		n, err := unix.Poll(fds, 0)
+		if err != nil || n == 0 {
+			return
+		}
+		buf := make([]byte, 512)
+		if _, err := tty.Read(buf); err != nil {
+			return
+		}
+	}
+}
+
 // readReplies collects tty output for up to timeout.
 // It waits with poll(2) in the calling goroutine: a
 // timeout must never leave a reader behind, because a
 // goroutine still blocked on the tty would race the
 // TUI's own input reader for keystrokes after startup.
+// The wait ends early once every query has been
+// answered, or after a short quiet window following
+// the first byte — a terminal that does not answer
+// every query must not burn the whole budget.
 func readReplies(tty *os.File, timeout time.Duration) []byte {
 	var reply []byte
 	buf := make([]byte, 512)
@@ -93,19 +114,47 @@ func readReplies(tty *os.File, timeout time.Duration) []byte {
 		if remaining <= 0 {
 			return reply
 		}
+		wait := remaining
+		if len(reply) > 0 {
+			if quiet := 25 * time.Millisecond; quiet < remaining {
+				wait = quiet
+			}
+		}
 		fds := []unix.PollFd{{Fd: int32(tty.Fd()), Events: unix.POLLIN}}
-		n, err := unix.Poll(fds, int(remaining.Milliseconds()))
+		n, err := unix.Poll(fds, int(wait.Milliseconds()))
 		if err != nil || n == 0 {
 			return reply
 		}
 		n, err = tty.Read(buf)
 		if n > 0 {
 			reply = append(reply, buf[:n]...)
+			if repliesComplete(reply) {
+				return reply
+			}
 		}
 		if err != nil {
 			return reply
 		}
 	}
+}
+
+// repliesComplete reports whether the reply stream
+// already answers all three queries: the
+// device-attributes report (final byte c), the kitty
+// keyboard reply (u) and the DECRQM reply ($y).
+func repliesComplete(reply []byte) bool {
+	var sawAttrs, sawKitty, sawSync bool
+	for _, seq := range splitCSI(reply) {
+		switch {
+		case strings.HasSuffix(seq, "c"):
+			sawAttrs = true
+		case strings.HasPrefix(seq, "\x1b[?") && strings.HasSuffix(seq, "u"):
+			sawKitty = true
+		case strings.HasSuffix(seq, "$y"):
+			sawSync = true
+		}
+	}
+	return sawAttrs && sawKitty && sawSync
 }
 
 // kittySupported parses CSI ? flags u replies: any nonzero
@@ -235,13 +284,18 @@ func (s *syncTTYWriter) Read(p []byte) (int, error) { return s.file.Read(p) }
 func (s *syncTTYWriter) Close() error               { return nil }
 func (s *syncTTYWriter) Fd() uintptr                { return s.file.Fd() }
 
+var openTTYFn = openTTY
+
 // openTTY returns the controlling terminal. It prefers
 // /dev/tty so detection works even when stdin is
 // redirected, and never returns a descriptor the caller
 // must not close: owns reports whether the caller should
 // close the file.
 func openTTY() (*os.File, bool, error) {
-	if f, err := os.Open("/dev/tty"); err == nil {
+	// O_RDWR: detection writes queries to the terminal, so a
+	// read-only descriptor would fail every write with EBADF
+	// and silently disable all capability detection.
+	if f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
 		return f, true, nil
 	}
 	if term.IsTerminal(os.Stdin.Fd()) {

@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -105,18 +107,14 @@ func TestPTYCodingLoop(t *testing.T) {
 	_ = pty.Setsize(f, &pty.Winsize{Rows: 24, Cols: 80})
 	defer f.Close()
 	var out strings.Builder
-	dsrSeen := false
+	answered := map[string]bool{}
 	go func() {
 		buf := make([]byte, 4096)
 		for {
 			n, err := f.Read(buf)
 			if n > 0 {
 				out.Write(buf[:n])
-				if !dsrSeen && strings.Contains(out.String(), "\x1b[6n") {
-					dsrSeen = true
-					_, _ = f.Write([]byte("\x1b[1;1R"))
-					_, _ = f.Write([]byte("\x1b]11;rgb:0000/0000/0000\x1b\\"))
-				}
+				answerTerminalQueries(buf[:n], f, answered)
 			}
 			if err != nil {
 				return
@@ -150,23 +148,49 @@ func TestPTYCodingLoop(t *testing.T) {
 
 func min(a, b int) int { if a < b { return a }; return b }
 
+// answerTerminalQueries replies to the terminal
+// queries niki (and the TUI framework) send, the way
+// a real terminal would, so capability detection
+// completes immediately instead of waiting out its
+// budget. Each query is answered at most once.
+func answerTerminalQueries(chunk []byte, f *os.File, answered map[string]bool) {
+	reply := func(query, resp string) {
+		if answered[query] {
+			return
+		}
+		answered[query] = true
+		_, _ = f.Write([]byte(resp))
+	}
+	if bytes.Contains(chunk, []byte("\x1b[6n")) {
+		reply("dsr", "\x1b[1;1R")
+		reply("osc11", "\x1b]11;rgb:0000/0000/0000\x1b\\")
+	}
+	if bytes.Contains(chunk, []byte("\x1b[c")) {
+		reply("da1", "\x1b[?62;22c")
+	}
+	if bytes.Contains(chunk, []byte("\x1b[?u")) {
+		reply("kitty", "\x1b[?1u")
+	}
+	if bytes.Contains(chunk, []byte("\x1b[?2026$p")) {
+		reply("decrqm", "\x1b[?2026;1$y")
+	}
+}
+
 // waitFirstFrame reads PTY output until the first
 // rendered frame (the Niki header) appears, answering
-// bubbletea's cursor-position query so rendering is
-// not delayed. Returns the elapsed time.
+// terminal queries so rendering is not delayed.
+// Returns the elapsed time.
 func waitFirstFrame(t *testing.T, f *os.File, start time.Time) time.Duration {
 	t.Helper()
 	buf := make([]byte, 8192)
-	dsrAnswered := false
+	answered := map[string]bool{}
 	for {
 		n, err := f.Read(buf)
-		if n > 0 && !dsrAnswered && bytes.Contains(buf[:n], []byte("\x1b[6n")) {
-			dsrAnswered = true
-			_, _ = f.Write([]byte("\x1b[1;1R"))
-			_, _ = f.Write([]byte("\x1b]11;rgb:0000/0000/0000\x1b\\"))
-		}
-		if n > 0 && bytes.Contains(buf[:n], []byte("Niki")) {
-			return time.Since(start)
+		if n > 0 {
+			answerTerminalQueries(buf[:n], f, answered)
+			if bytes.Contains(buf[:n], []byte("Niki")) {
+				return time.Since(start)
+			}
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -234,5 +258,83 @@ func TestColdStartFirstFrame(t *testing.T) {
 	t.Logf("cold_start_to_first_frame_ms=%d", elapsed.Milliseconds())
 	if elapsed > 60*time.Millisecond {
 		t.Fatalf("too slow: %v", elapsed)
+	}
+}
+
+// TestArgvFastPathVersion asserts niki --version runs via the fast path without heavy init.
+func TestArgvFastPathVersion(t *testing.T) {
+	cmd := exec.Command("../../bin/niki", "--version")
+	start := time.Now()
+	out, err := cmd.Output()
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("--version execution failed: %v", err)
+	}
+	if !strings.Contains(string(out), "niki version") {
+		t.Fatalf("unexpected version output: %s", string(out))
+	}
+	t.Logf("--version took %v", elapsed)
+	if elapsed > 25*time.Millisecond {
+		t.Errorf("--version took %v, want < 25ms", elapsed)
+	}
+}
+
+// TestBootWith5MCPAnd50Skills verifies that configuring 5 MCP servers and 50 skills
+// does not block the boot critical path, keeping time-to-first-paint within budget (B6/B5).
+func TestBootWith5MCPAnd50Skills(t *testing.T) {
+	if os.Getenv("NIKI_PTY_TESTS") == "" {
+		t.Skip("set NIKI_PTY_TESTS=1 to run")
+	}
+
+	dir := t.TempDir()
+	// 1. Create niki.toml with 5 MCP servers
+	var tomlContent strings.Builder
+	tomlContent.WriteString("[model]\nname = \"mock\"\n")
+	for i := 1; i <= 5; i++ {
+		fmt.Fprintf(&tomlContent, "[mcp.servers.srv%d]\ncommand = \"echo\"\nargs = [\"server%d\"]\n\n", i, i)
+	}
+	_ = os.WriteFile(filepath.Join(dir, "niki.toml"), []byte(tomlContent.String()), 0o644)
+
+	// 2. Create .agents/skills with 50 skills
+	skillsDir := filepath.Join(dir, ".agents", "skills")
+	_ = os.MkdirAll(skillsDir, 0o755)
+	for i := 1; i <= 50; i++ {
+		skillPath := filepath.Join(skillsDir, fmt.Sprintf("skill_%d.md", i))
+		content := fmt.Sprintf("---\nname: skill_%d\ndescription: test skill %d\n---\nBody of skill %d", i, i, i)
+		_ = os.WriteFile(skillPath, []byte(content), 0o644)
+	}
+
+	nikiBin, err := filepath.Abs("../../bin/niki")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	cmd := exec.Command(nikiBin, "--config", filepath.Join(dir, "niki.toml"))
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "NIKI_BOOT_TRACE=1", "NIKI_TRUST_PROJECT=1", "HOME="+dir)
+
+	f, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = pty.Setsize(f, &pty.Winsize{Rows: 24, Cols: 80})
+	defer f.Close()
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	elapsed := waitFirstFrame(t, f, start)
+	t.Logf("boot_with_5mcp_50skills_first_frame_ms=%d", elapsed.Milliseconds())
+
+	// Must stay inside cold start budget (≤90ms)
+	if elapsed > 90*time.Millisecond {
+		t.Errorf("first frame took %v, want <= 90ms with 5 MCP and 50 skills", elapsed)
+	}
+
+	// Read boot trace
+	traceData, err := os.ReadFile(filepath.Join(dir, ".niki", "log", "boot-trace.log"))
+	if err == nil {
+		t.Logf("boot trace:\n%s", string(traceData))
 	}
 }

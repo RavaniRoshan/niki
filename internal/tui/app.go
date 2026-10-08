@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -40,6 +41,19 @@ func NewAppModel(cmdChan chan<- protocol.EngineCommand, eventChan <-chan protoco
 		theme:     NewDefaultTheme(),
 		telemetry: &FrameTelemetry{},
 		pacer:     renderPacer{minInterval: streamInterval},
+	}
+}
+
+// SetReducedMotion applies the reduced-motion
+// preference (U8): the composer cursor becomes
+// static instead of blinking, removing the
+// periodic wakeups animation would cause.
+func (m *AppModel) SetReducedMotion(reduced bool) {
+	m.state.ReducedMotion = reduced
+	if reduced {
+		m.composer.Input.Cursor.SetMode(cursor.CursorStatic)
+	} else {
+		m.composer.Input.Cursor.SetMode(cursor.CursorBlink)
 	}
 }
 
@@ -190,18 +204,40 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEsc:
 			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdInterruptTurn}
 		case tea.KeyEnter:
-			input := m.composer.Input.Value()
-			if input == "/debug" {
+			input := strings.TrimSpace(m.composer.Input.Value())
+			switch input {
+			case "/help":
+				var helpText strings.Builder
+				helpText.WriteString("Available commands:\n")
+				for _, cmd := range CoreSlashCommands {
+					helpText.WriteString("  " + cmd.Name + " — " + cmd.Description + "\n")
+				}
+				helpText.WriteString("\nKeybindings:\n")
+				helpText.WriteString("  Esc: Interrupt turn / Deny approval\n")
+				helpText.WriteString("  Ctrl+C: Clear input / Interrupt\n")
+				helpText.WriteString("  Ctrl+D: Exit on empty input\n")
+				helpText.WriteString("  Ctrl+Z: Suspend process\n")
+				m.history.Append("system", helpText.String())
+				m.composer.Input.Reset()
+			case "/clear":
+				m.history.Cells = nil
+				m.history.Committed = 0
+				m.composer.Input.Reset()
+			case "/quit", "/exit":
+				return m, tea.Quit
+			case "/debug":
 				m.state.Debug = !m.state.Debug
 				m.composer.Input.Reset()
-			} else if input == "/reload" {
+			case "/reload":
 				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
 				m.composer.Input.Reset()
-			} else if input != "" {
-				m.history.Append("user", input)
-				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSubmitPrompt, Prompt: input}
-				m.composer.Input.Reset()
-				m.state.Busy = true
+			default:
+				if input != "" {
+					m.history.Append("user", input)
+					m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSubmitPrompt, Prompt: input}
+					m.composer.Input.Reset()
+					m.state.Busy = true
+				}
 			}
 		}
 
@@ -399,16 +435,9 @@ func itoa(n int) string {
 func composerSuggestions(value string) []string {
 	switch {
 	case strings.HasPrefix(value, "/"):
-		cmds := []string{"/exec", "/doctor", "/config", "/skills", "/mcp", "/resume", "/reload", "/debug", "/quit"}
-		q := strings.TrimPrefix(value, "/")
-		var out []string
-		for _, c := range cmds {
-			if strings.Contains(c, q) {
-				out = append(out, c)
-			}
-		}
-		if len(out) > 5 {
-			out = out[:5]
+		out := SuggestSlashCommands(value)
+		if len(out) > 6 {
+			out = out[:6]
 		}
 		return out
 	case strings.HasPrefix(value, "@"):

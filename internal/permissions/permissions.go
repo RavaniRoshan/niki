@@ -14,6 +14,14 @@ const (
 
 type Guard struct {
 	Mode Mode
+	// SandboxedShell permits the shell tool in
+	// read-only mode when a real sandbox backend
+	// enforces the read-only boundary at the OS
+	// level: writes land nowhere outside the
+	// bound workspace, so the mode's guarantee
+	// still holds (S1 auto-allow).
+	SandboxedShell bool
+	AuditLog       []DecisionRecord
 }
 
 func NewGuard(mode Mode) *Guard { return &Guard{Mode: mode} }
@@ -27,6 +35,9 @@ func (g *Guard) Allow(toolName string) bool {
 	case ModeWorkspaceWrite:
 		return true
 	case ModeReadOnly:
+		if toolName == "shell" && g.SandboxedShell {
+			return true
+		}
 		return readOnlyTools[toolName]
 	}
 	return false
@@ -45,4 +56,60 @@ func ClassifyCommand(cmd string) string {
 	default:
 		return "safe"
 	}
+}
+
+type ApprovalOption int
+
+const (
+	OptionDeny ApprovalOption = iota // 0: Safest option, focused by default
+	OptionAllowOnce
+	OptionAllowAlways
+)
+
+type DecisionRecord struct {
+	Tool     string
+	Command  string
+	Decision ApprovalOption
+	Reason   string
+}
+
+type ApprovalPrompt struct {
+	ToolName string
+	Command  string
+	Focused  ApprovalOption // Defaults to OptionDeny (safest)
+}
+
+func NewApprovalPrompt(tool, cmd string) *ApprovalPrompt {
+	return &ApprovalPrompt{
+		ToolName: tool,
+		Command:  cmd,
+		Focused:  OptionDeny, // Safest option focused by default
+	}
+}
+
+// HandleKey processes key events: Esc always denies.
+func (p *ApprovalPrompt) HandleKey(key string) ApprovalOption {
+	switch strings.ToLower(key) {
+	case "esc", "n":
+		return OptionDeny
+	case "enter":
+		return p.Focused
+	case "1":
+		return OptionDeny
+	case "2":
+		return OptionAllowOnce
+	case "3":
+		return OptionAllowAlways
+	default:
+		return OptionDeny // Fail-closed
+	}
+}
+
+func (g *Guard) LogDecision(tool, cmd string, decision ApprovalOption, reason string) {
+	g.AuditLog = append(g.AuditLog, DecisionRecord{
+		Tool:     tool,
+		Command:  cmd,
+		Decision: decision,
+		Reason:   reason,
+	})
 }

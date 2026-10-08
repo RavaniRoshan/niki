@@ -1,10 +1,12 @@
 package skills
 
 import (
-	"strings"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestDiscover(t *testing.T) {
@@ -57,4 +59,53 @@ func TestInstructionsBounded(t *testing.T) {
 	if len(got) != 1 || len(got[0].Content) > 50 {
 		t.Fatalf("got=%v len=%d", got, len(got))
 	}
+}
+
+func TestCompatAgentsSkillsDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	agentsSkills := filepath.Join(dir, ".agents", "skills")
+	_ = os.MkdirAll(agentsSkills, 0o755)
+	_ = os.WriteFile(filepath.Join(agentsSkills, "tool_helper.md"), []byte("---\nname: tool_helper\ndescription: helper\n---\nbody"), 0o644)
+
+	roots := StandardRoots(dir)
+	skills, err := Discover(roots...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range skills {
+		if s.Name == "tool_helper" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("failed to discover skill in .agents/skills compat path: %+v", skills)
+	}
+}
+
+func TestCachedDiscoverColdVsWarm(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i < 20; i++ {
+		skDir := filepath.Join(dir, fmt.Sprintf("skill_%d", i))
+		_ = os.MkdirAll(skDir, 0o755)
+		_ = os.WriteFile(filepath.Join(skDir, "SKILL.md"), []byte(fmt.Sprintf("---\nname: sk_%d\ndescription: desc\n---\nbody", i)), 0o644)
+	}
+
+	startCold := time.Now()
+	coldSkills, err := CachedDiscover(dir)
+	coldDuration := time.Since(startCold)
+	if err != nil || len(coldSkills) != 20 {
+		t.Fatalf("cold discover failed: len=%d err=%v", len(coldSkills), err)
+	}
+
+	startWarm := time.Now()
+	warmSkills, err := CachedDiscover(dir)
+	warmDuration := time.Since(startWarm)
+	if err != nil || len(warmSkills) != 20 {
+		t.Fatalf("warm discover failed: len=%d err=%v", len(warmSkills), err)
+	}
+
+	t.Logf("skills_cold_duration=%v skills_warm_duration=%v (warm_speedup=%.1fx)",
+		coldDuration, warmDuration, float64(coldDuration)/float64(max(warmDuration, 1*time.Nanosecond)))
 }

@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: github.com/RavaniRoshan/niki/internal/tui
+cpu: AMD Ryzen 7 4800H with Radeon Graphics         
+BenchmarkView80x24-16    	   24141	     49496 ns/op
+BenchmarkView80x24-16    	   23692	     51534 ns/op
+BenchmarkView80x24-16    	   24408	     49507 ns/op
+BenchmarkView80x24-16    	   24310	     49706 ns/op
+BenchmarkView80x24-16    	   24132	     49575 ns/op
+PASS
+ok  	github.com/RavaniRoshan/niki/internal/tui	8.587s

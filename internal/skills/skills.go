@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Skill is a discovered SKILL.md document.
@@ -17,7 +19,60 @@ type Skill struct {
 	Loaded      bool
 }
 
-// Discover scans for SKILL.md files under roots (non-recursive-limited walk).
+// StandardRoots returns standard and compat roots for skill discovery,
+// including ~/.niki/skills, <project>/.niki/skills, and .agents/skills.
+func StandardRoots(projectDir string) []string {
+	var roots []string
+	if home, err := os.UserHomeDir(); err == nil {
+		roots = append(roots, filepath.Join(home, ".niki", "skills"))
+	}
+	if projectDir != "" {
+		roots = append(roots,
+			filepath.Join(projectDir, ".niki", "skills"),
+			filepath.Join(projectDir, "skills"),
+			filepath.Join(projectDir, ".agents", "skills"),
+		)
+	}
+	return roots
+}
+
+var (
+	indexMu     sync.RWMutex
+	cachedRoots = make(map[string]time.Time)
+	cachedIndex []Skill
+)
+
+// CachedDiscover returns skills from cache if directory mtimes are unchanged,
+// loading frontmatter only.
+func CachedDiscover(roots ...string) ([]Skill, error) {
+	indexMu.Lock()
+	defer indexMu.Unlock()
+
+	changed := false
+	for _, root := range roots {
+		fi, err := os.Stat(root)
+		if err != nil {
+			continue
+		}
+		prev, ok := cachedRoots[root]
+		if !ok || !prev.Equal(fi.ModTime()) {
+			changed = true
+			cachedRoots[root] = fi.ModTime()
+		}
+	}
+
+	if !changed && len(cachedIndex) > 0 {
+		return cachedIndex, nil
+	}
+
+	skills, err := Discover(roots...)
+	if err == nil {
+		cachedIndex = skills
+	}
+	return skills, err
+}
+
+// Discover scans for SKILL.md or *.md files under roots (frontmatter only).
 func Discover(roots ...string) ([]Skill, error) {
 	var out []Skill
 	for _, root := range roots {
@@ -31,7 +86,7 @@ func Discover(roots ...string) ([]Skill, error) {
 			if d.IsDir() {
 				return nil
 			}
-			if strings.EqualFold(d.Name(), "SKILL.md") {
+			if strings.EqualFold(d.Name(), "SKILL.md") || strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
 				s, err := parseSkill(path)
 				if err == nil {
 					out = append(out, s)

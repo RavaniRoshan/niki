@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -79,14 +78,22 @@ func (o *OpenAIProvider) Stream(ctx context.Context, messages []Message) (<-chan
 			return
 		}
 
-		sc := bufio.NewScanner(resp.Body)
-		sc.Buffer(make([]byte, 1024*1024), 1024*1024)
-		for sc.Scan() {
-			line := strings.TrimSpace(sc.Text())
-			if !strings.HasPrefix(line, "data:") {
-				continue
+		scanner := NewSSEScanner(resp.Body)
+		sawDone := false
+		for {
+			ev, err := scanner.Next()
+			if err != nil {
+				if err == io.EOF {
+					if !sawDone {
+						errs <- fmt.Errorf("stream truncated: connection closed before completion")
+						return
+					}
+					break
+				}
+				errs <- fmt.Errorf("stream truncated: %w", err)
+				return
 			}
-			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			data := strings.TrimSpace(ev.Data)
 			if data == "[DONE]" {
 				break
 			}
@@ -113,10 +120,6 @@ func (o *OpenAIProvider) Stream(ctx context.Context, messages []Message) (<-chan
 				}
 			}
 		}
-		if err := sc.Err(); err != nil {
-			errs <- err
-			return
-		}
 		deltas <- Delta{Kind: DeltaDone}
 	}()
 
@@ -124,23 +127,33 @@ func (o *OpenAIProvider) Stream(ctx context.Context, messages []Message) (<-chan
 }
 
 func (o *OpenAIProvider) doWithBackoff(ctx context.Context, req *http.Request) (*http.Response, error) {
-	var resp *http.Response
-	var err error
+	backoff := 10 * time.Millisecond
 	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt) * 200 * time.Millisecond):
+		if req.GetBody != nil {
+			body, err := req.GetBody()
+			if err == nil {
+				req.Body = body
 			}
 		}
-		resp, err = o.Client.Do(req)
-		if err == nil && resp.StatusCode < 500 {
+		resp, err := o.Client.Do(req)
+		if err == nil && resp.StatusCode < 500 && resp.StatusCode != 429 {
 			return resp, nil
 		}
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
+		if attempt == 2 {
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("exhausted retries (last status %d)", resp.StatusCode)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+			backoff *= 2
+		}
 	}
-	return resp, err
+	return nil, fmt.Errorf("exhausted retries")
 }

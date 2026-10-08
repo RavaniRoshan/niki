@@ -18,20 +18,31 @@ type HookContext struct {
 }
 
 type HookFunc func(HookContext)
+type BlockingHookFunc func(HookContext) error
 
 type HookRunner struct {
-	mu    sync.RWMutex
-	hooks map[HookPoint][]HookFunc
+	mu            sync.RWMutex
+	hooks         map[HookPoint][]HookFunc
+	blockingHooks map[HookPoint][]BlockingHookFunc
 }
 
 func NewHookRunner() *HookRunner {
-	return &HookRunner{hooks: map[HookPoint][]HookFunc{}}
+	return &HookRunner{
+		hooks:         map[HookPoint][]HookFunc{},
+		blockingHooks: map[HookPoint][]BlockingHookFunc{},
+	}
 }
 
 func (h *HookRunner) On(point HookPoint, fn HookFunc) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.hooks[point] = append(h.hooks[point], fn)
+}
+
+func (h *HookRunner) OnBlocking(point HookPoint, fn BlockingHookFunc) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.blockingHooks[point] = append(h.blockingHooks[point], fn)
 }
 
 func (h *HookRunner) Fire(ctx HookContext) {
@@ -41,3 +52,15 @@ func (h *HookRunner) Fire(ctx HookContext) {
 		fn(ctx)
 	}
 }
+
+func (h *HookRunner) FirePreTool(ctx HookContext) error {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, fn := range h.blockingHooks[ctx.Point] {
+		if err := fn(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+

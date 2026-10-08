@@ -1,0 +1,44 @@
+# NIKI Performance Budgets & Measured Baselines
+# Measured on Linux WSL2 (AMD Ryzen 7 4800H 8C/16T, 7.5 GiB RAM)
+
+[budgets]
+version_time_ms = 20.0        # Budget: <= Codex (Codex measured: 20.0 ms)
+first_paint_ms = 23.4         # Budget: <= Codex (Codex measured: 23.4 ms)
+input_ready_ms = 23.4         # Budget: <= Codex (Codex measured: 23.4 ms)
+idle_rss_mb = 40.0            # Budget: <= 40 MB absolute (Codex measured: 21.7 MB)
+binary_size_mb = 25.0         # Budget: < 25 MB
+keystroke_p95_ms = 16.0       # Budget: < 16 ms
+idle_redraws = 0              # Budget: 0 redraws
+
+[baseline.codex]
+version_mean_ms = 20.0
+first_paint_ms = 23.4
+input_ready_ms = 23.4
+idle_rss_mb = 21.7
+bytes_before_prompt = 88
+binary_size_mb = 244.0
+
+[baseline.agy]
+version_mean_ms = 19.3
+first_paint_ms = 778.5
+input_ready_ms = 778.5
+idle_rss_mb = 225.5
+bytes_before_prompt = 7
+binary_size_mb = 202.0
+
+[baseline.kimi]
+version_mean_ms = 188.4
+first_paint_ms = 1253.7
+input_ready_ms = 1253.7
+idle_rss_mb = 391.6
+bytes_before_prompt = 7
+binary_size_mb = 75.0
+
+[measured.niki]
+version_mean_ms = 6.8
+first_paint_ms = 5.9
+input_ready_ms = 5.9
+idle_rss_mb = 13.1
+bytes_before_prompt = 16
+binary_size_mb = 19.0
+idle_redraws = 0

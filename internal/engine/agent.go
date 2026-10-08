@@ -18,6 +18,7 @@ type TurnRunner struct {
 	Registry *tools.Registry
 	Context  *ContextAssembler
 	Perm     *permissions.Guard
+	Hooks    *HookRunner
 }
 
 func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.EngineEvent)) error {
@@ -71,6 +72,11 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 func (t *TurnRunner) dispatchTool(ctx context.Context, name, argsJSON string) (tools.ToolResult, error) {
 	if t.Perm != nil && !t.Perm.Allow(name) {
 		return tools.ToolResult{}, &Error{Kind: ErrPermission, Message: "tool not allowed in current mode: " + name}
+	}
+	if t.Hooks != nil {
+		if err := t.Hooks.FirePreTool(HookContext{Point: HookPreToolUse, ToolName: name, Payload: argsJSON}); err != nil {
+			return tools.ToolResult{}, &Error{Kind: ErrPermission, Message: "blocked by hook: " + err.Error()}
+		}
 	}
 	return t.Registry.Run(ctx, name, jsonRaw(argsJSON))
 }

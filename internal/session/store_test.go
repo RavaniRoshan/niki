@@ -131,3 +131,51 @@ func TestDeleteSession(t *testing.T) {
 		t.Fatalf("session survived delete: %v", ids)
 	}
 }
+
+// TestKill9MidTurnThenResume verifies that an abrupt crash (simulating kill -9)
+// mid-turn preserves all flushed JSONL/DB events and allows clean session resume.
+func TestKill9MidTurnThenResume(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "sessions.db")
+
+	// Phase 1: Start turn and stream events
+	s1, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := protocol.NewSessionId()
+	_ = s1.CreateSession(sessionID, "crash-test")
+	_ = s1.AppendEvent(sessionID, protocol.EngineEvent{Type: protocol.EventSessionStarted, Timestamp: time.Now()})
+	_ = s1.AppendEvent(sessionID, protocol.EngineEvent{Type: protocol.EventTurnStarted, Timestamp: time.Now(), TurnID: "turn-1"})
+	_ = s1.AppendEvent(sessionID, protocol.EngineEvent{Type: protocol.EventAssistantTextDelta, Timestamp: time.Now(), TurnID: "turn-1", Text: "partial response before kill -9"})
+	// Abrupt termination simulation: do not call s1.Close() (simulate OS SIGKILL)
+
+	// Phase 2: Resume in fresh process instance
+	s2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open session store after unclosed termination: %v", err)
+	}
+	defer s2.Close()
+
+	recoveredEvents, err := s2.Events(sessionID)
+	if err != nil {
+		t.Fatalf("failed to read events: %v", err)
+	}
+	if len(recoveredEvents) != 3 {
+		t.Fatalf("expected 3 recovered events, got %d", len(recoveredEvents))
+	}
+	if recoveredEvents[2].Text != "partial response before kill -9" {
+		t.Fatalf("recovered event delta mismatch: %q", recoveredEvents[2].Text)
+	}
+
+	// Phase 3: Resume turn and append completion
+	err = s2.AppendEvent(sessionID, protocol.EngineEvent{Type: protocol.EventTurnCompleted, Timestamp: time.Now(), TurnID: "turn-1"})
+	if err != nil {
+		t.Fatalf("failed to continue session after resume: %v", err)
+	}
+	allEvents, _ := s2.Events(sessionID)
+	if len(allEvents) != 4 {
+		t.Fatalf("expected 4 total events after resume, got %d", len(allEvents))
+	}
+}
+

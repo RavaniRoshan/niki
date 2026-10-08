@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -137,6 +138,12 @@ func TestSyncWriterIsTermFile(t *testing.T) {
 // TestDetectOnNonTerminal asserts detection fails closed and
 // quickly when there is no controlling terminal.
 func TestDetectOnNonTerminal(t *testing.T) {
+	orig := openTTYFn
+	openTTYFn = func() (*os.File, bool, error) {
+		return nil, false, errors.New("no controlling terminal")
+	}
+	defer func() { openTTYFn = orig }()
+
 	done := make(chan struct{})
 	var err error
 	go func() {
