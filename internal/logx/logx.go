@@ -34,11 +34,11 @@ func Open(path string) (*Logger, error) {
 
 // Entry is one structured log record.
 type Entry struct {
-	Time    time.Time         `json:"time"`
-	Level   string            `json:"level"`
-	Event   string            `json:"event"`
-	Error   string            `json:"error,omitempty"`
-	Fields  map[string]string `json:"fields,omitempty"`
+	Time   time.Time         `json:"time"`
+	Level  string            `json:"level"`
+	Event  string            `json:"event"`
+	Error  string            `json:"error,omitempty"`
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 // Info records an informational event.

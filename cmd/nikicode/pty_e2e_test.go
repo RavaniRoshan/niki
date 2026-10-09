@@ -150,7 +150,12 @@ func TestPTYCodingLoop(t *testing.T) {
 	}
 }
 
-func min(a, b int) int { if a < b { return a }; return b }
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
 
 // answerTerminalQueries replies to the terminal
 // queries nikicode (and the TUI framework) send, the way

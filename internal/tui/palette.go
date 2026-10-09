@@ -625,4 +625,3 @@ func renderMCPAddModal(state PaletteState, th Theme, width int) string {
 		Width(width).
 		Render(content)
 }
-

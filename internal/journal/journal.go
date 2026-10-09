@@ -23,9 +23,9 @@ type Entry struct {
 	Kind string    `json:"kind"` // recipe | git | explain
 	Name string    `json:"name"` // recipe name, git op, or "explain"
 	// Input is the exact step text, so redo can re-parse it.
-	Input   string            `json:"input,omitempty"`
-	Dir     string            `json:"dir"`
-	Vars    map[string]string `json:"vars,omitempty"`
+	Input   string               `json:"input,omitempty"`
+	Dir     string               `json:"dir"`
+	Vars    map[string]string    `json:"vars,omitempty"`
 	Effects []recipes.FileEffect `json:"effects,omitempty"`
 	// HeadBefore/HeadAfter track the git tip across the action.
 	HeadBefore string `json:"head_before,omitempty"`

@@ -28,8 +28,10 @@ func NewTodoWriteTool() *TodoWriteTool {
 	}
 }
 
-func (t *TodoWriteTool) Name() string        { return "todo_write" }
-func (t *TodoWriteTool) Description() string { return "Rewrite the session-scoped todo list atomically" }
+func (t *TodoWriteTool) Name() string { return "todo_write" }
+func (t *TodoWriteTool) Description() string {
+	return "Rewrite the session-scoped todo list atomically"
+}
 
 type todoWriteArgs struct {
 	Todos []TodoItem `json:"todos"`

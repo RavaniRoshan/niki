@@ -20,8 +20,10 @@ func NewNotebookEditTool() *NotebookEditTool {
 	}
 }
 
-func (t *NotebookEditTool) Name() string        { return "notebook_edit" }
-func (t *NotebookEditTool) Description() string { return "Edit a Jupyter Notebook (.ipynb) cell by index (replace, insert, delete) while preserving outputs and metadata integrity" }
+func (t *NotebookEditTool) Name() string { return "notebook_edit" }
+func (t *NotebookEditTool) Description() string {
+	return "Edit a Jupyter Notebook (.ipynb) cell by index (replace, insert, delete) while preserving outputs and metadata integrity"
+}
 
 type notebookEditArgs struct {
 	Path      string `json:"path"`

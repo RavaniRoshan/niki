@@ -8,10 +8,10 @@ import (
 type Mode string
 
 const (
-	ModeReadOnly      Mode = "readonly"
+	ModeReadOnly       Mode = "readonly"
 	ModeWorkspaceWrite Mode = "workspace_write"
-	ModeFullAccess    Mode = "full_access"
-	ModeManual        Mode = "manual"
+	ModeFullAccess     Mode = "full_access"
+	ModeManual         Mode = "manual"
 )
 
 type Guard struct {

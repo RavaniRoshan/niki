@@ -260,4 +260,3 @@ func SaveUserConfig(cfg Config) error {
 	}
 	return os.WriteFile(path, data, 0o644)
 }
-

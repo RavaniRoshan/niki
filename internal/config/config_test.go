@@ -164,7 +164,6 @@ theme = "nord"
 	}
 }
 
-
 func TestProjectConfigLegacyFallback(t *testing.T) {
 	dir := t.TempDir()
 	origWd, _ := os.Getwd()

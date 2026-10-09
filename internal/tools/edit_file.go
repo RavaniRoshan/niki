@@ -24,8 +24,10 @@ func NewEditFileTool() *EditFileTool {
 	}
 }
 
-func (t *EditFileTool) Name() string        { return "edit_file" }
-func (t *EditFileTool) Description() string { return "Replace exact string occurrences in a file with read-before-edit hash check and unified diff preview" }
+func (t *EditFileTool) Name() string { return "edit_file" }
+func (t *EditFileTool) Description() string {
+	return "Replace exact string occurrences in a file with read-before-edit hash check and unified diff preview"
+}
 
 type editFileArgs struct {
 	Path         string `json:"path"`

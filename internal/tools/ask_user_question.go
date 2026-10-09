@@ -32,8 +32,10 @@ func NewAskUserQuestionTool() *AskUserQuestionTool {
 	}
 }
 
-func (t *AskUserQuestionTool) Name() string        { return "ask_user_question" }
-func (t *AskUserQuestionTool) Description() string { return "Prompt the user with structured multiple-choice questions (1-4 questions, 2-4 options, header <= 12 chars) with write-in escape hatch" }
+func (t *AskUserQuestionTool) Name() string { return "ask_user_question" }
+func (t *AskUserQuestionTool) Description() string {
+	return "Prompt the user with structured multiple-choice questions (1-4 questions, 2-4 options, header <= 12 chars) with write-in escape hatch"
+}
 
 type askUserQuestionArgs struct {
 	Questions []UserQuestion `json:"questions"`

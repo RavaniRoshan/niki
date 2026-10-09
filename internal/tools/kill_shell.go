@@ -23,8 +23,10 @@ func NewKillShellTool(pm *ProcessManager) *KillShellTool {
 	}
 }
 
-func (t *KillShellTool) Name() string        { return "kill_shell" }
-func (t *KillShellTool) Description() string { return "Terminate a running background process or process group using SIGTERM or SIGKILL" }
+func (t *KillShellTool) Name() string { return "kill_shell" }
+func (t *KillShellTool) Description() string {
+	return "Terminate a running background process or process group using SIGTERM or SIGKILL"
+}
 
 type killShellArgs struct {
 	ProcessID string `json:"process_id"`

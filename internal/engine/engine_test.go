@@ -11,8 +11,8 @@ import (
 
 	"github.com/RavaniRoshan/niki/internal/config"
 	"github.com/RavaniRoshan/niki/internal/permissions"
-	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/protocol"
+	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/tools"
 )
 
@@ -248,5 +248,3 @@ func TestCompactionGolden(t *testing.T) {
 		t.Fatal("system message lost in automated compaction")
 	}
 }
-
-

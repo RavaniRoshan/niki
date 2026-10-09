@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/RavaniRoshan/niki/internal/protocol"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestTieredCtrlCBehavior(t *testing.T) {

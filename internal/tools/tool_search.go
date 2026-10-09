@@ -26,8 +26,10 @@ func NewToolSearchTool(r *Registry) *ToolSearchTool {
 	}
 }
 
-func (t *ToolSearchTool) Name() string        { return "tool_search" }
-func (t *ToolSearchTool) Description() string { return "Search and discover available tools by exact name, 'select:A,B,C', 'mcp__' prefix, or keyword matching" }
+func (t *ToolSearchTool) Name() string { return "tool_search" }
+func (t *ToolSearchTool) Description() string {
+	return "Search and discover available tools by exact name, 'select:A,B,C', 'mcp__' prefix, or keyword matching"
+}
 
 type toolSearchArgs struct {
 	Query string `json:"query"`

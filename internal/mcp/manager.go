@@ -39,20 +39,20 @@ type Status struct {
 // (M2). MCP output is untrusted: every result is
 // sanitized before it leaves the manager (M5).
 type Manager struct {
-	mu       sync.RWMutex
-	servers  map[string]*serverEntry
-	order    []string
-	cache    *CatalogCache
-	emit     func(protocol.EngineEvent)
+	mu      sync.RWMutex
+	servers map[string]*serverEntry
+	order   []string
+	cache   *CatalogCache
+	emit    func(protocol.EngineEvent)
 }
 
 type serverEntry struct {
-	cfg      ServerConfig
-	client   *Client
+	cfg       ServerConfig
+	client    *Client
 	qualified string
-	tools    []string
-	cached   bool // tools served from the persisted cache
-	err      string
+	tools     []string
+	cached    bool // tools served from the persisted cache
+	err       string
 }
 
 func NewManager(cache *CatalogCache, emit func(protocol.EngineEvent)) *Manager {

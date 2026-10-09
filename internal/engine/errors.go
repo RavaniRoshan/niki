@@ -5,11 +5,11 @@ import "fmt"
 type ErrorKind string
 
 const (
-	ErrProvider  ErrorKind = "provider"
-	ErrTool      ErrorKind = "tool"
+	ErrProvider   ErrorKind = "provider"
+	ErrTool       ErrorKind = "tool"
 	ErrPermission ErrorKind = "permission"
-	ErrCancelled ErrorKind = "cancelled"
-	ErrInternal  ErrorKind = "internal"
+	ErrCancelled  ErrorKind = "cancelled"
+	ErrInternal   ErrorKind = "internal"
 )
 
 type Error struct {
@@ -27,6 +27,8 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Err }
 
-func WrapProvider(err error) *Error  { return &Error{Kind: ErrProvider, Message: "provider failure", Err: err} }
-func WrapTool(err error) *Error      { return &Error{Kind: ErrTool, Message: "tool failure", Err: err} }
-func WrapCancelled() *Error          { return &Error{Kind: ErrCancelled, Message: "cancelled"} }
+func WrapProvider(err error) *Error {
+	return &Error{Kind: ErrProvider, Message: "provider failure", Err: err}
+}
+func WrapTool(err error) *Error { return &Error{Kind: ErrTool, Message: "tool failure", Err: err} }
+func WrapCancelled() *Error     { return &Error{Kind: ErrCancelled, Message: "cancelled"} }

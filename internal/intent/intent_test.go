@@ -23,8 +23,8 @@ func TestRouteRecipesWin(t *testing.T) {
 		"build the project now": "build",
 		"commit my changes":     "commit",
 		"scaffold a worker":     "scaffold",
-		"rename Old to New":      "refactor",
-		"generate the docs":      "docs",
+		"rename Old to New":     "refactor",
+		"generate the docs":     "docs",
 	} {
 		a := Route(all, input)
 		if a.Kind != Recipe || a.Recipe.Name != want {
@@ -36,18 +36,18 @@ func TestRouteRecipesWin(t *testing.T) {
 func TestRouteGit(t *testing.T) {
 	all := loadAll(t)
 	cases := map[string]GitOp{
-		"what is the status":            GitStatus,
-		"show my working tree":          GitStatus,
-		"create a branch called feat":   GitBranch,
-		"switch to main":                GitBranch,
-		"rebase onto main":              GitRebase,
-		"resolve the merge conflict":    GitRebase,
-		"blame line 10 of main.go":      GitBlame,
-		"show recent commits":           GitLog,
-		"review my staged changes":      GitReview,
-		"write a changelog":             GitChangelog,
-		"draft a pull request":          GitPRDraft,
-		"commit the staged files":       GitCommit,
+		"what is the status":          GitStatus,
+		"show my working tree":        GitStatus,
+		"create a branch called feat": GitBranch,
+		"switch to main":              GitBranch,
+		"rebase onto main":            GitRebase,
+		"resolve the merge conflict":  GitRebase,
+		"blame line 10 of main.go":    GitBlame,
+		"show recent commits":         GitLog,
+		"review my staged changes":    GitReview,
+		"write a changelog":           GitChangelog,
+		"draft a pull request":        GitPRDraft,
+		"commit the staged files":     GitCommit,
 	}
 	for input, want := range cases {
 		a := Route(all, input)
@@ -98,8 +98,8 @@ func TestSplitSteps(t *testing.T) {
 	cases := map[string][]string{
 		"scaffold name=a Name=A then build the project": {"scaffold name=a Name=A", "build the project"},
 		"run the tests and then commit my changes":      {"run the tests", "commit my changes"},
-		"status; log":                                   {"status", "log"},
-		"just one thing":                                {"just one thing"},
+		"status; log":    {"status", "log"},
+		"just one thing": {"just one thing"},
 	}
 	for in, want := range cases {
 		got := SplitSteps(in)

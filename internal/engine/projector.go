@@ -10,13 +10,13 @@ import (
 // before they are transmitted to any model provider.
 //
 // Conformance:
-// - Repairs broken/unclosed tool calls from interrupted turns (synthesizes
-//   a "[tool execution interrupted]" placeholder to prevent 400 Bad Request
-//   errors from Anthropic and OpenAI).
-// - Merges consecutive assistant messages so turn-alternation schemas pass.
-// - Removes empty/vacuous messages.
-// - Injects 3-point prompt cache hints (CacheControl="ephemeral") on the
-//   system prompt, last tool message, and latest user prompt (OpenCode parity).
+//   - Repairs broken/unclosed tool calls from interrupted turns (synthesizes
+//     a "[tool execution interrupted]" placeholder to prevent 400 Bad Request
+//     errors from Anthropic and OpenAI).
+//   - Merges consecutive assistant messages so turn-alternation schemas pass.
+//   - Removes empty/vacuous messages.
+//   - Injects 3-point prompt cache hints (CacheControl="ephemeral") on the
+//     system prompt, last tool message, and latest user prompt (OpenCode parity).
 func ProjectContext(messages []provider.Message) []provider.Message {
 	if len(messages) == 0 {
 		return messages

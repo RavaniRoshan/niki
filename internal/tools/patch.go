@@ -293,8 +293,10 @@ func NewApplyPatchTool() *ApplyPatchTool {
 	}
 }
 
-func (t *ApplyPatchTool) Name() string        { return "apply_patch" }
-func (t *ApplyPatchTool) Description() string { return "Apply a unified diff patch to a file with fuzzy seek and reverse support" }
+func (t *ApplyPatchTool) Name() string { return "apply_patch" }
+func (t *ApplyPatchTool) Description() string {
+	return "Apply a unified diff patch to a file with fuzzy seek and reverse support"
+}
 
 type applyPatchArgs struct {
 	Path    string `json:"path"`

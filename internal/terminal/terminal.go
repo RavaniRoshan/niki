@@ -20,12 +20,12 @@ import (
 // even to terminals that never enabled the modes: unknown CSI
 // private modes are ignored by convention.
 const (
-	kittyQuery      = "\x1b[?u"
-	kittyEnable     = "\x1b[>1u"
-	kittyDisable    = "\x1b[<u"
-	syncQuery       = "\x1b[?2026$p"
-	syncEnable      = "\x1b[?2026h"
-	syncDisable     = "\x1b[?2026l"
+	kittyQuery       = "\x1b[?u"
+	kittyEnable      = "\x1b[>1u"
+	kittyDisable     = "\x1b[<u"
+	syncQuery        = "\x1b[?2026$p"
+	syncEnable       = "\x1b[?2026h"
+	syncDisable      = "\x1b[?2026l"
 	deviceAttrsQuery = "\x1b[c"
 
 	ProgressIndeterminate  = "\x1b]9;4;3\x1b\\"

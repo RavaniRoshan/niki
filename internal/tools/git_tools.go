@@ -37,8 +37,8 @@ func NewGitStatusTool() *GitStatusTool {
 	return &GitStatusTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string"}}`}}
 }
 
-func (t *GitStatusTool) Name() string        { return "git_status" }
-func (t *GitStatusTool) Description() string { return "Show git status (porcelain) for a work tree" }
+func (t *GitStatusTool) Name() string            { return "git_status" }
+func (t *GitStatusTool) Description() string     { return "Show git status (porcelain) for a work tree" }
 func (t *GitStatusTool) IsConcurrencySafe() bool { return true }
 func (t *GitStatusTool) IsReadOnly() bool        { return true }
 
@@ -71,8 +71,10 @@ func NewGitCommitTool() *GitCommitTool {
 	return &GitCommitTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string","message":"string","stage":"string"}}`}}
 }
 
-func (t *GitCommitTool) Name() string        { return "git_commit" }
-func (t *GitCommitTool) Description() string { return "Commit staged changes (message derived from the staged diff when empty); optional stage paths first" }
+func (t *GitCommitTool) Name() string { return "git_commit" }
+func (t *GitCommitTool) Description() string {
+	return "Commit staged changes (message derived from the staged diff when empty); optional stage paths first"
+}
 
 func (t *GitCommitTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, error) {
 	var a struct {
@@ -111,8 +113,10 @@ func NewGitBranchTool() *GitBranchTool {
 	return &GitBranchTool{Base: Base{SchemaStr: `{"required":["action","name"],"fields":{"dir":"string","action":"string","name":"string"}}`}}
 }
 
-func (t *GitBranchTool) Name() string        { return "git_branch" }
-func (t *GitBranchTool) Description() string { return "Create (action=create) or switch to (action=switch) a branch" }
+func (t *GitBranchTool) Name() string { return "git_branch" }
+func (t *GitBranchTool) Description() string {
+	return "Create (action=create) or switch to (action=switch) a branch"
+}
 
 func (t *GitBranchTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, error) {
 	var a struct {
@@ -147,8 +151,10 @@ func NewGitRebaseTool() *GitRebaseTool {
 	return &GitRebaseTool{Base: Base{SchemaStr: `{"required":["onto"],"fields":{"dir":"string","onto":"string","abort":"boolean","continue":"boolean"}}`}}
 }
 
-func (t *GitRebaseTool) Name() string        { return "git_rebase" }
-func (t *GitRebaseTool) Description() string { return "Rebase onto a ref (autostash); conflicts stop with a report; abort/continue drive the cycle" }
+func (t *GitRebaseTool) Name() string { return "git_rebase" }
+func (t *GitRebaseTool) Description() string {
+	return "Rebase onto a ref (autostash); conflicts stop with a report; abort/continue drive the cycle"
+}
 
 func (t *GitRebaseTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, error) {
 	var a struct {
@@ -188,8 +194,10 @@ func NewGitBlameTool() *GitBlameTool {
 	return &GitBlameTool{Base: Base{SchemaStr: `{"required":["file","line"],"fields":{"dir":"string","file":"string","line":"number"}}`}}
 }
 
-func (t *GitBlameTool) Name() string        { return "git_blame" }
-func (t *GitBlameTool) Description() string { return "Blame one line: who, when, and the commit summary" }
+func (t *GitBlameTool) Name() string { return "git_blame" }
+func (t *GitBlameTool) Description() string {
+	return "Blame one line: who, when, and the commit summary"
+}
 func (t *GitBlameTool) IsConcurrencySafe() bool { return true }
 func (t *GitBlameTool) IsReadOnly() bool        { return true }
 
@@ -217,8 +225,8 @@ func NewGitLogTool() *GitLogTool {
 	return &GitLogTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string","n":"number"}}`}}
 }
 
-func (t *GitLogTool) Name() string        { return "git_log" }
-func (t *GitLogTool) Description() string { return "Recent commit history" }
+func (t *GitLogTool) Name() string            { return "git_log" }
+func (t *GitLogTool) Description() string     { return "Recent commit history" }
 func (t *GitLogTool) IsConcurrencySafe() bool { return true }
 func (t *GitLogTool) IsReadOnly() bool        { return true }
 
@@ -253,8 +261,10 @@ func NewGitReviewTool() *GitReviewTool {
 	return &GitReviewTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string"}}`}}
 }
 
-func (t *GitReviewTool) Name() string        { return "git_review" }
-func (t *GitReviewTool) Description() string { return "Review staged changes: per-file counts plus the first hunk" }
+func (t *GitReviewTool) Name() string { return "git_review" }
+func (t *GitReviewTool) Description() string {
+	return "Review staged changes: per-file counts plus the first hunk"
+}
 func (t *GitReviewTool) IsConcurrencySafe() bool { return true }
 func (t *GitReviewTool) IsReadOnly() bool        { return true }
 
@@ -284,8 +294,8 @@ func NewGitChangelogTool() *GitChangelogTool {
 	return &GitChangelogTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string","n":"number"}}`}}
 }
 
-func (t *GitChangelogTool) Name() string        { return "git_changelog" }
-func (t *GitChangelogTool) Description() string { return "Render recent history as markdown changelog" }
+func (t *GitChangelogTool) Name() string            { return "git_changelog" }
+func (t *GitChangelogTool) Description() string     { return "Render recent history as markdown changelog" }
 func (t *GitChangelogTool) IsConcurrencySafe() bool { return true }
 func (t *GitChangelogTool) IsReadOnly() bool        { return true }
 
@@ -312,10 +322,12 @@ func NewGitDiffSummaryTool() *GitDiffSummaryTool {
 	return &GitDiffSummaryTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string"}}`}}
 }
 
-func (t *GitDiffSummaryTool) Name() string              { return "git_diff_summary" }
-func (t *GitDiffSummaryTool) Description() string       { return "Show line additions, deletions, and file change statistics" }
-func (t *GitDiffSummaryTool) IsConcurrencySafe() bool   { return true }
-func (t *GitDiffSummaryTool) IsReadOnly() bool          { return true }
+func (t *GitDiffSummaryTool) Name() string { return "git_diff_summary" }
+func (t *GitDiffSummaryTool) Description() string {
+	return "Show line additions, deletions, and file change statistics"
+}
+func (t *GitDiffSummaryTool) IsConcurrencySafe() bool { return true }
+func (t *GitDiffSummaryTool) IsReadOnly() bool        { return true }
 
 func (t *GitDiffSummaryTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, error) {
 	var a struct {
@@ -339,8 +351,10 @@ func NewGitSmartCommitTool() *GitSmartCommitTool {
 	return &GitSmartCommitTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string"}}`}}
 }
 
-func (t *GitSmartCommitTool) Name() string        { return "git_smart_commit" }
-func (t *GitSmartCommitTool) Description() string { return "Draft an automated conventional commit message from diff and commit" }
+func (t *GitSmartCommitTool) Name() string { return "git_smart_commit" }
+func (t *GitSmartCommitTool) Description() string {
+	return "Draft an automated conventional commit message from diff and commit"
+}
 func (t *GitSmartCommitTool) IsConcurrencySafe() bool { return false }
 func (t *GitSmartCommitTool) IsReadOnly() bool        { return false }
 
@@ -370,10 +384,12 @@ func NewGitPRSummaryTool() *GitPRSummaryTool {
 	return &GitPRSummaryTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string","base":"string"}}`}}
 }
 
-func (t *GitPRSummaryTool) Name() string              { return "git_pr_summary" }
-func (t *GitPRSummaryTool) Description() string       { return "Draft a GitHub PR description with commits and change stats" }
-func (t *GitPRSummaryTool) IsConcurrencySafe() bool   { return true }
-func (t *GitPRSummaryTool) IsReadOnly() bool          { return true }
+func (t *GitPRSummaryTool) Name() string { return "git_pr_summary" }
+func (t *GitPRSummaryTool) Description() string {
+	return "Draft a GitHub PR description with commits and change stats"
+}
+func (t *GitPRSummaryTool) IsConcurrencySafe() bool { return true }
+func (t *GitPRSummaryTool) IsReadOnly() bool        { return true }
 
 func (t *GitPRSummaryTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, error) {
 	var a struct {

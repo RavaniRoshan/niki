@@ -9,7 +9,7 @@ import (
 )
 
 type ToolResult struct {
-	Output string
+	Output  string
 	IsError bool
 }
 

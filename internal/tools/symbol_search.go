@@ -25,10 +25,12 @@ func NewSymbolSearchTool(idx *index.SymbolIndex) *SymbolSearchTool {
 	}
 }
 
-func (t *SymbolSearchTool) Name() string              { return "symbol_search" }
-func (t *SymbolSearchTool) Description() string       { return "Search workspace declarations (functions, types, interfaces, structs) by symbol name" }
-func (t *SymbolSearchTool) IsReadOnly() bool          { return true }
-func (t *SymbolSearchTool) IsConcurrencySafe() bool   { return true }
+func (t *SymbolSearchTool) Name() string { return "symbol_search" }
+func (t *SymbolSearchTool) Description() string {
+	return "Search workspace declarations (functions, types, interfaces, structs) by symbol name"
+}
+func (t *SymbolSearchTool) IsReadOnly() bool        { return true }
+func (t *SymbolSearchTool) IsConcurrencySafe() bool { return true }
 
 type symbolSearchArgs struct {
 	Query string `json:"query"`

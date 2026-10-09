@@ -24,8 +24,10 @@ func NewExecCommandTool(pm *ProcessManager) *ExecCommandTool {
 	}
 }
 
-func (t *ExecCommandTool) Name() string        { return "exec_command" }
-func (t *ExecCommandTool) Description() string { return "Spawn an interactive or background command with PTY session support" }
+func (t *ExecCommandTool) Name() string { return "exec_command" }
+func (t *ExecCommandTool) Description() string {
+	return "Spawn an interactive or background command with PTY session support"
+}
 
 type execCommandArgs struct {
 	Command        string `json:"command"`

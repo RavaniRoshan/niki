@@ -23,8 +23,10 @@ func NewWriteStdinTool(pm *ProcessManager) *WriteStdinTool {
 	}
 }
 
-func (t *WriteStdinTool) Name() string        { return "write_stdin" }
-func (t *WriteStdinTool) Description() string { return "Send interactive input, EOF, or interrupt signal to a background process" }
+func (t *WriteStdinTool) Name() string { return "write_stdin" }
+func (t *WriteStdinTool) Description() string {
+	return "Send interactive input, EOF, or interrupt signal to a background process"
+}
 
 type writeStdinArgs struct {
 	ProcessID string `json:"process_id"`

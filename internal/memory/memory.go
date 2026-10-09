@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	MaxIndexLines       = 200
-	MaxIndexBytes       = 25 * 1024 // 25 KB cap
-	MaxRetrievalTopics  = 5         // At most 5 topics injected into context
+	MaxIndexLines      = 200
+	MaxIndexBytes      = 25 * 1024 // 25 KB cap
+	MaxRetrievalTopics = 5         // At most 5 topics injected into context
 )
 
 type TopicFact struct {

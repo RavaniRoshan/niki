@@ -34,9 +34,9 @@ func (r Report) FormatXML() string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("<diagnostics file=\"%s\">\n", r.File))
+	fmt.Fprintf(&sb, "<diagnostics file=\"%s\">\n", r.File)
 	for _, it := range r.Items {
-		sb.WriteString(fmt.Sprintf("%s [%d:%d] %s\n", it.Severity, it.Line, it.Col, it.Message))
+		fmt.Fprintf(&sb, "%s [%d:%d] %s\n", it.Severity, it.Line, it.Col, it.Message)
 	}
 	sb.WriteString("</diagnostics>")
 	return sb.String()

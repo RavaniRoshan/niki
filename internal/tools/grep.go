@@ -15,7 +15,9 @@ type GrepTool struct {
 	Base
 }
 
-func NewGrepTool() *GrepTool { return &GrepTool{Base: Base{SchemaStr: `{"required":["pattern"],"fields":{"pattern":"string","root":"string","glob":"string"}}`}} }
+func NewGrepTool() *GrepTool {
+	return &GrepTool{Base: Base{SchemaStr: `{"required":["pattern"],"fields":{"pattern":"string","root":"string","glob":"string"}}`}}
+}
 
 func (t *GrepTool) Name() string        { return "grep" }
 func (t *GrepTool) Description() string { return "Regex search across files" }

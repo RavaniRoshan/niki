@@ -244,4 +244,3 @@ func TestPaletteEscAndBackspace(t *testing.T) {
 		t.Fatal("expected palette to be closed after second Esc")
 	}
 }
-

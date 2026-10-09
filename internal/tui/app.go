@@ -1400,7 +1400,7 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 					if len(firstLine) > 50 {
 						firstLine = firstLine[:47] + "..."
 					}
-					sb.WriteString(fmt.Sprintf("  [%d] %s (%d lines, %s)\n", i+1, firstLine, e.LineCount, e.CreatedAt.Format("15:04:05")))
+					fmt.Fprintf(&sb, "  [%d] %s (%d lines, %s)\n", i+1, firstLine, e.LineCount, e.CreatedAt.Format("15:04:05"))
 				}
 				sb.WriteString("Use '/stash pop' to restore the latest.")
 				m.history.Append("system", sb.String())

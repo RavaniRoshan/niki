@@ -28,8 +28,10 @@ func NewUpdatePlanTool() *UpdatePlanTool {
 	}
 }
 
-func (t *UpdatePlanTool) Name() string        { return "update_plan" }
-func (t *UpdatePlanTool) Description() string { return "Update the execution plan with structured steps; enforces at most one in-progress step and rejects in read-only plan mode" }
+func (t *UpdatePlanTool) Name() string { return "update_plan" }
+func (t *UpdatePlanTool) Description() string {
+	return "Update the execution plan with structured steps; enforces at most one in-progress step and rejects in read-only plan mode"
+}
 
 type updatePlanArgs struct {
 	Steps []PlanStep `json:"steps"`

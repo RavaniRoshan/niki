@@ -25,8 +25,8 @@ import (
 	"github.com/RavaniRoshan/niki/internal/mcp"
 	"github.com/RavaniRoshan/niki/internal/paths"
 	"github.com/RavaniRoshan/niki/internal/permissions"
-	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/protocol"
+	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/recipes"
 	"github.com/RavaniRoshan/niki/internal/routing"
 	"github.com/RavaniRoshan/niki/internal/sandbox"
@@ -39,11 +39,11 @@ import (
 )
 
 var (
-	version     = "0.11.0"
-	debug       bool
-	profile     bool
-	inline      bool
-	configPath  string
+	version    = "0.11.0"
+	debug      bool
+	profile    bool
+	inline     bool
+	configPath string
 )
 
 var bootT0 = time.Now()

@@ -50,10 +50,10 @@ type StepResult struct {
 // FileEffect records one file write for undo: the pre-image (Before,
 // nil when the file is new), what was written (After), and the mode.
 type FileEffect struct {
-	Path         string
-	Existed      bool
+	Path          string
+	Existed       bool
 	Before, After []byte
-	Mode         os.FileMode
+	Mode          os.FileMode
 }
 
 // Report is a full recipe execution.

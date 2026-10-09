@@ -8,26 +8,26 @@ import (
 	"time"
 
 	"github.com/RavaniRoshan/niki/internal/permissions"
-	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/protocol"
+	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/tools"
 )
 
 type Engine struct {
-	cmdChan    chan protocol.EngineCommand
-	eventChan  chan protocol.EngineEvent
-	ctx        context.Context
-	cancel     context.CancelFunc
-	runner     *TurnRunner
-	session    *Session
-	obs        func(protocol.EngineEvent)
-	readiness  *Readiness
+	cmdChan   chan protocol.EngineCommand
+	eventChan chan protocol.EngineEvent
+	ctx       context.Context
+	cancel    context.CancelFunc
+	runner    *TurnRunner
+	session   *Session
+	obs       func(protocol.EngineEvent)
+	readiness *Readiness
 
 	sessionStore SessionStore
 
-	mu           sync.Mutex
-	turnCancel   context.CancelFunc
-	turnRunning  bool
+	mu          sync.Mutex
+	turnCancel  context.CancelFunc
+	turnRunning bool
 
 	// emitMu serializes emit() now that turns run on their
 	// own goroutines and the engine loop emits concurrently.

@@ -49,18 +49,20 @@ func NewWebFetchTool() *WebFetchTool {
 	}
 }
 
-func (t *WebFetchTool) Name() string        { return "web_fetch" }
-func (t *WebFetchTool) Description() string { return "Fetch a web page, upgrade to HTTPS, and extract clean markdown content" }
+func (t *WebFetchTool) Name() string { return "web_fetch" }
+func (t *WebFetchTool) Description() string {
+	return "Fetch a web page, upgrade to HTTPS, and extract clean markdown content"
+}
 
 type webFetchArgs struct {
 	URL string `json:"url"`
 }
 
 var (
-	reScript = regexp.MustCompile(`(?is)<script.*?</script>`)
-	reStyle  = regexp.MustCompile(`(?is)<style.*?</style>`)
-	reTag    = regexp.MustCompile(`(?s)<[^>]+>`)
-	reSpaces = regexp.MustCompile(`[ \t\r\f]+`)
+	reScript   = regexp.MustCompile(`(?is)<script.*?</script>`)
+	reStyle    = regexp.MustCompile(`(?is)<style.*?</style>`)
+	reTag      = regexp.MustCompile(`(?s)<[^>]+>`)
+	reSpaces   = regexp.MustCompile(`[ \t\r\f]+`)
 	reNewlines = regexp.MustCompile(`\n{3,}`)
 )
 

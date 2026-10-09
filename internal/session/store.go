@@ -14,9 +14,9 @@ import (
 
 // Store persists sessions and events to SQLite + a JSONL event log.
 type Store struct {
-	db   *sql.DB
+	db      *sql.DB
 	logPath string
-	log *os.File
+	log     *os.File
 }
 
 func Open(path string) (*Store, error) {

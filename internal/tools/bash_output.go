@@ -23,8 +23,10 @@ func NewBashOutputTool(pm *ProcessManager) *BashOutputTool {
 	}
 }
 
-func (t *BashOutputTool) Name() string        { return "bash_output" }
-func (t *BashOutputTool) Description() string { return "Retrieve incremental or full terminal output and status from a running or completed process" }
+func (t *BashOutputTool) Name() string { return "bash_output" }
+func (t *BashOutputTool) Description() string {
+	return "Retrieve incremental or full terminal output and status from a running or completed process"
+}
 
 type bashOutputArgs struct {
 	ProcessID string `json:"process_id"`

@@ -17,11 +17,11 @@ import (
 )
 
 type HookConfig struct {
-	Point   string `json:"point"`   // pre_tool_use | post_tool_use | session_start | user_prompt_submit | stop
-	Command string `json:"command"` // command or script path
+	Point   string   `json:"point"`   // pre_tool_use | post_tool_use | session_start | user_prompt_submit | stop
+	Command string   `json:"command"` // command or script path
 	Args    []string `json:"args,omitempty"`
-	SHA256  string `json:"sha256,omitempty"` // trusted hash
-	Timeout int    `json:"timeout_seconds,omitempty"`
+	SHA256  string   `json:"sha256,omitempty"` // trusted hash
+	Timeout int      `json:"timeout_seconds,omitempty"`
 }
 
 type MCPServerDef struct {
@@ -46,8 +46,8 @@ type Plugin struct {
 }
 
 type Manager struct {
-	mu           sync.RWMutex
-	plugins      map[string]*Plugin
+	mu            sync.RWMutex
+	plugins       map[string]*Plugin
 	trustedHashes map[string]bool
 }
 

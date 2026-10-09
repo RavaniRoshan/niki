@@ -20,12 +20,12 @@ type Sample struct {
 
 // Stats summarizes N samples.
 type Stats struct {
-	N     int
-	Min   float64
-	Max   float64
-	Mean  float64
-	P50   float64
-	P95   float64
+	N    int
+	Min  float64
+	Max  float64
+	Mean float64
+	P50  float64
+	P95  float64
 }
 
 // Summarize sorts a copy and reports min/max/mean/p50/p95. Empty input

@@ -5,8 +5,8 @@ import "sync"
 type HookPoint string
 
 const (
-	HookPreToolUse  HookPoint = "pre_tool_use"
-	HookPostToolUse HookPoint = "post_tool_use"
+	HookPreToolUse   HookPoint = "pre_tool_use"
+	HookPostToolUse  HookPoint = "post_tool_use"
 	HookSessionStart HookPoint = "session_start"
 	HookSessionEnd   HookPoint = "session_end"
 )
@@ -63,4 +63,3 @@ func (h *HookRunner) FirePreTool(ctx HookContext) error {
 	}
 	return nil
 }
-

@@ -30,16 +30,18 @@ type ShellTool struct {
 	AllowUnsandboxed bool
 }
 
-func NewShellTool() *ShellTool { return &ShellTool{Base: Base{SchemaStr: `{"required":["command"],"fields":{"command":"string","timeout_seconds":"number","dir":"string","dangerously_disable_sandbox":"boolean"}}`}} }
+func NewShellTool() *ShellTool {
+	return &ShellTool{Base: Base{SchemaStr: `{"required":["command"],"fields":{"command":"string","timeout_seconds":"number","dir":"string","dangerously_disable_sandbox":"boolean"}}`}}
+}
 
 func (t *ShellTool) Name() string        { return "shell" }
 func (t *ShellTool) Description() string { return "Run a shell command" }
 
 type shellArgs struct {
-	Command                 string `json:"command"`
-	Timeout                 int    `json:"timeout_seconds"`
-	Dir                     string `json:"dir"`
-	DangerouslyDisableSandbox bool `json:"dangerously_disable_sandbox"`
+	Command                   string `json:"command"`
+	Timeout                   int    `json:"timeout_seconds"`
+	Dir                       string `json:"dir"`
+	DangerouslyDisableSandbox bool   `json:"dangerously_disable_sandbox"`
 }
 
 const maxInlineOutput = 4096

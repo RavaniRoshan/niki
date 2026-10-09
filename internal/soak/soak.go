@@ -7,8 +7,8 @@ package soak
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,22 +19,22 @@ import (
 	"github.com/RavaniRoshan/niki/internal/agent"
 	"github.com/RavaniRoshan/niki/internal/bench"
 	"github.com/RavaniRoshan/niki/internal/engine"
+	"github.com/RavaniRoshan/niki/internal/mcp"
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/plugins"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/tools"
-	"github.com/RavaniRoshan/niki/internal/mcp"
 )
 
 // Config tunes a soak run.
 type Config struct {
-	Turns    int    // engine turns to run
-	MCPBin   string // fake MCP server binary ("" skips MCP)
-	HookCmd  string // hook command per turn ("" skips hooks)
-	WorkDir  string // tool-call working directory
-	SampleN  int    // sample every N turns (default 1)
-	OutCSV   string // CSV output path
+	Turns   int    // engine turns to run
+	MCPBin  string // fake MCP server binary ("" skips MCP)
+	HookCmd string // hook command per turn ("" skips hooks)
+	WorkDir string // tool-call working directory
+	SampleN int    // sample every N turns (default 1)
+	OutCSV  string // CSV output path
 }
 
 // Verdict summarizes stability.
@@ -178,8 +178,8 @@ func Run(cfg Config) (Verdict, error) {
 	return Verdict{
 		Turns: cfg.Turns, Crashes: crashes,
 		RSSStartMB: rssStart, RSSEndMB: rssEnd, RSSMaxMB: rssMax,
-		GrowthMB: rssEnd - rssStart,
-		HeapMB:   float64(ms.HeapAlloc) / 1024 / 1024,
+		GrowthMB:   rssEnd - rssStart,
+		HeapMB:     float64(ms.HeapAlloc) / 1024 / 1024,
 		Goroutines: runtime.NumGoroutine(),
 		CSV:        cfg.OutCSV,
 	}, nil

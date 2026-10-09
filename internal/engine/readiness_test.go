@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/RavaniRoshan/niki/internal/permissions"
-	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/protocol"
+	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/tools"
 )
 

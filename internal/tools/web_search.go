@@ -54,8 +54,10 @@ func NewWebSearchTool() *WebSearchTool {
 	return t
 }
 
-func (t *WebSearchTool) Name() string        { return "web_search" }
-func (t *WebSearchTool) Description() string { return "Search the web for documentation, APIs, and reference material" }
+func (t *WebSearchTool) Name() string { return "web_search" }
+func (t *WebSearchTool) Description() string {
+	return "Search the web for documentation, APIs, and reference material"
+}
 
 func (t *WebSearchTool) SetMode(m string) {
 	t.mu.Lock()

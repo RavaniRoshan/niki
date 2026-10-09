@@ -9,11 +9,11 @@ import (
 
 // RateLimiter manages request cadence using a token-bucket algorithm to prevent 429 errors.
 type RateLimiter struct {
-	mu           sync.Mutex
-	ratePerMin   int
-	tokens       float64
-	lastRefill   time.Time
-	tokenPerSec  float64
+	mu          sync.Mutex
+	ratePerMin  int
+	tokens      float64
+	lastRefill  time.Time
+	tokenPerSec float64
 }
 
 // NewRateLimiter creates a RateLimiter with requests-per-minute cap.

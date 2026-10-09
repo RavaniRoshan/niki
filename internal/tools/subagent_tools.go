@@ -22,8 +22,10 @@ func NewSpawnAgentTool(ctrl AgentController) *SpawnAgentTool {
 	}
 }
 
-func (t *SpawnAgentTool) Name() string        { return "spawn_agent" }
-func (t *SpawnAgentTool) Description() string { return "Spawn an isolated subagent with hierarchical pathing, runaway controls, and optional worktree isolation" }
+func (t *SpawnAgentTool) Name() string { return "spawn_agent" }
+func (t *SpawnAgentTool) Description() string {
+	return "Spawn an isolated subagent with hierarchical pathing, runaway controls, and optional worktree isolation"
+}
 
 type spawnAgentArgs struct {
 	Name         string `json:"name"`
@@ -77,8 +79,10 @@ func NewSendInputTool(ctrl AgentController) *SendInputTool {
 	}
 }
 
-func (t *SendInputTool) Name() string        { return "send_input" }
-func (t *SendInputTool) Description() string { return "Send a message or follow-up instruction to a running subagent" }
+func (t *SendInputTool) Name() string { return "send_input" }
+func (t *SendInputTool) Description() string {
+	return "Send a message or follow-up instruction to a running subagent"
+}
 
 type sendInputArgs struct {
 	AgentID string `json:"agent_id"`
@@ -118,8 +122,10 @@ func NewWaitAgentTool(ctrl AgentController) *WaitAgentTool {
 	}
 }
 
-func (t *WaitAgentTool) Name() string        { return "wait_agent" }
-func (t *WaitAgentTool) Description() string { return "Wait for a subagent turn to finish and retrieve its condensed summary" }
+func (t *WaitAgentTool) Name() string { return "wait_agent" }
+func (t *WaitAgentTool) Description() string {
+	return "Wait for a subagent turn to finish and retrieve its condensed summary"
+}
 
 type waitAgentArgs struct {
 	AgentID        string `json:"agent_id"`
@@ -166,8 +172,10 @@ func NewCloseAgentTool(ctrl AgentController) *CloseAgentTool {
 	}
 }
 
-func (t *CloseAgentTool) Name() string        { return "close_agent" }
-func (t *CloseAgentTool) Description() string { return "Terminate an active subagent and clean up ephemeral worktree storage" }
+func (t *CloseAgentTool) Name() string { return "close_agent" }
+func (t *CloseAgentTool) Description() string {
+	return "Terminate an active subagent and clean up ephemeral worktree storage"
+}
 
 type closeAgentArgs struct {
 	AgentID string `json:"agent_id"`
@@ -205,8 +213,10 @@ func NewResumeAgentTool(ctrl AgentController) *ResumeAgentTool {
 	}
 }
 
-func (t *ResumeAgentTool) Name() string        { return "resume_agent" }
-func (t *ResumeAgentTool) Description() string { return "Resume execution of a paused or waiting subagent" }
+func (t *ResumeAgentTool) Name() string { return "resume_agent" }
+func (t *ResumeAgentTool) Description() string {
+	return "Resume execution of a paused or waiting subagent"
+}
 
 type resumeAgentArgs struct {
 	AgentID string `json:"agent_id"`

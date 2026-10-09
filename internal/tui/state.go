@@ -54,7 +54,6 @@ type State struct {
 	MentionOverlay   MentionOverlayState
 }
 
-
 // FrameTelemetry records render-cost and event
 // counters for the debug overlay (B9).
 type FrameTelemetry struct {

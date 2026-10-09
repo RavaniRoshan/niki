@@ -13,7 +13,9 @@ type GlobTool struct {
 	Base
 }
 
-func NewGlobTool() *GlobTool { return &GlobTool{Base: Base{SchemaStr: `{"required":["pattern"],"fields":{"pattern":"string","root":"string"}}`}} }
+func NewGlobTool() *GlobTool {
+	return &GlobTool{Base: Base{SchemaStr: `{"required":["pattern"],"fields":{"pattern":"string","root":"string"}}`}}
+}
 
 func (t *GlobTool) Name() string        { return "glob" }
 func (t *GlobTool) Description() string { return "Find files matching a glob pattern" }

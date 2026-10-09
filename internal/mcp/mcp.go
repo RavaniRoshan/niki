@@ -18,13 +18,13 @@ type Client struct {
 	Command string
 	Args    []string
 
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  *bufio.Reader
 	pending map[int64]chan *Response
-	nextID atomic.Int64
-	state  State
+	nextID  atomic.Int64
+	state   State
 }
 
 // setState records a state transition. The state

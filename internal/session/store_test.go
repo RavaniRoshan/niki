@@ -181,7 +181,6 @@ func TestKill9MidTurnThenResume(t *testing.T) {
 	}
 }
 
-
 // TestKill9RealProcess kills -9 a live writer mid-append, then reopens:
 // the store must open cleanly with a gap-free prefix of flushed events.
 func TestKill9RealProcess(t *testing.T) {

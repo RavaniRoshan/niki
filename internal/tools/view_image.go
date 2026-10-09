@@ -30,8 +30,10 @@ func NewViewImageTool() *ViewImageTool {
 	}
 }
 
-func (t *ViewImageTool) Name() string        { return "view_image" }
-func (t *ViewImageTool) Description() string { return "Inspect and decode an image file (PNG/JPEG/GIF) into a base64 data URL formatted for vision models" }
+func (t *ViewImageTool) Name() string { return "view_image" }
+func (t *ViewImageTool) Description() string {
+	return "Inspect and decode an image file (PNG/JPEG/GIF) into a base64 data URL formatted for vision models"
+}
 
 type viewImageArgs struct {
 	Path   string `json:"path"`

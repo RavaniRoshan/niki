@@ -65,8 +65,8 @@ func InWorkTree(dir string) bool {
 // FileStatus is one porcelain v1 status entry.
 type FileStatus struct {
 	// XY are the porcelain status codes (index, worktree).
-	X, Y  byte
-	Path  string
+	X, Y   byte
+	Path   string
 	Staged bool
 }
 
@@ -110,9 +110,9 @@ func StagedFiles(dir string) ([]string, error) {
 
 // NumStat is per-file added/removed line counts from `git diff --numstat`.
 type NumStat struct {
-	Path         string
-	Added, Del  int
-	Binary       bool
+	Path       string
+	Added, Del int
+	Binary     bool
 }
 
 // StagedNumStat returns `git diff --cached --numstat` rows.
@@ -386,10 +386,10 @@ func Changelog(dir string, n int) (string, error) {
 
 // FileReview is a per-file staged-diff summary for review.
 type FileReview struct {
-	Path         string
-	Added, Del   int
-	Hunks        int
-	Sample       string
+	Path       string
+	Added, Del int
+	Hunks      int
+	Sample     string
 }
 
 // ReviewStaged summarizes each staged file: line counts, hunk count,

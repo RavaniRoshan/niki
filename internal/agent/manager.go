@@ -23,7 +23,7 @@ var (
 )
 
 const (
-	DefaultMaxDepth     = 3
+	DefaultMaxDepth      = 3
 	DefaultMaxConcurrent = 6
 )
 
@@ -40,11 +40,11 @@ type AgentInstance struct {
 }
 
 type Manager struct {
-	mu           sync.RWMutex
-	store        AgentGraphStore
-	maxDepth     int
-	sem          chan struct{}
-	counter      uint64
+	mu             sync.RWMutex
+	store          AgentGraphStore
+	maxDepth       int
+	sem            chan struct{}
+	counter        uint64
 	allowlist      map[string]bool
 	instances      map[string]*AgentInstance
 	eventEmitter   func(protocol.EngineEvent)
