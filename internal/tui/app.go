@@ -14,10 +14,20 @@ import (
 	"github.com/RavaniRoshan/niki/internal/config"
 	"github.com/RavaniRoshan/niki/internal/editor"
 	"github.com/RavaniRoshan/niki/internal/explain"
+	"github.com/RavaniRoshan/niki/internal/git"
 	"github.com/RavaniRoshan/niki/internal/mention"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/routing"
+	"github.com/RavaniRoshan/niki/internal/shell"
 )
+
+type shellResultMsg = shell.Result
+
+func runShellCmd(cmdStr, dir string) tea.Cmd {
+	return func() tea.Msg {
+		return shell.Run(cmdStr, dir)
+	}
+}
 
 type editorFinishedMsg struct {
 	path string
@@ -100,7 +110,7 @@ func NewAppModel(cmdChan chan<- protocol.EngineCommand, eventChan <-chan protoco
 			ModelName:      "mock: gpt-4o-mini",
 			Version:        "0.11.0",
 			PermissionMode: "workspace_write",
-			Mode:           "plan",
+			Mode:           "agent",
 			GitBranch:      "main",
 			MaxTokens:      128000,
 			SpinnerStyle:   SpinnerBloom,
@@ -155,6 +165,49 @@ func (m *AppModel) SetReducedMotion(reduced bool) {
 // SetInline configures whether the TUI runs in inline mode.
 func (m *AppModel) SetInline(inline bool) {
 	m.state.Inline = inline
+}
+
+func (m AppModel) cycleWorkingMode() (AppModel, tea.Cmd) {
+	if m.state.Mode == "plan" {
+		m.state.Mode = "agent"
+		m.state.PermissionMode = "workspace_write"
+		m.history.Append("system", "✨ Mode switched to: Agent · Ask When Needed (Standard execution; workspace writes enabled)")
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPlanMode, Mode: "false"}
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: "workspace_write"}
+	} else {
+		switch m.state.PermissionMode {
+		case "manual", "always":
+			m.state.Mode = "agent"
+			m.state.PermissionMode = "full_access"
+			m.history.Append("system", "⚡ Mode switched to: Agent · Never Ask (Yolo mode: all actions run unattended)")
+			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: "full_access"}
+		case "full_access", "yolo", "never":
+			m.state.Mode = "plan"
+			m.state.PermissionMode = "readonly"
+			m.history.Append("system", "📋 Mode switched to: Plan Mode (Read-only exploration; file edits and commands locked)")
+			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPlanMode, Mode: "plan"}
+			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: "readonly"}
+		default: // workspace_write, ask_when_needed
+			m.state.Mode = "agent"
+			m.state.PermissionMode = "manual"
+			m.history.Append("system", "🛡️ Mode switched to: Agent · Always Ask (Strict safety: prompt on every action)")
+			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: "manual"}
+		}
+	}
+	m.renderLive()
+	return m, nil
+}
+
+func (m AppModel) executeShellCommand(cmdStr string) (AppModel, tea.Cmd) {
+	m.history.Append("shell_input", "$ "+cmdStr)
+	m.state.Busy = true
+	m.state.Activity = "executing shell: " + cmdStr
+	dir := m.state.Directory
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	m.renderLive()
+	return m, runShellCmd(cmdStr, dir)
 }
 
 type engineEventMsg protocol.EngineEvent
@@ -511,7 +564,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if msg.Type == tea.KeyShiftTab || msg.String() == "shift+tab" || msg.String() == "backtab" {
+			return m.cycleWorkingMode()
+		}
+
 		switch msg.Type {
+		case tea.KeyShiftTab:
+			return m.cycleWorkingMode()
+
 		case tea.KeyCtrlC:
 			val := m.composer.Input.Value()
 			if len(val) > 0 {
@@ -889,7 +949,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, nil
 					case "set_mode":
 						m.state.PermissionMode = item.Payload
+						m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: item.Payload}
 						m.history.Append("system", fmt.Sprintf("🛡️ Permission mode set to %s", item.Payload))
+						m.state.Palette.Open = false
+						return m, nil
+					case "set_thinking":
+						m.state.ThinkingEffort = item.Payload
+						m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetThinkingEffort, Effort: item.Payload}
+						m.history.Append("system", fmt.Sprintf("🧠 Model thinking effort set to %s", item.Payload))
 						m.state.Palette.Open = false
 						return m, nil
 					case "set_spinner":
@@ -932,6 +999,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Type == tea.KeyEnter {
 			raw := m.composer.Input.Value()
 			input := strings.TrimSpace(ExpandPasteTokens(raw))
+			if strings.HasPrefix(input, "!") {
+				cmdStr := strings.TrimSpace(strings.TrimPrefix(input, "!"))
+				m.composer.Input.Reset()
+				if cmdStr == "" {
+					return m, nil
+				}
+				return m.executeShellCommand(cmdStr)
+			}
 			if strings.HasPrefix(input, "/") {
 				m.composer.Input.Reset()
 				return m.executeSlashCommand(input)
@@ -1022,6 +1097,21 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, waitForEvent(m.eventChan))
 
+	case shellResultMsg:
+		m.state.Busy = false
+		m.state.Activity = ""
+		output := strings.TrimRight(msg.Output, "\r\n")
+		if output != "" {
+			m.history.Append("shell_output", output)
+		}
+		if msg.ExitCode == 0 {
+			m.history.Append("shell_status", "  └ exit 0")
+		} else {
+			m.history.Append("shell_status", fmt.Sprintf("  ✗ exit %d", msg.ExitCode))
+		}
+		m.renderLive()
+		return m, nil
+
 	case tickMsg:
 		if m.pacer.pending {
 			m.pacer.force()
@@ -1040,6 +1130,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	val := m.composer.Input.Value()
+	if strings.HasPrefix(val, "!") {
+		m.composer.Input.Prompt = "$ "
+		m.composer.Input.PromptStyle = m.theme.Accent
+		m.composer.Input.Placeholder = "Run shell command directly (e.g. ! git status)..."
+	} else {
+		m.composer.Input.Prompt = "> "
+		m.composer.Input.PromptStyle = m.theme.PromptPrefix
+		m.composer.Input.Placeholder = "Type a prompt or task (type / for commands, ! for shell)..."
+	}
 	pos := m.composer.Input.Position()
 	if q, ok := ComputeMentionQuery(val, pos); ok {
 		m.state.MentionOverlay.Active = true
@@ -1073,7 +1172,14 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 			helpText.WriteString("  " + cmd.Name + " — " + cmd.Description + "\n")
 		}
 		helpText.WriteString("\nKeybindings:\n")
+		helpText.WriteString("  Shift+Tab: Cycle mode (Ask When Needed / Always Ask / Never Ask / Plan Mode)\n")
+		helpText.WriteString("  ! <cmd>: Execute local shell command directly (fast path, no LLM)\n")
+		helpText.WriteString("  @<file>: Fuzzy file & symbol autocomplete overlay\n")
 		helpText.WriteString("  Ctrl+P: Command palette & settings\n")
+		helpText.WriteString("  Ctrl+S: Session manager & switcher\n")
+		helpText.WriteString("  Ctrl+G: Open input in external $EDITOR\n")
+		helpText.WriteString("  Ctrl+O: Toggle tool output folding\n")
+		helpText.WriteString("  Ctrl+R: Search prompt history\n")
 		helpText.WriteString("  Esc: Interrupt turn / Deny approval / Close palette\n")
 		helpText.WriteString("  Ctrl+C: Clear input / Interrupt\n")
 		helpText.WriteString("  Ctrl+D: Exit on empty input\n")
@@ -1141,32 +1247,103 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case input == "/debug":
 		m.state.Debug = !m.state.Debug
+	case strings.HasPrefix(input, "/mode"):
+		parts := strings.Fields(input)
+		if len(parts) > 1 {
+			target := strings.ToLower(parts[1])
+			switch target {
+			case "plan":
+				return m.executeSlashCommand("/plan")
+			case "yolo", "never":
+				return m.executeSlashCommand("/yolo")
+			case "auto", "ask":
+				return m.executeSlashCommand("/auto")
+			case "manual", "always":
+				return m.executeSlashCommand("/manual")
+			default:
+				m.history.Append("system", "Usage: /mode [ask | always | yolo | plan] (or press Shift+Tab to cycle)")
+			}
+		} else {
+			return m.cycleWorkingMode()
+		}
 	case input == "/plan":
 		if m.state.Mode == "plan" {
-			m.state.Mode = "normal"
-			m.history.Append("system", "Switched to standard execution mode (tools active).")
+			m.state.Mode = "agent"
+			m.state.PermissionMode = "workspace_write"
+			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPlanMode, Mode: "false"}
+			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: "workspace_write"}
+			m.history.Append("system", "✨ Switched to Agent Mode · Ask When Needed (Standard execution; workspace writes enabled).")
 		} else {
 			m.state.Mode = "plan"
-			m.history.Append("system", "Entered Plan Mode (read-only exploration; modifications withheld).")
+			m.state.PermissionMode = "readonly"
+			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPlanMode, Mode: "plan"}
+			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: "readonly"}
+			m.history.Append("system", "📋 Entered Plan Mode (Read-only exploration; file edits and commands locked).")
+		}
+	case input == "/yolo":
+		m.state.Mode = "agent"
+		m.state.PermissionMode = "full_access"
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPlanMode, Mode: "false"}
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: "full_access"}
+		m.history.Append("system", "⚡ Mode switched to: Agent · Never Ask (Yolo mode: all actions run unattended).")
+	case input == "/auto" || input == "/ask":
+		m.state.Mode = "agent"
+		m.state.PermissionMode = "workspace_write"
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPlanMode, Mode: "false"}
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: "workspace_write"}
+		m.history.Append("system", "✨ Mode switched to: Agent · Ask When Needed (Standard workspace write mode).")
+	case input == "/manual" || input == "/always":
+		m.state.Mode = "agent"
+		m.state.PermissionMode = "manual"
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPlanMode, Mode: "false"}
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: "manual"}
+		m.history.Append("system", "🛡️ Mode switched to: Agent · Always Ask (Strict safety: prompt on every action).")
+	case strings.HasPrefix(input, "/thinking"):
+		parts := strings.Fields(input)
+		if len(parts) > 1 {
+			effort := strings.ToLower(parts[1])
+			switch effort {
+			case "off", "none":
+				m.state.ThinkingEffort = "none"
+				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetThinkingEffort, Effort: "none"}
+				m.history.Append("system", "🧠 Model reasoning effort disabled.")
+			case "low", "medium", "med", "high":
+				if effort == "med" {
+					effort = "medium"
+				}
+				m.state.ThinkingEffort = effort
+				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetThinkingEffort, Effort: effort}
+				m.history.Append("system", fmt.Sprintf("🧠 Model reasoning effort set to: %s", effort))
+			default:
+				m.history.Append("system", "Usage: /thinking [off | low | medium | high]")
+			}
+		} else {
+			cur := m.state.ThinkingEffort
+			if cur == "" {
+				cur = "none"
+			}
+			m.history.Append("system", fmt.Sprintf("Current thinking effort: %s. Usage: /thinking [off | low | medium | high]", cur))
 		}
 	case input == "/agents":
 		m.history.Append("system", "Subagents: 0 active child agents in root session.")
 	case input == "/diff" || strings.HasPrefix(input, "/diff"):
-		rawDiff := `diff --git a/internal/engine/agent.go b/internal/engine/agent.go
---- a/internal/engine/agent.go
-+++ b/internal/engine/agent.go
-@@ -38,6 +38,12 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.EngineEvent)) error {
-+		// Mid-turn steering: drain any injected steering prompt
-+		if t.SteerChannel != nil {
-+			select {
-+			case steer := <-t.SteerChannel:
-+				t.Context.Add(provider.Message{Role: "user", Content: steer})
-+			default:
-+			}`
-		files := ParseUnifiedDiff(rawDiff)
-		m.state.DiffViewer = NewDiffViewerState(files)
-		m.state.DiffViewer.Active = true
-		m.renderLive()
+		dir := m.state.Directory
+		if dir == "" {
+			dir, _ = os.Getwd()
+		}
+		rawDiff := git.RawDiff(dir)
+		if strings.TrimSpace(rawDiff) == "" {
+			m.history.Append("system", "No git diff in working directory (clean repository status).")
+		} else {
+			files := ParseUnifiedDiff(rawDiff)
+			if len(files) == 0 {
+				m.history.Append("system", "No diff hunks parsed from git output.")
+			} else {
+				m.state.DiffViewer = NewDiffViewerState(files)
+				m.state.DiffViewer.Active = true
+				m.renderLive()
+			}
+		}
 	case strings.HasPrefix(input, "/btw"):
 		query := strings.TrimSpace(strings.TrimPrefix(input, "/btw"))
 		if query == "" {
@@ -1235,9 +1412,9 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) renderMascot() string {
-	top := m.theme.MascotTop.Render("        ")
-	mid := m.theme.MascotMid.Render("  ■  ■  ")
-	bot := m.theme.MascotBot.Render("        ")
+	top := m.theme.Accent.Render(" ▄███▄ ")
+	mid := m.theme.Accent.Render("███◐███")
+	bot := m.theme.Accent.Render(" ▀███▀ ")
 	return lipgloss.JoinVertical(lipgloss.Left, top, mid, bot)
 }
 
@@ -1315,29 +1492,34 @@ func (m AppModel) headerView() string {
 }
 
 func (m AppModel) footerView() string {
-	permLabel := "Never Ask"
-	switch m.state.PermissionMode {
-	case "readonly":
-		permLabel = "Read Only"
-	case "full_access":
-		permLabel = "Full Access"
-	case "workspace_write":
-		permLabel = "Never Ask"
+	var modeBadge string
+	if m.state.Mode == "plan" {
+		modeBadge = m.theme.BadgeMode.Render("[Plan: Read-Only]")
+	} else {
+		var permLabel string
+		switch m.state.PermissionMode {
+		case "manual", "always":
+			permLabel = "Always Ask"
+		case "full_access", "yolo", "never":
+			permLabel = "Never Ask (Yolo)"
+		case "readonly":
+			permLabel = "Read Only"
+		default:
+			permLabel = "Ask When Needed"
+		}
+		modeBadge = m.theme.BadgePerm.Render("[" + permLabel + "]")
 	}
-	perm := m.theme.BadgePerm.Render(permLabel)
-
-	modeLabel := m.state.Mode
-	if modeLabel == "" {
-		modeLabel = "plan"
-	}
-	mode := m.theme.BadgeMode.Render(modeLabel)
 
 	modelName := m.state.ModelName
 	if modelName == "" {
 		modelName = "mock: gpt-4o-mini"
 	}
-	model := m.theme.BadgeModel.Render(modelName)
-	thinking := m.theme.StatusThinking.Render("thinking: high")
+	model := m.theme.BadgeModel.Render("[" + modelName + "]")
+
+	var thinking string
+	if m.state.ThinkingEffort != "" && m.state.ThinkingEffort != "none" {
+		thinking = " " + m.theme.StatusThinking.Render("thinking: "+m.state.ThinkingEffort)
+	}
 
 	dir := m.state.Directory
 	if dir == "" {
@@ -1354,11 +1536,13 @@ func (m AppModel) footerView() string {
 		gitInfo = " " + m.theme.StatusGit.Render(m.state.GitBranch)
 	}
 
-	leftParts := perm + " " + mode + "  " + model + " " + thinking + "  " + dirStyle + gitInfo
+	leftParts := modeBadge + " " + model + thinking + "  " + dirStyle + gitInfo
 
-	rightHints := m.theme.StatusHints.Render("@: mention files | ! to run a shell command")
+	var rightHints string
 	if m.state.Busy {
-		rightHints = m.theme.StatusHints.Render("ctrl+c: cancel | /help: commands")
+		rightHints = m.theme.StatusHints.Render("esc interrupt · ctrl+o fold output")
+	} else {
+		rightHints = m.theme.StatusHints.Render("shift+tab mode · ! shell · @ file · ctrl+p menu")
 	}
 
 	w := m.state.Width

@@ -21,6 +21,9 @@ const (
 	CmdResumeSession  CommandType = "resume_session"
 	CmdForkSession    CommandType = "fork_session"
 	CmdDeleteSession  CommandType = "delete_session"
+	CmdSetPermissionMode CommandType = "set_permission_mode"
+	CmdSetPlanMode       CommandType = "set_plan_mode"
+	CmdSetThinkingEffort CommandType = "set_thinking_effort"
 )
 
 type EngineCommand struct {
@@ -31,4 +34,6 @@ type EngineCommand struct {
 	WorkingDir string      `json:"working_dir,omitempty"`
 	Answers    []string    `json:"answers,omitempty"`
 	SessionID  SessionId   `json:"session_id,omitempty"`
+	Mode       string      `json:"mode,omitempty"`
+	Effort     string      `json:"effort,omitempty"`
 }

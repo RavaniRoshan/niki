@@ -33,6 +33,8 @@ type State struct {
 	Version        string
 	PermissionMode string
 	Mode           string
+	ThinkingEffort string
+	ShellInputMode bool
 	GitBranch      string
 
 	// Token Context Meter & Cost Accounting

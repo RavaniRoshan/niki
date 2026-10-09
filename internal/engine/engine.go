@@ -309,6 +309,45 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 		}
 		e.mu.Unlock()
 		e.emit(protocol.EngineEvent{Type: protocol.EventConfigReloaded, Timestamp: time.Now(), Text: summary})
+	case protocol.CmdSetPermissionMode:
+		e.mu.Lock()
+		if e.runner.Perm != nil {
+			switch cmd.Mode {
+			case "readonly":
+				e.runner.Perm.Mode = permissions.ModeReadOnly
+				e.runner.Perm.PlanMode = false
+			case "full_access", "yolo", "never_ask":
+				e.runner.Perm.Mode = permissions.ModeFullAccess
+				e.runner.Perm.PlanMode = false
+			case "manual", "always_ask":
+				e.runner.Perm.Mode = permissions.ModeManual
+				e.runner.Perm.PlanMode = false
+			default:
+				e.runner.Perm.Mode = permissions.ModeWorkspaceWrite
+				e.runner.Perm.PlanMode = false
+			}
+		}
+		e.mu.Unlock()
+		e.emit(protocol.EngineEvent{
+			Type:      protocol.EventConfigReloaded,
+			Timestamp: time.Now(),
+			Text:      fmt.Sprintf("Permission mode set to %s", cmd.Mode),
+		})
+	case protocol.CmdSetPlanMode:
+		e.mu.Lock()
+		if e.runner.Perm != nil {
+			if cmd.Mode == "plan" || cmd.Mode == "true" {
+				e.runner.Perm.EnterPlanMode()
+			} else {
+				_ = e.runner.Perm.ExitPlanMode(true)
+			}
+		}
+		e.mu.Unlock()
+		e.emit(protocol.EngineEvent{
+			Type:      protocol.EventConfigReloaded,
+			Timestamp: time.Now(),
+			Text:      fmt.Sprintf("Plan mode set to %s", cmd.Mode),
+		})
 	case protocol.CmdStartSession:
 		e.emit(protocol.EngineEvent{Type: protocol.EventSessionReady, Timestamp: time.Now(), SessionID: e.session.ID})
 	case protocol.CmdListSessions:

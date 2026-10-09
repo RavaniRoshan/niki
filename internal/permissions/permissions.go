@@ -11,6 +11,7 @@ const (
 	ModeReadOnly      Mode = "readonly"
 	ModeWorkspaceWrite Mode = "workspace_write"
 	ModeFullAccess    Mode = "full_access"
+	ModeManual        Mode = "manual"
 )
 
 type Guard struct {
@@ -74,6 +75,8 @@ func (g *Guard) Allow(toolName string) bool {
 		return true
 	case ModeWorkspaceWrite:
 		return true
+	case ModeManual:
+		return readOnlyTools[toolName]
 	case ModeReadOnly:
 		if toolName == "shell" && g.SandboxedShell {
 			return true

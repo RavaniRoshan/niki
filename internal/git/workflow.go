@@ -116,3 +116,12 @@ func PRSummary(dir, baseBranch string) (string, error) {
 
 	return sb.String(), nil
 }
+
+// RawDiff returns the unformatted git diff output for unstaged and staged changes.
+func RawDiff(dir string) string {
+	out, _ := run(dir, "git diff", "diff")
+	if strings.TrimSpace(out) == "" {
+		out, _ = run(dir, "git diff cached", "diff", "--cached")
+	}
+	return out
+}

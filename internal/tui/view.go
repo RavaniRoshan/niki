@@ -40,6 +40,21 @@ func renderCells(m AppModel, cells []HistoryCell) string {
 		case "error":
 			bullet := m.theme.Error.Render("● ")
 			out += bullet + m.theme.Error.Render("[error] "+c.Text) + "\n\n"
+		case "shell_input":
+			cmdText := strings.TrimPrefix(c.Text, "$ ")
+			out += m.theme.StatusDir.Render("$ ") + m.theme.UserText.Render(cmdText) + "\n\n"
+		case "shell_output":
+			lines := strings.Split(c.Text, "\n")
+			for _, line := range lines {
+				out += "  " + m.theme.ToolDetail.Render(line) + "\n"
+			}
+			out += "\n"
+		case "shell_status":
+			if strings.Contains(c.Text, "exit 0") {
+				out += m.theme.ToolTree.Render("  └ ") + m.theme.Success.Render("exit 0") + "\n\n"
+			} else {
+				out += m.theme.ToolTree.Render("  └ ") + m.theme.Error.Render(strings.TrimSpace(c.Text)) + "\n\n"
+			}
 		default:
 			bullet := m.theme.Accent.Render("✦ ")
 			out += bullet + m.theme.Muted.Render(c.Text) + "\n\n"
