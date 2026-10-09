@@ -34,11 +34,8 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 	}
 
 	const maxSteps = 30
-	var (
-		lastToolName string
-		lastToolArgs string
-		failCount    int
-	)
+	doomDetector := NewDoomLoopDetector(DefaultDoomLoopThreshold)
+	var trippedDoomLoop bool
 
 	for step := 0; step < maxSteps; step++ {
 		// Mid-turn steering: drain any injected steering prompt from user without aborting turn
@@ -130,13 +127,6 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 					Error:     err.Error(),
 				})
 				output = fmt.Sprintf("Tool error: %v", err)
-				if tc.Tool == lastToolName && tc.Args == lastToolArgs {
-					failCount++
-				} else {
-					lastToolName = tc.Tool
-					lastToolArgs = tc.Args
-					failCount = 1
-				}
 			} else {
 				emit(protocol.EngineEvent{
 					Type:      protocol.EventToolCompleted,
@@ -146,7 +136,6 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 					ToolName:  tc.Tool,
 					Text:      res.Output,
 				})
-				failCount = 0
 				if tc.Tool == "edit_file" || tc.Tool == "write_file" || tc.Tool == "apply_patch" {
 					var pathObj struct {
 						Path string `json:"path"`
@@ -161,17 +150,21 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 				}
 			}
 
+			if doomDetector.Record(tc.Tool, tc.Args, err == nil) {
+				trippedDoomLoop = true
+				emit(protocol.EngineEvent{
+					Type:      protocol.EventWarning,
+					Timestamp: time.Now(),
+					TurnID:    turnID,
+					Text:      fmt.Sprintf("Stopped recurring failing tool call %s after 3 attempts (doom loop guard)", tc.Tool),
+				})
+			}
+
 			t.Context.Add(provider.Message{Role: "tool", Content: output, Name: tc.Tool})
 		}
 
 		// Doom loop guard: 3 consecutive identical failures
-		if failCount >= 3 {
-			emit(protocol.EngineEvent{
-				Type:      protocol.EventWarning,
-				Timestamp: time.Now(),
-				TurnID:    turnID,
-				Text:      fmt.Sprintf("Stopped recurring failing tool call %s after 3 attempts (doom loop guard)", lastToolName),
-			})
+		if trippedDoomLoop {
 			break
 		}
 	}
