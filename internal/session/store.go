@@ -80,6 +80,66 @@ func (s *Store) ListSessions() ([]string, error) {
 	return ids, nil
 }
 
+// ListSessionSummaries returns metadata summaries for all persisted sessions.
+func (s *Store) ListSessionSummaries() ([]protocol.SessionMetadata, error) {
+	rows, err := s.db.Query(`SELECT s.id, s.title, s.created_at, COUNT(e.id) FROM sessions s LEFT JOIN events e ON s.id = e.session_id GROUP BY s.id ORDER BY s.created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var list []protocol.SessionMetadata
+	for rows.Next() {
+		var id string
+		var title sql.NullString
+		var createdAt int64
+		var count int
+		if err := rows.Scan(&id, &title, &createdAt, &count); err != nil {
+			continue
+		}
+		t := title.String
+		if t == "" {
+			if len(id) > 8 {
+				t = "Session " + id[:8]
+			} else {
+				t = "Session " + id
+			}
+		}
+		list = append(list, protocol.SessionMetadata{
+			ID:        protocol.SessionId(id),
+			Title:     t,
+			CreatedAt: time.Unix(createdAt, 0),
+			TurnCount: count,
+		})
+	}
+	return list, nil
+}
+
+// GetRecentHistory returns a short snippet of recent messages for preview.
+func (s *Store) GetRecentHistory(sessionID protocol.SessionId, limit int) ([]string, error) {
+	evts, err := s.Events(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var msgs []string
+	for _, e := range evts {
+		if e.Type == protocol.EventTurnStarted && e.Text != "" {
+			msgs = append(msgs, "> "+e.Text)
+		} else if e.Type == protocol.EventToolStarted && e.ToolName != "" {
+			msgs = append(msgs, "● "+e.ToolName)
+		} else if e.Type == protocol.EventAssistantTextDelta && e.Text != "" {
+			if len(msgs) > 0 && len(msgs[len(msgs)-1]) < 300 {
+				msgs[len(msgs)-1] += e.Text
+			} else {
+				msgs = append(msgs, e.Text)
+			}
+		}
+	}
+	if len(msgs) > limit {
+		msgs = msgs[len(msgs)-limit:]
+	}
+	return msgs, nil
+}
+
 func (s *Store) Events(sessionID protocol.SessionId) ([]protocol.EngineEvent, error) {
 	rows, err := s.db.Query(`SELECT payload FROM events WHERE session_id = ? ORDER BY id`, string(sessionID))
 	if err != nil {

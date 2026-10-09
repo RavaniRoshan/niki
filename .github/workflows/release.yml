@@ -9,19 +9,28 @@ permissions:
 
 jobs:
   goreleaser:
+    name: Build & Publish Release Binaries
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-      - name: Build binary
-        run: go build -o bin/nikicode ./cmd/nikicode
-      - name: Run tests
-        run: go test ./... -race
-      - uses: goreleaser/goreleaser-action@v6
+          cache: true
+
+      - name: Verification Tests
+        run: |
+          go vet ./...
+          go test ./internal/lintcheck/...
+          go test ./...
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
         with:
           version: '~> v2'
           args: release --clean

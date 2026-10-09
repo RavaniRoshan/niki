@@ -14,6 +14,7 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestLoadLayered(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	proj := filepath.Join(dir, "nikicode.toml")
 	os.WriteFile(proj, []byte(`
@@ -43,6 +44,7 @@ func TestResolveAPIKey(t *testing.T) {
 }
 
 func TestLoadWithSources(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	proj := filepath.Join(dir, "nikicode.toml")
 	os.WriteFile(proj, []byte("[model]\nname = \"gpt-4o\"\n"), 0o644)

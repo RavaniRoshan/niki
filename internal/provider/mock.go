@@ -65,10 +65,19 @@ func (m *MockProvider) Stream(ctx context.Context, messages []Message) (<-chan D
 		}
 	}
 	var calls []ToolCall
-	for _, k := range sortedKeys(m.ToolScripts) {
-		if strings.Contains(strings.ToLower(user), k) {
-			calls = m.ToolScripts[k]
+	hasToolResults := false
+	for _, msg := range messages {
+		if msg.Role == "tool" {
+			hasToolResults = true
 			break
+		}
+	}
+	if !hasToolResults {
+		for _, k := range sortedKeys(m.ToolScripts) {
+			if strings.Contains(strings.ToLower(user), k) {
+				calls = m.ToolScripts[k]
+				break
+			}
 		}
 	}
 

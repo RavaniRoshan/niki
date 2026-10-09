@@ -45,9 +45,10 @@ type Manager struct {
 	maxDepth     int
 	sem          chan struct{}
 	counter      uint64
-	allowlist    map[string]bool
-	instances    map[string]*AgentInstance
-	eventEmitter func(protocol.EngineEvent)
+	allowlist      map[string]bool
+	instances      map[string]*AgentInstance
+	eventEmitter   func(protocol.EngineEvent)
+	secondaryModel string
 }
 
 func NewManager(store AgentGraphStore, maxDepth, maxConcurrent int, emitter func(protocol.EngineEvent)) *Manager {
@@ -68,6 +69,18 @@ func NewManager(store AgentGraphStore, maxDepth, maxConcurrent int, emitter func
 		allowlist:    make(map[string]bool),
 		eventEmitter: emitter,
 	}
+}
+
+func (m *Manager) SetSecondaryModel(model string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.secondaryModel = model
+}
+
+func (m *Manager) SecondaryModel() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.secondaryModel
 }
 
 func (m *Manager) SetAllowlist(names []string) {
@@ -128,6 +141,7 @@ func (m *Manager) Spawn(ctx context.Context, parentID, name, prompt, contextMode
 		CanonicalPath: canonPath,
 		ParentID:      parentID,
 		Name:          name,
+		Model:         m.SecondaryModel(),
 		Status:        StatusActive,
 		Depth:         depth,
 		BudgetTokens:  budget,

@@ -39,7 +39,19 @@ type State struct {
 	UsedTokens int
 	MaxTokens  int
 	TotalCost  float64
+
+	// Visual & Interactive Customizations
+	SpinnerStyle     SpinnerStyle
+	Palette          PaletteState
+	ExpandToolOutput bool
+	QuestionModal    QuestionState
+	DiffViewer       DiffViewerState
+	Btw              BtwState
+	SwarmAgents      []SwarmAgent
+	SessionPicker    SessionPickerState
+	MentionOverlay   MentionOverlayState
 }
+
 
 // FrameTelemetry records render-cost and event
 // counters for the debug overlay (B9).

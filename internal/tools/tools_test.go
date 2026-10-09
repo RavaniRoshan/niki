@@ -162,8 +162,8 @@ func TestShellDisableSandboxArg(t *testing.T) {
 
 func TestRegistry(t *testing.T) {
 	r := DefaultRegistry()
-	if len(r.List()) != 32 {
-		t.Fatalf("expected 32 tools, got %d", len(r.List()))
+	if len(r.List()) != 36 {
+		t.Fatalf("expected 36 tools, got %d", len(r.List()))
 	}
 	for _, expected := range []string{
 		"shell", "apply_patch", "edit_file", "read_file", "write_file",
@@ -174,6 +174,8 @@ func TestRegistry(t *testing.T) {
 		"close_agent", "resume_agent",
 		"git_status", "git_commit", "git_branch", "git_rebase",
 		"git_blame", "git_log", "git_review", "git_changelog",
+		"git_diff_summary", "git_smart_commit", "git_pr_summary",
+		"symbol_search",
 	} {
 		if _, ok := r.Get(expected); !ok {
 			t.Fatalf("tool %q missing from registry", expected)

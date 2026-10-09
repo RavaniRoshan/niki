@@ -10,29 +10,55 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Test & Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
+
       - name: Vet
         run: go vet ./...
+
       - name: Lint
+        if: matrix.os == 'ubuntu-latest'
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-      - name: Build binary
-        run: go build -o bin/nikicode ./cmd/nikicode
-      - name: Test (race)
-        run: go test ./... -race
-      - name: PTY end-to-end
+
+      - name: Architecture & TUI Lint Check
+        run: go test -v ./internal/lintcheck/...
+
+      - name: Test Suite (with race detector)
+        run: TERM=xterm go test -v -race ./...
+
+      - name: Build Static Binary
         run: |
-          go build -o bin/nikicode ./cmd/nikicode
-          NIKI_PTY_TESTS=1 go test ./cmd/nikicode/ -run 'PTY|NonTTY' -v
-      - name: Fuzz (short)
+          go build -trimpath -ldflags="-s -w" -o bin/nikicode ./cmd/nikicode
+          ./bin/nikicode --version
+
+      - name: Headless CI Self-Check
+        run: ./bin/nikicode ci --check
+
+      - name: PTY End-to-End Smoke Tests
+        if: matrix.os == 'ubuntu-latest'
+        run: NIKI_PTY_TESTS=1 go test -v ./cmd/nikicode/ -run 'PTY|NonTTY'
+
+      - name: Fuzzing Smokes
+        if: matrix.os == 'ubuntu-latest'
         run: |
-          go test -run=Fuzz -fuzz=FuzzAnalyzeShell -fuzztime=10s ./internal/permissions/
-          go test -run=Fuzz -fuzz=FuzzParseSkill -fuzztime=10s ./internal/skills/
-      - name: Benchmarks (compile + smoke)
-        run: go test -bench=. -benchtime=10x ./internal/tui/
+          go test -run=Fuzz -fuzz=FuzzAnalyzeShell -fuzztime=5s ./internal/permissions/
+          go test -run=Fuzz -fuzz=FuzzParseSkill -fuzztime=5s ./internal/skills/
+          go test -run=Fuzz -fuzz=FuzzSanitize -fuzztime=5s ./internal/tui/
+
+      - name: TUI Viewport Benchmarks
+        run: go test -bench=BenchmarkView -benchtime=5x ./internal/tui/

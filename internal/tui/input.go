@@ -5,7 +5,9 @@ import (
 )
 
 type Composer struct {
-	Input textinput.Model
+	Input    textinput.Model
+	KillRing *KillRing
+	Undo     *UndoStack
 }
 
 func NewComposer(theme Theme) Composer {
@@ -16,7 +18,21 @@ func NewComposer(theme Theme) Composer {
 	ti.Placeholder = "Type a prompt or task (type / for commands)..."
 	ti.PlaceholderStyle = theme.Placeholder
 	ti.Focus()
-	ti.CharLimit = 4096
+	ti.CharLimit = 8192
 	ti.Width = 80
-	return Composer{Input: ti}
+	return Composer{
+		Input:    ti,
+		KillRing: NewKillRing(32),
+		Undo:     NewUndoStack(),
+	}
+}
+
+// Value returns the current input value with expanded paste tokens.
+func (c *Composer) Value() string {
+	return c.Input.Value()
+}
+
+// Reset clears the input value and resets cursor.
+func (c *Composer) Reset() {
+	c.Input.Reset()
 }

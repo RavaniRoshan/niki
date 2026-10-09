@@ -31,9 +31,10 @@ type Usage struct {
 }
 
 type Message struct {
-	Role    string `json:"role"` // system, user, assistant, tool
-	Content string `json:"content"`
-	Name    string `json:"name,omitempty"`
+	Role         string `json:"role"` // system, user, assistant, tool
+	Content      string `json:"content"`
+	Name         string `json:"name,omitempty"`
+	CacheControl string `json:"cache_control,omitempty"`
 }
 
 // Streamer emits model deltas.

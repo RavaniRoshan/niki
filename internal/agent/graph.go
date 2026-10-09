@@ -24,6 +24,7 @@ type AgentNode struct {
 	CanonicalPath string      `json:"canonical_path"` // e.g. "/root/worker-1"
 	ParentID      string      `json:"parent_id"`
 	Name          string      `json:"name"`
+	Model         string      `json:"model,omitempty"`
 	Status        AgentStatus `json:"status"`
 	Depth         int         `json:"depth"`
 	TokensUsed    int         `json:"tokens_used"`

@@ -12,8 +12,15 @@ const (
 	CmdRefreshSkills CommandType = "refresh_skills"
 	CmdRefreshMcp    CommandType = "refresh_mcp"
 	CmdReloadConfig  CommandType = "reload_config"
-	CmdCompact       CommandType = "compact"
-	CmdShutdown      CommandType = "shutdown"
+	CmdCompact        CommandType = "compact"
+	CmdShutdown       CommandType = "shutdown"
+	CmdAnswerQuestion CommandType = "answer_question"
+	CmdSteerTurn      CommandType = "steer_turn"
+	CmdDetachTool     CommandType = "detach_tool"
+	CmdListSessions   CommandType = "list_sessions"
+	CmdResumeSession  CommandType = "resume_session"
+	CmdForkSession    CommandType = "fork_session"
+	CmdDeleteSession  CommandType = "delete_session"
 )
 
 type EngineCommand struct {
@@ -22,4 +29,6 @@ type EngineCommand struct {
 	CallID     ToolCallId  `json:"call_id,omitempty"`
 	Approved   bool        `json:"approved,omitempty"`
 	WorkingDir string      `json:"working_dir,omitempty"`
+	Answers    []string    `json:"answers,omitempty"`
+	SessionID  SessionId   `json:"session_id,omitempty"`
 }

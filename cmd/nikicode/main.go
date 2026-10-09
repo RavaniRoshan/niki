@@ -315,6 +315,7 @@ func main() {
 					return
 				}
 				store = s
+				eng.SetSessionStore(s)
 				_ = store.CreateSession(eng.SessionID(), "tui")
 				for _, p := range pending {
 					_ = store.AppendEvent(p.id, p.evt)
@@ -570,6 +571,7 @@ func main() {
 	execCmd.Flags().BoolVar(&execGitHubCheck, "github-check", false, "Output conclusion formatted as GitHub Check Run JSON")
 	execCmd.Flags().StringVar(&execOutputFile, "output", "", "Write output to specified file")
 	rootCmd.AddCommand(execCmd)
+	rootCmd.AddCommand(newCICommand())
 
 	// `nikicode do` routes one natural-language instruction to a recipe,
 	// an explanation, or a git workflow — deterministically, with no

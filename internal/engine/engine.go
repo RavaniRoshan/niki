@@ -23,6 +23,8 @@ type Engine struct {
 	obs        func(protocol.EngineEvent)
 	readiness  *Readiness
 
+	sessionStore SessionStore
+
 	mu           sync.Mutex
 	turnCancel   context.CancelFunc
 	turnRunning  bool
@@ -82,10 +84,11 @@ func NewEngine(bufferSize int, prov provider.ModelProvider, reg *tools.Registry,
 		session:   NewSession(),
 		readiness: NewReadiness(CapTerminal, CapEngine, CapModel),
 		runner: &TurnRunner{
-			Provider: prov,
-			Registry: reg,
-			Context:  NewContextAssembler(),
-			Perm:     guard,
+			Provider:     prov,
+			Registry:     reg,
+			Context:      NewContextAssembler(),
+			Perm:         guard,
+			SteerChannel: make(chan string, 16),
 		},
 	}
 	// Built-in required warmers: the engine loop itself, the model
@@ -117,6 +120,22 @@ func (e *Engine) AddSystemMessage(content string) {
 // and the permission mode are swapped between turns.
 func (e *Engine) SetConfigReloader(fn ConfigReloader) {
 	e.configReloader = fn
+}
+
+// SessionStore defines the methods required by Engine to manage past sessions.
+type SessionStore interface {
+	ListSessionSummaries() ([]protocol.SessionMetadata, error)
+	GetRecentHistory(sessionID protocol.SessionId, limit int) ([]string, error)
+	Fork(srcID protocol.SessionId, title string) (protocol.SessionId, error)
+	Delete(sessionID protocol.SessionId) error
+	Events(sessionID protocol.SessionId) ([]protocol.EngineEvent, error)
+}
+
+// SetSessionStore registers the persistence store with the engine.
+func (e *Engine) SetSessionStore(s SessionStore) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.sessionStore = s
 }
 
 func (e *Engine) Run() error {
@@ -216,6 +235,18 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 		e.mu.Lock()
 		if e.turnRunning {
 			e.mu.Unlock()
+			if e.runner.SteerChannel != nil {
+				select {
+				case e.runner.SteerChannel <- cmd.Prompt:
+					e.emit(protocol.EngineEvent{
+						Type:      protocol.EventWarning,
+						Timestamp: time.Now(),
+						Text:      "mid-turn prompt queued for steering",
+					})
+					return
+				default:
+				}
+			}
 			e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "turn already in progress"})
 			return
 		}
@@ -249,6 +280,8 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 		e.emit(protocol.EngineEvent{Type: protocol.EventSkillDiscovered, Timestamp: time.Now(), Text: "skills refreshed"})
 	case protocol.CmdRefreshMcp:
 		e.emit(protocol.EngineEvent{Type: protocol.EventMcpServerReady, Timestamp: time.Now(), Text: "mcp refreshed"})
+	case protocol.CmdDetachTool:
+		e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "tool detached into background execution"})
 	case protocol.CmdReloadConfig:
 		// The provider and permission mode are only swapped
 		// between turns: a live turn keeps the configuration
@@ -278,5 +311,71 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 		e.emit(protocol.EngineEvent{Type: protocol.EventConfigReloaded, Timestamp: time.Now(), Text: summary})
 	case protocol.CmdStartSession:
 		e.emit(protocol.EngineEvent{Type: protocol.EventSessionReady, Timestamp: time.Now(), SessionID: e.session.ID})
+	case protocol.CmdListSessions:
+		e.mu.Lock()
+		store := e.sessionStore
+		e.mu.Unlock()
+		if store != nil {
+			if cmd.SessionID != "" {
+				hist, _ := store.GetRecentHistory(cmd.SessionID, 8)
+				e.emit(protocol.EngineEvent{
+					Type:      protocol.EventSessionList,
+					Timestamp: time.Now(),
+					SessionID: cmd.SessionID,
+					History:   hist,
+				})
+			} else {
+				summaries, _ := store.ListSessionSummaries()
+				e.emit(protocol.EngineEvent{
+					Type:      protocol.EventSessionList,
+					Timestamp: time.Now(),
+					Sessions:  summaries,
+				})
+			}
+		}
+	case protocol.CmdDeleteSession:
+		e.mu.Lock()
+		store := e.sessionStore
+		e.mu.Unlock()
+		if store != nil && cmd.SessionID != "" {
+			_ = store.Delete(cmd.SessionID)
+			summaries, _ := store.ListSessionSummaries()
+			e.emit(protocol.EngineEvent{
+				Type:      protocol.EventSessionList,
+				Timestamp: time.Now(),
+				Sessions:  summaries,
+				Text:      "Deleted session " + string(cmd.SessionID),
+			})
+		}
+	case protocol.CmdForkSession:
+		e.mu.Lock()
+		store := e.sessionStore
+		e.mu.Unlock()
+		if store != nil && cmd.SessionID != "" {
+			newID, _ := store.Fork(cmd.SessionID, "Forked Session")
+			summaries, _ := store.ListSessionSummaries()
+			e.emit(protocol.EngineEvent{
+				Type:      protocol.EventSessionList,
+				Timestamp: time.Now(),
+				Sessions:  summaries,
+				Text:      "Forked session as " + string(newID),
+			})
+		}
+	case protocol.CmdResumeSession:
+		e.mu.Lock()
+		store := e.sessionStore
+		e.mu.Unlock()
+		if store != nil && cmd.SessionID != "" {
+			evts, err := store.Events(cmd.SessionID)
+			if err == nil {
+				e.session.ID = cmd.SessionID
+				e.emit(protocol.EngineEvent{
+					Type:      protocol.EventSessionLoaded,
+					Timestamp: time.Now(),
+					SessionID: cmd.SessionID,
+					Text:      fmt.Sprintf("Resumed session %s with %d events", cmd.SessionID, len(evts)),
+				})
+			}
+		}
 	}
 }

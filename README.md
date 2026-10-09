@@ -212,19 +212,19 @@ Read more in [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ---
 
-## 🛠️ Built-In Tool Suite
+## 🛠️ Built-In Tool Suite (36 Native Tools)
 
-NikiCode ships with an uncompromised, zero-fluff set of core coding tools:
+NikiCode ships with an uncompromised, zero-fluff set of 36 native tools—all strictly typed and fail-closed:
 
-| Tool | Purpose | Safety Guarantees |
+| Category | Tools | Capabilities & Safety Guarantees |
 | :--- | :--- | :--- |
-| `read_file` | Read file contents with line ranges | Bounded size limits, path sanitization |
-| `write_file` | Atomic write file replacement | Temporary file swap, prevents corruption |
-| `edit_file` | Targeted string replacement | Requires exact match, rejects ambiguous edits |
-| `apply_patch` | Unified diff patch applicator | Fuzzed parser (>400k iterations with 0 panics) |
-| `glob` | Find files matching wildcard patterns | Bounded directory walking, ignore awareness |
-| `grep` | Fast regex content search | Read-only concurrency, skip binary files |
-| `shell` | Execute shell commands in workspace | Bubblewrap isolation, network denial, dropped caps |
+| **Files & Editing** | `read_file`, `write_file`, `edit_file`, `apply_patch`, `glob`, `grep`, `list_dir` | Bounded line counts (cap 2000), SHA-256 pre-verification, atomic temp swap, fuzzed unified diff parser |
+| **Processes & Shell** | `shell`, `exec_command`, `write_stdin`, `bash_output`, `kill_shell` | Bubblewrap sandbox, private `/tmp`, network namespace denial, PTY process trees, PGID signal kill, detach |
+| **Navigation & AST** | `symbol_search`, `tool_search` | Zero-dependency AST indexer for Go/Python/TS/Rust, exact/fuzzy BM25 tool matching with discovery tracking |
+| **Git Workflows** | `git_status`, `git_diff_summary`, `git_smart_commit`, `git_pr_summary`, `git_commit`, `git_branch`, `git_rebase`, `git_log`, `git_blame`, `git_review`, `git_changelog` | Porcelain parsing, staged conventional commits, branch diff summaries, PR generation, conflict-cycle detection |
+| **Web & Media** | `web_search`, `web_fetch`, `view_image`, `notebook_edit` | HTTPS upgrade, 15m memory cache, HTML-to-markdown conversion, 1024x1024 token downscaling, `.ipynb` JSON edit |
+| **Planning & Tasks** | `update_plan`, `todo_write`, `ask_user_question` | Plan mode state machine, session todo ledger, interactive multi-question modal with write-in escape hatch |
+| **Autonomous Swarms** | `spawn_agent`, `send_input`, `wait_agent`, `close_agent`, `resume_agent` | Hierarchical subagent trees, git worktree isolation, depth limit (3), concurrency semaphore (6), budget caps |
 
 ---
 
@@ -234,18 +234,50 @@ Within the interactive TUI, control NikiCode effortlessly:
 
 | Slash Command | Action |
 | :--- | :--- |
-| `/help` | Display active keybindings, tools, and slash commands |
-| `/doctor` | Run comprehensive system and sandbox diagnostics |
-| `/compact` | Force context compaction, folding past turn history |
-| `/model` | Inspect active model, context window, and token prices |
+| `/palette` | Open fuzzy command palette & interactive settings (`Ctrl+P`) |
+| `/sessions` | Open interactive session browser with transcript previews & rollouts (`Ctrl+S`) |
+| `/editor` | Open external `$EDITOR` for multi-line draft editing (`Ctrl+G`) |
+| `/export` | Export session transcript to standalone dark-mode HTML or Markdown (`/export [markdown\|html]`) |
+| `/diff` | Interactive split-screen side-by-side or unified diff viewer |
+| `/btw` | Docked mini-agent card for quick side queries without context pollution (`/btw <query>`) |
+| `/plan` | Toggle read-only plan mode exploration (withholds write and exec tools) |
+| `/rewind` | Rewind workspace code files or conversation to a previous turn checkpoint |
+| `/unrevert` | Redo / restore workspace files from the pre-rewind state |
+| `/agents` | Inspect active subagent tree, hierarchy paths, and status |
+| `/explain` | Semantic code explanation with verified file:line citations |
+| `/connect` | Guided in-TUI connection for Anthropic, OpenAI, OpenRouter, and DeepSeek API keys |
+| `/spinner` | Switch activity spinner animation (`bloom`, `braille`, `sweep`, `pulse`) |
+| `/cost` | Display session token ledger and accumulated dollar cost |
+| `/theme` | Switch color theme (`default`, `dark`, `light`, `monochrome`) |
+| `/doctor` | Run comprehensive system, sandbox, and provider health checks |
+| `/reload` | Hot-reload configuration without restarting |
+| `/compact` | Force tiered context compaction, folding past turn history |
+| `/model` | Inspect or switch active model and context window |
 | `/clear` | Clear visible terminal viewport |
+| `/help` | Display active keybindings, tools, and slash commands |
 | `/quit` | Cleanly restore terminal termios state and exit |
 
 ### Keyboard Shortcuts
-* `Enter` — Send message or execute command.
-* `Esc` — Interrupt ongoing model stream or deny approval prompt.
-* `Ctrl+C` — Cleanly cancel current turn and restore terminal state.
-* `Ctrl+Z` — Suspend process to background.
+
+| Shortcut | Description |
+| :--- | :--- |
+| `Ctrl+P` | Toggle command palette & in-TUI settings (models, MCP wizards, API keys) |
+| `Ctrl+S` | Toggle interactive session browser & rollout explorer |
+| `Ctrl+G` | Open prompt draft in external `$EDITOR` (`$VISUAL`, nano, vim) |
+| `Ctrl+O` | Toggle collapsible tool stdout/stderr excerpts in transcript |
+| `Ctrl+B` | Detach active foreground tool execution into background process manager |
+| `Ctrl+W` | Kill preceding word to Emacs kill-ring |
+| `Ctrl+K` | Kill line from cursor to end to kill-ring |
+| `Ctrl+U` | Kill line from start to cursor to kill-ring |
+| `Ctrl+Y` | Yank most recent kill-ring entry at cursor |
+| `Ctrl+_` | Undo last edit in composer |
+| `Ctrl+C` | Tiered cancel: clears non-empty input; interrupts active turn; double Ctrl+C exits |
+| `Ctrl+D` | Exit on empty input; forward-delete character when text is present |
+| `Ctrl+Z` | Suspend process cleanly to background via `SIGSTOP` / `SIGCONT` |
+| `Esc` | Tiered escape: closes active modal/overlay $\to$ interrupts active turn |
+| `@` | Triggers floating symbol & file mention autocomplete overlay |
+| `/` | Triggers fuzzy slash command suggestions dropdown |
+| `Tab` / `Enter` | Autocomplete selected mention or slash command; submit prompt |
 
 ---
 

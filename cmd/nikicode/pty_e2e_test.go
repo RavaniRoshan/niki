@@ -360,7 +360,9 @@ func TestBootWith5MCPAnd50Skills(t *testing.T) {
 // their command instead of printing the version.
 func TestArgvFastPathScoped(t *testing.T) {
 	bin := ensureBinary(t)
-	out, err := exec.Command(bin, "exec", "version").CombinedOutput()
+	cmd := exec.Command(bin, "exec", "version")
+	cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("exec version failed: %v\n%s", err, out)
 	}

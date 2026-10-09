@@ -45,6 +45,12 @@ type Theme struct {
 	StatusGit      lipgloss.Style
 	StatusHints    lipgloss.Style
 	StatusMeter    lipgloss.Style
+
+	PaletteBorder   lipgloss.Style
+	PaletteSearch   lipgloss.Style
+	PaletteSelected lipgloss.Style
+	PaletteTag      lipgloss.Style
+	PaletteSuccess  lipgloss.Style
 }
 
 func NewDefaultTheme() Theme {
@@ -106,6 +112,11 @@ func NewDefaultTheme() Theme {
 		StatusDir:      lipgloss.NewStyle().Foreground(slateMuted),
 		StatusGit:      lipgloss.NewStyle().Foreground(slateMuted),
 		StatusHints:    lipgloss.NewStyle().Foreground(slateMuted),
+		PaletteBorder:   lipgloss.NewStyle().Foreground(cyan),
+		PaletteSearch:   lipgloss.NewStyle().Foreground(cyan),
+		PaletteSelected: lipgloss.NewStyle().Bold(true).Foreground(cyan),
+		PaletteTag:      lipgloss.NewStyle().Foreground(slateDim).Background(dark),
+		PaletteSuccess:  lipgloss.NewStyle().Foreground(green),
 	}
 }
 

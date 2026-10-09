@@ -161,8 +161,12 @@ func TestSpinnerReducedMotionStatic(t *testing.T) {
 	if m.activityView() != before {
 		t.Fatal("reduced motion must hold a static frame")
 	}
-	if !strings.Contains(before, "◐") {
-		t.Fatalf("static frame should be ◐: %q", before)
+	expectedGlyph := "◐"
+	if UseASCII() {
+		expectedGlyph = "-"
+	}
+	if !strings.Contains(before, expectedGlyph) {
+		t.Fatalf("static frame should be %s: %q", expectedGlyph, before)
 	}
 }
 

@@ -100,23 +100,46 @@ func (t *ShellTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, 
 		return ToolResult{Output: summarize(out)}, nil
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", a.Command)
-	if a.Dir != "" {
-		cmd.Dir = a.Dir
-	}
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	out := stdout.String()
-	if stderr.Len() > 0 {
-		out += "\n[stderr]\n" + stderr.String()
+	stdout, stderr, err := runWithProcessGroup(ctx, a.Dir, a.Command)
+	out := stdout
+	if stderr != "" {
+		out += "\n[stderr]\n" + stderr
 	}
 	if err != nil {
 		out = out + "\n" + err.Error()
 		return ToolResult{Output: summarize(out), IsError: true}, nil
 	}
 	return ToolResult{Output: summarize(out)}, nil
+}
+
+func runWithProcessGroup(ctx context.Context, dir, command string) (string, string, error) {
+	cmd := exec.Command("bash", "-c", command)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	setProcessGroup(cmd)
+
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return "", "", err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case <-ctx.Done():
+		killProcessGroup(cmd)
+		<-done
+		return stdout.String(), stderr.String(), ctx.Err()
+	case err := <-done:
+		return stdout.String(), stderr.String(), err
+	}
 }
 
 // excluded reports whether the command matches an

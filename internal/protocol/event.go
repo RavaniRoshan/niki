@@ -36,20 +36,40 @@ const (
 	EventWarning              EventType = "warning"
 	EventError                EventType = "error"
 	EventBootPhase            EventType = "boot_phase"
+	EventQuestionPrompted     EventType = "question_prompted"
+	EventSessionList          EventType = "session_list"
+	EventSessionLoaded        EventType = "session_loaded"
 )
 
+type SessionMetadata struct {
+	ID        SessionId `json:"id"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+	TurnCount int       `json:"turn_count"`
+}
+
+type UserQuestion struct {
+	Header      string   `json:"header"`
+	Question    string   `json:"question"`
+	Options     []string `json:"options"`
+	AllowCustom bool     `json:"allow_custom"`
+}
+
 type EngineEvent struct {
-	Type      EventType     `json:"type"`
-	Timestamp time.Time     `json:"timestamp"`
-	SessionID SessionId     `json:"session_id,omitempty"`
-	TurnID    TurnId        `json:"turn_id,omitempty"`
-	CallID    ToolCallId    `json:"call_id,omitempty"`
-	Text      string        `json:"text,omitempty"`
-	ToolName  string        `json:"tool_name,omitempty"`
-	Error     string        `json:"error,omitempty"`
-	Duration  time.Duration `json:"duration,omitempty"`
-	Plan      []PlanStep    `json:"plan,omitempty"`
-	Usage     *Usage        `json:"usage,omitempty"`
+	Type      EventType         `json:"type"`
+	Timestamp time.Time         `json:"timestamp"`
+	SessionID SessionId         `json:"session_id,omitempty"`
+	TurnID    TurnId            `json:"turn_id,omitempty"`
+	CallID    ToolCallId        `json:"call_id,omitempty"`
+	Text      string            `json:"text,omitempty"`
+	ToolName  string            `json:"tool_name,omitempty"`
+	Error     string            `json:"error,omitempty"`
+	Duration  time.Duration     `json:"duration,omitempty"`
+	Plan      []PlanStep        `json:"plan,omitempty"`
+	Usage     *Usage            `json:"usage,omitempty"`
+	Questions []UserQuestion    `json:"questions,omitempty"`
+	Sessions  []SessionMetadata `json:"sessions,omitempty"`
+	History   []string          `json:"history,omitempty"`
 }
 
 type Usage = provider.Usage

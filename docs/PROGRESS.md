@@ -608,3 +608,103 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
 - Cut: TUI cold open, 3 scripted tool turns with visible sweep frames
   (◑ streaming verified in the encode), committed cells, ticking
   footer meters, end card on the ledger. Tape + storyboard current.
+
+## 2026-10-09 — Parity implementation: autonomous loop, keyboard ergonomics, context repair, process containment
+- Autonomous multi-step tool recursion loop: TurnRunner in internal/engine/agent.go
+  now executes an autonomous loop (up to maxSteps=30) where tool results feed back into
+  the model until finish_reason="stop", with 3-consecutive-failure doom loop protection.
+  Proven by TestAutonomousMultiStepToolRecursionLoop.
+- Pre-flight context projector & anomaly repair (internal/engine/projector.go):
+  ProjectContext repairs unclosed tool calls from interrupted turns (auto-synthesizes
+  placeholder tool results to prevent Anthropic/OpenAI 400 errors), merges consecutive
+  assistant messages, strips empty/vacuous messages, and injects 3-point prompt cache hints
+  (CacheControl="ephemeral") on system, last tool, and latest user prompt (OpenCode parity).
+  Proven by TestProjectContext*.
+- Unix process group containment & Windows taskkill: internal/tools/proc_unix.go and
+  proc_windows.go implement setProcessGroup (Setpgid=true) and signal escalation (SIGINT -> 500ms
+  -> SIGKILL to -pgid) and taskkill /T /F on Windows across ShellTool and ProcessManager.
+- Critical keyboard ergonomics hazard remediation (internal/tui/app.go):
+  - Tiered Ctrl+C: non-empty input clears composer; running turn interrupts turn; empty input
+    arms exit confirmation timer (1.5s) requiring double Ctrl+C to quit.
+  - Standard Ctrl+D: exits on empty input (EOF); forward deletes character when text is present.
+  - Esc: tiered dismissal (closes palette -> interrupts active turn).
+  - Emacs Kill-Ring (internal/tui/killring.go) with Ctrl+W, Ctrl+K, Ctrl+U, and Ctrl+Y yank.
+  - UndoStack (internal/tui/undostack.go) with Ctrl+_ undo.
+  - Bracketed paste & token collapsing (internal/tui/paste.go): pastes >10 lines or >1000 chars
+    collapse into atomic [paste #N +L lines] tokens, expanded on Enter.
+  - Collapsible tool output (Ctrl+O) in transcript view.
+  - Checkpoint /unrevert (internal/checkpoint/checkpoint.go) to redo/restore pre-rewind state.
+- Full verification: go vet ./... and go test ./... pass 100% across all 32 packages in the tree.
+  Updated static binaries built at bin/nikicode, bin/niki, and installed to ~/.local/bin/nikicode.
+
+## 2026-10-09 — Complete Parity Implementation: Visual Swarm, Interactive Questions, Mid-Turn Steering, Split Diff, /btw Side-Agent, Git Snapshots & Secondary Model Pool
+- Visual Swarm & 7-Level Progressive Braille Bars (internal/tui/progress.go):
+  7 progressive Braille vertical fill glyphs (⣀ ⣄ ⣤ ⣦ ⣶ ⣷ ⣿), 80ms frame cadence,
+  phase status progression (Orchestrating…, Prompting…, Working…, Completed., Rate limited…),
+  ASCII fallback for dumb terminals, and hierarchical subagent task card tree rendering.
+  Proven by TestRenderBrailleBar and TestRenderSwarmProgress.
+- Interactive Question Modal System (internal/tui/question.go, internal/tools/ask_user_question.go):
+  Extended AskUserQuestionTool with SetPromptHandler callback for interactive resolution.
+  Interactive floating overlay in internal/tui/question.go with Up/Down arrow navigation,
+  Tab/Shift+Tab question switching, Enter submission, Esc cancellation, and custom write-in answers.
+  Wired EventQuestionPrompted and CmdAnswerQuestion in internal/protocol.
+  Proven by TestQuestionModalNavigationAndSubmit.
+- Mid-Turn Prompt Steering & Ctrl+B Background Detach (internal/engine/agent.go, internal/engine/engine.go, internal/tui/app.go):
+  SteerChannel in TurnRunner drains user guidance mid-flight between tool execution steps
+  without aborting the turn. CmdSubmitPrompt submitted while busy automatically routes
+  into SteerChannel. Ctrl+B detaches foreground tool execution into background task management.
+  Proven by TestMidTurnPromptSteering.
+- Dedicated Interactive Diff Viewer /diff (internal/tui/diff.go):
+  Dual split-screen side-by-side diff when terminal width > 120 columns (Old vs New with line numbers),
+  unified single-column diff when terminal width <= 120 columns. Left file sidebar with additions/deletions
+  badges (+N -M) and keyboard navigation (j/k files, n/p hunks, q/Esc return to chat).
+- Docked /btw Side-Agent (internal/tui/btw.go):
+  Floating card docked above composer executing isolated quick lookups without polluting
+  main session history or token budget.
+- Out-of-Band Git write-tree Instant Snapshots & Secondary Model Pool:
+  internal/checkpoint/checkpoint.go captures repository-wide snapshots in <2ms using git write-tree
+  with isolated GIT_INDEX_FILE cache, supporting instant rollback and /unrevert.
+  Proven by TestGitTreeSnapshotAndRewind.
+  Secondary model pool ([secondary_model]) in internal/config dynamically injects lightweight
+  models into child subagents to preserve root token budgets.
+- Full verification: golangci-lint (0 issues), go vet ./... (clean), internal/lintcheck (clean),
+  and full test suite passing across all packages.
+
+## 2026-10-09 — Master Finalist Parity & Release Engineering Delivery DONE
+- Interactive Session Browser & Rollouts (/sessions, Ctrl+S, internal/tui/session_picker.go):
+  Dual-pane modal with real-time fuzzy search by title or session ID, turn counts, relative timestamps,
+  and transcript preview. Actions for Resume (Enter), Fork (f), Delete with confirmation prompt (d),
+  and Esc to return to composer. Proven by TestSessionPickerFiltering, TestSessionPickerKeyboardNavigation,
+  and TestSessionPickerDeleteFlow.
+- External $EDITOR Bridge (Ctrl+G, /editor, internal/editor/editor.go):
+  Suspends Bubble Tea cleanly via tea.ExecProcess, prepares draft file in cache, resolves editor
+  hierarchy ($VISUAL -> $EDITOR -> nano -> vim -> vi), and reloads updated content into the composer
+  upon exit. Proven by internal/editor unit tests and lintcheck zero-I/O verification.
+- Floating @ Mention Autocomplete Overlay (internal/tui/mention_overlay.go):
+  Automatically surfaces floating candidate card directly above composer upon typing @. Fuzzy matches
+  workspace files with Git status badges and AST symbol declarations. Keyboard navigable (Up/Down,
+  Tab/Enter insertion, Esc dismissal). Asynchronous candidate discovery keeps TUI render path pure.
+  Proven by TestMentionQueryAndReplace and TestRenderMentionOverlay.
+- OSC Terminal Integrations & Session Exporter (internal/terminal/terminal.go, internal/session/export.go):
+  OSC 0/2 window title tracking, OSC 9/777 desktop notifications on turn completion, and OSC 133 semantic
+  prompt markers for terminal scrollback navigation. /export produces standalone dark-mode HTML or
+  GitHub-flavored Markdown transcripts with collapsible tool outputs and turn metrics.
+  Proven by TestExportToMarkdownAndHTML and terminal test suite.
+- In-Memory Workspace Symbol Indexer & Git Smart Tools (internal/index/symbols.go, internal/tools/):
+  Background AST and regex symbol indexer for Go, Python, TypeScript, and Rust. Registered symbol_search,
+  git_diff_summary, git_smart_commit, and git_pr_summary tools (36 total tools in DefaultRegistry).
+  Fail-closed permissions maintained. Proven by TestSymbolIndexer, TestWorkflowSmartCommit, and TestDefaultRegistryCount.
+- Adaptive Rate Limiter & Headless CI Mode (internal/routing/limiter.go, cmd/nikicode/ci.go):
+  Token bucket rate limiter preventing 429 provider rate spikes and session cost guardrail alerts.
+  nikicode ci subcommand provides automated diff summary, PR review, test execution, SARIF report,
+  and GitHub workflow annotations. Proven by TestRateLimiterAndCostGuard and nikicode ci --check.
+- Multi-Platform CI/CD Pipeline (.github/workflows/ci.yml, release.yml):
+  Multi-OS matrix (Ubuntu & macOS), vet, golangci-lint, race tests, lintcheck (0 render I/O, 0 color literals
+  outside theme.go), PTY e2e smokes, and GoReleaser static multi-arch binary matrix.
+- Verification Gates:
+  go vet ./... (clean), golangci-lint run ./... (0 issues), TERM=xterm go test ./... (100% pass across all 35 packages),
+  internal/lintcheck (clean), nikicode ci --check (clean code 0). Static binaries rebuilt at bin/nikicode,
+  bin/niki, and ~/.local/bin/nikicode.
+
+
+

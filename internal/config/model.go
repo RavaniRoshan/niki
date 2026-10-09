@@ -1,12 +1,19 @@
 package config
 
 type Config struct {
-	Model       ModelConfig       `toml:"model"`
-	Provider    ProviderConfig    `toml:"provider"`
-	UI          UIConfig          `toml:"ui"`
-	Permissions PermissionsConfig `toml:"permissions"`
-	MCP         MCPConfig         `toml:"mcp"`
-	Sandbox     SandboxConfig     `toml:"sandbox"`
+	Model          ModelConfig          `toml:"model"`
+	SecondaryModel SecondaryModelConfig `toml:"secondary_model,omitempty"`
+	Provider       ProviderConfig       `toml:"provider"`
+	UI             UIConfig             `toml:"ui"`
+	Permissions    PermissionsConfig    `toml:"permissions"`
+	MCP            MCPConfig            `toml:"mcp"`
+	Sandbox        SandboxConfig        `toml:"sandbox"`
+}
+
+type SecondaryModelConfig struct {
+	Provider string `toml:"provider,omitempty"`
+	Model    string `toml:"model,omitempty"`
+	Force    bool   `toml:"force,omitempty"`
 }
 
 type ModelConfig struct {

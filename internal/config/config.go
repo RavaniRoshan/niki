@@ -12,7 +12,12 @@ import (
 
 func Default() Config {
 	return Config{
-		Model:       ModelConfig{Name: "gpt-4o-mini"},
+		Model: ModelConfig{Name: "gpt-4o-mini"},
+		SecondaryModel: SecondaryModelConfig{
+			Provider: "mock",
+			Model:    "gpt-4o-mini",
+			Force:    false,
+		},
 		Provider:    ProviderConfig{Name: "mock", EnvKey: "OPENAI_API_KEY"},
 		UI:          UIConfig{Inline: false, Theme: "default"},
 		Permissions: PermissionsConfig{Mode: "workspace_write"},
@@ -72,7 +77,7 @@ func LoadWithProfile(explicitPath, profileName string) (ConfigWithSources, error
 
 	for _, path := range candidates {
 		if path == "defaults" {
-			for _, s := range []string{"model", "provider", "ui", "permissions", "mcp", "sandbox"} {
+			for _, s := range []string{"model", "secondary_model", "provider", "ui", "permissions", "mcp", "sandbox"} {
 				out.Sources[s] = "default"
 			}
 			continue
@@ -141,3 +146,22 @@ func (c Config) ResolveAPIKey() string {
 	}
 	return os.Getenv("OPENAI_API_KEY")
 }
+
+// SaveUserConfig persists configuration to the canonical user config file (~/.config/nikicode/nikicode.toml).
+func SaveUserConfig(cfg Config) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(home, ".config", "nikicode")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "nikicode.toml")
+	data, err := toml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+

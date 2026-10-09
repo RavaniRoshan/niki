@@ -15,10 +15,13 @@ type UserQuestion struct {
 	AllowCustom bool     `json:"allow_custom"`
 }
 
+type PromptHandlerFunc func(ctx context.Context, questions []UserQuestion) ([]string, error)
+
 type AskUserQuestionTool struct {
 	Base
-	mu         sync.RWMutex
-	isSubagent bool
+	mu            sync.RWMutex
+	isSubagent    bool
+	promptHandler PromptHandlerFunc
 }
 
 func NewAskUserQuestionTool() *AskUserQuestionTool {
@@ -42,9 +45,16 @@ func (t *AskUserQuestionTool) SetSubagent(subagent bool) {
 	t.isSubagent = subagent
 }
 
+func (t *AskUserQuestionTool) SetPromptHandler(handler PromptHandlerFunc) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.promptHandler = handler
+}
+
 func (t *AskUserQuestionTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, error) {
 	t.mu.RLock()
 	sub := t.isSubagent
+	handler := t.promptHandler
 	t.mu.RUnlock()
 
 	if sub {
@@ -86,6 +96,30 @@ func (t *AskUserQuestionTool) Run(ctx context.Context, args json.RawMessage) (To
 				IsError: true,
 			}, nil
 		}
+	}
+
+	if handler != nil {
+		answers, err := handler(ctx, a.Questions)
+		if err != nil {
+			return ToolResult{
+				Output:  fmt.Sprintf("interactive question cancelled or failed: %v", err),
+				IsError: true,
+			}, nil
+		}
+		var sb strings.Builder
+		sb.WriteString("User answered the question(s):\n\n")
+		for i, q := range a.Questions {
+			ans := "skipped"
+			if i < len(answers) && answers[i] != "" {
+				ans = answers[i]
+			}
+			header := q.Header
+			if header == "" {
+				header = fmt.Sprintf("Question %d", i+1)
+			}
+			fmt.Fprintf(&sb, "[%s] %s -> %s\n", header, q.Question, ans)
+		}
+		return ToolResult{Output: strings.TrimSpace(sb.String())}, nil
 	}
 
 	var sb strings.Builder

@@ -303,3 +303,89 @@ func (t *GitChangelogTool) Run(ctx context.Context, args json.RawMessage) (ToolR
 	}
 	return ToolResult{Output: out}, nil
 }
+
+// --- git_diff_summary ---
+
+type GitDiffSummaryTool struct{ Base }
+
+func NewGitDiffSummaryTool() *GitDiffSummaryTool {
+	return &GitDiffSummaryTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string"}}`}}
+}
+
+func (t *GitDiffSummaryTool) Name() string              { return "git_diff_summary" }
+func (t *GitDiffSummaryTool) Description() string       { return "Show line additions, deletions, and file change statistics" }
+func (t *GitDiffSummaryTool) IsConcurrencySafe() bool   { return true }
+func (t *GitDiffSummaryTool) IsReadOnly() bool          { return true }
+
+func (t *GitDiffSummaryTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, error) {
+	var a struct {
+		Dir string `json:"dir"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return ToolResult{}, fmt.Errorf("bad args: %w", err)
+	}
+	out, err := git.DiffSummary(gitDir(a.Dir))
+	if err != nil {
+		return gitErr(err)
+	}
+	return ToolResult{Output: out}, nil
+}
+
+// --- git_smart_commit ---
+
+type GitSmartCommitTool struct{ Base }
+
+func NewGitSmartCommitTool() *GitSmartCommitTool {
+	return &GitSmartCommitTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string"}}`}}
+}
+
+func (t *GitSmartCommitTool) Name() string        { return "git_smart_commit" }
+func (t *GitSmartCommitTool) Description() string { return "Draft an automated conventional commit message from diff and commit" }
+func (t *GitSmartCommitTool) IsConcurrencySafe() bool { return false }
+func (t *GitSmartCommitTool) IsReadOnly() bool        { return false }
+
+func (t *GitSmartCommitTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, error) {
+	var a struct {
+		Dir string `json:"dir"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return ToolResult{}, fmt.Errorf("bad args: %w", err)
+	}
+	dir := gitDir(a.Dir)
+	msg, err := git.SmartCommitMessage(dir)
+	if err != nil {
+		return gitErr(err)
+	}
+	if err := git.Commit(dir, msg); err != nil {
+		return gitErr(err)
+	}
+	return ToolResult{Output: fmt.Sprintf("Committed with message:\n%s", msg)}, nil
+}
+
+// --- git_pr_summary ---
+
+type GitPRSummaryTool struct{ Base }
+
+func NewGitPRSummaryTool() *GitPRSummaryTool {
+	return &GitPRSummaryTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string","base":"string"}}`}}
+}
+
+func (t *GitPRSummaryTool) Name() string              { return "git_pr_summary" }
+func (t *GitPRSummaryTool) Description() string       { return "Draft a GitHub PR description with commits and change stats" }
+func (t *GitPRSummaryTool) IsConcurrencySafe() bool   { return true }
+func (t *GitPRSummaryTool) IsReadOnly() bool          { return true }
+
+func (t *GitPRSummaryTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, error) {
+	var a struct {
+		Dir  string `json:"dir"`
+		Base string `json:"base"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return ToolResult{}, fmt.Errorf("bad args: %w", err)
+	}
+	out, err := git.PRSummary(gitDir(a.Dir), a.Base)
+	if err != nil {
+		return gitErr(err)
+	}
+	return ToolResult{Output: out}, nil
+}

@@ -224,5 +224,9 @@ func DefaultRegistry() *Registry {
 	r.Register(NewGitLogTool())
 	r.Register(NewGitReviewTool())
 	r.Register(NewGitChangelogTool())
+	r.Register(NewGitDiffSummaryTool())
+	r.Register(NewGitSmartCommitTool())
+	r.Register(NewGitPRSummaryTool())
+	r.Register(NewSymbolSearchTool(nil))
 	return r
 }

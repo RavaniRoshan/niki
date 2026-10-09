@@ -27,7 +27,47 @@ const (
 	syncEnable      = "\x1b[?2026h"
 	syncDisable     = "\x1b[?2026l"
 	deviceAttrsQuery = "\x1b[c"
+
+	ProgressIndeterminate  = "\x1b]9;4;3\x1b\\"
+	ProgressClear          = "\x1b]9;4;0\x1b\\"
+	CursorSteadyBar        = "\x1b[6 q"
+	CursorBlinkingBar      = "\x1b[5 q"
+	ModifyOtherKeysEnable  = "\x1b[>4;2m"
+	ModifyOtherKeysDisable = "\x1b[>4;0m"
 )
+
+// SetProgress emits the OS taskbar/tab progress indicator escape (OSC 9;4).
+func SetProgress(w io.Writer, active bool) {
+	if active {
+		_, _ = io.WriteString(w, ProgressIndeterminate)
+	} else {
+		_, _ = io.WriteString(w, ProgressClear)
+	}
+}
+
+// SetCursorShape emits the DECSCUSR cursor shape sequence.
+func SetCursorShape(w io.Writer, reducedMotion bool) {
+	if reducedMotion {
+		_, _ = io.WriteString(w, CursorSteadyBar)
+	} else {
+		_, _ = io.WriteString(w, CursorBlinkingBar)
+	}
+}
+
+// SetWindowTitle sets the terminal window/tab title using OSC 0 / OSC 2.
+func SetWindowTitle(title string) string {
+	return fmt.Sprintf("\x1b]0;%s\x07", title)
+}
+
+// DesktopNotification emits OSC 9 and OSC 777 desktop notification escapes.
+func DesktopNotification(title, message string) string {
+	return fmt.Sprintf("\x1b]777;notify;%s;%s\x07\x1b]9;%s: %s\x07", title, message, title, message)
+}
+
+// SemanticPromptMark returns OSC 133 semantic prompt markers (A: prompt, B: command, C: output, D: finish).
+func SemanticPromptMark(mark string) string {
+	return fmt.Sprintf("\x1b]133;%s\x07", mark)
+}
 
 // Capabilities reports which negotiated modes the terminal
 // actually supports.
