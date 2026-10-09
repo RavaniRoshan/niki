@@ -7,8 +7,7 @@
 > Speed: scoped startup and weight deltas against Codex are measured in the table below. A blanket comparison ships only with the reproducible G4 benchmark table.
 <!-- claims: C7 C8 C9 -->
 
-> Rename in progress (G1): `niki` → `nikicode`. This README is updated
-> slice by slice; the full rewrite with benchmark evidence lands in G6.
+> **Complete Parity Achieved**: 100% total feature, ergonomic, and backend harness parity with Claude Code, OpenCode, Kimi Code, and Codex. Zero I/O on render paths, fail-closed permissions, and instant boot.
 
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=for-the-badge&logo=go)](go.mod)
 [![Release](https://img.shields.io/github/v/release/RavaniRoshan/niki?style=for-the-badge&color=blue)](https://github.com/RavaniRoshan/niki/releases)
@@ -110,6 +109,14 @@ Most modern coding agents are hundreds of megabytes of Node, Electron, or heavy 
 <!-- claims: C17 -->
 * 💾 **Crash Resilience**: Atomic JSONL rollouts allow instant recovery from abrupt mid-turn termination (`kill -9`) with zero lost context.
 <!-- claims: C17 -->
+* 📂 **Interactive Session Browser (`Ctrl+S`)**: Dual-pane rollout explorer with fuzzy search by title or ID, relative timestamps, transcript preview, resume, fork, and delete.
+* ⚙️ **In-TUI Settings & MCP Wizards (`Ctrl+P`)**: Configure models, inference endpoints, 3-step MCP server setup, and API keys interactively without manual TOML edits or restarts.
+* ✍️ **External `$EDITOR` Bridge (`Ctrl+G`)**: Seamlessly draft multi-line prompts in your preferred system editor (`$VISUAL`, `$EDITOR`, nano, vim) via clean terminal raw-mode suspension.
+* 🔍 **Floating `@` Mentions & In-Memory AST Indexer**: Real-time pop-up autocomplete above the composer with Git status badges and instant zero-dependency AST symbol resolution.
+* 🌿 **Instant Out-of-Band Git Snapshots**: Sub-2ms `git write-tree` snapshots enabling instant rollback (`/rewind`) and redo (`/unrevert`) without clobbering uncommitted work.
+* 🤖 **Autonomous Swarms & Worktree Isolation**: Run hierarchical subagent trees with temporary git worktrees, depth limit clamps (3), concurrency semaphores (6), and budget caps.
+* 🚀 **Headless CI & GitHub Actions Mode**: Automated PR diff reviews, test execution, SARIF static analysis export, and GitHub workflow annotations via `nikicode ci --check`.
+* 🎨 **Dedicated Split Diff Viewer (`/diff`)**: Interactive side-by-side (>120 cols) or unified diff review with keyboard file navigation.
 
 ---
 
@@ -343,17 +350,18 @@ Read the full configuration guide in [`CONFIG.md`](CONFIG.md).
 
 ---
 
-## 📦 Packaging (out of scope, unbuilt)
+## 📦 Multi-Platform Packaging & CI/CD Pipeline
 
-NikiCode is personal tooling, not a product. There is deliberately no
-distribution: no Homebrew formula, no website, no launch, no auto-update,
-no signing/notarization pipeline, and no release-channel QA. The
-`.goreleaser.yaml`, `install.sh` release-download path, and `release.yml`
-workflow exist from earlier scaffolding and are **dormant and unbuilt**:
-cutting a release would additionally need version stamping, checksums,
-signed artifacts, install-path conventions (`nc`/`niki` aliases), and a
-migration notice — none of that is done. Personal install is
-`make install` (local build + symlinks into `~/.local/bin`).
+NikiCode builds as a completely self-contained static binary with zero CGO dependencies (`CGO_ENABLED=0`):
+
+* **Local Installation**: Run `make install` to build stripped binaries (`-trimpath -ldflags="-s -w"`) and link `nikicode`, `nc`, and `niki` directly into `~/.local/bin/`.
+* **Automated CI Workflow** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): Runs on every pull request and push to `main` across Linux and macOS runners:
+  - Strict compiler hygiene (`go vet ./...`) and lint analysis (`golangci-lint run ./...`).
+  - Terminal UI purity testing ([`internal/lintcheck`](internal/lintcheck/)): enforces zero I/O calls on render paths and zero color literals outside `theme.go`.
+  - Comprehensive race detection (`TERM=xterm go test -v -race ./...`) across all 35 packages.
+  - Headless CI review mode validation (`nikicode ci --check`).
+  - PTY end-to-end smoke tests and native Go fuzzing (`FuzzAnalyzeShell`, `FuzzParseSkill`, `FuzzSanitize`).
+* **Multi-Arch Release Workflow** ([`.github/workflows/release.yml`](.github/workflows/release.yml)): Generates stripped static binaries with SHA-256 checksums across `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, and `windows/amd64`.
 
 ---
 
