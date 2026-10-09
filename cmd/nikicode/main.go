@@ -327,6 +327,10 @@ func main() {
 					_ = store.AppendEvent(p.id, p.evt)
 				}
 				pending = nil
+				go func() {
+					sessDir := filepath.Join(paths.Dir(), "sessions")
+					_, _ = session.ArchiveColdSessions(sessDir, 30*24*time.Hour)
+				}()
 			}()
 			defer func() {
 				<-storeReady
