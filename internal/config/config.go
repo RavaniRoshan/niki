@@ -12,13 +12,13 @@ import (
 
 func Default() Config {
 	return Config{
-		Model: ModelConfig{Name: "gpt-4o-mini"},
+		Model: ModelConfig{Name: ""},
 		SecondaryModel: SecondaryModelConfig{
-			Provider: "mock",
-			Model:    "gpt-4o-mini",
+			Provider: "",
+			Model:    "",
 			Force:    false,
 		},
-		Provider:    ProviderConfig{Name: "mock", EnvKey: "OPENAI_API_KEY"},
+		Provider:    ProviderConfig{Name: "", EnvKey: ""},
 		UI:          UIConfig{Inline: false, Theme: "default"},
 		Permissions: PermissionsConfig{Mode: "workspace_write"},
 		MCP:         MCPConfig{Servers: map[string]MCPServer{}},
@@ -29,6 +29,66 @@ func Default() Config {
 			FailIfUnavailable: false,
 		},
 	}
+}
+
+// DefaultMock returns a test/demo configuration utilizing the deterministic mock provider.
+func DefaultMock() Config {
+	cfg := Default()
+	cfg.Model.Name = "gpt-4o-mini"
+	cfg.SecondaryModel = SecondaryModelConfig{
+		Provider: "mock",
+		Model:    "gpt-4o-mini",
+		Force:    false,
+	}
+	cfg.Provider = ProviderConfig{Name: "mock", EnvKey: ""}
+	return cfg
+}
+
+// AutoDetectProvider checks standard environment variables and returns a detected ProviderConfig and ModelConfig,
+// or empty configs if unconfigured.
+func AutoDetectProvider() (ProviderConfig, ModelConfig) {
+	if k := os.Getenv("ANTHROPIC_API_KEY"); k != "" {
+		return ProviderConfig{
+			Name:   "anthropic",
+			APIKey: k,
+			EnvKey: "ANTHROPIC_API_KEY",
+		}, ModelConfig{Name: "claude-3-5-sonnet-latest"}
+	}
+	if k := os.Getenv("OPENAI_API_KEY"); k != "" {
+		return ProviderConfig{
+			Name:   "openai",
+			APIKey: k,
+			EnvKey: "OPENAI_API_KEY",
+		}, ModelConfig{Name: "gpt-4o"}
+	}
+	if k := os.Getenv("OPENROUTER_API_KEY"); k != "" {
+		return ProviderConfig{
+			Name:    "openai",
+			BaseURL: "https://openrouter.ai/api/v1",
+			APIKey:  k,
+			EnvKey:  "OPENROUTER_API_KEY",
+		}, ModelConfig{Name: "anthropic/claude-3.5-sonnet"}
+	}
+	if k := os.Getenv("DEEPSEEK_API_KEY"); k != "" {
+		return ProviderConfig{
+			Name:    "openai",
+			BaseURL: "https://api.deepseek.com",
+			APIKey:  k,
+			EnvKey:  "DEEPSEEK_API_KEY",
+		}, ModelConfig{Name: "deepseek-chat"}
+	}
+	if k := os.Getenv("GEMINI_API_KEY"); k != "" {
+		return ProviderConfig{
+			Name:    "openai",
+			BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+			APIKey:  k,
+			EnvKey:  "GEMINI_API_KEY",
+		}, ModelConfig{Name: "gemini-2.0-flash"}
+	}
+	if paths.Env("MOCK") != "" || paths.Env("DEMO_TOUR") != "" {
+		return ProviderConfig{Name: "mock"}, ModelConfig{Name: "gpt-4o-mini"}
+	}
+	return ProviderConfig{}, ModelConfig{}
 }
 
 // Load resolves config from defaults -> user (~/.config/nikicode/nikicode.toml,
@@ -112,6 +172,17 @@ func LoadWithProfile(explicitPath, profileName string) (ConfigWithSources, error
 			out.MCP = Default().MCP
 		}
 	}
+	if out.Provider.Name == "" || out.Model.Name == "" {
+		detectedProv, detectedModel := AutoDetectProvider()
+		if out.Provider.Name == "" && detectedProv.Name != "" {
+			out.Provider = detectedProv
+			out.Sources["provider"] = "auto-detected from environment"
+		}
+		if out.Model.Name == "" && detectedModel.Name != "" {
+			out.Model = detectedModel
+			out.Sources["model"] = "auto-detected default"
+		}
+	}
 	return out, nil
 }
 
@@ -134,6 +205,20 @@ func IsProjectTrusted(projectDir string) bool {
 	return false
 }
 
+// IsConfigured reports whether a real model provider and credentials (or local ollama/mock) are available.
+func (c Config) IsConfigured() bool {
+	if c.Provider.Name == "" || c.Model.Name == "" {
+		return false
+	}
+	if c.Provider.Name == "ollama" {
+		return true
+	}
+	if c.Provider.Name == "mock" && (paths.Env("MOCK") != "" || paths.Env("DEMO_TOUR") != "") {
+		return true
+	}
+	return c.ResolveAPIKey() != ""
+}
+
 // ResolveAPIKey returns the key from config, env, or the configured env var name.
 func (c Config) ResolveAPIKey() string {
 	if c.Provider.APIKey != "" {
@@ -144,7 +229,18 @@ func (c Config) ResolveAPIKey() string {
 			return v
 		}
 	}
-	return os.Getenv("OPENAI_API_KEY")
+	switch c.Provider.Name {
+	case "anthropic":
+		return os.Getenv("ANTHROPIC_API_KEY")
+	case "openai":
+		return os.Getenv("OPENAI_API_KEY")
+	case "openrouter":
+		return os.Getenv("OPENROUTER_API_KEY")
+	case "deepseek":
+		return os.Getenv("DEEPSEEK_API_KEY")
+	default:
+		return ""
+	}
 }
 
 // SaveUserConfig persists configuration to the canonical user config file (~/.config/nikicode/nikicode.toml).

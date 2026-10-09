@@ -34,9 +34,10 @@ func ptyRun(t *testing.T, args ...string) (restore func()) {
 			}
 		}
 	}()
-	time.Sleep(500 * time.Millisecond)
-	// Send Ctrl+C to exit the TUI.
-	f.Write([]byte{0x03})
+	// Send double Ctrl+C to confirm exit (tiered Ctrl+C).
+	_, _ = f.Write([]byte{0x03})
+	time.Sleep(50 * time.Millisecond)
+	_, _ = f.Write([]byte{0x03})
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
@@ -84,7 +85,9 @@ func TestNonTTYExec(t *testing.T) {
 	if os.Getenv("NIKI_PTY_TESTS") == "" {
 		t.Skip("set NIKI_PTY_TESTS=1 to run")
 	}
-	out, err := exec.Command("../../bin/nikicode", "exec", "hello").Output()
+	cmd := exec.Command("../../bin/nikicode", "exec", "hello")
+	cmd.Env = append(os.Environ(), "NIKICODE_MOCK=1")
+	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +103,7 @@ func TestPTYCodingLoop(t *testing.T) {
 		t.Skip("set NIKI_PTY_TESTS=1 to run")
 	}
 	cmd := exec.Command("../../bin/nikicode")
+	cmd.Env = append(os.Environ(), "HOME="+t.TempDir(), "NIKICODE_MOCK=1")
 	f, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +137,7 @@ func TestPTYCodingLoop(t *testing.T) {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	if _, err := f.Write([]byte{0x03}); err != nil { // Ctrl+C
+	if _, err := f.Write([]byte{0x03, 0x03}); err != nil { // Double Ctrl+C to confirm exit
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
@@ -361,7 +365,7 @@ func TestBootWith5MCPAnd50Skills(t *testing.T) {
 func TestArgvFastPathScoped(t *testing.T) {
 	bin := ensureBinary(t)
 	cmd := exec.Command(bin, "exec", "version")
-	cmd.Env = append(os.Environ(), "HOME="+t.TempDir())
+	cmd.Env = append(os.Environ(), "HOME="+t.TempDir(), "NIKICODE_MOCK=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("exec version failed: %v\n%s", err, out)

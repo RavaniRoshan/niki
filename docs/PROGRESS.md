@@ -706,5 +706,35 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
   internal/lintcheck (clean), nikicode ci --check (clean code 0). Static binaries rebuilt at bin/nikicode,
   bin/niki, and ~/.local/bin/nikicode.
 
+## 2026-10-09 — Mock Purge, Dynamic Alert Readiness, FTUX Onboarding & Traditional CI/CD Pipeline DONE
+- Superpowers Skill Integration (.agents/skills/):
+  Integrated complete Superpowers traditional software engineering suite (14 skills: verification-before-completion,
+  test-driven-development, finishing-a-development-branch, writing-plans, executing-plans, systematic-debugging, etc.).
+- Mock Purge & Clean Runtime Separation (internal/config, cmd/nikicode/main.go):
+  Completely eliminated mock defaults from production runtime. Default configuration sets Provider.Name="" and
+  Model.Name="", returning UnconfiguredProvider unless explicit mock flags (NIKICODE_MOCK=1, DEMO_TOUR=1) are supplied.
+  AutoDetectProvider seamlessly picks up ambient environment keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY,
+  DEEPSEEK_API_KEY, GEMINI_API_KEY).
+- UnconfiguredProvider (internal/provider/unconfigured.go, unconfigured_test.go):
+  Returns name "none" and actionable diagnostic errors rather than silent fake completions.
+- Dynamic Alert Harness (internal/alerts/alerts.go, alerts_test.go):
+  Decoupled actionable alert system supporting AlertNoModel, AlertAuthFailure (401), AlertRateLimit (429),
+  AlertNetworkError, AlertContextBudget (>80%), and AlertUnsandboxedCommand. Pure text and Lip Gloss formatting
+  without color literals (lintcheck compliant).
+- User-Centric FTUX & TUI Interception (internal/tui/app.go, palette.go, unconfigured_test.go):
+  Initial model displays as "[Model: None]". Submitting an AI turn without a model intercepts gracefully, displaying
+  actionable guidance (connecting via /connect or Ctrl+P, exporting env vars, or running local shell commands with "! <cmd>")
+  and automatically opening the provider connection palette. Local shell commands ("! <cmd>") execute without requiring an AI model.
+- Traditional Software Engineering CI/CD Pipeline (.github/workflows/ci.yml, release.yml):
+  Production-grade GitHub Actions workflows:
+  - ci.yml: Quality gate (gofmt, go vet, lintcheck, golangci-lint), multi-OS matrix (Ubuntu & macOS) race-detector test suite,
+    PTY e2e tests (NIKI_PTY_TESTS=1), native Go fuzzing (AnalyzeShell, ParseSkill, Sanitize, ParseSSE), benchmarks, and headless CI self-check.
+  - release.yml: Triggered on version tags (v*) and manual workflow_dispatch, gating full verification before running GoReleaser.
+- Gates Verified:
+  go vet ./... (clean), golangci-lint run ./... (0 issues), TERM=xterm go test ./... (37/37 packages pass),
+  NIKI_PTY_TESTS=1 e2e (pass), lintcheck (clean), nikicode ci --check (code 0).
+  Installed binary verified at ~/.local/bin/nikicode and bin/nikicode.
+
+
 
 

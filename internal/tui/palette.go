@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/RavaniRoshan/niki/internal/paths"
 )
 
 // PaletteCategory classifies commands in the palette.
@@ -47,7 +49,7 @@ type PaletteState struct {
 
 // DefaultPaletteCatalog returns the comprehensive list of actions available via Ctrl+P.
 func DefaultPaletteCatalog() []PaletteItem {
-	return []PaletteItem{
+	items := []PaletteItem{
 		// Models
 		{
 			ID:          "model-claude-3-5",
@@ -98,12 +100,12 @@ func DefaultPaletteCatalog() []PaletteItem {
 			Payload:     "openai:llama3",
 		},
 		{
-			ID:          "model-mock",
+			ID:          "model-openrouter",
 			Category:    CatModel,
-			Title:       "Switch to Mock Demo Provider",
-			Description: "Zero-cost local tour without API key",
+			Title:       "Switch to OpenRouter (Claude 3.5)",
+			Description: "Access Anthropic and open models via OpenRouter gateway",
 			ActionType:  "set_model",
-			Payload:     "mock:gpt-4o-mini",
+			Payload:     "openrouter:anthropic/claude-3.5-sonnet",
 		},
 		{
 			ID:          "model-custom",
@@ -376,6 +378,17 @@ func DefaultPaletteCatalog() []PaletteItem {
 			Payload:     "/quit",
 		},
 	}
+	if paths.Env("MOCK") != "" || paths.Env("DEMO_TOUR") != "" {
+		items = append(items, PaletteItem{
+			ID:          "model-mock",
+			Category:    CatModel,
+			Title:       "Switch to Mock Demo Provider",
+			Description: "Zero-cost local tour without API key",
+			ActionType:  "set_model",
+			Payload:     "mock:gpt-4o-mini",
+		})
+	}
+	return items
 }
 
 // FilterPalette returns items matching query in title, category, or description.

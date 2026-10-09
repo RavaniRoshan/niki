@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/RavaniRoshan/niki/internal/alerts"
 	"github.com/RavaniRoshan/niki/internal/config"
 	"github.com/RavaniRoshan/niki/internal/editor"
 	"github.com/RavaniRoshan/niki/internal/explain"
@@ -107,7 +108,7 @@ func NewAppModel(cmdChan chan<- protocol.EngineCommand, eventChan <-chan protoco
 		state: State{
 			Directory:      cwd,
 			SessionID:      "",
-			ModelName:      "mock: gpt-4o-mini",
+			ModelName:      "None",
 			Version:        "0.11.0",
 			PermissionMode: "workspace_write",
 			Mode:           "agent",
@@ -1011,6 +1012,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.composer.Input.Reset()
 				return m.executeSlashCommand(input)
 			} else if input != "" {
+				if m.state.ModelName == "None" || m.state.ModelName == "" || m.state.ModelName == "none" {
+					m.history.Append("user", input)
+					m.composer.Input.Reset()
+					alert := alerts.NewNoModelAlert()
+					m.history.Append("system", alert.FormatPlain(m.state.Width))
+					m.state.Palette.Open = true
+					m.state.Palette.Mode = "palette"
+					m.state.Palette.Query = "connect"
+					m.state.Palette.Selected = 0
+					return m, nil
+				}
 				m.history.Append("user", input)
 				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSubmitPrompt, Prompt: input}
 				m.composer.Input.Reset()
@@ -1443,7 +1455,7 @@ func (m AppModel) welcomeCardView() string {
 	sessionID := m.state.SessionID
 	model := m.state.ModelName
 	if model == "" {
-		model = "mock: gpt-4o-mini"
+		model = "None"
 	}
 	ver := m.state.Version
 	if ver == "" {
@@ -1512,7 +1524,7 @@ func (m AppModel) footerView() string {
 
 	modelName := m.state.ModelName
 	if modelName == "" {
-		modelName = "mock: gpt-4o-mini"
+		modelName = "None"
 	}
 	model := m.theme.BadgeModel.Render("[" + modelName + "]")
 

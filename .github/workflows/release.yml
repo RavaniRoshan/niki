@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build (e.g. v0.11.0)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -27,7 +33,7 @@ jobs:
         run: |
           go vet ./...
           go test ./internal/lintcheck/...
-          go test ./...
+          go test -race ./...
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6

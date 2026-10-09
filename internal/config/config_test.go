@@ -8,8 +8,18 @@ import (
 
 func TestDefaults(t *testing.T) {
 	c := Default()
-	if c.Provider.Name != "mock" || c.Permissions.Mode != "workspace_write" {
-		t.Fatalf("bad defaults: %+v", c)
+	if c.Provider.Name != "" || c.Model.Name != "" || c.Permissions.Mode != "workspace_write" {
+		t.Fatalf("bad unconfigured defaults: %+v", c)
+	}
+	if c.IsConfigured() {
+		t.Fatal("default config should not report configured")
+	}
+}
+
+func TestDefaultMock(t *testing.T) {
+	c := DefaultMock()
+	if c.Provider.Name != "mock" || c.Model.Name != "gpt-4o-mini" {
+		t.Fatalf("bad mock defaults: %+v", c)
 	}
 }
 
@@ -30,16 +40,26 @@ mode = "full_access"
 	if c.Model.Name != "gpt-4o" || c.Permissions.Mode != "full_access" {
 		t.Fatalf("overlay failed: %+v", c)
 	}
-	if c.Provider.Name != "mock" {
-		t.Fatalf("defaults lost: %+v", c)
+	if c.Provider.Name != "" {
+		t.Fatalf("provider should remain unconfigured: %+v", c)
 	}
 }
 
 func TestResolveAPIKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	c := Default()
+	c.Provider.Name = "openai"
 	if c.ResolveAPIKey() != "sk-test" {
 		t.Fatal("env key resolution failed")
+	}
+}
+
+func TestAutoDetectProvider(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("OPENAI_API_KEY", "")
+	p, m := AutoDetectProvider()
+	if p.Name != "anthropic" || m.Name != "claude-3-5-sonnet-latest" {
+		t.Fatalf("anthropic auto-detection failed: p=%+v, m=%+v", p, m)
 	}
 }
 

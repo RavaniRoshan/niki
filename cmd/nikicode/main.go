@@ -138,6 +138,12 @@ func providerHost(rawURL string) string {
 
 func buildProvider(cfg config.Config) provider.ModelProvider {
 	constructSingle := func(name, model string) provider.ModelProvider {
+		if paths.Env("MOCK") != "" || paths.Env("DEMO_TOUR") != "" {
+			return demoMockProvider()
+		}
+		if !cfg.IsConfigured() {
+			return provider.NewUnconfiguredProvider()
+		}
 		switch name {
 		case "openai":
 			return provider.NewOpenAIProvider(cfg.Provider.BaseURL, cfg.ResolveAPIKey(), model)
@@ -146,7 +152,7 @@ func buildProvider(cfg config.Config) provider.ModelProvider {
 		case "responses":
 			return provider.NewResponsesProvider(cfg.Provider.BaseURL, cfg.ResolveAPIKey(), model)
 		default:
-			return demoMockProvider()
+			return provider.NewUnconfiguredProvider()
 		}
 	}
 
@@ -372,11 +378,16 @@ func main() {
 			app.SetDirectory(cwd)
 			app.SetGitBranch(detectGitBranch(cwd))
 			app.SetSessionID(string(eng.SessionID()))
-			mName := cfg.Model.Name
-			if cfg.Provider.Name != "" && mName != "" {
-				mName = cfg.Provider.Name + ": " + mName
-			} else if mName == "" {
+			var mName string
+			if paths.Env("MOCK") != "" || paths.Env("DEMO_TOUR") != "" {
 				mName = "mock: gpt-4o-mini"
+			} else if cfg.IsConfigured() {
+				mName = cfg.Model.Name
+				if cfg.Provider.Name != "" && mName != "" {
+					mName = cfg.Provider.Name + ": " + mName
+				}
+			} else {
+				mName = "None"
 			}
 			app.SetModel(mName, 128000)
 			pMode := cfg.Permissions.Mode

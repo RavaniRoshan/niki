@@ -4,20 +4,17 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test & Verify (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+  quality-gate:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up Go
@@ -26,39 +23,97 @@ jobs:
           go-version: '1.24'
           cache: true
 
-      - name: Vet
-        run: go vet ./...
+      - name: Check Code Formatting (gofmt)
+        run: |
+          diffs=$(gofmt -s -l .)
+          if [ -n "$diffs" ]; then
+            echo "The following files require formatting:"
+            echo "$diffs"
+            exit 1
+          fi
 
-      - name: Lint
-        if: matrix.os == 'ubuntu-latest'
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+      - name: Go Vet
+        run: go vet ./...
 
       - name: Architecture & TUI Lint Check
         run: go test -v ./internal/lintcheck/...
 
-      - name: Test Suite (with race detector)
-        run: TERM=xterm go test -v -race ./...
+      - name: GolangCI-Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
 
-      - name: Build Static Binary
-        run: |
-          go build -trimpath -ldflags="-s -w" -o bin/nikicode ./cmd/nikicode
-          ./bin/nikicode --version
+  test-matrix:
+    name: Test Suite Matrix (${{ matrix.os }})
+    needs: quality-gate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Headless CI Self-Check
-        run: ./bin/nikicode ci --check
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Run Test Suite (with race detector)
+        run: TERM=xterm go test -v -race -timeout 10m ./...
+
+  e2e-and-fuzzing:
+    name: PTY E2E & Fuzzing Verification
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
 
       - name: PTY End-to-End Smoke Tests
-        if: matrix.os == 'ubuntu-latest'
         run: NIKI_PTY_TESTS=1 go test -v ./cmd/nikicode/ -run 'PTY|NonTTY'
 
-      - name: Fuzzing Smokes
-        if: matrix.os == 'ubuntu-latest'
+      - name: Native Go Fuzzing Smokes
         run: |
           go test -run=Fuzz -fuzz=FuzzAnalyzeShell -fuzztime=5s ./internal/permissions/
           go test -run=Fuzz -fuzz=FuzzParseSkill -fuzztime=5s ./internal/skills/
           go test -run=Fuzz -fuzz=FuzzSanitize -fuzztime=5s ./internal/tui/
+          go test -run=Fuzz -fuzz=FuzzParseSSE -fuzztime=5s ./internal/provider/
 
-      - name: TUI Viewport Benchmarks
+      - name: TUI Viewport Benchmarks Check
         run: go test -bench=BenchmarkView -benchtime=5x ./internal/tui/
+
+  build-and-verify:
+    name: Build & Binary Verification
+    needs: [test-matrix, e2e-and-fuzzing]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Build Static Binary
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/nikicode ./cmd/nikicode
+          chmod +x bin/nikicode
+
+      - name: Verify Version Fast-Path
+        run: ./bin/nikicode --version
+
+      - name: Headless CI Self-Check
+        run: ./bin/nikicode ci --check

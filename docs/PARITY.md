@@ -22,6 +22,8 @@ Status: All rows start **UNVERIFIED**. A row turns **VERIFIED** only when real t
 | **Workspace In-Memory Symbol Index & Git Tools** | Background AST indexer for Go/Python/TS/Rust, symbol_search tool, git_diff_summary, git_smart_commit, git_pr_summary | Finalist | VERIFIED | In-memory symbol indexing & search verified in symbols_test.go & symbol_search_test.go; git workflow functions verified in workflow_test.go; tool registry count (36) verified in tools_test.go. |
 | **Adaptive Rate Limiter & Headless CI Mode** | Token bucket rate limiter, cost threshold alerts, nikicode ci --check, SARIF export & GitHub annotations | Finalist | VERIFIED | Token bucket rate limiter & cost guardrails verified in limiter_test.go; nikicode ci --check verified with code 0 on real workspace diff. |
 | **CI/CD Pipeline & Release Engineering** | Multi-platform GitHub Actions CI matrix (Linux/macOS), vet, lintcheck, fuzzing, PTY smokes, GoReleaser matrix | Finalist | VERIFIED | .github/workflows/ci.yml and release.yml updated; full local gate passes 100% (35 packages green, golangci-lint 0 issues, go vet clean). |
+| **Mock Purge, Dynamic Alert Harness & FTUX** | Zero mock in production, UnconfiguredProvider, dynamic contextual alert engine, first-run onboarding, offline shell commands | Finalist | VERIFIED | UnconfiguredProvider verified in unconfigured_test.go; Dynamic Alert Harness verified in alerts_test.go; unconfigured TUI prompt interception verified in unconfigured_test.go; PTY e2e smokes green; lintcheck clean. |
+
 
 ## Rule of Proof
 - "Works" means a real test ran and its output is recorded.
