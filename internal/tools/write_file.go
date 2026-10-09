@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/RavaniRoshan/niki/internal/format"
 )
 
 type WriteFileTool struct {
@@ -43,5 +45,6 @@ func (t *WriteFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResu
 	if err := os.Rename(tmp.Name(), a.Path); err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}
+	_ = format.FormatFile(ctx, a.Path)
 	return ToolResult{Output: fmt.Sprintf("wrote %d bytes to %s", len(a.Content), a.Path)}, nil
 }

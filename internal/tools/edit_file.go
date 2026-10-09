@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/RavaniRoshan/niki/internal/format"
 )
 
 type EditFileTool struct {
@@ -89,6 +91,8 @@ func (t *EditFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResul
 	if err := os.WriteFile(a.Path, []byte(updated), 0o644); err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}
+
+	_ = format.FormatFile(ctx, a.Path)
 
 	diffPreview := generateSimpleDiff(a.Path, a.OldString, a.NewString)
 	output := fmt.Sprintf("Successfully edited %s (%d replacement(s), hash: %s):\n\n%s",
