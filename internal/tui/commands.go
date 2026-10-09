@@ -40,6 +40,7 @@ var CoreSlashCommands = []CommandDef{
 	{Name: "/debug", Description: "Toggle debug telemetry overlay"},
 	{Name: "/sessions", Description: "Interactive session browser and rollouts (or Ctrl+S)"},
 	{Name: "/editor", Description: "Open external $EDITOR for multi-line drafting (or Ctrl+G)"},
+	{Name: "/stash", Description: "Stash or restore composer prompt drafts (/stash [pop|list|clear])"},
 	{Name: "/export", Description: "Export session transcript to Markdown or HTML (/export [markdown|html])"},
 	{Name: "/quit", Description: "Exit NikiCode"},
 }

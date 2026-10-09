@@ -85,6 +85,7 @@ type AppModel struct {
 
 	// exitArmed tracks whether the exit arm timer is active for double Ctrl+C
 	exitArmed bool
+	stash     *StashManager
 }
 
 type disarmExitMsg struct{}
@@ -105,6 +106,7 @@ func NewAppModel(cmdChan chan<- protocol.EngineCommand, eventChan <-chan protoco
 		theme:     th,
 		telemetry: &FrameTelemetry{},
 		pacer:     renderPacer{minInterval: streamInterval},
+		stash:     NewStashManager(),
 		state: State{
 			Directory:      cwd,
 			SessionID:      "",
@@ -1373,6 +1375,46 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.history.Append("system", "Rewound session state to previous turn checkpoint.")
 	case input == "/unrevert" || strings.HasPrefix(input, "/unrevert"):
 		m.history.Append("system", "Restored workspace files from pre-rewind state (unrevert complete).")
+	case input == "/stash" || strings.HasPrefix(input, "/stash"):
+		arg := strings.TrimSpace(strings.TrimPrefix(input, "/stash"))
+		switch arg {
+		case "pop":
+			if entry, ok := m.stash.Pop(); ok {
+				m.composer.Input.SetValue(entry.Content)
+				m.history.Append("system", fmt.Sprintf("Restored stashed prompt (%d lines).", entry.LineCount))
+			} else {
+				m.history.Append("system", "Stash is empty. Nothing to pop.")
+			}
+		case "clear":
+			m.stash.Clear()
+			m.history.Append("system", "Stash cleared.")
+		case "list":
+			entries := m.stash.List()
+			if len(entries) == 0 {
+				m.history.Append("system", "Stash is empty.")
+			} else {
+				var sb strings.Builder
+				sb.WriteString("Stashed prompts:\n")
+				for i, e := range entries {
+					firstLine := strings.Split(e.Content, "\n")[0]
+					if len(firstLine) > 50 {
+						firstLine = firstLine[:47] + "..."
+					}
+					sb.WriteString(fmt.Sprintf("  [%d] %s (%d lines, %s)\n", i+1, firstLine, e.LineCount, e.CreatedAt.Format("15:04:05")))
+				}
+				sb.WriteString("Use '/stash pop' to restore the latest.")
+				m.history.Append("system", sb.String())
+			}
+		default:
+			content := m.composer.Input.Value()
+			if strings.TrimSpace(content) != "" {
+				entry := m.stash.Push(content)
+				m.composer.Input.Reset()
+				m.history.Append("system", fmt.Sprintf("Stashed active prompt (%d lines). Use '/stash pop' to restore.", entry.LineCount))
+			} else {
+				m.history.Append("system", "Usage: /stash [pop | list | clear]. If composer has text, /stash saves it.")
+			}
+		}
 	case input == "/cost":
 		costMsg := fmt.Sprintf("💰 Session Accounting:\n  Tokens: %d / %d\n  Cost:   %s",
 			m.state.UsedTokens, m.state.MaxTokens, routing.FormatCost(m.state.TotalCost))
