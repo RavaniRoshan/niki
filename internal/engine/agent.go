@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RavaniRoshan/niki/internal/diagnostics"
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/protocol"
@@ -146,6 +147,18 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 					Text:      res.Output,
 				})
 				failCount = 0
+				if tc.Tool == "edit_file" || tc.Tool == "write_file" || tc.Tool == "apply_patch" {
+					var pathObj struct {
+						Path string `json:"path"`
+					}
+					_ = json.Unmarshal([]byte(tc.Args), &pathObj)
+					if pathObj.Path != "" {
+						diag := diagnostics.CollectDiagnostics(ctx, ".", pathObj.Path)
+						if xml := diag.FormatXML(); xml != "" {
+							output += "\n\n" + xml
+						}
+					}
+				}
 			}
 
 			t.Context.Add(provider.Message{Role: "tool", Content: output, Name: tc.Tool})
