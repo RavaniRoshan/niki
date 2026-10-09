@@ -735,6 +735,39 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
   NIKI_PTY_TESTS=1 e2e (pass), lintcheck (clean), nikicode ci --check (code 0).
   Installed binary verified at ~/.local/bin/nikicode and bin/nikicode.
 
+## 2026-10-09 — Final Loop Execution & 100% Master Parity Delivery DONE
+- Prompt Stashing Subsystem (internal/tui/stash.go, stash_test.go, app.go, commands.go):
+  StashManager LIFO stack storing prompt drafts, timestamps, and line counts. Slash commands:
+  `/stash` saves draft, `/stash pop` restores to composer, `/stash list` displays previews,
+  `/stash clear` empties stack. Preserves L2 terminal suspension contract for Ctrl+Z.
+- Post-Edit Automated Code Formatter (internal/format/formatter.go, formatter_test.go):
+  Auto-detects and formats modified code on disk via language-native formatters (gofmt, rustfmt,
+  ruff, prettier, biome, clang-format, shfmt). Wire-integrated into edit_file and write_file.
+- Compiler & Linter Diagnostics Feedback Injection (internal/diagnostics/diagnostics.go):
+  Collects compiler/linter error diagnostics (go vet, tsc, pyright, cargo check) post-edit and
+  injects structured `<diagnostics file="...">` blocks directly into tool outcomes for automated
+  self-healing across multi-step agent turns.
+- Doom Loop Circuit Breaker (internal/engine/doomloop.go, doomloop_test.go, agent.go):
+  DOOM_LOOP_THRESHOLD = 3 pattern circuit breaker tracking sha256 call signatures. Halts
+  identical recurring failed tool attempts and emits EventWarning.
+- HTTP Retry-After Header Parsing & Backoff (internal/routing/retry.go, retry_test.go):
+  Parses HTTP Retry-After (seconds & RFC 1123/850 dates) and retry-after-ms response headers.
+  Exponential backoff with 0.25 randomized jitter and 5-attempt ceiling.
+- Parallel Multi-Agent Swarm Batch Runner (internal/agent/swarm.go, swarm_test.go):
+  RunSwarm concurrently dispatches batches of worker subagents governed by a semaphore concurrency
+  channel over isolated Git worktrees.
+- Cold Session Archiving & Compaction (internal/session/archive.go, archive_test.go, main.go):
+  ArchiveColdSessions scans ~/.nikicode/sessions/ and gzip-compresses sessions older than 30 days
+  into .jsonl.gz, executing in background Boot DAG Task B10.
+- Production CI/CD Matrix & Release Verification (.github/workflows/ci.yml, release.yml):
+  Multi-OS matrix (Ubuntu & macOS), quality gate (gofmt, vet, lintcheck, golangci-lint),
+  race test suite, native Go fuzzing, PTY smokes, and static binary build.
+- Verification Gates:
+  go vet ./... (clean), golangci-lint run ./... (0 issues), go test -race ./... (100% pass across
+  all 39 packages), NIKI_PTY_TESTS=1 e2e (pass), internal/lintcheck (clean), nikicode ci --check (code 0).
+  Installed binaries verified at ~/.local/bin/nikicode, bin/nikicode, and bin/niki.
+
+
 
 
 
