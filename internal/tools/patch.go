@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -171,8 +172,32 @@ func InvertHunk(h DiffHunk) DiffHunk {
 	return inv
 }
 
-// findFuzzyMatch looks for context/deletion lines around targetIdx within maxOffset.
-func findFuzzyMatch(lines []string, hunk DiffHunk, targetIdx int, maxOffset int) int {
+// MatchReport describes how a hunk's context was located, for logging.
+type MatchReport struct {
+	Fuzzy      bool
+	Offset     int
+	Confidence float64
+}
+
+func matchAt(lines []string, idx int, prefix []string) bool {
+	if idx < 0 || idx+len(prefix) > len(lines) {
+		return false
+	}
+	for k, exp := range prefix {
+		if lines[idx+k] != exp {
+			return false
+		}
+	}
+	return true
+}
+
+// findFuzzyMatch locates the hunk context. A perfect match at the
+// stated position always wins (confidence 1). Otherwise every match
+// within maxOffset is collected: zero matches is an error (never
+// guess at the stated offset), more than one is ambiguous and an
+// error (a fuzzy fallback is only allowed when the match is unique).
+// Returns the index, the confidence (1/(1+|offset|)), and an error.
+func findFuzzyMatch(lines []string, hunk DiffHunk, targetIdx int, maxOffset int) (int, float64, error) {
 	var expectedPrefix []string
 	for _, hl := range hunk.Lines {
 		if len(hl) > 0 && (hl[0] == ' ' || hl[0] == '-') {
@@ -183,38 +208,57 @@ func findFuzzyMatch(lines []string, hunk DiffHunk, targetIdx int, maxOffset int)
 		}
 	}
 	if len(expectedPrefix) == 0 {
-		return targetIdx
+		return targetIdx, 1, nil
+	}
+	if matchAt(lines, targetIdx, expectedPrefix) {
+		return targetIdx, 1, nil
 	}
 
-	bestIdx := targetIdx
-	for delta := 0; delta <= maxOffset; delta++ {
-		// Try targetIdx + delta, then targetIdx - delta
+	var matches []int
+	for delta := 1; delta <= maxOffset; delta++ {
 		for _, tryIdx := range []int{targetIdx + delta, targetIdx - delta} {
-			if tryIdx < 0 || tryIdx+len(expectedPrefix) > len(lines) {
-				continue
-			}
-			matched := true
-			for k, exp := range expectedPrefix {
-				if lines[tryIdx+k] != exp {
-					matched = false
-					break
-				}
-			}
-			if matched {
-				return tryIdx
+			if matchAt(lines, tryIdx, expectedPrefix) {
+				matches = append(matches, tryIdx)
 			}
 		}
 	}
-	return bestIdx
+	sort.Ints(matches)
+	switch len(matches) {
+	case 0:
+		return 0, 0, fmt.Errorf("hunk context not found at or within %d lines of line %d; refusing to guess", maxOffset, targetIdx+1)
+	case 1:
+		idx := matches[0]
+		offset := idx - targetIdx
+		if offset < 0 {
+			offset = -offset
+		}
+		return idx, 1 / float64(1+offset), nil
+	default:
+		pos := make([]string, len(matches))
+		for i, m := range matches {
+			pos[i] = strconv.Itoa(m + 1)
+		}
+		return 0, 0, fmt.Errorf("ambiguous fuzzy match: %d candidate positions (lines %s) for the context stated at line %d; refusing to guess", len(matches), strings.Join(pos, ", "), targetIdx+1)
+	}
 }
 
 // ApplyPatch applies hunks to original file content and returns the updated text.
 func ApplyPatch(content string, hunks []DiffHunk) (string, error) {
-	return ApplyPatchWithOpts(content, hunks, false, true)
+	out, _, err := ApplyPatchReport(content, hunks, false, true)
+	return out, err
 }
 
 // ApplyPatchWithOpts applies hunks with optional reverse application and fuzzy seeking.
 func ApplyPatchWithOpts(content string, hunks []DiffHunk, reverse bool, fuzzy bool) (string, error) {
+	out, _, err := ApplyPatchReport(content, hunks, reverse, fuzzy)
+	return out, err
+}
+
+// ApplyPatchReport applies hunks and reports how the context was
+// matched (exact vs fuzzy fallback, offset, confidence) so callers
+// can log the confidence of a fuzzy match.
+func ApplyPatchReport(content string, hunks []DiffHunk, reverse bool, fuzzy bool) (string, MatchReport, error) {
+	report := MatchReport{Confidence: 1}
 	lines := strings.Split(content, "\n")
 	if len(lines) == 1 && lines[0] == "" {
 		lines = []string{}
@@ -233,13 +277,25 @@ func ApplyPatchWithOpts(content string, hunks []DiffHunk, reverse bool, fuzzy bo
 	srcIdx := 0
 
 	for _, hunk := range effectiveHunks {
-		targetIdx := hunk.OldStart - 1
+		claimedIdx := hunk.OldStart - 1
+		targetIdx := claimedIdx
 		if targetIdx < 0 {
 			targetIdx = 0
 		}
 
 		if fuzzy && len(lines) > 0 {
-			targetIdx = findFuzzyMatch(lines, hunk, targetIdx, 20)
+			idx, conf, err := findFuzzyMatch(lines, hunk, targetIdx, 20)
+			if err != nil {
+				return "", report, err
+			}
+			if idx != targetIdx || conf < 1 {
+				report.Fuzzy = true
+				report.Offset = idx - claimedIdx
+				if conf < report.Confidence {
+					report.Confidence = conf
+				}
+			}
+			targetIdx = idx
 		}
 
 		// Copy unchanged lines prior to hunk
@@ -258,6 +314,9 @@ func ApplyPatchWithOpts(content string, hunks []DiffHunk, reverse bool, fuzzy bo
 			switch indicator {
 			case ' ':
 				if srcIdx < len(lines) {
+					if lines[srcIdx] != text {
+						return "", report, fmt.Errorf("context mismatch at line %d: expected %q, found %q; refusing to guess", srcIdx+1, text, lines[srcIdx])
+					}
 					result = append(result, lines[srcIdx])
 					srcIdx++
 				} else {
@@ -265,6 +324,9 @@ func ApplyPatchWithOpts(content string, hunks []DiffHunk, reverse bool, fuzzy bo
 				}
 			case '-':
 				if srcIdx < len(lines) {
+					if lines[srcIdx] != text {
+						return "", report, fmt.Errorf("removed-line mismatch at line %d: patch wants to remove %q, file has %q; refusing to guess", srcIdx+1, text, lines[srcIdx])
+					}
 					srcIdx++ // skip/delete from source
 				}
 			case '+':
@@ -279,7 +341,7 @@ func ApplyPatchWithOpts(content string, hunks []DiffHunk, reverse bool, fuzzy bo
 		srcIdx++
 	}
 
-	return strings.Join(result, "\n"), nil
+	return strings.Join(result, "\n"), report, nil
 }
 
 // ApplyPatchTool exposes patch parsing and application as a built-in tool.
@@ -322,8 +384,11 @@ func (t *ApplyPatchTool) Run(ctx context.Context, args json.RawMessage) (ToolRes
 	if err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}
+	if reason := nonTextReason(data); reason != "" {
+		return ToolResult{Output: "refusing to patch: " + reason, IsError: true}, nil
+	}
 
-	updated, err := ApplyPatchWithOpts(string(data), patches[0].Hunks, a.Reverse, true)
+	updated, report, err := ApplyPatchReport(string(data), patches[0].Hunks, a.Reverse, true)
 	if err != nil {
 		return ToolResult{Output: fmt.Sprintf("failed applying patch: %v", err), IsError: true}, nil
 	}
@@ -336,5 +401,9 @@ func (t *ApplyPatchTool) Run(ctx context.Context, args json.RawMessage) (ToolRes
 	if a.Reverse {
 		dirMsg = "reverse applied"
 	}
-	return ToolResult{Output: fmt.Sprintf("%s %d hunks to %s", dirMsg, len(patches[0].Hunks), a.Path)}, nil
+	fuzzyMsg := ""
+	if report.Fuzzy {
+		fuzzyMsg = fmt.Sprintf(" (fuzzy match, offset=%+d, confidence=%.2f)", report.Offset, report.Confidence)
+	}
+	return ToolResult{Output: fmt.Sprintf("%s %d hunks to %s%s", dirMsg, len(patches[0].Hunks), a.Path, fuzzyMsg)}, nil
 }

@@ -60,6 +60,9 @@ func (t *EditFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResul
 	if err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}
+	if reason := nonTextReason(data); reason != "" {
+		return ToolResult{Output: "refusing text edit: " + reason, IsError: true}, nil
+	}
 
 	currentHash := sha256.Sum256(data)
 	hexHash := hex.EncodeToString(currentHash[:])
@@ -73,19 +76,29 @@ func (t *EditFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResul
 
 	fileContent := string(data)
 	n := strings.Count(fileContent, a.OldString)
-	if n == 0 {
-		return ToolResult{Output: fmt.Sprintf("target old_string not found in %s", a.Path), IsError: true}, nil
-	}
-
-	if !a.ReplaceAll && n > 1 {
+	if n > 1 && !a.ReplaceAll {
 		return ToolResult{
 			Output:  fmt.Sprintf("expected exactly 1 occurrence, found %d (set replace_all: true to replace all instances)", n),
 			IsError: true,
 		}, nil
 	}
 
-	var updated string
-	if a.ReplaceAll {
+	var updated, fuzzyNote string
+	if n == 0 {
+		// E1: exact text absent — allow a whitespace-normalized
+		// fallback only when it is unique; ambiguous or missing
+		// matches are rejected, never guessed. The confidence of a
+		// fuzzy hit is logged in the output.
+		fz, lineNo, conf, applied, reason := fuzzyReplace(fileContent, a.OldString, a.NewString)
+		if !applied {
+			if reason != "" {
+				return ToolResult{Output: fmt.Sprintf("edit rejected: %s", reason), IsError: true}, nil
+			}
+			return ToolResult{Output: fmt.Sprintf("target old_string not found in %s", a.Path), IsError: true}, nil
+		}
+		updated = fz
+		fuzzyNote = fmt.Sprintf(", fuzzy match confidence=%.2f at line %d", conf, lineNo)
+	} else if a.ReplaceAll {
 		updated = strings.ReplaceAll(fileContent, a.OldString, a.NewString)
 	} else {
 		updated = strings.Replace(fileContent, a.OldString, a.NewString, 1)
@@ -115,8 +128,67 @@ func (t *EditFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResul
 	_ = format.FormatFile(ctx, a.Path)
 
 	diffPreview := generateSimpleDiff(a.Path, a.OldString, a.NewString)
-	output := fmt.Sprintf("Successfully edited %s (%d replacement(s), hash: %s):\n\n%s",
-		a.Path, n, hexHash[:12], diffPreview)
+	replacements := n
+	if replacements == 0 {
+		replacements = 1
+	}
+	output := fmt.Sprintf("Successfully edited %s (%d replacement(s)%s, hash: %s):\n\n%s",
+		a.Path, replacements, fuzzyNote, hexHash[:12], diffPreview)
 
 	return ToolResult{Output: output}, nil
+}
+
+// normalizeLine collapses every whitespace run to a single space and
+// trims the ends, so "  x  =  1  " and "x = 1" normalize alike.
+func normalizeLine(l string) string {
+	return strings.Join(strings.Fields(l), " ")
+}
+
+// fuzzyReplace looks for a unique line window in content whose
+// normalized form equals the normalized old text. Returns applied=true
+// with the rewritten content and a line number/confidence for logging.
+// If several windows match it returns applied=false and a non-empty
+// reason (ambiguous...); if none match, reason is empty. A unique
+// normalized match logs confidence 0.90 (line-normalized heuristic).
+func fuzzyReplace(content, oldText, newText string) (out string, line int, conf float64, applied bool, reason string) {
+	oldLines := strings.Split(oldText, "\n")
+	lines := strings.Split(content, "\n")
+	normOld := make([]string, len(oldLines))
+	for i, l := range oldLines {
+		normOld[i] = normalizeLine(l)
+	}
+	var hits []int
+	for start := 0; start+len(oldLines) <= len(lines); start++ {
+		match := true
+		for k, no := range normOld {
+			if normalizeLine(lines[start+k]) != no {
+				match = false
+				break
+			}
+		}
+		if match {
+			hits = append(hits, start)
+		}
+	}
+	if len(hits) == 0 {
+		return "", 0, 0, false, ""
+	}
+	if len(hits) > 1 {
+		return "", 0, 0, false, fmt.Sprintf("ambiguous fuzzy match: %d candidate positions (line %s) for old_string; refusing to guess", len(hits), joinLineNos(hits))
+	}
+	start := hits[0]
+	newLines := strings.Split(newText, "\n")
+	merged := make([]string, 0, len(lines)-len(oldLines)+len(newLines))
+	merged = append(merged, lines[:start]...)
+	merged = append(merged, newLines...)
+	merged = append(merged, lines[start+len(oldLines):]...)
+	return strings.Join(merged, "\n"), start + 1, 0.90, true, ""
+}
+
+func joinLineNos(idxs []int) string {
+	parts := make([]string, len(idxs))
+	for i, v := range idxs {
+		parts[i] = fmt.Sprintf("%d", v+1)
+	}
+	return strings.Join(parts, ", ")
 }

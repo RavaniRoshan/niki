@@ -335,3 +335,28 @@ any context compaction.
   gateFires=1 completed`; `[L6 failed-side-effect] toolRuns=3
   gateFires=3`.
 - Full suite GO_TEST_EXIT=0 (45 ok); gofmt clean. L6 GREEN (16 rows).
+
+## 2026-10-10 — Slice M: E1 patch semantics + E6 text-tool guards (P0)
+- E1 (D-14): `ApplyPatchReport` (MatchReport fuzzy/offset/confidence);
+  `findFuzzyMatch` rewritten (exact wins; 0/∞/1 candidates →
+  error/ambiguity/unique+confidence 1/(1+|off|)); strict context and
+  removed-line verification in the apply loop; apply_patch logs
+  confidence; edit_file unique normalized-window fallback (confidence
+  0.90) with ambiguity rejection. New tests: patch_ambiguity_test.go
+  (7) + edit_fuzzy_test.go (4).
+- E6 (D-15): `internal/tools/textguard.go` (`nonTextReason`: 2 MiB cap,
+  UTF-16/32 BOM, NUL-in-8KiB) wired into edit_file / apply_patch /
+  notebook_edit / write_file-overwrite. New tests: text_guard_test.go
+  (6) incl. CRLF round-trip and UTF-16 refusal with byte-identical
+  file.
+- Acceptance printed: `[E1 ambiguous] rejected: ambiguous fuzzy match:
+  2 candidate positions (lines 7, 15) … refusing to guess`;
+  `[E1 unique-fuzzy] offset=+6 confidence=0.14 applied`;
+  `[E1 property] 300 generated hunks round-tripped exactly`;
+  `[E1 tool] … (fuzzy match, offset=+6, confidence=0.14)`;
+  `[E1 fuzzy-amb] edit rejected … (line 1, 4) … refusing to guess`;
+  `[E6 binary]` / `[E6 utf16]` / `[E6 binary-patch]` / `[E6 oversize]`
+  refusals with files untouched; `[E6 crlf] 3 CRLF pairs preserved, no
+  bare LF`; `[E6 write-binary] refusing to overwrite …`.
+- Full suite GO_TEST_EXIT=0 (45 ok); gofmt clean. E1+E6 GREEN (18
+  rows).

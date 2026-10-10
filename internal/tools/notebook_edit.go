@@ -56,6 +56,9 @@ func (t *NotebookEditTool) Run(ctx context.Context, args json.RawMessage) (ToolR
 	if err != nil {
 		return ToolResult{Output: fmt.Sprintf("failed to read notebook %s: %v", path, err), IsError: true}, nil
 	}
+	if reason := nonTextReason(data); reason != "" {
+		return ToolResult{Output: "refusing to edit: " + reason, IsError: true}, nil
+	}
 
 	// Read generic notebook preserving all top-level keys
 	var notebook map[string]interface{}

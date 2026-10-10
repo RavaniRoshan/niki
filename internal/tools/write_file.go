@@ -34,6 +34,13 @@ func (t *WriteFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResu
 	if err := os.MkdirAll(filepath.Dir(a.Path), 0o755); err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}
+	// E6: text tools never clobber binary/oversize targets; creating
+	// a new file is always allowed.
+	if existing, rerr := os.ReadFile(a.Path); rerr == nil {
+		if reason := nonTextReason(existing); reason != "" {
+			return ToolResult{Output: "refusing to overwrite: " + reason, IsError: true}, nil
+		}
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(a.Path), ".nikicode-write-*")
 	if err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil

@@ -201,3 +201,47 @@ decisions were confirmed by the owner on 2026-10-10 (see docs/FINISH_PACK.md).
   auto-approving a side-effect tool for retries (spec requires a
   fresh approval each dispatch).
 
+## D-14 — E1 context-matched patch semantics (P0)
+
+- locate: a perfect match of the hunk context at its stated
+  position always wins (confidence 1.0, never ambiguous). Otherwise
+  every match within +/-20 lines is collected: 0 matches is an error
+  ("context not found … refusing to guess"), more than 1 is an
+  error ("ambiguous fuzzy match: N candidate positions (lines …)"),
+  exactly 1 is applied with logged confidence 1/(1+|offset|).
+- apply: every context (' ') and removed ('-') line is now verified
+  against the file before the write; a mismatch is an error instead
+  of the old silent best-effort write. The tool output logs
+  "(fuzzy match, offset=…, confidence=…)" when a fallback was used.
+- edit_file keeps exact-first semantics (n>1 without replace_all is
+  rejected as before). When the exact text is absent, a unique
+  whitespace-normalized line-window match is allowed: only the
+  MATCHING is normalized (strings.Fields join), the replacement text
+  is applied verbatim, and the output logs "fuzzy match confidence
+  0.90 at line N". Multiple normalized matches are rejected as
+  ambiguous; zero still reports not found.
+- Property evidence: 300 generated hunks (globally unique contexts)
+  round-trip exactly; fuzz corpus on the parser still crash-free.
+- Rejected: keeping the old fallback that applied the hunk at the
+  stated offset when nothing matched (a guess, and a silent corruptor);
+  first-hit-wins fuzzy (it would pick one of several identical
+  contexts); case-insensitive fuzzy matching (too aggressive for a
+  code editor).
+
+## D-15 — E6 text-tool guards and byte preservation (P0)
+
+- One shared guard `nonTextReason(data)`: oversize (>2 MiB) or
+  encoding smells (UTF-16/UTF-32 BOM, NUL byte in the first 8 KiB).
+  It runs after read and before any write in edit_file, apply_patch,
+  and notebook_edit; write_file consults it only when a target
+  already exists (creating new files is always allowed).
+- CRLF is preserved by construction: edits are byte-level string
+  replacements, so no newline conversion happens; the test asserts
+  the 
+ count is unchanged and no bare LF appears.
+- UTF-16 fixtures are refused (BOM sniff), so their bytes round-trip
+  untouched; editing them with a text tool would corrupt them.
+- Rejected: converting encodings on edit (lossy, out of scope);
+  extension allow/deny lists only (misses extensionless binaries);
+  capping reads instead of edits (the spec targets editing).
+
