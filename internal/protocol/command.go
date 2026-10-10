@@ -6,6 +6,7 @@ const (
 	CmdStartSession      CommandType = "start_session"
 	CmdSubmitPrompt      CommandType = "submit_prompt"
 	CmdInterruptTurn     CommandType = "interrupt_turn"
+	CmdPauseTurn         CommandType = "pause_turn"
 	CmdCancelTurn        CommandType = "cancel_turn"
 	CmdApproveTool       CommandType = "approve_tool"
 	CmdRejectTool        CommandType = "reject_tool"

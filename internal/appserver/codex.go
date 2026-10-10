@@ -13,6 +13,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/tools"
+	"github.com/RavaniRoshan/niki/internal/verifier"
 )
 
 type CodexServer struct {
@@ -28,6 +29,11 @@ type CodexServer struct {
 	activeTurn string
 	outWriter  io.Writer
 	done       chan struct{}
+}
+
+// SetVerifier installs the L3 completion-gate verifier on the engine.
+func (s *CodexServer) SetVerifier(v verifier.Verifier, maxLoops int) {
+	s.eng.SetVerifier(v, maxLoops)
 }
 
 func NewCodexServer(prov provider.ModelProvider, reg *tools.Registry, guard *permissions.Guard) *CodexServer {
@@ -109,6 +115,11 @@ func (s *CodexServer) listenEvents() {
 				payload["error"] = evt.Error
 			case protocol.EventTurnCancelled:
 				notifType = "cancelled"
+			case protocol.EventTurnNotVerified, protocol.EventBudgetWrap, protocol.EventBudgetStopped:
+				// L2/L3: run ended without a verified done — clients
+				// must unblock with a failed notification, never hang.
+				notifType = "failed"
+				payload["error"] = terminalReason(evt)
 			default:
 				continue
 			}

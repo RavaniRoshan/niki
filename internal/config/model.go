@@ -7,6 +7,7 @@ type Config struct {
 	UI             UIConfig             `toml:"ui"`
 	Permissions    PermissionsConfig    `toml:"permissions"`
 	MCP            MCPConfig            `toml:"mcp"`
+	Budgets        BudgetsConfig        `toml:"budgets"`
 	Sandbox        SandboxConfig        `toml:"sandbox"`
 }
 
@@ -63,4 +64,13 @@ type SandboxConfig struct {
 type MCPServer struct {
 	Command string   `toml:"command"`
 	Args    []string `toml:"args"`
+}
+
+// BudgetsConfig sets per-run budgets (L2): wall time, cost, and steps.
+// Zero/empty disables that dimension. Defaults are set in Default()
+// so the D-04 verifier backstop is active out of the box (D-09).
+type BudgetsConfig struct {
+	WallTime string  `toml:"wall_time"` // Go duration, e.g. "10m"; "" or "0" disables
+	CostUSD  float64 `toml:"cost_usd"`  // USD per run; 0 disables
+	Steps    int     `toml:"steps"`     // provider steps per run; 0 disables
 }

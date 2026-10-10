@@ -6,6 +6,7 @@ package main
 // hand-holds a number.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/skills"
 	"github.com/RavaniRoshan/niki/internal/tools"
+	"github.com/RavaniRoshan/niki/internal/verifier"
 )
 
 type benchRow struct {
@@ -195,6 +197,11 @@ func benchTurnOverhead(n int) (benchRow, []float64, error) {
 	var vals []float64
 	for i := 0; i < n; i++ {
 		eng, cmdChan, eventChan := engine.NewEngine(100, provider.NewMockProvider(), reg, guard)
+		// Overhead bench measures turn cost, not verification (L3
+		// gate tested in engine); a trivial pass keeps turns done.
+		eng.SetVerifier(verifier.Func(func(context.Context, verifier.Request) (verifier.Verdict, error) {
+			return verifier.Verdict{Result: verifier.Verified, Reason: "bench"}, nil
+		}), 0)
 		go func() { _ = eng.Run() }()
 		start := time.Now()
 		cmdChan <- protocol.EngineCommand{Type: protocol.CmdSubmitPrompt, Prompt: "hi"}

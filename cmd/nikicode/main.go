@@ -17,8 +17,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/RavaniRoshan/niki/internal/appserver"
+	"github.com/RavaniRoshan/niki/internal/budget"
 	"github.com/RavaniRoshan/niki/internal/config"
+	"github.com/RavaniRoshan/niki/internal/doctor"
 	"github.com/RavaniRoshan/niki/internal/engine"
+	"github.com/RavaniRoshan/niki/internal/firstrun"
 	"github.com/RavaniRoshan/niki/internal/git"
 	"github.com/RavaniRoshan/niki/internal/intent"
 	"github.com/RavaniRoshan/niki/internal/logx"
@@ -136,13 +139,57 @@ func providerHost(rawURL string) string {
 	return u.Hostname()
 }
 
+// firstRunMessage turns the ordered first-run detection result into the
+// first-turn guidance shown when no model provider is configured.
+func firstRunMessage(d firstrun.Detection) string {
+	return "no AI model configured. " + d.Offer
+}
+
+// budgetSummary renders the terminal budget event for --github-check.
+func budgetSummary(evt protocol.EngineEvent) string {
+	if evt.Budget == nil {
+		return "run stopped by budget"
+	}
+	return fmt.Sprintf("budget %s hit at %.0f%% (hit=%s); verdict: %s",
+		evt.Budget.State, worstBudgetPctInfo(evt.Budget)*100, evt.Budget.Hit, evt.Budget.Verdict)
+}
+
+// worstBudgetPctInfo is the largest enabled gauge fraction (L2).
+func worstBudgetPctInfo(b *protocol.BudgetInfo) float64 {
+	worst := 0.0
+	if b.WallEnabled && b.Wall > worst {
+		worst = b.Wall
+	}
+	if b.CostEnabled && b.Cost > worst {
+		worst = b.Cost
+	}
+	if b.StepEnabled && b.Step > worst {
+		worst = b.Step
+	}
+	return worst
+}
+
+// applyBudget wires L2 per-run budgets (wall time, cost, steps) from
+// config; an invalid wall duration disables budgets and is logged.
+func applyBudget(eng *engine.Engine, cfg config.Config) error {
+	limits, err := budget.ParseLimits(cfg.Budgets.WallTime, cfg.Budgets.CostUSD, cfg.Budgets.Steps)
+	if err != nil {
+		eng.SetBudget(budget.Limits{}, cfg.Model.Name)
+		return err
+	}
+	eng.SetBudget(limits, cfg.Model.Name)
+	return nil
+}
+
 func buildProvider(cfg config.Config) provider.ModelProvider {
 	constructSingle := func(name, model string) provider.ModelProvider {
 		if paths.Env("MOCK") != "" || paths.Env("DEMO_TOUR") != "" {
 			return demoMockProvider()
 		}
 		if !cfg.IsConfigured() {
-			return provider.NewUnconfiguredProvider()
+			// I2: ordered first-run detection (env key -> local server ->
+			// recorded demo offer) decides the guidance the user sees.
+			return provider.NewUnconfiguredProviderWithMessage(firstRunMessage(firstrun.DetectDefaults()))
 		}
 		switch name {
 		case "openai":
@@ -151,6 +198,14 @@ func buildProvider(cfg config.Config) provider.ModelProvider {
 			return provider.NewAnthropicProvider(cfg.Provider.BaseURL, cfg.ResolveAPIKey(), model)
 		case "responses":
 			return provider.NewResponsesProvider(cfg.Provider.BaseURL, cfg.ResolveAPIKey(), model)
+		case "ollama":
+			// I5: local model path — loopback, no key, offline after setup.
+			// An explicit base URL (remote Ollama) overrides the default.
+			p := provider.NewOllamaProvider(model)
+			if cfg.Provider.BaseURL != "" {
+				p.BaseURL = cfg.Provider.BaseURL
+			}
+			return p
 		default:
 			return provider.NewUnconfiguredProvider()
 		}
@@ -213,6 +268,41 @@ func buildRegistry(cfg config.Config, mode permissions.Mode) (*tools.Registry, *
 	shell.ExcludedCommands = cfg.Sandbox.ExcludedCommands
 	shell.AllowUnsandboxed = cfg.Sandbox.AllowUnsandboxed
 	return reg, guard, nil
+}
+
+// renderConfig formats `niki config show` output. It renders an explicit
+// field allow-list — API keys are never rendered, even when live in the
+// config struct (I4).
+func renderConfig(cfg config.ConfigWithSources, showSrc bool) string {
+	var b strings.Builder
+	printField := func(section, key string, val interface{}) {
+		src := cfg.Sources[section]
+		if src == "" {
+			src = "default"
+		}
+		if showSrc {
+			fmt.Fprintf(&b, "%s.%s = %v  # source: %s\n", section, key, val, src)
+		} else {
+			fmt.Fprintf(&b, "%s.%s = %v\n", section, key, val)
+		}
+	}
+	printField("model", "name", cfg.Model.Name)
+	printField("provider", "name", cfg.Provider.Name)
+	printField("provider", "env_key", cfg.Provider.EnvKey)
+	printField("ui", "inline", cfg.UI.Inline)
+	printField("ui", "theme", cfg.UI.Theme)
+	printField("permissions", "mode", cfg.Permissions.Mode)
+	printField("sandbox", "enabled", cfg.Sandbox.Enabled)
+	printField("sandbox", "auto_allow", cfg.Sandbox.AutoAllow)
+	printField("sandbox", "fail_if_unavailable", cfg.Sandbox.FailIfUnavailable)
+	if len(cfg.MCP.Servers) == 0 {
+		printField("mcp", "servers", "{}")
+	} else {
+		for name, srv := range cfg.MCP.Servers {
+			printField("mcp", "servers."+name+".command", srv.Command)
+		}
+	}
+	return b.String()
 }
 
 func main() {
@@ -279,6 +369,9 @@ func main() {
 			}
 			bootMark("registry")
 			eng, cmdChan, eventChan := engine.NewEngine(100, buildProvider(cfg), reg, guard)
+			if err := applyBudget(eng, cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "budget config invalid (budgets disabled): %v\n", err)
+			}
 			// Live config reload (C5): /reload re-reads the
 			// config file and swaps the provider and the
 			// permission mode without a restart.
@@ -422,6 +515,9 @@ func main() {
 			}
 			out := os.Stdout
 			terminal.Enable(caps, out)
+			// Hand the boot negotiation result to /doctor so the TUI can
+			// report it without re-probing the live terminal (I3).
+			tui.BootCaps, tui.BootCapsErr = caps, err
 			defer func() {
 				if r := recover(); r != nil {
 					terminal.Disable(out)
@@ -492,6 +588,9 @@ func main() {
 			}
 			bootMark("registry")
 			eng, cmdChan, eventChan := engine.NewEngine(100, buildProvider(cfg), reg, guard)
+			if err := applyBudget(eng, cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "budget config invalid (budgets disabled): %v\n", err)
+			}
 			bootMark("engine")
 			go func() { _ = eng.Run() }()
 			if profile {
@@ -552,6 +651,38 @@ func main() {
 						_ = os.WriteFile(execOutputFile, []byte(strings.Join(outLines, "\n")+"\n"), 0o644)
 					}
 					return nil
+				case protocol.EventBudgetWrap, protocol.EventBudgetStopped:
+					// L2: run ended by budget with a recorded verdict.
+					if !execJSONL && !execGitHubCheck {
+						if evt.Budget != nil {
+							fmt.Printf("\n[budget %s] hit=%s at %.0f%% — verdict: %s\n",
+								evt.Budget.State, evt.Budget.Hit, worstBudgetPctInfo(evt.Budget)*100, evt.Budget.Verdict)
+						}
+					}
+					eng.Stop()
+					if execGitHubCheck {
+						check := map[string]any{
+							"name":       "nikicode",
+							"head_sha":   detectGitBranch("."),
+							"status":     "completed",
+							"conclusion": "neutral",
+							"output": map[string]any{
+								"title":   "NikiCode run stopped by budget",
+								"summary": budgetSummary(evt),
+								"text":    fullText.String(),
+							},
+						}
+						b, _ := json.MarshalIndent(check, "", "  ")
+						if execOutputFile == "" {
+							fmt.Println(string(b))
+						} else {
+							outLines = append(outLines, string(b))
+						}
+					}
+					if execOutputFile != "" {
+						_ = os.WriteFile(execOutputFile, []byte(strings.Join(outLines, "\n")+"\n"), 0o644)
+					}
+					return nil
 				case protocol.EventTurnFailed:
 					eng.Stop()
 					if execGitHubCheck {
@@ -577,6 +708,36 @@ func main() {
 						_ = os.WriteFile(execOutputFile, []byte(strings.Join(outLines, "\n")+"\n"), 0o644)
 					}
 					return fmt.Errorf("%s", evt.Error)
+				case protocol.EventTurnNotVerified:
+					// L3: run ended without a verified done — terminal,
+					// non-zero, never a success.
+					if !execJSONL && !execGitHubCheck {
+						fmt.Printf("\n[not verified] %s\n", evt.Text)
+					}
+					eng.Stop()
+					if execGitHubCheck {
+						check := map[string]any{
+							"name":       "nikicode",
+							"head_sha":   detectGitBranch("."),
+							"status":     "completed",
+							"conclusion": "failure",
+							"output": map[string]any{
+								"title":   "NikiCode run not verified",
+								"summary": fmt.Sprintf("Run ended not-verified: %s", evt.Text),
+								"text":    fullText.String(),
+							},
+						}
+						b, _ := json.MarshalIndent(check, "", "  ")
+						if execOutputFile == "" {
+							fmt.Println(string(b))
+						} else {
+							outLines = append(outLines, string(b))
+						}
+					}
+					if execOutputFile != "" {
+						_ = os.WriteFile(execOutputFile, []byte(strings.Join(outLines, "\n")+"\n"), 0o644)
+					}
+					return fmt.Errorf("run ended not-verified: %s", evt.Text)
 				}
 			}
 			return nil
@@ -587,6 +748,7 @@ func main() {
 	execCmd.Flags().StringVar(&execOutputFile, "output", "", "Write output to specified file")
 	rootCmd.AddCommand(execCmd)
 	rootCmd.AddCommand(newCICommand())
+	rootCmd.AddCommand(newDemoCommand())
 
 	// `nikicode do` routes one natural-language instruction to a recipe,
 	// an explanation, or a git workflow — deterministically, with no
@@ -861,13 +1023,20 @@ Brief description of the repository and architecture.
 					fmt.Printf("✓ Env %s=%s (via %s)\n", name, v, src)
 				}
 			}
-			fmt.Println("✓ Go runtime")
-			fmt.Println("✓ Terminal capabilities")
-			fmt.Println("✓ Working directory writable")
+			// I3: the nine real checks, each failure printing its exact fix.
+			fails, warns := 0, 0
+			for _, r := range doctor.Run(doctor.DefaultProbes(configPath)) {
+				fmt.Println(doctor.Render(r))
+				switch r.Status {
+				case doctor.StatusFail:
+					fails++
+				case doctor.StatusWarn:
+					warns++
+				}
+			}
+			fmt.Printf("doctor: %d failed, %d warnings\n", fails, warns)
 			cfg, _ := config.Load(configPath)
-			fmt.Printf("✓ Config resolved (provider=%s, model=%s)\n", cfg.Provider.Name, cfg.Model.Name)
-			fmt.Printf("✓ Provider constructed: %s\n", buildProvider(cfg).Name())
-			fmt.Printf("✓ MCP servers configured: %d\n", len(cfg.MCP.Servers))
+			fmt.Printf("MCP servers configured: %d\n", len(cfg.MCP.Servers))
 			for name, srv := range cfg.MCP.Servers {
 				pctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				client := mcp.NewClient(name, srv.Command, srv.Args...)
@@ -880,12 +1049,7 @@ Brief description of the repository and architecture.
 				_ = client.Stop()
 				fmt.Printf("✓ MCP %s: reachable\n", name)
 			}
-			backend, ok := sandbox.Detect()
-			if ok {
-				fmt.Printf("✓ Sandbox backend available: %s (enforced: read-only root, writable workspace roots, network denied, dropped capabilities)\n", backend)
-			} else {
-				fmt.Println("✗ Sandbox backend: none available (fallback: env-scrubbed passthrough)")
-			}
+			backend, _ := sandbox.Detect()
 			if cfg.Sandbox.Enabled {
 				fmt.Printf("✓ Sandbox policy: active (%s)\n", backend)
 			} else {
@@ -975,33 +1139,7 @@ Brief description of the repository and architecture.
 
 	var showSources bool
 	printConfig := func(cfg config.ConfigWithSources, showSrc bool) {
-		printField := func(section, key string, val interface{}) {
-			src := cfg.Sources[section]
-			if src == "" {
-				src = "default"
-			}
-			if showSrc {
-				fmt.Printf("%s.%s = %v  # source: %s\n", section, key, val, src)
-			} else {
-				fmt.Printf("%s.%s = %v\n", section, key, val)
-			}
-		}
-		printField("model", "name", cfg.Model.Name)
-		printField("provider", "name", cfg.Provider.Name)
-		printField("provider", "env_key", cfg.Provider.EnvKey)
-		printField("ui", "inline", cfg.UI.Inline)
-		printField("ui", "theme", cfg.UI.Theme)
-		printField("permissions", "mode", cfg.Permissions.Mode)
-		printField("sandbox", "enabled", cfg.Sandbox.Enabled)
-		printField("sandbox", "auto_allow", cfg.Sandbox.AutoAllow)
-		printField("sandbox", "fail_if_unavailable", cfg.Sandbox.FailIfUnavailable)
-		if len(cfg.MCP.Servers) == 0 {
-			printField("mcp", "servers", "{}")
-		} else {
-			for name, srv := range cfg.MCP.Servers {
-				printField("mcp", "servers."+name+".command", srv.Command)
-			}
-		}
+		fmt.Print(renderConfig(cfg, showSrc))
 	}
 
 	configCmd := &cobra.Command{

@@ -2,6 +2,7 @@ package appserver_test
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"strings"
@@ -12,13 +13,23 @@ import (
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/tools"
+	"github.com/RavaniRoshan/niki/internal/verifier"
 )
+
+// passVerifier ends fixture claims as verified (the L3 gate itself is
+// tested in internal/engine).
+func passVerifier() verifier.Verifier {
+	return verifier.Func(func(context.Context, verifier.Request) (verifier.Verdict, error) {
+		return verifier.Verdict{Result: verifier.Verified, Reason: "fixture pass"}, nil
+	})
+}
 
 func TestCodexServer(t *testing.T) {
 	prov := provider.NewMockProvider()
 	reg := tools.DefaultRegistry()
 	guard := permissions.NewGuard(permissions.ModeWorkspaceWrite)
 	srv := appserver.NewCodexServer(prov, reg, guard)
+	srv.SetVerifier(passVerifier(), 0)
 	defer srv.Stop()
 
 	inReader, inWriter := io.Pipe()
@@ -151,6 +162,7 @@ func TestACPServer(t *testing.T) {
 	reg := tools.DefaultRegistry()
 	guard := permissions.NewGuard(permissions.ModeWorkspaceWrite)
 	srv := appserver.NewACPServer(prov, reg, guard)
+	srv.SetVerifier(passVerifier(), 0)
 	defer srv.Stop()
 
 	inReader, inWriter := io.Pipe()

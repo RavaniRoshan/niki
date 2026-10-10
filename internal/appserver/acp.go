@@ -13,6 +13,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/tools"
+	"github.com/RavaniRoshan/niki/internal/verifier"
 )
 
 // ACPServer implements Agent Client Protocol (ACP) JSON-RPC 2.0 adapter.
@@ -29,6 +30,11 @@ type ACPServer struct {
 	activeSession string
 	outWriter     io.Writer
 	done          chan struct{}
+}
+
+// SetVerifier installs the L3 completion-gate verifier on the engine.
+func (s *ACPServer) SetVerifier(v verifier.Verifier, maxLoops int) {
+	s.eng.SetVerifier(v, maxLoops)
 }
 
 func NewACPServer(prov provider.ModelProvider, reg *tools.Registry, guard *permissions.Guard) *ACPServer {
@@ -108,6 +114,11 @@ func (s *ACPServer) listenEvents() {
 				payload["error"] = evt.Error
 			case protocol.EventTurnCancelled:
 				payload["updateType"] = "cancelled"
+			case protocol.EventTurnNotVerified, protocol.EventBudgetWrap, protocol.EventBudgetStopped:
+				// L2/L3: run ended without a verified done — clients
+				// must unblock with a failed update, never hang.
+				payload["updateType"] = "failed"
+				payload["error"] = terminalReason(evt)
 			default:
 				continue
 			}
@@ -232,4 +243,15 @@ func (s *ACPServer) sendResponse(out io.Writer, id any, result any, rpcErr *RPCE
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, _ = out.Write(append(b, '\n'))
+}
+
+// terminalReason extracts a human reason from a terminal non-done event.
+func terminalReason(evt protocol.EngineEvent) string {
+	if evt.Budget != nil && evt.Budget.Hit != "" {
+		return "budget " + evt.Budget.State + " (hit " + evt.Budget.Hit + ")"
+	}
+	if evt.Text != "" {
+		return evt.Text
+	}
+	return string(evt.Type)
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/RavaniRoshan/niki/internal/paths"
+	"github.com/RavaniRoshan/niki/internal/secrets"
 )
 
 func Default() Config {
@@ -22,6 +23,9 @@ func Default() Config {
 		UI:          UIConfig{Inline: false, Theme: "default"},
 		Permissions: PermissionsConfig{Mode: "workspace_write"},
 		MCP:         MCPConfig{Servers: map[string]MCPServer{}},
+		// D-09: budgets on by default (D-04 verifier backstop): wall
+		// time, cost, and steps per run; 0/"" disables a dimension.
+		Budgets: BudgetsConfig{WallTime: "10m", CostUSD: 2.0, Steps: 100},
 		Sandbox: SandboxConfig{
 			Enabled:           false,
 			AutoAllow:         true,
@@ -42,6 +46,19 @@ func DefaultMock() Config {
 	}
 	cfg.Provider = ProviderConfig{Name: "mock", EnvKey: ""}
 	return cfg
+}
+
+// EnvKeysInOrder returns the provider API-key environment variables in
+// first-run detection order. It must stay aligned with the checks in
+// AutoDetectProvider below (same set, same order).
+func EnvKeysInOrder() []string {
+	return []string{
+		"ANTHROPIC_API_KEY",
+		"OPENAI_API_KEY",
+		"OPENROUTER_API_KEY",
+		"DEEPSEEK_API_KEY",
+		"GEMINI_API_KEY",
+	}
 }
 
 // AutoDetectProvider checks standard environment variables and returns a detected ProviderConfig and ModelConfig,
@@ -219,10 +236,34 @@ func (c Config) IsConfigured() bool {
 	return c.ResolveAPIKey() != ""
 }
 
-// ResolveAPIKey returns the key from config, env, or the configured env var name.
+// accountFor maps a provider config to its stable keychain account,
+// distinguishing openrouter/deepseek/gemini from the generic openai name.
+func accountFor(p ProviderConfig) string {
+	switch {
+	case strings.Contains(p.BaseURL, "openrouter"):
+		return "openrouter"
+	case strings.Contains(p.BaseURL, "deepseek"):
+		return "deepseek"
+	case strings.Contains(p.BaseURL, "generativelanguage"):
+		return "gemini"
+	case p.Name != "":
+		return p.Name
+	}
+	return ""
+}
+
+// ResolveAPIKey returns the key from the in-memory session value, the OS
+// keychain, or — as the fallback — the environment (EnvKey or the
+// provider's well-known variable). Key values are never read from config
+// files at this point: SaveUserConfig strips them before writing.
 func (c Config) ResolveAPIKey() string {
 	if c.Provider.APIKey != "" {
 		return c.Provider.APIKey
+	}
+	if acc := accountFor(c.Provider); acc != "" {
+		if k, ok := secrets.Get(acc); ok {
+			return k
+		}
 	}
 	if c.Provider.EnvKey != "" {
 		if v := os.Getenv(c.Provider.EnvKey); v != "" {
@@ -243,7 +284,10 @@ func (c Config) ResolveAPIKey() string {
 	}
 }
 
-// SaveUserConfig persists configuration to the canonical user config file (~/.config/nikicode/nikicode.toml).
+// SaveUserConfig persists configuration to the canonical user config file
+// (~/.config/nikicode/nikicode.toml). API keys are NEVER written: the
+// in-memory value is stripped before marshalling (I4) — keys live in the
+// OS keychain or the environment.
 func SaveUserConfig(cfg Config) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -254,6 +298,7 @@ func SaveUserConfig(cfg Config) error {
 		return err
 	}
 	path := filepath.Join(dir, "nikicode.toml")
+	cfg.Provider.APIKey = "" // hard guarantee: no key in config files
 	data, err := toml.Marshal(cfg)
 	if err != nil {
 		return err

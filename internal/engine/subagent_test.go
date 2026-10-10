@@ -21,6 +21,7 @@ func TestSubagentReturnsSummaryOnly(t *testing.T) {
 	prov := provider.NewMockProvider()
 	prov.ChunkDelay = time.Millisecond
 	parent := &TurnRunner{
+		verifier: passVerifier(),
 		Provider: prov,
 		Registry: reg,
 		Context:  NewContextAssembler(),
@@ -75,6 +76,7 @@ func TestSubagentReturnsSummaryOnly(t *testing.T) {
 // refused with a typed error rather than recursing.
 func TestSubagentDepthLimit(t *testing.T) {
 	parent := &TurnRunner{
+		verifier: passVerifier(),
 		Provider: provider.NewMockProvider(),
 		Registry: tools.DefaultRegistry(),
 		Context:  NewContextAssembler(),

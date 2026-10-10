@@ -24,6 +24,7 @@ func TestAutonomousMultiStepToolRecursionLoop(t *testing.T) {
 
 	guard := permissions.NewGuard(permissions.ModeFullAccess)
 	runner := &TurnRunner{
+		verifier: passVerifier(),
 		Provider: prov,
 		Registry: reg,
 		Context:  NewContextAssembler(),

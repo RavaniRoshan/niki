@@ -20,6 +20,7 @@ func TestReadinessRequiredBeforePrompt(t *testing.T) {
 	reg := tools.DefaultRegistry()
 	prov := provider.NewMockProvider()
 	eng, cmdChan, eventChan := NewEngine(100, prov, reg, permissions.NewGuard(permissions.ModeFullAccess))
+	eng.SetVerifier(passVerifier(), 0)
 
 	// An optional warmer that is slow must not delay readiness.
 	optionalDone := make(chan struct{})
@@ -95,6 +96,7 @@ func TestReadinessRequiredBeforePrompt(t *testing.T) {
 // typed failure event.
 func TestPromptRefusedBeforeReadiness(t *testing.T) {
 	eng, cmdChan, eventChan := NewEngine(100, provider.NewMockProvider(), tools.DefaultRegistry(), permissions.NewGuard(permissions.ModeFullAccess))
+	eng.SetVerifier(passVerifier(), 0)
 	// Replace every required warmer with one that fails, so
 	// readiness can never be published.
 	eng.requiredWarmers = nil
@@ -129,6 +131,7 @@ func TestReadOnlyTurnEndToEnd(t *testing.T) {
 	prov := provider.NewMockProvider()
 	prov.ChunkDelay = time.Millisecond
 	eng, cmdChan, eventChan := NewEngine(100, prov, reg, permissions.NewGuard(permissions.ModeReadOnly))
+	eng.SetVerifier(passVerifier(), 0)
 	go eng.Run()
 	defer eng.Stop()
 
@@ -274,6 +277,7 @@ func TestPermissionGateDeniesTool(t *testing.T) {
 		},
 	}
 	eng, cmdChan, eventChan := NewEngine(100, prov, reg, permissions.NewGuard(permissions.ModeReadOnly))
+	eng.SetVerifier(passVerifier(), 0)
 	go eng.Run()
 	defer eng.Stop()
 

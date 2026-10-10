@@ -1,0 +1,41 @@
+{
+  "label": "Recorded session replay \u2014 pre-captured transcript from a demo run; no model, no network, no spend. This is a recording, not a live session.",
+  "events": [
+    {
+      "role": "user",
+      "text": "read the main file"
+    },
+    {
+      "role": "assistant",
+      "text": "[tool] read_file {\"path\":\"main.go\"}"
+    },
+    {
+      "role": "assistant",
+      "text": "Read complete \u2014 41 lines. What would you like to change?"
+    },
+    {
+      "role": "user",
+      "text": "search for worker"
+    },
+    {
+      "role": "assistant",
+      "text": "[tool] grep {\"pattern\":\"Worker\"}"
+    },
+    {
+      "role": "assistant",
+      "text": "3 matches in internal/engine/worker.go."
+    },
+    {
+      "role": "user",
+      "text": "show the status"
+    },
+    {
+      "role": "assistant",
+      "text": "[tool] git_status {}"
+    },
+    {
+      "role": "assistant",
+      "text": "Working tree clean; 2 commits ahead of origin/main."
+    }
+  ]
+}

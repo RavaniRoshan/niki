@@ -17,11 +17,7 @@ type MockProvider struct {
 	ToolScripts map[string][]ToolCall
 }
 
-// ToolCall is one scripted model tool request.
-type ToolCall struct {
-	Tool string
-	Args string
-}
+// ToolCall is defined in provider.go (shared with the request-side tool loop).
 
 func NewMockProvider() *MockProvider {
 	return &MockProvider{
@@ -113,8 +109,18 @@ func (m *MockProvider) Stream(ctx context.Context, messages []Message) (<-chan D
 			case deltas <- d:
 			}
 		}
-		deltas <- Delta{Kind: DeltaUsage, Usage: &Usage{PromptTokens: len(user) / 4, CompletionTokens: len(response) / 4}}
-		deltas <- Delta{Kind: DeltaDone}
+		select {
+		case <-ctx.Done():
+			errs <- ctx.Err()
+			return
+		case deltas <- Delta{Kind: DeltaUsage, Usage: &Usage{PromptTokens: len(user) / 4, CompletionTokens: len(response) / 4}}:
+		}
+		select {
+		case <-ctx.Done():
+			errs <- ctx.Err()
+			return
+		case deltas <- Delta{Kind: DeltaDone}:
+		}
 	}()
 
 	return deltas, errs

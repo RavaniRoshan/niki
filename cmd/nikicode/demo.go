@@ -1,8 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/spf13/cobra"
+
+	"github.com/RavaniRoshan/niki/internal/firstrun"
 	"github.com/RavaniRoshan/niki/internal/paths"
 	"github.com/RavaniRoshan/niki/internal/provider"
 )
@@ -34,4 +38,30 @@ func demoMockProvider() provider.ModelProvider {
 	m.Scripts["search for worker"] = "Matches are in the tool cell above."
 	m.Scripts["show the status"] = "Status is in the tool cell above."
 	return m
+}
+
+// newDemoCommand is the no-key demo entry point offered by the first-run
+// flow (branch 3): it replays the shipped recorded session with an explicit
+// recorded label. No model, no network, no spend.
+func newDemoCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "demo",
+		Short: "Replay the recorded demo session (no key, no network)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			demo, err := firstrun.LoadRecordedDemo()
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			fmt.Fprintln(out, "[recorded] session replay — this is a pre-captured recording, not a live model session.")
+			fmt.Fprintln(out, "Label:", demo.Label)
+			fmt.Fprintln(out)
+			for _, e := range demo.Events {
+				fmt.Fprintf(out, "  %s> %s\n", e.Role, e.Text)
+			}
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "[end of recording] Set ANTHROPIC_API_KEY / OPENAI_API_KEY, or start Ollama, to run live.")
+			return nil
+		},
+	}
 }

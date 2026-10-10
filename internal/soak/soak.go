@@ -122,7 +122,11 @@ func Run(cfg Config) (Verdict, error) {
 					crashes++
 					return Verdict{Crashes: crashes}, fmt.Errorf("event channel closed at turn %d", i)
 				}
-				if evt.Type == protocol.EventTurnCompleted {
+				// The harness measures turn execution, not
+				// verification outcomes (L3): a run that ends
+				// not-verified still ends the turn loop honestly.
+				if evt.Type == protocol.EventTurnCompleted ||
+					evt.Type == protocol.EventTurnNotVerified {
 					break turnLoop
 				}
 			case <-deadline:

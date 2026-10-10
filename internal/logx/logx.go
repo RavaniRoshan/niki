@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/RavaniRoshan/niki/internal/tools"
 )
 
 // Logger appends JSON lines to a file. It is safe
@@ -59,12 +61,13 @@ func (l *Logger) write(level, event, errMsg string, fields map[string]string) {
 	if l == nil || l.f == nil {
 		return
 	}
+	// I4/X3: secrets are redacted before bytes hit the log file.
 	e := Entry{
 		Time:   time.Now().UTC(),
 		Level:  level,
-		Event:  event,
-		Error:  errMsg,
-		Fields: fields,
+		Event:  tools.Redact(event),
+		Error:  tools.Redact(errMsg),
+		Fields: redactFields(fields),
 	}
 	line, merr := json.Marshal(e)
 	if merr != nil {
@@ -73,6 +76,18 @@ func (l *Logger) write(level, event, errMsg string, fields map[string]string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	_, _ = l.f.Write(append(line, '\n'))
+}
+
+// redactFields scrubs secret-like values from structured fields.
+func redactFields(fields map[string]string) map[string]string {
+	if fields == nil {
+		return nil
+	}
+	out := make(map[string]string, len(fields))
+	for k, v := range fields {
+		out[k] = tools.Redact(v)
+	}
+	return out
 }
 
 // Close flushes and closes the log file.

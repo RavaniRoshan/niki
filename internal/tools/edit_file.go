@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/RavaniRoshan/niki/internal/format"
@@ -90,7 +91,24 @@ func (t *EditFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResul
 		updated = strings.Replace(fileContent, a.OldString, a.NewString, 1)
 	}
 
-	if err := os.WriteFile(a.Path, []byte(updated), 0o644); err != nil {
+	// Atomic replace: write a temp file and rename, so an interrupt
+	// mid-write can never leave a torn file (L5).
+	tmp, err := os.CreateTemp(filepath.Dir(a.Path), ".nikicode-edit-*")
+	if err != nil {
+		return ToolResult{Output: err.Error(), IsError: true}, nil
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(updated); err != nil {
+		tmp.Close()
+		return ToolResult{Output: err.Error(), IsError: true}, nil
+	}
+	if err := tmp.Close(); err != nil {
+		return ToolResult{Output: err.Error(), IsError: true}, nil
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return ToolResult{Output: err.Error(), IsError: true}, nil
+	}
+	if err := os.Rename(tmp.Name(), a.Path); err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}
 

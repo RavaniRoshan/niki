@@ -42,6 +42,11 @@ type State struct {
 	MaxTokens  int
 	TotalCost  float64
 
+	// L2 budget gauges: state (ok/wrap/stopped) and worst enabled
+	// utilization fraction for the current run.
+	BudgetState string
+	BudgetPct   float64
+
 	// Visual & Interactive Customizations
 	SpinnerStyle     SpinnerStyle
 	Palette          PaletteState

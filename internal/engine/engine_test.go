@@ -21,6 +21,7 @@ func TestEngineEchoTurn(t *testing.T) {
 	prov := provider.NewMockProvider()
 	prov.ChunkDelay = time.Millisecond
 	eng, cmdChan, eventChan := NewEngine(100, prov, reg, permissions.NewGuard(permissions.ModeFullAccess))
+	eng.SetVerifier(passVerifier(), 0)
 	go eng.Run()
 	defer eng.Stop()
 
@@ -69,7 +70,7 @@ func TestCompactionCircuitBreaker(t *testing.T) {
 
 func TestSubagentIsolatedContext(t *testing.T) {
 	ca := NewContextAssembler()
-	parent := &TurnRunner{Context: ca, Provider: provider.NewMockProvider(), Registry: tools.DefaultRegistry()}
+	parent := &TurnRunner{Context: ca, Provider: provider.NewMockProvider(), Registry: tools.DefaultRegistry(), verifier: passVerifier()}
 	sub := NewSubagent(parent, 2)
 	if sub.Runner.Context == ca {
 		t.Fatal("subagent must have its own context assembler")
@@ -84,6 +85,7 @@ func TestUsageEventEmitted(t *testing.T) {
 	prov := provider.NewMockProvider()
 	prov.ChunkDelay = time.Millisecond
 	eng, cmdChan, eventChan := NewEngine(100, prov, reg, permissions.NewGuard(permissions.ModeFullAccess))
+	eng.SetVerifier(passVerifier(), 0)
 	go eng.Run()
 	defer eng.Stop()
 	cmdChan <- protocol.EngineCommand{Type: protocol.CmdSubmitPrompt, Prompt: "hi"}
@@ -133,6 +135,7 @@ func TestAdversarialStreamCannotMutatePolicy(t *testing.T) {
 	}
 	guard := permissions.NewGuard(permissions.ModeReadOnly)
 	eng, cmdChan, eventChan := NewEngine(100, prov, tools.DefaultRegistry(), guard)
+	eng.SetVerifier(passVerifier(), 0)
 	go eng.Run()
 	defer eng.Stop()
 

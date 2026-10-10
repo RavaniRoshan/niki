@@ -53,7 +53,9 @@ func FormatFile(ctx context.Context, filePath string) FormatterResult {
 	args := append([]string{}, spec.args...)
 	args = append(args, filePath)
 
-	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Detached from turn cancellation: killing a formatter mid-rewrite
+	// could tear the file. The 5s timeout still bounds the run.
+	cmdCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, binPath, args...)

@@ -28,6 +28,7 @@ func TestMidTurnPromptSteering(t *testing.T) {
 	reg := tools.DefaultRegistry()
 
 	runner := &TurnRunner{
+		verifier:     passVerifier(),
 		Provider:     prov,
 		Registry:     reg,
 		Context:      ca,

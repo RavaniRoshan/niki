@@ -22,11 +22,12 @@ func ProjectContext(messages []provider.Message) []provider.Message {
 		return messages
 	}
 
-	// Step 1: Filter out empty/vacuous messages (except tool results which may have empty output)
+	// Step 1: Filter out empty/vacuous messages (tool results and assistant
+	// tool-call messages may carry empty text but essential payload).
 	var filtered []provider.Message
 	for _, m := range messages {
 		trimmed := strings.TrimSpace(m.Content)
-		if m.Role != "tool" && trimmed == "" {
+		if m.Role != "tool" && trimmed == "" && len(m.ToolCalls) == 0 {
 			continue
 		}
 		filtered = append(filtered, m)
@@ -41,29 +42,69 @@ func ProjectContext(messages []provider.Message) []provider.Message {
 	for _, curr := range filtered {
 		if curr.Role == "assistant" && len(collapsed) > 0 && collapsed[len(collapsed)-1].Role == "assistant" {
 			collapsed[len(collapsed)-1].Content += "\n\n" + curr.Content
+			collapsed[len(collapsed)-1].ToolCalls = append(collapsed[len(collapsed)-1].ToolCalls, curr.ToolCalls...)
 			continue
 		}
 		collapsed = append(collapsed, curr)
 	}
 
 	// Step 3: Repair unclosed tool calls.
-	// If an assistant message contains a tool call indication, but the next message
-	// is a user message without an intervening tool message, synthesize a cancelled tool result.
+	// Every assistant tool call must be answered by a tool result before the
+	// next non-tool message; unanswered calls get a synthesized interrupted
+	// result so provider-native tool protocols never see a dangling call.
 	var repaired []provider.Message
-	for i := 0; i < len(collapsed); i++ {
+	for i := 0; i < len(collapsed); {
 		curr := collapsed[i]
 		repaired = append(repaired, curr)
 
-		if curr.Role == "assistant" && strings.Contains(curr.Content, "[ToolCall:") {
-			// Check if next message is tool result
-			hasToolNext := (i+1 < len(collapsed) && collapsed[i+1].Role == "tool")
-			if !hasToolNext {
-				repaired = append(repaired, provider.Message{
-					Role:    "tool",
-					Content: "[tool execution interrupted or cancelled by user]",
-				})
+		needsRepair := curr.Role == "assistant" &&
+			(len(curr.ToolCalls) > 0 || strings.Contains(curr.Content, "[ToolCall:"))
+		if !needsRepair {
+			i++
+			continue
+		}
+
+		// Absorb the contiguous run of tool results that answers this message.
+		answered := map[string]bool{}
+		legacyFree := 0
+		j := i + 1
+		for j < len(collapsed) && collapsed[j].Role == "tool" {
+			repaired = append(repaired, collapsed[j])
+			if collapsed[j].ToolCallID != "" {
+				answered[collapsed[j].ToolCallID] = true
+			} else {
+				legacyFree++
+			}
+			j++
+		}
+
+		// Synthesize interrupted results for calls the run did not answer.
+		synthesize := func(id, name string) {
+			repaired = append(repaired, provider.Message{
+				Role:       "tool",
+				Content:    "[tool execution interrupted or cancelled by user]",
+				ToolCallID: id,
+				Name:       name,
+			})
+		}
+		if len(curr.ToolCalls) == 0 {
+			if j == i+1 {
+				synthesize("", "")
+			}
+		} else {
+			for _, tc := range curr.ToolCalls {
+				if answered[tc.ID] {
+					continue
+				}
+				if legacyFree > 0 {
+					// A legacy result without ID answers this call.
+					legacyFree--
+					continue
+				}
+				synthesize(tc.ID, tc.Tool)
 			}
 		}
+		i = j
 	}
 
 	// Step 4: 3-point prompt caching breakpoints (applyCachePolicy)

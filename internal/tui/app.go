@@ -13,13 +13,41 @@ import (
 
 	"github.com/RavaniRoshan/niki/internal/alerts"
 	"github.com/RavaniRoshan/niki/internal/config"
+	"github.com/RavaniRoshan/niki/internal/doctor"
 	"github.com/RavaniRoshan/niki/internal/editor"
 	"github.com/RavaniRoshan/niki/internal/explain"
 	"github.com/RavaniRoshan/niki/internal/git"
 	"github.com/RavaniRoshan/niki/internal/mention"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/routing"
+	"github.com/RavaniRoshan/niki/internal/secrets"
 	"github.com/RavaniRoshan/niki/internal/shell"
+	"github.com/RavaniRoshan/niki/internal/terminal"
+)
+
+// envVarForProvider names the environment variable a user should export
+// when the keychain is unavailable (the env-var fallback for I4).
+func envVarForProvider(prov string) string {
+	switch prov {
+	case "anthropic":
+		return "ANTHROPIC_API_KEY"
+	case "openai":
+		return "OPENAI_API_KEY"
+	case "openrouter":
+		return "OPENROUTER_API_KEY"
+	case "deepseek":
+		return "DEEPSEEK_API_KEY"
+	default:
+		return "an API-key environment variable"
+	}
+}
+
+// BootCaps and BootCapsErr carry the terminal negotiation result from the
+// boot path (main) so /doctor can report it without re-probing the live
+// terminal mid-session.
+var (
+	BootCaps    terminal.Capabilities
+	BootCapsErr error
 )
 
 type shellResultMsg = shell.Result
@@ -249,17 +277,51 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 	case protocol.EventTurnStarted:
 		m.state.Busy = true
 		m.state.Activity = "thinking…"
+		m.state.BudgetState = ""
+		m.state.BudgetPct = 0
+	case protocol.EventBudgetGauge:
+		if evt.Budget != nil {
+			m.state.BudgetState = evt.Budget.State
+			m.state.BudgetPct = worstBudgetPct(evt.Budget)
+		}
+	case protocol.EventBudgetWrap:
+		if evt.Budget != nil {
+			m.state.BudgetState = evt.Budget.State
+			m.state.BudgetPct = worstBudgetPct(evt.Budget)
+			m.state.Busy = false
+			m.state.Activity = "budget wrap: " + evt.Budget.Hit
+			m.history.Append("system", fmt.Sprintf("Budget WRAP at %.0f%% of %s — finishing step, running check, verdict: %s",
+				m.state.BudgetPct*100, evt.Budget.Hit, evt.Budget.Verdict))
+		}
+	case protocol.EventBudgetStopped:
+		if evt.Budget != nil {
+			m.state.BudgetState = evt.Budget.State
+			m.state.BudgetPct = worstBudgetPct(evt.Budget)
+			m.state.Busy = false
+			m.state.Activity = "budget stopped: " + evt.Budget.Hit
+			m.history.Append("system", fmt.Sprintf("Budget STOPPED at %.0f%% of %s — run stopped, branch kept, verdict: %s",
+				m.state.BudgetPct*100, evt.Budget.Hit, evt.Budget.Verdict))
+		}
 	case protocol.EventTurnCompleted:
 		m.state.Busy = false
 		m.state.Activity = ""
 	case protocol.EventTurnCancelled:
 		m.state.Busy = false
 		m.state.Activity = ""
-		m.history.Append("system", "[turn cancelled]")
+		if evt.Text != "" {
+			m.history.Append("system", "[turn cancelled] "+evt.Text)
+		} else {
+			m.history.Append("system", "[turn cancelled]")
+		}
 	case protocol.EventTurnFailed:
 		m.state.Busy = false
 		m.state.Activity = ""
 		m.history.Append("error", evt.Error)
+	case protocol.EventTurnNotVerified:
+		// L3: terminal — a claim alone never ends a run done.
+		m.state.Busy = false
+		m.state.Activity = ""
+		m.history.Append("error", "[not verified] "+evt.Text)
 	case protocol.EventToolStarted:
 		m.history.Append("tool", "started "+evt.ToolName)
 		m.state.Activity = "running " + evt.ToolName
@@ -275,6 +337,9 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 		m.history.Append("error", evt.Error)
 	case protocol.EventWarning:
 		m.history.Append("system", "[warning] "+evt.Text)
+	case protocol.EventSteer:
+		// L4: shown as an event at the safe point; not terminal.
+		m.history.Append("system", "[steer] "+evt.Text)
 	case protocol.EventContextCompacted:
 		m.history.Append("system", "[context compacted]")
 	case protocol.EventSubagentStarted:
@@ -631,8 +696,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.state.Busy {
-				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdInterruptTurn}
-				m.state.Activity = "interrupting…"
+				// L5: Esc pauses at the next safe point; a second
+				// Esc (while still busy) stops the run now.
+				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdPauseTurn}
+				m.state.Activity = "pausing… (Esc again to stop)"
 				return m, nil
 			}
 			return m, nil
@@ -791,6 +858,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					prov := m.state.Palette.ConnectProvider
 					if key != "" {
 						cfg, _ := config.Load("")
+						// I4: the key goes to the OS keychain (session
+						// memory when unavailable) — never to the config
+						// file; SaveUserConfig strips it as a hard floor.
+						keychainStored, _ := secrets.Set(prov, key)
 						switch prov {
 						case "anthropic":
 							cfg.Provider.Name = "anthropic"
@@ -817,7 +888,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						_ = config.SaveUserConfig(cfg)
 						m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
 						m.state.ModelName = cfg.Provider.Name + ": " + cfg.Model.Name
-						m.history.Append("system", fmt.Sprintf("✓ Connected %s API key and reloaded provider (%s)!", prov, m.state.ModelName))
+						if keychainStored {
+							m.history.Append("system", fmt.Sprintf("✓ Connected %s API key (stored in OS keychain) and reloaded provider (%s)!", prov, m.state.ModelName))
+						} else {
+							m.history.Append("system", fmt.Sprintf("✓ Connected %s API key (session only — keychain unavailable; export %s in your shell profile to persist) and reloaded provider (%s)!", prov, envVarForProvider(prov), m.state.ModelName))
+						}
 					}
 					m.state.Palette.Open = false
 					m.state.Palette.Mode = "palette"
@@ -1089,7 +1164,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		turnEnded := evt.Type == protocol.EventTurnCompleted ||
 			evt.Type == protocol.EventTurnFailed ||
-			evt.Type == protocol.EventTurnCancelled
+			evt.Type == protocol.EventTurnCancelled ||
+			evt.Type == protocol.EventTurnNotVerified ||
+			evt.Type == protocol.EventBudgetWrap ||
+			evt.Type == protocol.EventBudgetStopped
 		if turnEnded {
 			// Finalize the turn: committed cells
 			// flush to native scrollback in inline
@@ -1194,7 +1272,7 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 		helpText.WriteString("  Ctrl+G: Open input in external $EDITOR\n")
 		helpText.WriteString("  Ctrl+O: Toggle tool output folding\n")
 		helpText.WriteString("  Ctrl+R: Search prompt history\n")
-		helpText.WriteString("  Esc: Interrupt turn / Deny approval / Close palette\n")
+		helpText.WriteString("  Esc: Pause turn (Esc twice stops) / Deny approval / Close palette\n")
 		helpText.WriteString("  Ctrl+C: Clear input / Interrupt\n")
 		helpText.WriteString("  Ctrl+D: Exit on empty input\n")
 		helpText.WriteString("  Ctrl+Z: Suspend process\n")
@@ -1250,7 +1328,25 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 			m.state.Palette.Selected = 0
 		}
 	case input == "/doctor":
-		m.history.Append("system", "🏥 System Health:\n  ✓ Sandbox: Bubblewrap isolation active\n  ✓ Writable workspace roots enforced\n  ✓ Network isolation enabled\n  ✓ Terminal capabilities synced")
+		// I3: the real nine checks — never a canned all-green report.
+		probes := doctor.DefaultProbes("")
+		probes.TerminalProbe = func() (terminal.Capabilities, error) {
+			return BootCaps, BootCapsErr
+		}
+		var b strings.Builder
+		b.WriteString("🏥 System Health:")
+		fails, warns := 0, 0
+		for _, r := range doctor.Run(probes) {
+			b.WriteString("\n  " + strings.ReplaceAll(doctor.Render(r), "\n", "\n  "))
+			switch r.Status {
+			case doctor.StatusFail:
+				fails++
+			case doctor.StatusWarn:
+				warns++
+			}
+		}
+		fmt.Fprintf(&b, "\n  doctor: %d failed, %d warnings", fails, warns)
+		m.history.Append("system", b.String())
 	case input == "/compact":
 		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdCompact}
 		m.history.Append("system", "🧹 Context compaction triggered. Past turns folded.")
@@ -1615,6 +1711,9 @@ func (m AppModel) footerView() string {
 	if m.state.TotalCost > 0 {
 		costStr = " | cost: " + routing.FormatCost(m.state.TotalCost)
 	}
+	if m.state.BudgetState != "" {
+		costStr += fmt.Sprintf(" | budget: %.0f%% %s", m.state.BudgetPct*100, strings.ToUpper(m.state.BudgetState))
+	}
 	if usedTok == 0 {
 		meterText = fmt.Sprintf("context: 0%% (0/%s)%s", formatTokens(maxTok), costStr)
 	} else {
@@ -1836,4 +1935,19 @@ func composerSuggestions(value string) []string {
 		return out
 	}
 	return nil
+}
+
+// worstBudgetPct returns the largest enabled gauge fraction (L2).
+func worstBudgetPct(b *protocol.BudgetInfo) float64 {
+	worst := 0.0
+	if b.WallEnabled && b.Wall > worst {
+		worst = b.Wall
+	}
+	if b.CostEnabled && b.Cost > worst {
+		worst = b.Cost
+	}
+	if b.StepEnabled && b.Step > worst {
+		worst = b.Step
+	}
+	return worst
 }

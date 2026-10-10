@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/RavaniRoshan/niki/internal/budget"
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/tools"
+	"github.com/RavaniRoshan/niki/internal/verifier"
 )
 
 type Engine struct {
@@ -25,9 +28,18 @@ type Engine struct {
 
 	sessionStore SessionStore
 
-	mu          sync.Mutex
-	turnCancel  context.CancelFunc
-	turnRunning bool
+	mu         sync.Mutex
+	turnCancel context.CancelFunc
+
+	// L2 budgets: limits/model/check applied per turn via beginBudget.
+	budgetLimits budget.Limits
+	budgetModel  string
+	budgetCheck  func(ctx context.Context) (string, error)
+	turnRunning  bool
+
+	// L5: first Esc asks for a pause at the next safe point; a
+	// second Esc (or CmdInterruptTurn) stops the run now.
+	pauseRequested atomic.Bool
 
 	// emitMu serializes emit() now that turns run on their
 	// own goroutines and the engine loop emits concurrently.
@@ -91,6 +103,7 @@ func NewEngine(bufferSize int, prov provider.ModelProvider, reg *tools.Registry,
 			SteerChannel: make(chan string, 16),
 		},
 	}
+	eng.runner.PauseRequested = func() bool { return eng.pauseRequested.Load() }
 	// Built-in required warmers: the engine loop itself, the model
 	// provider constructor, and a terminal capability probe.
 	eng.WarmRequired(CapEngine, func(context.Context) error { return nil })
@@ -112,6 +125,29 @@ func (e *Engine) Readiness() *Readiness { return e.readiness }
 // instruction files) into the runtime's context assembler.
 func (e *Engine) AddSystemMessage(content string) {
 	e.runner.Context.Add(provider.Message{Role: "system", Content: content})
+}
+
+// SetBudget installs the per-run budget limits (L2) and the model name
+// used for cost gauging. Limits with every dimension zero disable budgets.
+func (e *Engine) SetBudget(l budget.Limits, modelName string) {
+	e.budgetLimits = l
+	e.budgetModel = modelName
+}
+
+// SetVerifier installs the completion-gate verifier (L3): a run ends
+// as done only through this verifier. maxLoops caps verification
+// attempts per claim; 0 means unbounded (D-04), backstopped by budgets.
+func (e *Engine) SetVerifier(v verifier.Verifier, maxLoops int) {
+	e.runner.verifier = v
+	e.runner.verMaxLoops = maxLoops
+	e.runner.verifyAttempt = 0
+}
+
+// SetBudgetCheck installs the check invoked when a budget enters WRAP
+// or stops the run; its return value becomes the recorded verdict (V
+// wires the real verifier here).
+func (e *Engine) SetBudgetCheck(fn func(ctx context.Context) (string, error)) {
+	e.budgetCheck = fn
 }
 
 // SetConfigReloader registers the function that rebuilds the
@@ -253,6 +289,8 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 		turnCtx, cancel := context.WithCancel(e.ctx)
 		e.turnCancel = cancel
 		e.turnRunning = true
+		e.pauseRequested.Store(false)
+		e.runner.beginBudget(e.budgetLimits, e.budgetModel, e.budgetCheck)
 		e.mu.Unlock()
 		// The turn runs on its own goroutine so the command
 		// loop stays live: CmdInterruptTurn must be able to
@@ -270,7 +308,36 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 			}()
 			_ = e.runner.Run(turnCtx, cmd.Prompt, e.emit)
 		}()
+	case protocol.CmdPauseTurn:
+		// L5: Esc #1 requests a pause at the next safe point (the
+		// in-flight tool finishes); Esc #2 while a pause is already
+		// pending stops the run now, keeping all edits.
+		e.mu.Lock()
+		if e.turnCancel == nil {
+			e.mu.Unlock()
+			return
+		}
+		if e.pauseRequested.Load() {
+			cancel := e.turnCancel
+			e.mu.Unlock()
+			cancel()
+			e.emit(protocol.EngineEvent{
+				Type:      protocol.EventWarning,
+				Timestamp: time.Now(),
+				Text:      "stopping now (Esc)",
+			})
+			return
+		}
+		e.pauseRequested.Store(true)
+		e.mu.Unlock()
+		e.emit(protocol.EngineEvent{
+			Type:      protocol.EventWarning,
+			Timestamp: time.Now(),
+			Text:      "pausing at safe point — press Esc again to stop now",
+		})
 	case protocol.CmdInterruptTurn, protocol.CmdCancelTurn:
+		// Immediate stop (Ctrl+C / ACP cancel): cancels ctx outright;
+		// a pending Esc pause is superseded by the stop.
 		e.mu.Lock()
 		if e.turnCancel != nil {
 			e.turnCancel()

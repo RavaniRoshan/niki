@@ -17,6 +17,9 @@ type ResponsesProvider struct {
 	APIKey  string
 	Model   string
 	Client  *http.Client
+
+	// jitter scales retry backoff (L6); nil means rand.Float64.
+	jitter func() float64
 }
 
 // NewResponsesProvider constructs a provider targeting the Responses API.
@@ -34,20 +37,73 @@ func NewResponsesProvider(baseURL, apiKey, model string) *ResponsesProvider {
 
 func (r *ResponsesProvider) Name() string { return "responses" }
 
-type responsesMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+// responsesItem is a Responses-API input item: plain role messages, prior
+// assistant function calls, and function call outputs.
+type responsesItem struct {
+	Type      string `json:"type,omitempty"`
+	Role      string `json:"role,omitempty"`
+	Content   string `json:"content,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+	Output    string `json:"output,omitempty"`
 }
 
 type responsesRequest struct {
-	Model  string             `json:"model"`
-	Input  []responsesMessage `json:"input"`
-	Stream bool               `json:"stream"`
+	Model  string          `json:"model"`
+	Input  []responsesItem `json:"input"`
+	Stream bool            `json:"stream"`
+	Tools  []responsesTool `json:"tools,omitempty"`
+}
+
+type responsesTool struct {
+	Type        string          `json:"type"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+// mapResponsesInput converts generic messages into Responses input items.
+func mapResponsesInput(messages []Message) []responsesItem {
+	var out []responsesItem
+	for _, m := range messages {
+		switch m.Role {
+		case "system":
+			out = append(out, responsesItem{Role: "system", Content: m.Content})
+		case "user":
+			out = append(out, responsesItem{Role: "user", Content: m.Content})
+		case "assistant":
+			if m.Content != "" {
+				out = append(out, responsesItem{Role: "assistant", Content: m.Content})
+			}
+			for _, tc := range m.ToolCalls {
+				id := tc.ID
+				if id == "" {
+					id = "call_" + tc.Tool
+				}
+				out = append(out, responsesItem{Type: "function_call", CallID: id, Name: tc.Tool, Arguments: tc.Args})
+			}
+		case "tool":
+			id := m.ToolCallID
+			if id == "" {
+				id = "call_" + m.Name
+			}
+			out = append(out, responsesItem{Type: "function_call_output", CallID: id, Output: m.Content})
+		}
+	}
+	return out
 }
 
 type responsesDeltaPayload struct {
-	Type     string `json:"type,omitempty"`
-	Delta    string `json:"delta,omitempty"`
+	Type  string `json:"type,omitempty"`
+	Delta string `json:"delta,omitempty"`
+	Item  *struct {
+		Type      string `json:"type"`
+		ID        string `json:"id"`
+		CallID    string `json:"call_id"`
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"item,omitempty"`
 	Response *struct {
 		Usage *struct {
 			InputTokens  int `json:"input_tokens"`
@@ -63,6 +119,10 @@ type responsesDeltaPayload struct {
 }
 
 func (r *ResponsesProvider) Stream(ctx context.Context, messages []Message) (<-chan Delta, <-chan error) {
+	return r.StreamWithTools(ctx, messages, nil)
+}
+
+func (r *ResponsesProvider) StreamWithTools(ctx context.Context, messages []Message, tools []ToolSpec) (<-chan Delta, <-chan error) {
 	deltas := make(chan Delta, 64)
 	errs := make(chan error, 1)
 
@@ -70,15 +130,21 @@ func (r *ResponsesProvider) Stream(ctx context.Context, messages []Message) (<-c
 		defer close(deltas)
 		defer close(errs)
 
-		var input []responsesMessage
-		for _, m := range messages {
-			input = append(input, responsesMessage{Role: m.Role, Content: m.Content})
+		var wireTools []responsesTool
+		for _, ts := range tools {
+			wireTools = append(wireTools, responsesTool{
+				Type:        "function",
+				Name:        ts.Name,
+				Description: ts.Description,
+				Parameters:  ts.Parameters,
+			})
 		}
 
 		body, err := json.Marshal(responsesRequest{
 			Model:  r.Model,
-			Input:  input,
+			Input:  mapResponsesInput(messages),
 			Stream: true,
+			Tools:  wireTools,
 		})
 		if err != nil {
 			errs <- err
@@ -141,9 +207,25 @@ func (r *ResponsesProvider) Stream(ctx context.Context, messages []Message) (<-c
 
 			var payload responsesDeltaPayload
 			if err := json.Unmarshal([]byte(data), &payload); err == nil {
-				if payload.Delta != "" {
+				if payload.Type == "response.output_text.delta" && payload.Delta != "" {
 					select {
 					case deltas <- Delta{Kind: DeltaText, Text: payload.Delta}:
+					case <-ctx.Done():
+						errs <- ctx.Err()
+						return
+					}
+				}
+				if payload.Type == "response.output_item.done" && payload.Item != nil && payload.Item.Type == "function_call" {
+					args := payload.Item.Arguments
+					if args == "" {
+						args = "{}"
+					}
+					callID := payload.Item.CallID
+					if callID == "" {
+						callID = payload.Item.ID
+					}
+					select {
+					case deltas <- Delta{Kind: DeltaToolCall, ToolName: payload.Item.Name, ToolArgs: args, CallID: callID}:
 					case <-ctx.Done():
 						errs <- ctx.Err()
 						return
@@ -184,7 +266,6 @@ func (r *ResponsesProvider) Stream(ctx context.Context, messages []Message) (<-c
 }
 
 func (r *ResponsesProvider) doWithBackoff(ctx context.Context, req *http.Request) (*http.Response, error) {
-	backoff := 10 * time.Millisecond
 	for attempt := 0; attempt < 3; attempt++ {
 		if req.GetBody != nil {
 			body, err := req.GetBody()
@@ -209,8 +290,7 @@ func (r *ResponsesProvider) doWithBackoff(ctx context.Context, req *http.Request
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(backoff):
-			backoff *= 2
+		case <-time.After(JitteredBackoff(10*time.Millisecond, attempt, r.jitter)):
 		}
 	}
 	return nil, fmt.Errorf("exhausted retries")
