@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"time"
@@ -246,6 +247,39 @@ func Enable(caps Capabilities, w io.Writer) {
 	}
 	if caps.SyncOutput {
 		_, _ = io.WriteString(w, syncEnable)
+	}
+}
+
+// RestoreOnSignal installs a watcher that restores the terminal
+// modes when sig arrives, then re-raises the default disposition
+// (P3: SIGHUP/SIGTERM must not leave kitty/sync modes enabled).
+// It returns a stop function; tests and the TUI call it on clean
+// shutdown. w is where Disable writes (usually os.Stdout).
+func RestoreOnSignal(w io.Writer, sig ...os.Signal) (stop func()) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, sig...)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case got := <-ch:
+			Disable(w)
+			signal.Stop(ch)
+			// Re-raise the received signal with default
+			// handling so the exit status still reflects it.
+			signal.Reset(got)
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = p.Signal(got)
+			}
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(ch)
+		select {
+		case <-done:
+		default:
+			close(done)
+		}
 	}
 }
 

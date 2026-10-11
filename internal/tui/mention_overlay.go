@@ -70,7 +70,7 @@ func RenderMentionOverlay(candidates []mention.Candidate, selected int, th Theme
 	)
 
 	return th.CardBorder.
-		Border(lipgloss.RoundedBorder()).
+		Border(ChromeBorder()).
 		Padding(0, 1).
 		Width(boxWidth).
 		Render(content)

@@ -449,7 +449,7 @@ func RenderPaletteView(state PaletteState, th Theme, termWidth int) string {
 		queryDisplay = th.UserText.Render(state.Query)
 	}
 	searchBox := th.PaletteSearch.
-		Border(lipgloss.RoundedBorder()).
+		Border(ChromeBorder()).
 		Padding(0, 1).
 		Width(width - 4).
 		Render("❯ " + queryDisplay + "█")
@@ -530,7 +530,7 @@ func renderConnectModal(state PaletteState, th Theme, width int) string {
 	}
 
 	keyBox := th.PaletteSuccess.
-		Border(lipgloss.RoundedBorder()).
+		Border(ChromeBorder()).
 		Padding(0, 1).
 		Width(width - 4).
 		Render("Key: " + inputDisplay + "█")
@@ -565,7 +565,7 @@ func renderPromptInputModal(titleText, helpText, placeholder, val string, th The
 	}
 
 	box := th.PaletteSuccess.
-		Border(lipgloss.RoundedBorder()).
+		Border(ChromeBorder()).
 		Padding(0, 1).
 		Width(width - 4).
 		Render("❯ " + display + "█")
@@ -604,7 +604,7 @@ func renderMCPAddModal(state PaletteState, th Theme, width int) string {
 	}
 
 	box := th.PaletteSuccess.
-		Border(lipgloss.RoundedBorder()).
+		Border(ChromeBorder()).
 		Padding(0, 1).
 		Width(width - 4).
 		Render("❯ " + display + "█")

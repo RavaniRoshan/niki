@@ -107,6 +107,11 @@ type EngineEvent struct {
 
 type Usage = provider.Usage
 
+// EventSchemaVersion versions sessions and JSON event output
+// (U2). Breaking changes bump this number; readers must tolerate
+// unknown fields (forward-compatible decode).
+const EventSchemaVersion = 1
+
 // Redacted returns a copy with credential-like text scrubbed from
 // the free-text carriers (X3). Callers persist or render the copy,
 // never the original.

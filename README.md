@@ -123,7 +123,7 @@ Most modern coding agents are hundreds of megabytes of Node, Electron, or heavy 
 ## 📦 Installation Guide
 
 ### System Requirements
-* **Operating Systems**: Linux (x86_64, arm64), macOS (Apple Silicon & Intel), Windows (x86_64).
+* **Operating Systems**: Linux (x86_64, arm64), macOS (Apple Silicon & Intel). Native Windows is explicitly unsupported — use WSL (see `niki doctor`, which labels it).
 * **Sandboxing (Linux)**: Bubblewrap (`bwrap`) is recommended for container-grade unprivileged command isolation.
   ```bash
   # Debian/Ubuntu

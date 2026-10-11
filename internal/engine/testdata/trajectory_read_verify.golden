@@ -1,0 +1,16 @@
+session_started
+boot_phase|engine:ready
+boot_phase|model:ready
+boot_phase|terminal:ready
+session_ready
+turn_started
+assistant_message_done
+tool_started|read_file
+tool_completed|read_file|golden-bytes\n
+assistant_text_delta|all 
+assistant_text_delta|script 
+assistant_text_delta|steps 
+assistant_text_delta|done 
+assistant_message_done
+verification
+turn_completed|usage: 14 prompt + 14 completion = 28 tokens over 2 steps (est. cost $0.0000)

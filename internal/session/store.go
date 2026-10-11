@@ -33,6 +33,14 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, type TEXT, payload TEXT, ts INTEGER)`); err != nil {
 		return nil, err
 	}
+	// U2: schema version of the stored events. Writers stamp the
+	// current version; readers accept any version but report it.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)`); err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO meta (k, v) VALUES ('schema_version', ?)`, "1"); err != nil {
+		return nil, err
+	}
 	logPath := path + ".jsonl"
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -66,6 +74,16 @@ func (s *Store) AppendEvent(sessionID protocol.SessionId, evt protocol.EngineEve
 	// fsync every append so a crash cannot corrupt or
 	// lose committed history (P2).
 	return s.log.Sync()
+}
+
+// SchemaVersion reports the schema version this store was
+// written with (U2).
+func (s *Store) SchemaVersion() string {
+	var v string
+	if err := s.db.QueryRow(`SELECT v FROM meta WHERE k = 'schema_version'`).Scan(&v); err != nil {
+		return ""
+	}
+	return v
 }
 
 func (s *Store) ListSessions() ([]string, error) {

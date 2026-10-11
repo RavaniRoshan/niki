@@ -79,7 +79,7 @@ func RenderSessionPicker(state SessionPickerState, th Theme, width, height int) 
 		queryDisplay = th.UserText.Render(state.Query)
 	}
 	searchBox := th.PaletteSearch.
-		Border(lipgloss.RoundedBorder()).
+		Border(ChromeBorder()).
 		Padding(0, 1).
 		Width(modalWidth - 6).
 		Render("❯ " + queryDisplay + "█")
@@ -184,7 +184,7 @@ func RenderSessionPicker(state SessionPickerState, th Theme, width, height int) 
 		}
 
 		rightPane := th.CardBorder.
-			Border(lipgloss.RoundedBorder()).
+			Border(ChromeBorder()).
 			Padding(0, 1).
 			Width(rightWidth).
 			Height(11).

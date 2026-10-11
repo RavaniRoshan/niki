@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -523,7 +524,13 @@ func main() {
 				caps = terminal.Capabilities{}
 			}
 			out := os.Stdout
+			tui.ApplyDisplayEnv(out)
 			terminal.Enable(caps, out)
+			// P3: SIGHUP/SIGTERM restore the modes before the
+			// default disposition kills us; clean shutdown stops
+			// the watcher (the defer below still Disables).
+			stopRestore := terminal.RestoreOnSignal(out, syscall.SIGHUP, syscall.SIGTERM)
+			defer stopRestore()
 			// Hand the boot negotiation result to /doctor so the TUI can
 			// report it without re-probing the live terminal (I3).
 			tui.BootCaps, tui.BootCapsErr = caps, err
@@ -765,6 +772,8 @@ func main() {
 	execCmd.Flags().StringVar(&execOutputFile, "output", "", "Write output to specified file")
 	rootCmd.AddCommand(execCmd)
 	rootCmd.AddCommand(newCICommand())
+	rootCmd.AddCommand(newHelpCommand())
+	rootCmd.AddCommand(newExamplesCommand())
 	rootCmd.AddCommand(newDemoCommand())
 
 	// `nikicode do` routes one natural-language instruction to a recipe,

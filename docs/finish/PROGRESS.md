@@ -499,3 +499,30 @@ any context compaction.
 - Full suite GO_TEST_EXIT=0 (46 ok); gofmt + vet clean; lint
   clean except pre-existing S1000. M1+M3+M6+R1+O1+O5+G1+G3
   GREEN (45 rows).
+
+## 2026-10-11 — Slice S: P1-P5 + H1/H2 + Q1/Q2/Q5/U1/U2 (P0)
+- P-rows: P1 cell-width truncation + ASCII chrome + 3 hermetic
+  golden frames + plain mode; P2 real tmux test (exec/paint/
+  resize, SSH documented); P3 RestoreOnSignal + SIGHUP/panic
+  proofs; P4 Windows-unsupported label locked by test; P5 four
+  cross-builds recorded (darwin arm64/x64, linux arm64/x64).
+- H-rows: `help [topic]` (9) + `examples` (4, all executed by
+  the snippets test incl. a mock→T3-verified exec); key
+  registry (10/10 dispatch, /help generated from it; stale
+  Never-Ask line fixed, handler-less Ctrl+R unadvertised).
+- Q-rows: trajectory golden with printed diffs; `internal/eval`
+  20-task suite at 100% with EVALS.md; race-clean subset +
+  no-leak test; U1 migrate (dry-run/backup/version/key-strip);
+  U2 event schema v1 + forward-compat decode.
+- Acceptance printed: `[P1 …] golden frame matches` x3 +
+  `cell widths correct`; `[P2] … completes inside tmux` +
+  `paints … re-renders after resize`; `[P3] … idempotent` +
+  `SIGHUP restored …` + `panic path restored`;
+  `[P4] … labelled unsupported …`; cross-build sizes;
+  `[H1] 9 help topics` + 4 example lines;
+  `[H2] key … dispatches` x10; `[Q1] trajectory matches
+  golden`; `[Q2] … 20/20 = 100%`; `[Q5] goroutines 2 -> 2`;
+  `[U1] dry run … backup …`; `[U2] schema version 1 …`.
+- Full suite GO_TEST_EXIT=0 (46 ok); gofmt + vet clean; lint
+  clean except pre-existing S1000. P1-P5+H1+H2+Q1+Q2+Q5+U1+U2
+  GREEN (57 rows).

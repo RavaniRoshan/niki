@@ -259,8 +259,6 @@ func (d *DiffViewerState) Render(th Theme, width, height int) string {
 }
 
 func truncate(s string, max int) string {
-	if len(s) > max && max > 3 {
-		return s[:max-3] + "…"
-	}
-	return s
+	// P1: truncate by display cells, never splitting a rune.
+	return TruncateTo(s, max)
 }

@@ -460,3 +460,56 @@ decisions were confirmed by the owner on 2026-10-10 (see docs/FINISH_PACK.md).
 - Rejected: resetting the world on G1 wiring (surprise checkout
   moves); telemetry allowlists (there is no telemetry — absence
   is tested, not configured).
+
+## D-26 — P1-P5 terminal/platform rows (P0)
+
+- P1: width measured in cells via go-runewidth (new direct dep);
+  `TruncateTo` is rune-safe with an ascii-aware ellipsis. Chrome
+  goes ASCII at the source (borders, markers, hints, brandline) —
+  no global post-filter, so user content with unicode is never
+  mangled. `NIKI_PLAIN=1` = plain (ascii + colorless) for logs
+  and screen readers. Goldens are hermetic (frozen dir/branch).
+- P2: real tmux test (exec + paint + resize). SSH untestable
+  here — documented, not claimed. The mock-provider exec quirk
+  (30-step inconclusive loop on checkless dirs) is pre-existing
+  behavior, not a P2 concern.
+- P3: `RestoreOnSignal` re-raises the RECEIVED signal only
+  (first draft re-raised all — fixed before commit). Panic path
+  reuses the pre-existing Disable defer.
+- P4: label path, locked by a test that reads the three files.
+- P5: agent-run builds recorded (CI matrix pre-existed for
+  ubuntu+macos+race).
+- Rejected: a global ASCII post-filter (mangles user content);
+  implementing Ctrl+R history search to save one help line (no
+  such store exists — unadvertised instead).
+
+## D-27 — H1/H2 help rows (P0)
+
+- H1: custom `help [topic]` overrides cobra's builtin (bare →
+  standard help, topic → text, unknown → topic list). Examples
+  are data (`RunnableExamples`) rendered by the command AND
+  executed by the test — one source, two uses.
+- H2: the registry pairs help text with the canonical KeyMsg;
+  the test presses each with per-key arming. The registry
+  intentionally covers only dispatchable keys (!/@// are
+  composer prefixes documented as notes).
+- Rejected: refactoring Update's inline dispatch into the
+  registry (11 interleaved cases; the pairing test gives the
+  same guarantee cheaper).
+
+## D-28 — Q1/Q2/Q5/U1/U2 quality rows (P0)
+
+- Q1: normalized trajectory goldens (IDs/tmps scrubbed);
+  NIKI_WRITE_GOLDEN=1 regenerates (same knob as frame goldens).
+- Q2: `internal/eval` drives only public API (NewEngine,
+  SetBudget/SetVerifier/SetCheckpoints, protocol commands) —
+  the suite doubles as a public-surface smoke test. EVALS.md is
+  written by the test (fixture section); M9 appends.
+- Q5: race on a targeted subset (full-suite -race is CI's job
+  and takes minutes); leak via GC-settled NumGoroutine polling.
+- U1: one real prior version (v0); unknown future versions
+  refuse loudly. Migration also enforces I4 (keys out of files).
+- U2: version in DB meta (JSONL stays a pure event log);
+  forward-compat decode asserted so minor additions don't bump.
+- Rejected: goleak dependency (stdlib polling suffices, no new
+  dep); versioning every JSONL line (the store meta owns it).

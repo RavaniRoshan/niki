@@ -1268,18 +1268,13 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 			helpText.WriteString("  " + cmd.Name + " — " + cmd.Description + "\n")
 		}
 		helpText.WriteString("\nKeybindings:\n")
-		helpText.WriteString("  Shift+Tab: Cycle mode (Ask When Needed / Always Ask / Never Ask / Plan Mode)\n")
+		// H2: generated from the key registry — every advertised
+		// key dispatches (proven by the registry test). Never Ask
+		// is intentionally absent from the cycle (X2: explicit
+		// /yolo only); Ctrl+R has no handler and is not advertised.
+		helpText.WriteString(KeyHelpText())
 		helpText.WriteString("  ! <cmd>: Execute local shell command directly (fast path, no LLM)\n")
 		helpText.WriteString("  @<file>: Fuzzy file & symbol autocomplete overlay\n")
-		helpText.WriteString("  Ctrl+P: Command palette & settings\n")
-		helpText.WriteString("  Ctrl+S: Session manager & switcher\n")
-		helpText.WriteString("  Ctrl+G: Open input in external $EDITOR\n")
-		helpText.WriteString("  Ctrl+O: Toggle tool output folding\n")
-		helpText.WriteString("  Ctrl+R: Search prompt history\n")
-		helpText.WriteString("  Esc: Pause turn (Esc twice stops) / Deny approval / Close palette\n")
-		helpText.WriteString("  Ctrl+C: Clear input / Interrupt\n")
-		helpText.WriteString("  Ctrl+D: Exit on empty input\n")
-		helpText.WriteString("  Ctrl+Z: Suspend process\n")
 		m.history.Append("system", helpText.String())
 	case input == "/palette" || input == "/settings" || input == "/config":
 		m.state.Palette.Open = true
@@ -1623,7 +1618,7 @@ func (m AppModel) welcomeCardView() string {
 
 	cardInner := topRow + "\n\n" + metaBlock
 	card := m.theme.CardBorder.
-		Border(lipgloss.RoundedBorder()).
+		Border(ChromeBorder()).
 		Padding(1, 2).
 		Width(cardWidth).
 		Render(cardInner)
@@ -1705,7 +1700,11 @@ func (m AppModel) footerView() string {
 	if m.state.Busy {
 		rightHints = m.theme.StatusHints.Render("esc interrupt · ctrl+o fold output")
 	} else {
-		rightHints = m.theme.StatusHints.Render("shift+tab mode · ! shell · @ file · ctrl+p menu")
+		hints := "shift+tab mode · ! shell · @ file · ctrl+p menu"
+		if UseASCII() {
+			hints = "shift+tab mode - ! shell - @ file - ctrl+p menu"
+		}
+		rightHints = m.theme.StatusHints.Render(hints)
 	}
 
 	w := m.state.Width
@@ -1840,6 +1839,9 @@ func (m AppModel) View() string {
 func (m AppModel) activityView() string {
 	act := m.state.Activity
 	if act == "" {
+		if UseASCII() {
+			return m.theme.Muted.Render("  o NikiCode is ready")
+		}
 		return m.theme.Muted.Render("  ○ NikiCode is ready")
 	}
 	glyph := m.theme.ActivityGlyph.Render(SpinGlyphWithStyle(m.state.SpinnerStyle, m.state.SpinFrame, m.state.ReducedMotion, UseASCII()) + " ")
@@ -1871,7 +1873,7 @@ func (m AppModel) composerView() string {
 		cardWidth = 50
 	}
 	composerBox := m.theme.ComposerBorder.
-		Border(lipgloss.RoundedBorder()).
+		Border(ChromeBorder()).
 		Width(cardWidth).
 		Render(m.composer.Input.View())
 
