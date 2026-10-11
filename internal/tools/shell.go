@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/sandbox"
 )
 
@@ -62,6 +63,12 @@ func (t *ShellTool) Run(ctx context.Context, args json.RawMessage) (ToolResult, 
 	var a shellArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return ToolResult{}, fmt.Errorf("bad args: %w", err)
+	}
+	// G3: no push at all from autonomous runs — not force push,
+	// not history rewrite, not any push. The refusal happens here
+	// (not behind an approval) so no prompt can smuggle it through.
+	if permissions.IsPushCommand(a.Command) {
+		return ToolResult{Output: "refusing: git push is never run by autonomous runs (no push, no force push, no history rewrite)", IsError: true}, nil
 	}
 	if a.Timeout <= 0 {
 		a.Timeout = 120

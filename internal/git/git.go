@@ -245,6 +245,30 @@ func BranchCreate(dir, name string) error {
 	return err
 }
 
+// EnsureRunBranch moves the worktree onto a per-run branch
+// (niki/run-<id>) and reports the branch it came from, so the
+// user's checked-out branch is never modified by the run (G1).
+// A dirty checkout rides along untouched (checkout -b moves the
+// worktree pointer; it stages nothing and commits nothing).
+func EnsureRunBranch(dir, runID string) (prior string, err error) {
+	prior, err = CurrentBranch(dir)
+	if err != nil {
+		return "", err
+	}
+	name := "niki/run-" + runID
+	if err := BranchCreate(dir, name); err != nil {
+		// A retry of the same run reuses its branch.
+		if strings.Contains(err.Error(), "already exists") {
+			if err := BranchSwitch(dir, name); err != nil {
+				return "", err
+			}
+			return prior, nil
+		}
+		return "", err
+	}
+	return prior, nil
+}
+
 // BranchSwitch checks out an existing branch.
 func BranchSwitch(dir, name string) error {
 	if strings.TrimSpace(name) == "" {

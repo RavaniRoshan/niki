@@ -1,11 +1,7 @@
 package permissions
 
 import (
-	"context"
-	"encoding/json"
 	"testing"
-
-	"github.com/RavaniRoshan/niki/internal/tools"
 )
 
 func TestPlanModeWithholdingAndApproval(t *testing.T) {
@@ -45,18 +41,9 @@ func TestPlanModeWithholdingAndApproval(t *testing.T) {
 		}
 	}
 
-	// 4. UpdatePlan tool rejection test during Plan Mode
-	up := tools.NewUpdatePlanTool()
-	up.SetPlanMode(true)
-	res, err := up.Run(context.Background(), json.RawMessage(`{
-		"steps": [{"title": "Step 1", "status": "in_progress"}]
-	}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.IsError {
-		t.Fatalf("update_plan should be rejected in plan mode: %v", res)
-	}
+	// 4. update_plan rejection lives in tools (update_plan_mode_test):
+	// tools now imports permissions (G3 push guard), so the reverse
+	// import in this package's tests would be a cycle.
 
 	// 5. Exiting Plan Mode requires explicit approval
 	if err := guard.ExitPlanMode(false); err == nil {

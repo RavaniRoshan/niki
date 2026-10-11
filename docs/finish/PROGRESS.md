@@ -469,3 +469,33 @@ any context compaction.
 - Full suite GO_TEST_EXIT=0 (46 ok); gofmt clean; lint clean
   except pre-existing S1000. T1+T2+T3+T8+X1+X2+X3+X4+X6 GREEN
   (37 rows).
+
+## 2026-10-11 — Slice R: M1/M3/M6 + R1/O1/O5/G1/G3 (P0)
+- M-rows: repair round-trip (validator error + schema, 2 tries
+  then logged failure) with outcome snapshotting;
+  `toolSpecs()` plan-gating (17 read-only) + dispatch denial;
+  `RepeatCount` reminder-on-2 / doom-stop-on-3.
+- R1: 50-append torn-line scan + resume (pre-existing kill tests
+  green). O1: usage accumulation + totals on turn_completed.
+  O5: `logx.OpenRotated` (1 MiB/3 backups) + `/proc` growth
+  network-capture test. G1: `EnsureRunBranch` + dirty-checkout
+  proof. G3: `IsPushCommand` AST refusal in shell (pre-approval).
+- Fallout fixed: T2 versioning rejected engine fixture schemas
+  (L6/steer broke) → fixtures versioned; `TestShiftTabCyclesModes`
+  updated to the X2 cycle; tools→permissions import forced
+  moving the update_plan half of the plan-mode test (cycle).
+- Acceptance printed: `[M1] malformed args -> … recovered on
+  retry`; `[M1] two retries then logged failure`;
+  `[M6] reminder on 2nd identical call, stop on 3rd`;
+  `[M3] PLAN exposes 17 read-only tools …`;
+  `[R1] 50 atomic appends, 0 torn lines … resumed … 51 events`;
+  `[O1] per-step 21/21 summed exactly; final report: usage: 21
+  prompt + 21 completion = 42 tokens over 3 steps …`;
+  `[O5] 300 entries -> 3 bounded files …`;
+  `[O5] full run: external connections 1 -> 1 (no telemetry)`;
+  `[G1] run on niki/run-abc123; dirty checkout intact; main
+  still at 1 commit(s)`;
+  `[G3] 4 push forms refused … non-push unaffected`.
+- Full suite GO_TEST_EXIT=0 (46 ok); gofmt + vet clean; lint
+  clean except pre-existing S1000. M1+M3+M6+R1+O1+O5+G1+G3
+  GREEN (45 rows).

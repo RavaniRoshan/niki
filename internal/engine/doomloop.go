@@ -64,6 +64,25 @@ func (d *DoomLoopDetector) Record(name string, argsJSON string, success bool) bo
 	return true
 }
 
+// RepeatCount returns how many times the identical call (name +
+// args) concludes the history, counting the just-recorded attempt
+// by the caller convention: call it BEFORE Record for the current
+// attempt, so 1 means "first occurrence", 2 the first repeat (M6
+// reminder), 3 the stop.
+func (d *DoomLoopDetector) RepeatCount(name string, argsJSON string) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	h := d.hashCall(name, argsJSON)
+	n := 0
+	for i := len(d.history) - 1; i >= 0; i-- {
+		if d.history[i].hash != h {
+			break
+		}
+		n++
+	}
+	return n + 1
+}
+
 // Reset clears the historical call tracker.
 func (d *DoomLoopDetector) Reset() {
 	d.mu.Lock()

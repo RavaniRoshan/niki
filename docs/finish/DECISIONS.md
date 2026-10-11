@@ -418,3 +418,45 @@ decisions were confirmed by the owner on 2026-10-10 (see docs/FINISH_PACK.md).
   is left alone (project-local Ollama is a legitimate setup).
 - Rejected: blocking tool delivery on directive hits (blinds the
   model); refusing all project configs (legitimate setups break).
+
+## D-24 — M1/M3/M6 small-model rows (P0)
+
+- M1: repair text replaces the tool error for two attempts
+  (validator error + `Schema excerpt`), then the raw failure goes
+  back with a `repair failed after 2 attempts` warning. The
+  outcome is captured before the error is niled for message flow
+  so guards still see failures. Counter resets on any success.
+- M3: `toolSpecs()` filters by `IsReadOnlyTool` in plan mode;
+  dispatch denial (Guard/L8) is the second layer. 17 tools stay
+  visible (read/grep/glob/web/git-read/symbol…).
+- M6: `RepeatCount` asked before `Record` (1 = first sighting).
+  Reminder fires on exactly 2 (warning + model feedback with a
+  different-strategy nudge); the existing doom trip holds
+  (failed-identical only), which ends the turn not-verified —
+  that surfacing IS the "ask".
+- Rejected: unbounded repair retries (models loop on garbage);
+  resetting the repair counter per distinct args (one shape can
+  still wedge the turn — consecutive counting is the honest
+  bound); ending the turn on the reminder (the model deserves the
+  second chance the row promises).
+
+## D-25 — R1/O1/O5/G1/G3 session/observability/git rows (P0)
+
+- R1: atomicity = single `Write` + fsync per append (whole JSONL
+  lines only); crash proof reuses the pre-existing real-kill
+  test plus a 50-append torn-line scan.
+- O1: accumulation in the runner (no new store); the completed
+  event is the final report (Usage + human line with steps and
+  routing-model cost). Live visibility stays with per-step
+  deltas + budget gauges.
+- O5: rotation before overflow (no file passes the cap), 1 MiB /
+  3 backups default; network proof is growth-based (before/after
+  `/proc` snapshot) so the environment's own connections don't
+  flake the test. Non-Linux skips (documented).
+- G1: mechanism proven, auto-switch deliberately unwired (E3
+  shadow refs already isolate; moving checkouts surprises).
+- G3: refusal precedes approval (fail-closed, unpromptable).
+  `git -C <dir> push` and `--tags` covered by flag-skipping.
+- Rejected: resetting the world on G1 wiring (surprise checkout
+  moves); telemetry allowlists (there is no telemetry — absence
+  is tested, not configured).

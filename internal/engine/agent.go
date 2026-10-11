@@ -113,6 +113,15 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 	const maxStreamAttempts = 3 // L6: 1 try + 2 jittered retries
 	doomDetector := NewDoomLoopDetector(DefaultDoomLoopThreshold)
 	var trippedDoomLoop bool
+	// M1: consecutive schema-repair attempts for the current bad
+	// call shape. Two retries carry the validator error plus a
+	// schema excerpt back to the model; the third strike is a
+	// logged failure, not another retry.
+	var argRepairs int
+	// O1: live usage totals for the final report. Every step's
+	// reported usage accumulates here; the completed event carries
+	// the totals so they match the fixture's recorded usage exactly.
+	var turnUsage provider.Usage
 
 	for step := 0; step < maxSteps; step++ {
 		// L2 budget gauges: evaluated at each safe point (the step
@@ -232,6 +241,11 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 			emit(protocol.EngineEvent{Type: protocol.EventTurnFailed, Timestamp: time.Now(), TurnID: turnID, Error: streamErr.Error()})
 			return WrapProvider(streamErr)
 		}
+		if stepUsage != nil {
+			turnUsage.PromptTokens += stepUsage.PromptTokens
+			turnUsage.CompletionTokens += stepUsage.CompletionTokens
+			turnUsage.TotalTokens += stepUsage.TotalTokens
+		}
 
 		if t.budgetTracker != nil {
 			var stepCost float64
@@ -271,7 +285,18 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 				Verification: &protocol.VerificationInfo{Attempt: t.verifyAttempt, Result: string(v.Result), Reason: v.Reason},
 			})
 			if v.Passed() {
-				emit(protocol.EngineEvent{Type: protocol.EventTurnCompleted, Timestamp: time.Now(), TurnID: turnID})
+				// O1: the final report carries totals (tokens +
+				// cost over the run's steps), matching the sum of
+				// the per-step usage deltas.
+				stepsUsed := step + 1
+				report := turnUsage
+				if report.TotalTokens == 0 {
+					report.TotalTokens = report.PromptTokens + report.CompletionTokens
+				}
+				emit(protocol.EngineEvent{Type: protocol.EventTurnCompleted, Timestamp: time.Now(), TurnID: turnID,
+					Usage: &report,
+					Text:  fmt.Sprintf("usage: %d prompt + %d completion = %d tokens over %d steps (est. cost $%.4f)", report.PromptTokens, report.CompletionTokens, report.TotalTokens, stepsUsed, routing.CalculateCost(t.budgetModel, report)),
+				})
 				return nil
 			}
 			if t.verMaxLoops > 0 && t.verifyAttempt >= t.verMaxLoops {
@@ -322,6 +347,28 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 
 			res, err := t.dispatchTool(ctx, tc.Tool, tc.Args)
 			output := res.Output
+			// Outcome before M1 repair nils the error for message
+			// flow: validation failures must still count as
+			// failures for the repetition guards.
+			dispatchOK := err == nil
+			if schema, bad := invalidArgsSchema(t.Registry, tc.Tool, err); bad {
+				if argRepairs < 2 {
+					argRepairs++
+					output = fmt.Sprintf("Tool error: %v\n\nArguments failed schema validation (repair attempt %d of 2). Schema excerpt:\n%s\nFix the arguments and retry.",
+						err, argRepairs, schema)
+					err = nil // the repair, not the failure, goes back
+				} else {
+					argRepairs = 0
+					emit(protocol.EngineEvent{
+						Type:      protocol.EventWarning,
+						Timestamp: time.Now(),
+						TurnID:    turnID,
+						Text:      fmt.Sprintf("tool call repair failed after 2 attempts for %s; giving up on these arguments", tc.Tool),
+					})
+				}
+			} else if dispatchOK {
+				argRepairs = 0
+			}
 			if err != nil {
 				emit(protocol.EngineEvent{
 					Type:      protocol.EventToolFailed,
@@ -366,7 +413,18 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 				}
 			}
 
-			if doomDetector.Record(tc.Tool, tc.Args, err == nil) {
+			if n := doomDetector.RepeatCount(tc.Tool, tc.Args); n == 2 {
+				// M6: the second identical call earns a reminder
+				// with a different strategy, fed back to the model.
+				emit(protocol.EngineEvent{
+					Type:      protocol.EventWarning,
+					Timestamp: time.Now(),
+					TurnID:    turnID,
+					Text:      fmt.Sprintf("same tool call twice in a row (%s) — try a different strategy", tc.Tool),
+				})
+				output += "\n\nReminder: you just made this exact tool call twice in a row. Try a different strategy instead of repeating it."
+			}
+			if doomDetector.Record(tc.Tool, tc.Args, dispatchOK) {
 				trippedDoomLoop = true
 				emit(protocol.EngineEvent{
 					Type:      protocol.EventWarning,
@@ -466,13 +524,21 @@ func (t *TurnRunner) observeBudget(ctx context.Context, turnID protocol.TurnId, 
 // toolSpecs exposes the registry to the provider as request-side tool schemas.
 // This is the request half of the tool loop: the model can only call tools the
 // request told it about.
+// planMutatingTools are never offered to the model during PLAN:
+// the turn exposes only the tool family for the current phase (M3).
+// Dispatch denies them too (permissions.Guard), so a smuggled call
+// still cannot run.
 func (t *TurnRunner) toolSpecs() []provider.ToolSpec {
 	if t.Registry == nil {
 		return nil
 	}
+	planMode := t.Perm != nil && t.Perm.InPlanMode()
 	list := t.Registry.List()
 	specs := make([]provider.ToolSpec, 0, len(list))
 	for _, tool := range list {
+		if planMode && !permissions.IsReadOnlyTool(tool.Name()) {
+			continue
+		}
 		specs = append(specs, provider.ToolSpec{
 			Name:        tool.Name(),
 			Description: tool.Description(),
@@ -480,6 +546,24 @@ func (t *TurnRunner) toolSpecs() []provider.ToolSpec {
 		})
 	}
 	return specs
+}
+
+// invalidArgsSchema reports whether err is a schema-validation
+// rejection for the named tool, returning the tool's schema excerpt
+// for the M1 repair round-trip (validator error + schema go back to
+// the model).
+func invalidArgsSchema(reg *tools.Registry, name string, err error) (string, bool) {
+	if err == nil || reg == nil {
+		return "", false
+	}
+	if !strings.HasPrefix(err.Error(), "invalid args for "+name) {
+		return "", false
+	}
+	tool, ok := reg.Get(name)
+	if !ok {
+		return "", false
+	}
+	return tool.Schema(), true
 }
 
 func (t *TurnRunner) dispatchTool(ctx context.Context, name, argsJSON string) (tools.ToolResult, error) {
