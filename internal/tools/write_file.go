@@ -36,9 +36,15 @@ func (t *WriteFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResu
 	}
 	// E6: text tools never clobber binary/oversize targets; creating
 	// a new file is always allowed.
+	// N: keep the existing target's permission bits; new files get
+	// the umask-normal default 0644 (never CreateTemp's 0600).
+	targetMode := os.FileMode(0o644)
 	if existing, rerr := os.ReadFile(a.Path); rerr == nil {
 		if reason := nonTextReason(existing); reason != "" {
 			return ToolResult{Output: "refusing to overwrite: " + reason, IsError: true}, nil
+		}
+		if fi, serr := os.Stat(a.Path); serr == nil {
+			targetMode = fi.Mode().Perm()
 		}
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(a.Path), ".nikicode-write-*")
@@ -51,6 +57,9 @@ func (t *WriteFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResu
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}
 	tmp.Close()
+	if err := os.Chmod(tmp.Name(), targetMode); err != nil {
+		return ToolResult{Output: err.Error(), IsError: true}, nil
+	}
 	if err := os.Rename(tmp.Name(), a.Path); err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}

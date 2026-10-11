@@ -104,6 +104,12 @@ func (t *EditFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResul
 		updated = strings.Replace(fileContent, a.OldString, a.NewString, 1)
 	}
 
+	// Preserve the target's permission bits across the atomic
+	// replace (N: an edit must not turn a 0600 secret into 0644).
+	origMode := os.FileMode(0o644)
+	if fi, serr := os.Stat(a.Path); serr == nil {
+		origMode = fi.Mode().Perm()
+	}
 	// Atomic replace: write a temp file and rename, so an interrupt
 	// mid-write can never leave a torn file (L5).
 	tmp, err := os.CreateTemp(filepath.Dir(a.Path), ".nikicode-edit-*")
@@ -118,7 +124,7 @@ func (t *EditFileTool) Run(ctx context.Context, args json.RawMessage) (ToolResul
 	if err := tmp.Close(); err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}
-	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+	if err := os.Chmod(tmp.Name(), origMode); err != nil {
 		return ToolResult{Output: err.Error(), IsError: true}, nil
 	}
 	if err := os.Rename(tmp.Name(), a.Path); err != nil {

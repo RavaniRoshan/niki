@@ -23,6 +23,9 @@ const (
 	CmdForkSession       CommandType = "fork_session"
 	CmdDeleteSession     CommandType = "delete_session"
 	CmdSetPermissionMode CommandType = "set_permission_mode"
+	CmdUndo              CommandType = "undo"
+	CmdRewind            CommandType = "rewind"
+	CmdUnrevert          CommandType = "unrevert"
 	CmdSetPlanMode       CommandType = "set_plan_mode"
 	CmdSetThinkingEffort CommandType = "set_thinking_effort"
 )
@@ -35,6 +38,7 @@ type EngineCommand struct {
 	WorkingDir string      `json:"working_dir,omitempty"`
 	Answers    []string    `json:"answers,omitempty"`
 	SessionID  SessionId   `json:"session_id,omitempty"`
+	TurnID     TurnId      `json:"turn_id,omitempty"`
 	Mode       string      `json:"mode,omitempty"`
 	Effort     string      `json:"effort,omitempty"`
 }

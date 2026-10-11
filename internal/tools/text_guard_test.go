@@ -86,9 +86,8 @@ func TestEditCRLFRoundTrip(t *testing.T) {
 		t.Fatalf("[E6] CRLF edit failed: %s", res.Output)
 	}
 	data := read(t, p)
-	if strings.Contains(data, "\n") != strings.Contains(data, "\r\n") {
-		// every \n must be preceded by \r
-	}
+	// Every \n must be preceded by \r: the count check below (bare
+	// LF would make \n outnumber \r\n) is the real assertion.
 	if got, want := strings.Count(data, "\r\n"), strings.Count(orig, "\r\n"); got != want {
 		t.Fatalf("[E6] CRLF count changed: got %d want %d (%q)", got, want, data)
 	}

@@ -360,3 +360,36 @@ any context compaction.
   bare LF`; `[E6 write-binary] refusing to overwrite …`.
 - Full suite GO_TEST_EXIT=0 (45 ok); gofmt clean. E1+E6 GREEN (18
   rows).
+
+## 2026-10-11 — Slice N: E3 checkpoints/rewind + E4 undo (P0)
+- E4 (D-16): new `internal/undo` stack; engine `dispatchTool`
+  captures pre-images of the four file tools and pushes changed
+  effects; `CmdUndo`/`CmdRewind`/`CmdUnrevert` in `handleCommand`
+  (refuse while a turn runs); `Engine.SetCheckpoints`,
+  `Session.Snapshot` (mutex-guarded), protocol `CmdUndo/CmdRewind/
+  CmdUnrevert` + `EngineCommand.TurnID`.
+- E3 (D-17): checkpoint at turn start (events + `CreateGitTreeSnapshot`
+  now also writing shadow ref `refs/niki/checkpoints/<turnID>`);
+  `CapturePreImage`/`RecordAfter`; After-aware `RewindCode` + mode
+  restore + Created handling; `LastTurnID`; mode-preserving edits
+  (edit_file stat+chmod, write_file 0644-new/preserve-overwrite);
+  TUI /undo added, /rewind + /unrevert stubs replaced with real
+  commands.
+- New tests: `internal/engine/undo_checkpoint_test.go` (3: undo
+  bytes+mode, refusal-keeps-user-edits+retry, checkpoint+rewind
+  bytes/modes/created-removal/conversation/shadow-ref) and
+  `internal/tools/mode_preserve_test.go` (2). Acceptance printed:
+  `[E4] empty-stack message: nothing to undo`;
+  `[E4 refusal] undo refused: cannot undo …: file changed since the
+  agent edit (your changes are kept)`;
+  `[E4 retry] undid edit_file change to …`;
+  `[E3 rewind] rewound to checkpoint <id>: restored 2 file(s),
+  skipped 0, conversation events 6`;
+  `[E3] bytes+mode restored (-rw-------), created file removed,
+  conversation events=6, shadow
+  ref=refs/niki/checkpoints/<id>`; `[N] edit_file preserved mode
+  600`; `[N] write_file preserved 755 on overwrite, 644 for new
+  file`.
+- Full suite GO_TEST_EXIT=0 (45 ok); gofmt clean; golangci-lint
+  clean except a pre-existing S1000 in a Slice-L test. E3+E4 GREEN
+  (20 rows).

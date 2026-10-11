@@ -1467,10 +1467,19 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 			}
 			m.renderLive()
 		}
-	case input == "/rewind" || strings.HasPrefix(input, "/rewind"):
-		m.history.Append("system", "Rewound session state to previous turn checkpoint.")
-	case input == "/unrevert" || strings.HasPrefix(input, "/unrevert"):
-		m.history.Append("system", "Restored workspace files from pre-rewind state (unrevert complete).")
+	case input == "/undo":
+		// E4: real engine command; the engine's answer arrives as an
+		// event (nothing to undo / undo refused / undid <tool>).
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdUndo}
+		m.history.Append("system", "Undo requested — the engine replies when the stack is empty or the file changed.")
+	case strings.HasPrefix(input, "/rewind"):
+		// E3: real engine command, optionally targeting a turn id.
+		arg := strings.TrimSpace(strings.TrimPrefix(input, "/rewind"))
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdRewind, TurnID: protocol.TurnId(arg)}
+		m.history.Append("system", "Rewind requested — the engine replies with restored/skipped file counts.")
+	case input == "/unrevert":
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdUnrevert}
+		m.history.Append("system", "Unrevert requested — the engine replies with what was restored.")
 	case input == "/stash" || strings.HasPrefix(input, "/stash"):
 		arg := strings.TrimSpace(strings.TrimPrefix(input, "/stash"))
 		switch arg {

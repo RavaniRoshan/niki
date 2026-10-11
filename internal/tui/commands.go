@@ -25,6 +25,7 @@ var CoreSlashCommands = []CommandDef{
 	{Name: "/auto", Description: "Set mode to Ask When Needed (standard workspace writes)"},
 	{Name: "/manual", Description: "Set mode to Always Ask (prompt on every action)"},
 	{Name: "/thinking", Description: "Set model thinking/reasoning effort (/thinking [off|low|med|high])"},
+	{Name: "/undo", Description: "Undo the last agent file change (keeps your edits)"},
 	{Name: "/rewind", Description: "Rewind code files or conversation to a checkpoint"},
 	{Name: "/unrevert", Description: "Redo / restore files from the pre-rewind state"},
 	{Name: "/agents", Description: "View active subagents and hierarchy"},

@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/RavaniRoshan/niki/internal/budget"
+	"github.com/RavaniRoshan/niki/internal/checkpoint"
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/tools"
+	"github.com/RavaniRoshan/niki/internal/undo"
 	"github.com/RavaniRoshan/niki/internal/verifier"
 )
 
@@ -40,6 +42,12 @@ type Engine struct {
 	// L5: first Esc asks for a pause at the next safe point; a
 	// second Esc (or CmdInterruptTurn) stops the run now.
 	pauseRequested atomic.Bool
+
+	// E3: per-turn checkpoints; set once via SetCheckpoints.
+	checkpoints *checkpoint.Manager
+	// E4: session-scoped undo stack of the agent's file changes;
+	// CmdUndo reverts the newest effect.
+	undo *undo.Stack
 
 	// emitMu serializes emit() now that turns run on their
 	// own goroutines and the engine loop emits concurrently.
@@ -104,6 +112,9 @@ func NewEngine(bufferSize int, prov provider.ModelProvider, reg *tools.Registry,
 		},
 	}
 	eng.runner.PauseRequested = func() bool { return eng.pauseRequested.Load() }
+	eng.undo = undo.NewStack()
+	eng.runner.Undo = eng.undo
+	eng.runner.HistoryEvents = eng.session.Snapshot
 	// Built-in required warmers: the engine loop itself, the model
 	// provider constructor, and a terminal capability probe.
 	eng.WarmRequired(CapEngine, func(context.Context) error { return nil })
@@ -141,6 +152,14 @@ func (e *Engine) SetVerifier(v verifier.Verifier, maxLoops int) {
 	e.runner.verifier = v
 	e.runner.verMaxLoops = maxLoops
 	e.runner.verifyAttempt = 0
+}
+
+// SetCheckpoints installs the per-turn checkpoint manager (E3): each
+// turn snapshots the git tree before doing anything, captures files
+// at first touch, and CmdRewind restores from that state.
+func (e *Engine) SetCheckpoints(mgr *checkpoint.Manager) {
+	e.checkpoints = mgr
+	e.runner.Checkpoints = mgr
 }
 
 // SetBudgetCheck installs the check invoked when a budget enters WRAP
@@ -415,6 +434,71 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 			Timestamp: time.Now(),
 			Text:      fmt.Sprintf("Plan mode set to %s", cmd.Mode),
 		})
+	case protocol.CmdUndo:
+		e.mu.Lock()
+		running := e.turnRunning
+		e.mu.Unlock()
+		if running {
+			e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "undo refused: a turn is running"})
+			return
+		}
+		eff, err := e.undo.UndoLast()
+		if err != nil {
+			msg := "undo refused: " + err.Error()
+			if err.Error() == "nothing to undo" {
+				msg = "nothing to undo"
+			}
+			e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: msg})
+			return
+		}
+		e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "undid " + eff.Tool + " change to " + eff.Path})
+	case protocol.CmdRewind:
+		e.mu.Lock()
+		running := e.turnRunning
+		e.mu.Unlock()
+		if running {
+			e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "rewind refused: a turn is running"})
+			return
+		}
+		if e.checkpoints == nil {
+			e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "rewind refused: checkpoints are not enabled"})
+			return
+		}
+		target := string(cmd.TurnID)
+		if target == "" {
+			target = e.checkpoints.LastTurnID()
+			if target == "" {
+				e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "rewind refused: no checkpoint yet"})
+				return
+			}
+		}
+		res, convEvents, err := e.checkpoints.RewindAll(target, false)
+		if err != nil {
+			e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "rewind failed: " + err.Error()})
+			return
+		}
+		e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: fmt.Sprintf(
+			"rewound to checkpoint %s: restored %d file(s), skipped %d, conversation events %d",
+			target, len(res.Restored), len(res.Skipped), len(convEvents))})
+	case protocol.CmdUnrevert:
+		e.mu.Lock()
+		running := e.turnRunning
+		e.mu.Unlock()
+		if running {
+			e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "unrevert refused: a turn is running"})
+			return
+		}
+		if e.checkpoints == nil {
+			e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "unrevert refused: checkpoints are not enabled"})
+			return
+		}
+		res, err := e.checkpoints.Unrevert()
+		if err != nil {
+			e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "unrevert failed: " + err.Error()})
+			return
+		}
+		e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: fmt.Sprintf(
+			"unreverted: restored %d file(s)", len(res.Restored))})
 	case protocol.CmdStartSession:
 		e.emit(protocol.EngineEvent{Type: protocol.EventSessionReady, Timestamp: time.Now(), SessionID: e.session.ID})
 	case protocol.CmdListSessions:

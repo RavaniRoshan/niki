@@ -1,19 +1,23 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/RavaniRoshan/niki/internal/budget"
+	"github.com/RavaniRoshan/niki/internal/checkpoint"
 	"github.com/RavaniRoshan/niki/internal/diagnostics"
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/provider"
 	"github.com/RavaniRoshan/niki/internal/routing"
 	"github.com/RavaniRoshan/niki/internal/tools"
+	"github.com/RavaniRoshan/niki/internal/undo"
 	"github.com/RavaniRoshan/niki/internal/verifier"
 )
 
@@ -40,6 +44,20 @@ type TurnRunner struct {
 	// L5: reports whether an Esc pause is pending; the turn ends at
 	// the next safe point (between tool calls) with all edits kept.
 	PauseRequested func() bool
+
+	// E3: per-turn checkpoints (files captured at first touch, git
+	// tree snapshot at turn start). Nil disables checkpointing.
+	Checkpoints *checkpoint.Manager
+	// E4: the session undo stack; file-mutating tool effects are
+	// pushed here so CmdUndo can revert the last agent change.
+	Undo *undo.Stack
+	// HistoryEvents supplies the conversation snapshot stored in each
+	// new checkpoint (events recorded before this turn).
+	HistoryEvents func() []protocol.EngineEvent
+
+	// currentTurn is the turn id of the Run currently in flight;
+	// dispatchTool keys checkpoint/undo captures by it.
+	currentTurn string
 }
 
 // streamRetryBase is the first-retry floor for L6 stream retries
@@ -52,7 +70,22 @@ func (t *TurnRunner) pauseRequested() bool {
 
 func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.EngineEvent)) error {
 	turnID := protocol.NewTurnId()
+	t.currentTurn = string(turnID)
 	emit(protocol.EngineEvent{Type: protocol.EventTurnStarted, Timestamp: time.Now(), TurnID: turnID})
+
+	// E3: a checkpoint exists BEFORE the turn does anything — files
+	// are captured at first touch, the git tree snapshot (shadow ref,
+	// never the user's branches) is taken now.
+	if t.Checkpoints != nil {
+		var hist []protocol.EngineEvent
+		if t.HistoryEvents != nil {
+			hist = t.HistoryEvents()
+		}
+		_, _ = t.Checkpoints.CreateCheckpoint(string(turnID), nil, hist)
+		if cwd, err := os.Getwd(); err == nil {
+			_, _ = t.Checkpoints.CreateGitTreeSnapshot(string(turnID), cwd)
+		}
+	}
 
 	t.Context.Add(provider.Message{Role: "user", Content: prompt})
 	if t.Context.Compact() {
@@ -429,7 +462,112 @@ func (t *TurnRunner) dispatchTool(ctx context.Context, name, argsJSON string) (t
 			return tools.ToolResult{}, &Error{Kind: ErrPermission, Message: "blocked by hook: " + err.Error()}
 		}
 	}
-	return t.Registry.Run(ctx, name, jsonRaw(argsJSON))
+
+	// E3/E4: capture the pre-image of a file-mutating target before
+	// the tool runs; after a successful run, record the change on the
+	// undo stack and in the turn checkpoint.
+	var pre *filePreImage
+	if path, ok := mutatingFilePath(name, argsJSON); ok {
+		pre = captureFilePreImage(path)
+		if pre != nil && t.Checkpoints != nil && t.currentTurn != "" {
+			// The checkpoint records its own first-touch copy too
+			// (CapturePreImage is a no-op when already present).
+			_ = t.Checkpoints.CapturePreImage(t.currentTurn, path)
+		}
+	}
+
+	res, err := t.Registry.Run(ctx, name, jsonRaw(argsJSON))
+
+	if pre != nil && err == nil && !res.IsError {
+		t.recordFileChange(name, pre)
+	}
+	return res, err
+}
+
+// fileMutatingTools are the text tools whose targets are captured
+// for E3 checkpoints and the E4 undo stack. Shell commands can also
+// change files; those changes are covered by the turn checkpoint's
+// git tree snapshot, not the per-file stack.
+var fileMutatingTools = map[string]bool{
+	"edit_file":     true,
+	"write_file":    true,
+	"apply_patch":   true,
+	"notebook_edit": true,
+}
+
+func mutatingFilePath(name, argsJSON string) (string, bool) {
+	if !fileMutatingTools[name] {
+		return "", false
+	}
+	var a struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil || a.Path == "" {
+		return "", false
+	}
+	return a.Path, true
+}
+
+// filePreImage is the file's state before a mutating tool ran.
+type filePreImage struct {
+	path    string
+	existed bool
+	before  []byte
+	mode    os.FileMode
+}
+
+func captureFilePreImage(path string) *filePreImage {
+	fi, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &filePreImage{path: path, existed: false}
+		}
+		return nil
+	}
+	if fi.IsDir() {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return &filePreImage{path: path, existed: true, before: data, mode: fi.Mode().Perm()}
+}
+
+// recordFileChange pushes the effect when the tool actually changed
+// the bytes (or created the file) and records the post-state in the
+// turn checkpoint.
+func (t *TurnRunner) recordFileChange(tool string, pre *filePreImage) {
+	post, err := os.ReadFile(pre.path)
+	if err != nil {
+		if os.IsNotExist(err) && !pre.existed {
+			return // still absent: nothing changed
+		}
+		return
+	}
+	if pre.existed && bytes.Equal(pre.before, post) {
+		return // no byte change
+	}
+	mode := pre.mode
+	if fi, serr := os.Stat(pre.path); serr == nil {
+		if !pre.existed {
+			mode = fi.Mode().Perm()
+		}
+	}
+	if t.Checkpoints != nil && t.currentTurn != "" {
+		t.Checkpoints.RecordAfter(t.currentTurn, pre.path, post)
+	}
+	if t.Undo != nil {
+		t.Undo.Push(undo.Effect{
+			Path:    pre.path,
+			TurnID:  t.currentTurn,
+			Tool:    tool,
+			Existed: pre.existed,
+			Before:  pre.before,
+			After:   post,
+			Mode:    mode,
+		})
+	}
 }
 
 func jsonRaw(s string) json.RawMessage {

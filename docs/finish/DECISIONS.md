@@ -245,3 +245,65 @@ decisions were confirmed by the owner on 2026-10-10 (see docs/FINISH_PACK.md).
   extension allow/deny lists only (misses extensionless binaries);
   capping reads instead of edits (the spec targets editing).
 
+## D-16 — E4 undo-last-agent-change (P0)
+
+- New session-scoped `internal/undo` stack of `Effect{Path, TurnID,
+  Tool, Existed, Before, After, Mode}` with a monotonic id so pops
+  stay consistent under concurrency. Scope is the four text/file
+  tools only (edit_file, write_file, apply_patch, notebook_edit);
+  shell side effects are covered by the turn's git tree snapshot,
+  not the per-file stack.
+- Verify-before-restore: `Restore` compares current bytes to the
+  recorded After image. A mismatch is a refusal ("… file changed
+  since the agent edit (your changes are kept)") that leaves the
+  effect ON the stack, so putting the file back and retrying undoes
+  it. Restore rewrites Before bytes + `Chmod` to the original mode
+  (WriteFile only applies modes at create), or removes created
+  files.
+- `CmdUndo`/`CmdRewind`/`CmdUnrevert` all refuse while a turn is
+  running ("… refused: a turn is running"), so a rewind can never
+  race a write. All command feedback — including successful undos —
+  is emitted as `EventWarning` so it is always visible in the TUI
+  transcript (success text starts "undid …").
+- Rejected: undoing through shell history (unreliable); consuming
+  the effect on refusal (would delete the agent's only way back);
+  a separate "info" event type for one message (warning precedent
+  already exists: "turn already in progress").
+
+## D-17 — E3 per-turn checkpoints and After-aware rewind (P0)
+
+- A checkpoint is taken at turn start (after TurnStarted): the
+  conversation snapshot (session events, mutex-guarded copy) plus a
+  git tree via the isolated-GIT_INDEX_FILE `write-tree` path, with
+  the SHA also persisted as shadow ref
+  `refs/niki/checkpoints/<turnID>` (best-effort `git update-ref`;
+  never touches user branches/index/worktree; the SHA in the
+  checkpoint still stands if the ref write fails).
+- File pre-images are captured at FIRST touch during the turn
+  (`CapturePreImage`, no-op on repeat; missing files recorded as
+  Created). `RecordAfter` stores the post-write state so
+  `RewindCode` can tell the agent's own edit apart from external
+  changes: current==After → restore Before + Chmod stored mode;
+  current==Before → rewrite is a harmless no-op via the same path;
+  anything else → skipped as external unless force. Legacy
+  snapshot-only checkpoints (no After) keep the old force semantics,
+  so pre-existing tests pass unchanged.
+- Modes are restored with `Chmod` after every write (os.WriteFile
+  applies perms only at create). `Unrevert` replays the
+  pre-rewind snapshot, which now also records modes and
+  absent-file markers (Created → Remove).
+- TUI `/rewind [turn]` (empty arg = latest) and `/unrevert` send
+  real engine commands; the old hardcoded success stubs are gone.
+  Conversation restore is proven at manager level via
+  `RewindConversation` (event count in the reply); rebuilding the
+  live TUI history from it is out of scope and documented here.
+- Empirical probe that forced the tool fixes (write_file new files
+  came out 0600, edit_file clobbered 0600→0644): edit_file now
+  Chmods the tmp file to the target's original perm before rename;
+  write_file preserves on overwrite and uses 0644 for new files.
+  apply_patch needed nothing (WriteFile on an existing path keeps
+  its mode).
+- Rejected: forcing rewinds through external edits silently;
+  recording the full file set eagerly at turn start (cost);
+  checkout-based restore (would move HEAD).
+

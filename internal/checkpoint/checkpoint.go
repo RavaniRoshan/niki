@@ -15,11 +15,20 @@ import (
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
 
-// FileSnapshot records a single file's content and SHA-256 hash at checkpoint time.
+// FileSnapshot records a single file's content, permission bits and
+// SHA-256 hash at checkpoint time. When a turn's tool later writes
+// the file, After/AfterSHA256 record the state the turn left it in,
+// so a rewind can tell the agent's own change from an external edit.
+// Created marks a file that did not exist at checkpoint time (the
+// turn created it; rewind removes it).
 type FileSnapshot struct {
-	Path    string `json:"path"`
-	SHA256  string `json:"sha256"`
-	Content []byte `json:"content"`
+	Path        string      `json:"path"`
+	SHA256      string      `json:"sha256"`
+	Content     []byte      `json:"content"`
+	Mode        os.FileMode `json:"mode,omitempty"`
+	After       []byte      `json:"after,omitempty"`
+	AfterSHA256 string      `json:"after_sha256,omitempty"`
+	Created     bool        `json:"created,omitempty"`
 }
 
 // Checkpoint records file states and conversation history keyed by turn ID.
@@ -93,10 +102,15 @@ func (m *Manager) CreateCheckpoint(turnID string, filePaths []string, events []p
 		}
 		h := sha256.Sum256(data)
 		hashStr := hex.EncodeToString(h[:])
+		mode := os.FileMode(0)
+		if fi, serr := os.Stat(p); serr == nil {
+			mode = fi.Mode().Perm()
+		}
 		cp.Files[p] = FileSnapshot{
 			Path:    p,
 			SHA256:  hashStr,
 			Content: data,
+			Mode:    mode,
 		}
 	}
 
@@ -126,6 +140,73 @@ func (m *Manager) ListCheckpoints() []*Checkpoint {
 	return list
 }
 
+// LastTurnID returns the most recently created checkpoint's turn id,
+// or "" when no checkpoint exists yet.
+func (m *Manager) LastTurnID() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.order) == 0 {
+		return ""
+	}
+	return m.order[len(m.order)-1]
+}
+
+// CapturePreImage records the pre-turn state of path in the turn's
+// checkpoint at the FIRST touch (before a mutating tool runs), so a
+// rewind can restore files the turn changed. Missing files are
+// recorded as Created (rewind removes them). Capturing twice is a
+// no-op: the earliest pre-image wins.
+func (m *Manager) CapturePreImage(turnID, path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp, ok := m.checkpoints[turnID]
+	if !ok {
+		return fmt.Errorf("checkpoint %s not found", turnID)
+	}
+	if _, dup := cp.Files[path]; dup {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			cp.Files[path] = FileSnapshot{Path: path, Created: true}
+			return nil
+		}
+		return fmt.Errorf("failed reading file %s: %w", path, err)
+	}
+	mode := os.FileMode(0)
+	if fi, serr := os.Stat(path); serr == nil {
+		mode = fi.Mode().Perm()
+	}
+	cp.Files[path] = FileSnapshot{
+		Path:    path,
+		SHA256:  hex.EncodeToString(sha256Sum(data)),
+		Content: data,
+		Mode:    mode,
+	}
+	return nil
+}
+
+// RecordAfter records the post-write state of a captured file so
+// RewindCode can distinguish the agent's own edit (current == After)
+// from an external change (current == anything else). Only captured
+// files are updated; unknown paths are ignored.
+func (m *Manager) RecordAfter(turnID, path string, data []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp, ok := m.checkpoints[turnID]
+	if !ok {
+		return
+	}
+	snap, ok := cp.Files[path]
+	if !ok {
+		return
+	}
+	snap.After = data
+	snap.AfterSHA256 = hex.EncodeToString(sha256Sum(data))
+	cp.Files[path] = snap
+}
+
 // RewindCode restores snapshot files, verifying hashes to prevent clobbering external changes.
 func (m *Manager) RewindCode(turnID string, force bool) (*RewindResult, error) {
 	m.mu.RLock()
@@ -139,19 +220,31 @@ func (m *Manager) RewindCode(turnID string, force bool) (*RewindResult, error) {
 		TurnID: turnID,
 	}
 
-	// Capture pre-rewind state so user can unrevert/redo
+	// Capture pre-rewind state so user can unrevert/redo (files
+	// absent at this point are marked Created so unrevert removes
+	// them again; modes are preserved so unrevert restores them).
 	preSnap := &Checkpoint{
 		TurnID:    "pre_rewind",
 		Timestamp: time.Now(),
 		Files:     make(map[string]FileSnapshot),
 	}
 	for path := range cp.Files {
-		if data, err := os.ReadFile(path); err == nil {
-			preSnap.Files[path] = FileSnapshot{
-				Path:    path,
-				SHA256:  hex.EncodeToString(sha256Sum(data)),
-				Content: data,
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				preSnap.Files[path] = FileSnapshot{Path: path, Created: true}
 			}
+			continue
+		}
+		mode := os.FileMode(0)
+		if fi, serr := os.Stat(path); serr == nil {
+			mode = fi.Mode().Perm()
+		}
+		preSnap.Files[path] = FileSnapshot{
+			Path:    path,
+			SHA256:  hex.EncodeToString(sha256Sum(data)),
+			Content: data,
+			Mode:    mode,
 		}
 	}
 	m.mu.Lock()
@@ -160,18 +253,56 @@ func (m *Manager) RewindCode(turnID string, force bool) (*RewindResult, error) {
 
 	for path, snap := range cp.Files {
 		currentData, err := os.ReadFile(path)
+
+		if snap.Created {
+			// The file did not exist at checkpoint time: rewind
+			// removes it, but only if it still looks like the turn
+			// left it (an externally edited leftover is kept).
+			if err != nil {
+				continue // already absent
+			}
+			curHash := hex.EncodeToString(sha256Sum(currentData))
+			if snap.AfterSHA256 != "" && curHash != snap.AfterSHA256 && !force {
+				res.Skipped = append(res.Skipped, fmt.Sprintf("%s (created file changed since: %s != %s)", path, curHash[:8], snap.AfterSHA256[:8]))
+				continue
+			}
+			if rerr := os.Remove(path); rerr != nil {
+				return nil, fmt.Errorf("failed removing file %s: %w", path, rerr)
+			}
+			res.Restored = append(res.Restored, path)
+			continue
+		}
+
 		if err == nil {
 			currentHash := hex.EncodeToString(sha256Sum(currentData))
-			// If file was modified externally after snapshot and force is false,
-			// prevent accidental collision/clobbering!
-			if currentHash != snap.SHA256 && !force {
-				res.Skipped = append(res.Skipped, fmt.Sprintf("%s (hash mismatch %s != %s)", path, currentHash[:8], snap.SHA256[:8]))
-				continue
+			switch {
+			case snap.AfterSHA256 != "":
+				// Turn-touched file: current must be the agent's
+				// post-state (or already the pre-state); anything
+				// else is an external edit and is protected.
+				if currentHash != snap.AfterSHA256 && currentHash != snap.SHA256 && !force {
+					res.Skipped = append(res.Skipped, fmt.Sprintf("%s (changed since the turn: %s != %s)", path, currentHash[:8], snap.AfterSHA256[:8]))
+					continue
+				}
+			default:
+				// Snapshot-only checkpoint (no turn write recorded):
+				// legacy behaviour, hash mismatch needs force.
+				if currentHash != snap.SHA256 && !force {
+					res.Skipped = append(res.Skipped, fmt.Sprintf("%s (hash mismatch %s != %s)", path, currentHash[:8], snap.SHA256[:8]))
+					continue
+				}
 			}
 		}
 
 		if err := os.WriteFile(path, snap.Content, 0o644); err != nil {
 			return nil, fmt.Errorf("failed restoring file %s: %w", path, err)
+		}
+		// Restore the exact permission bits (WriteFile only applies
+		// them at create time).
+		if snap.Mode != 0 {
+			if cerr := os.Chmod(path, snap.Mode.Perm()); cerr != nil {
+				return nil, fmt.Errorf("failed restoring mode of %s: %w", path, cerr)
+			}
 		}
 		res.Restored = append(res.Restored, path)
 	}
@@ -199,8 +330,21 @@ func (m *Manager) Unrevert() (*RewindResult, error) {
 		TurnID: "unrevert",
 	}
 	for path, f := range snap.Files {
+		if f.Created {
+			// Absent before the rewind: put it back to absent.
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return nil, fmt.Errorf("failed removing file %s: %w", path, err)
+			}
+			res.Restored = append(res.Restored, path)
+			continue
+		}
 		if err := os.WriteFile(path, f.Content, 0o644); err != nil {
 			return nil, fmt.Errorf("failed restoring file %s: %w", path, err)
+		}
+		if f.Mode != 0 {
+			if err := os.Chmod(path, f.Mode.Perm()); err != nil {
+				return nil, fmt.Errorf("failed restoring mode of %s: %w", path, err)
+			}
 		}
 		res.Restored = append(res.Restored, path)
 	}
@@ -266,6 +410,13 @@ func (m *Manager) CreateGitTreeSnapshot(turnID string, repoDir string) (string, 
 		cp.GitTreeSHA = treeSHA
 	}
 	m.mu.Unlock()
+	// Shadow ref: persist the tree under refs/niki/… so the
+	// checkpoint survives the process — without ever touching the
+	// user's branches, index, or worktree (best effort: the SHA in
+	// the checkpoint still stands if the ref cannot be written).
+	refCmd := exec.Command("git", "update-ref", "refs/niki/checkpoints/"+turnID, treeSHA)
+	refCmd.Dir = repoDir
+	_ = refCmd.Run()
 	return treeSHA, nil
 }
 
