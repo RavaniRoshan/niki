@@ -771,3 +771,53 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
 
 
 
+
+## 2026-10-11 — Slice V: Charm stack v1 -> v2 (Classic flow prerequisite)
+
+- go.mod: bubbletea v1.3.10 -> charm.land/bubbletea/v2 v2.1.0, bubbles v1.0.0 ->
+  charm.land/bubbles/v2 v2.2.1, lipgloss v1.1.0 -> charm.land/lipgloss/v2 v2.0.6.
+  Every API verified against the downloaded module source (pinned commits in
+  GOMODCACHE), not from memory: tea.View/AltScreen, tea.KeyPressMsg + Key.String()
+  matching, tea.Quit/Suspend as Msg values, textinput v2 Styles/SetStyles,
+  viewport v2 WithWidth/WithHeight options, lipgloss v2 renderer removal
+  (colorprofile.Writer at the output boundary).
+- internal/tui (all non-test files + tests): key handling migrated from
+  msg.Type switches to msg.String() matching; question/diff/btw HandleKey
+  migrated; composer styles via textinput.Styles; viewport via options;
+  View() now returns tea.View (AltScreen set from !Inline); cmd/nikicode
+  main.go drops tea.WithAltScreen (now a View property).
+- Purity: AppModel.View() no longer reads the clock or mutates telemetry
+  (pure-render rule); B9 debug overlay narrowed to event counters and boot
+  phases (render-cost timing removed with the mutation that collected it);
+  TestDebugViewTelemetry adapted to the observable telemetry that remains.
+- Display modes: UseASCII additionally honors NIKI_ASCII=1; new Downsample()
+  applies the resolved colorprofile at the output boundary; frame goldens
+  regenerated after printing the diff (2-cell composer box width change from
+  Lip Gloss v2 border math; no content change).
+- Gates printed: go build ./... (clean), go vet ./... (clean),
+  go test ./internal/tui/... (ok), go test -race ./internal/tui/ (ok),
+  go test ./... (all packages ok), golangci-lint ./internal/tui/...
+  ./cmd/nikicode/... (1 pre-existing QF1011 in untouched
+  firstrun_cmd_test.go, not introduced here).
+
+## 2026-10-11 — Classic Flow TUI (Slices V + C0-C5)
+
+- V: Charm stack v1 -> v2 (bubbletea v2.1.0, bubbles v2.2.1, lipgloss
+  v2.0.6); whole internal/tui migrated (keys via msg.String(), View()
+  returns tea.View, textinput v2 styles, viewport options, lipgloss v2
+  renderer removal with colorprofile at the output boundary).
+- C0-C5: docs/ui/CLASSIC.md + PROGRESS.md + review dumps;
+  ui.layout = "classic"|"ledger" (default classic, unknown fails
+  closed); View() is pure (no clock reads, no mutation); classic
+  renderer: orb header, SETUP block with three dispatching choices,
+  raised user rows, one-line tool rows with right-aligned results
+  (engine-filled Target/Result/Excerpt), loop rows from real retry
+  warnings, contract strip, gates (safe option default), verdict card
+  (verified only at T2+ with every required requirement evidenced;
+  a real tampered run renders "not verified"), single-rule composer,
+  registry-driven footer; widths 100/80/60/<50; plain and ASCII modes
+  with a word per glyph; resize preserves focus, scroll, and gate
+  state; 30 golden frames + originality guard.
+- Gates: build/vet/gofmt/full suite/race(tui)/lint clean; pre-existing
+  issues in untouched files listed in docs/ui/PROGRESS.md.
+- STOP at OWNER REVIEW: docs/ui/review/ holds the ANSI frame dumps.

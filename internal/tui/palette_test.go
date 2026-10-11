@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
@@ -36,14 +36,14 @@ func TestCtrlPTogglesPalette(t *testing.T) {
 	}
 
 	// Press Ctrl+P -> open
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	m = m2.(AppModel)
 	if !m.state.Palette.Open {
 		t.Fatal("palette should be open after Ctrl+P")
 	}
 
 	// Press Esc -> close
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = m2.(AppModel)
 	if m.state.Palette.Open {
 		t.Fatal("palette should be closed after Esc")
@@ -56,17 +56,17 @@ func TestPaletteSelectSpinnerStyle(t *testing.T) {
 	m := NewAppModel(cmdChan, eventChan)
 
 	// Open palette
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	m = m2.(AppModel)
 
 	// Filter to "braille"
 	for _, r := range "braille" {
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m2, _ = m.Update(tea.KeyPressMsg{Text: string([]rune{r}), Code: []rune{r}[0]})
 		m = m2.(AppModel)
 	}
 
 	// Press Enter to select
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if m.state.Palette.Open {
@@ -85,7 +85,7 @@ func TestPaletteConnectFlow(t *testing.T) {
 
 	// Slash command /connect openai
 	m.composer.Input.SetValue("/connect openai")
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if !m.state.Palette.Open || m.state.Palette.Mode != "connect" {
@@ -97,7 +97,7 @@ func TestPaletteConnectFlow(t *testing.T) {
 
 	// Type dummy key
 	for _, r := range "sk-test-key-123" {
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m2, _ = m.Update(tea.KeyPressMsg{Text: string([]rune{r}), Code: []rune{r}[0]})
 		m = m2.(AppModel)
 	}
 
@@ -106,7 +106,7 @@ func TestPaletteConnectFlow(t *testing.T) {
 	}
 
 	// Submit key
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if m.state.Palette.Open {
@@ -125,17 +125,17 @@ func TestPaletteCustomModelFlow(t *testing.T) {
 	m := NewAppModel(cmdChan, eventChan)
 
 	// Open palette
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	m = m2.(AppModel)
 
 	// Filter to "custom model"
 	for _, r := range "custom model" {
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m2, _ = m.Update(tea.KeyPressMsg{Text: string([]rune{r}), Code: []rune{r}[0]})
 		m = m2.(AppModel)
 	}
 
 	// Select it
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if !m.state.Palette.Open || m.state.Palette.Mode != "custom_model" {
@@ -144,12 +144,12 @@ func TestPaletteCustomModelFlow(t *testing.T) {
 
 	// Type model name
 	for _, r := range "openai:deepseek-r1" {
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m2, _ = m.Update(tea.KeyPressMsg{Text: string([]rune{r}), Code: []rune{r}[0]})
 		m = m2.(AppModel)
 	}
 
 	// Submit
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if m.state.Palette.Open {
@@ -174,10 +174,10 @@ func TestPaletteMCPAddFlow(t *testing.T) {
 
 	// Step 0: name
 	for _, r := range "github" {
-		m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m2, _ := m.Update(tea.KeyPressMsg{Text: string([]rune{r}), Code: []rune{r}[0]})
 		m = m2.(AppModel)
 	}
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if m.state.Palette.InputStep != 1 || m.state.Palette.MCPName != "github" {
@@ -186,10 +186,10 @@ func TestPaletteMCPAddFlow(t *testing.T) {
 
 	// Step 1: command
 	for _, r := range "npx" {
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m2, _ = m.Update(tea.KeyPressMsg{Text: string([]rune{r}), Code: []rune{r}[0]})
 		m = m2.(AppModel)
 	}
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if m.state.Palette.InputStep != 2 || m.state.Palette.MCPCmd != "npx" {
@@ -198,10 +198,10 @@ func TestPaletteMCPAddFlow(t *testing.T) {
 
 	// Step 2: args
 	for _, r := range "-y @modelcontextprotocol/server-github" {
-		m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m2, _ = m.Update(tea.KeyPressMsg{Text: string([]rune{r}), Code: []rune{r}[0]})
 		m = m2.(AppModel)
 	}
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if m.state.Palette.Open {
@@ -224,21 +224,21 @@ func TestPaletteEscAndBackspace(t *testing.T) {
 	m.state.Palette.InputBuffer = "http://localhost"
 
 	// Backspace
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = m2.(AppModel)
 	if m.state.Palette.InputBuffer != "http://localhos" {
 		t.Fatalf("expected backspace to trim char, got: %s", m.state.Palette.InputBuffer)
 	}
 
 	// Esc returns to palette mode
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = m2.(AppModel)
 	if !m.state.Palette.Open || m.state.Palette.Mode != "palette" {
 		t.Fatalf("expected palette mode after Esc, got open=%v mode=%s", m.state.Palette.Open, m.state.Palette.Mode)
 	}
 
 	// Esc again closes palette
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = m2.(AppModel)
 	if m.state.Palette.Open {
 		t.Fatal("expected palette to be closed after second Esc")

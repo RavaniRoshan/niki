@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 type Theme struct {
 	Header         lipgloss.Style
@@ -12,6 +12,9 @@ type Theme struct {
 	Accent         lipgloss.Style
 	CardBorder     lipgloss.Style
 	ComposerBorder lipgloss.Style
+	// RaisedUser is the classic user row: full-width raised
+	// background, never truncated (C1).
+	RaisedUser     lipgloss.Style
 	BadgePerm      lipgloss.Style
 	BadgeMode      lipgloss.Style
 	BadgeModel     lipgloss.Style
@@ -56,6 +59,7 @@ type Theme struct {
 func NewDefaultTheme() Theme {
 	cyan := lipgloss.Color("#38bdf8")
 	dark := lipgloss.Color("#0f172a")
+	dark2 := lipgloss.Color("#1e293b")
 	white := lipgloss.Color("#ffffff")
 	brightWhite := lipgloss.Color("#f8fafc")
 	textWhite := lipgloss.Color("#f1f5f9")
@@ -80,6 +84,7 @@ func NewDefaultTheme() Theme {
 		Accent:          lipgloss.NewStyle().Foreground(cyan),
 		CardBorder:      lipgloss.NewStyle().Foreground(cyan),
 		ComposerBorder:  lipgloss.NewStyle().Foreground(borderGray),
+		RaisedUser:      lipgloss.NewStyle().Background(dark2).Foreground(brightWhite),
 		BadgePerm:       lipgloss.NewStyle().Bold(true).Foreground(amber),
 		BadgeMode:       lipgloss.NewStyle().Bold(true).Foreground(blue),
 		BadgeModel:      lipgloss.NewStyle().Foreground(slateLight),

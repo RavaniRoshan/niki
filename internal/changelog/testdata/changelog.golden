@@ -1,0 +1,18 @@
+## v0.12.0 — 2026-10-11
+
+### Added
+- git: register submodules
+- last: plain-language run summary
+
+### Changed
+- deps: bubbletea v2
+
+### Fixed
+- trace: boot-mark off-by-one
+- session: export line count
+
+### Other
+- engine: boot phase ordering
+- checkpoint: fork boundary fix
+- dogfood log header
+- not a conventional line at all

@@ -59,24 +59,29 @@ func TestWorksInsideTmux(t *testing.T) {
 	t.Logf("[P2] headless exec completes inside tmux")
 
 	// 2. Interactive TUI paints inside tmux, and survives a resize.
+	// The paint probe accepts either layout's identity: the classic
+	// "niki" row or the ledger "NikiCode" lockup.
+	paints := func(s string) bool {
+		return strings.Contains(s, "niki") || strings.Contains(s, "NikiCode")
+	}
 	tuiCmd := fmt.Sprintf("cd %s && NIKI_MOCK=1 HOME=%s %s 2>&1", work, home, bin)
 	tmux("new-session", "-d", "-s", "tui", "-x", "100", "-y", "30", tuiCmd)
 	deadline = time.Now().Add(30 * time.Second)
 	var painted string
 	for {
 		painted = tmux("capture-pane", "-p", "-t", "tui")
-		if strings.Contains(painted, "NikiCode") || time.Now().After(deadline) {
+		if paints(painted) || time.Now().After(deadline) {
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	if !strings.Contains(painted, "NikiCode") {
+	if !paints(painted) {
 		t.Fatalf("[P2] TUI did not paint inside tmux:\n%s", painted)
 	}
 	tmux("resize-pane", "-t", "tui", "-x", "120", "-y", "40")
 	time.Sleep(2 * time.Second)
 	resized := tmux("capture-pane", "-p", "-t", "tui")
-	if !strings.Contains(resized, "NikiCode") {
+	if !paints(resized) {
 		t.Fatalf("[P2] TUI did not survive resize:\n%s", resized)
 	}
 	t.Logf("[P2] TUI paints inside tmux and re-renders after resize")

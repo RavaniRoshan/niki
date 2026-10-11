@@ -54,6 +54,33 @@ type VerificationInfo struct {
 	Attempt int    `json:"attempt"`
 	Result  string `json:"result"`
 	Reason  string `json:"reason,omitempty"`
+
+	// Tier is the graded trust tier code ("T0".."T3") (C3). The
+	// word "verified" may render only at T2 or higher.
+	Tier string `json:"tier,omitempty"`
+	// Requirements is the per-requirement evidence in prompt
+	// order (C3): the verdict card renders exactly this.
+	Requirements []ReqStatus `json:"requirements,omitempty"`
+	// NotVerified lists what failed or had no check (C3). A
+	// verified verdict never has entries here.
+	NotVerified []string `json:"not_verified,omitempty"`
+	// Contract is the contract strip's per-requirement state
+	// during the run (C3).
+	Contract []ContractReq `json:"contract,omitempty"`
+}
+
+// ReqStatus is one requirement's measured state (C3).
+type ReqStatus struct {
+	ID       string `json:"id"`
+	Text     string `json:"text"`
+	Evidence string `json:"evidence,omitempty"`
+	State    string `json:"state"` // pass, fail, queued
+}
+
+// ContractReq is one contract strip entry (C3).
+type ContractReq struct {
+	ID    string `json:"id"`
+	State string `json:"state"` // pass, fail, running, queued, needs
 }
 
 // BudgetInfo carries L2 budget gauges and verdicts on budget events.
@@ -84,6 +111,11 @@ type UserQuestion struct {
 	Question    string   `json:"question"`
 	Options     []string `json:"options"`
 	AllowCustom bool     `json:"allow_custom"`
+	// Safe is the index of the option that keeps the constraint
+	// (C3): the gate focuses it and marks it "(default)". -1 when
+	// the source does not say, in which case the first option is
+	// the default (the tool documents safe-first ordering).
+	Safe int `json:"safe_option"`
 }
 
 type EngineEvent struct {
@@ -103,6 +135,23 @@ type EngineEvent struct {
 	History      []string          `json:"history,omitempty"`
 	Budget       *BudgetInfo       `json:"budget,omitempty"`
 	Verification *VerificationInfo `json:"verification,omitempty"`
+
+	// Target is the tool row's target: the file path, command, or
+	// pattern the tool acts on (C2). Set by the engine at
+	// tool_started; the TUI never invents it.
+	Target string `json:"target,omitempty"`
+	// Result is the tool row's right-aligned result summary: line
+	// counts, diff stats, exit codes (C2). Set at
+	// tool_completed/tool_failed.
+	Result string `json:"result,omitempty"`
+	// Excerpt is up to two lines of failing output shown beneath
+	// a failed tool row (C2). Set at tool_failed only.
+	Excerpt string `json:"excerpt,omitempty"`
+
+	// Contract is the turn's requirement contract (C3), extracted
+	// from the prompt at turn start: one entry per requirement,
+	// all queued. The contract strip renders only this.
+	Contract []ContractReq `json:"contract,omitempty"`
 }
 
 type Usage = provider.Usage

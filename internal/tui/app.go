@@ -6,10 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/RavaniRoshan/niki/internal/alerts"
 	"github.com/RavaniRoshan/niki/internal/config"
@@ -92,6 +91,118 @@ func fetchMentionCandidates(root, query string) tea.Cmd {
 	}
 }
 
+type ollamaConfiguredMsg struct{ err error }
+
+// configureOllamaCmd points the provider at a local Ollama
+// endpoint. All I/O happens in the command; Update only records the
+// result (C1 SETUP choice [o]).
+func configureOllamaCmd() tea.Cmd {
+	return func() tea.Msg {
+		cfg, _ := config.Load("")
+		cfg.Provider.Name = "openai"
+		cfg.Provider.BaseURL = "http://localhost:11434/v1"
+		cfg.Provider.APIKey = "ollama"
+		if cfg.Model.Name == "" || cfg.Model.Name == "None" {
+			cfg.Model.Name = "llama3.1"
+		}
+		return ollamaConfiguredMsg{err: config.SaveUserConfig(cfg)}
+	}
+}
+
+// gateOptions maps a question's options to gate choices.
+func gateOptions(q protocol.UserQuestion) []GateOption {
+	safe := safeIndex(q)
+	var out []GateOption
+	for i, opt := range q.Options {
+		out = append(out, GateOption{Key: gateLetter(i), Label: opt, Safe: i == safe})
+	}
+	return out
+}
+
+// safeIndex is the option that keeps the constraint: the event's
+// safe index, defaulting to the first option.
+func safeIndex(q protocol.UserQuestion) int {
+	if q.Safe >= 0 && q.Safe < len(q.Options) {
+		return q.Safe
+	}
+	return 0
+}
+
+// gateOptionIndex maps a gate letter to the option it answers: n is
+// always the constraint-keeping option, then y, v, d in order.
+func (m AppModel) gateOptionIndex(letter string) int {
+	if !m.state.Gate.Active {
+		return -1
+	}
+	if letter == "n" {
+		for i, o := range m.state.Gate.Options {
+			if o.Safe {
+				return i
+			}
+		}
+		return 0
+	}
+	order := map[string]int{"y": 0, "v": 1, "d": 2}[letter]
+	if order < 0 {
+		return -1
+	}
+	seen := 0
+	for i, o := range m.state.Gate.Options {
+		if o.Safe {
+			continue
+		}
+		if seen == order {
+			return i
+		}
+		seen++
+	}
+	return -1
+}
+
+// gateLetter is the single letter that picks gate option i.
+func gateLetter(i int) string {
+	letters := []string{"n", "y", "v", "d"}
+	if i < len(letters) {
+		return letters[i]
+	}
+	return "?"
+}
+
+// demoTickMsg advances the recorded demo replay (C3).
+type demoTickMsg struct{}
+
+// demoTick spaces the recorded fixture's events so the replay reads
+// like a run. No model is called; every event is a recorded one.
+func demoTick() tea.Cmd {
+	return tea.Tick(400*time.Millisecond, func(time.Time) tea.Msg {
+		return demoTickMsg{}
+	})
+}
+
+// demoEvents is the recorded fixture: the same five-frame script
+// the golden frames render.
+func demoEvents() []protocol.EngineEvent { return classicStageEvents("frame5") }
+
+// advanceDemo applies the next recorded event and reschedules while
+// events remain.
+func (m AppModel) advanceDemo() (AppModel, tea.Cmd) {
+	events := demoEvents()
+	if m.state.DemoStep >= len(events) {
+		m.state.Demo = false
+		m.state.DemoStep = -1
+		return m, nil
+	}
+	applyEvent(&m, events[m.state.DemoStep])
+	m.state.DemoStep++
+	m.renderLive()
+	if m.state.DemoStep >= len(events) {
+		m.state.Demo = false
+		m.state.DemoStep = -1
+		return m, nil
+	}
+	return m, demoTick()
+}
+
 // streamInterval is the minimum spacing between
 // live-region re-renders while streaming (U10).
 const streamInterval = 16 * time.Millisecond
@@ -145,6 +256,7 @@ func NewAppModel(cmdChan chan<- protocol.EngineCommand, eventChan <-chan protoco
 			GitBranch:      "main",
 			MaxTokens:      128000,
 			SpinnerStyle:   SpinnerBloom,
+			Layout:         "classic",
 		},
 	}
 }
@@ -186,11 +298,9 @@ func (m *AppModel) SetVersion(ver string) {
 // periodic wakeups animation would cause.
 func (m *AppModel) SetReducedMotion(reduced bool) {
 	m.state.ReducedMotion = reduced
-	if reduced {
-		m.composer.Input.Cursor.SetMode(cursor.CursorStatic)
-	} else {
-		m.composer.Input.Cursor.SetMode(cursor.CursorBlink)
-	}
+	styles := m.composer.Input.Styles()
+	styles.Cursor.Blink = !reduced
+	m.composer.Input.SetStyles(styles)
 }
 
 // SetInline configures whether the TUI runs in inline mode.
@@ -283,6 +393,9 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 		m.state.Activity = "thinking…"
 		m.state.BudgetState = ""
 		m.state.BudgetPct = 0
+		m.state.TurnOutcome = ""
+		m.state.Contract = evt.Contract
+		m.state.Verdict = VerdictState{}
 	case protocol.EventBudgetGauge:
 		if evt.Budget != nil {
 			m.state.BudgetState = evt.Budget.State
@@ -309,9 +422,11 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 	case protocol.EventTurnCompleted:
 		m.state.Busy = false
 		m.state.Activity = ""
+		m.state.TurnOutcome = "done"
 	case protocol.EventTurnCancelled:
 		m.state.Busy = false
 		m.state.Activity = ""
+		m.state.TurnOutcome = "interrupted"
 		if evt.Text != "" {
 			m.history.Append("system", "[turn cancelled] "+evt.Text)
 		} else {
@@ -320,32 +435,90 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 	case protocol.EventTurnFailed:
 		m.state.Busy = false
 		m.state.Activity = ""
+		m.state.TurnOutcome = "error"
 		m.history.Append("error", evt.Error)
 	case protocol.EventTurnNotVerified:
 		// L3: terminal — a claim alone never ends a run done.
 		m.state.Busy = false
 		m.state.Activity = ""
+		m.state.TurnOutcome = "error"
+		m.state.Verdict = VerdictState{
+			Active:      true,
+			Verified:    false,
+			NotVerified: []string{evt.Text},
+			Required:    len(m.state.Contract),
+			Branch:      m.state.GitBranch,
+			Trust:       "T0",
+		}
 		m.history.Append("error", "[not verified] "+evt.Text)
+	case protocol.EventVerification:
+		// C3: the verdict card renders only the verifier's measured
+		// evidence; the contract strip takes its final states here.
+		if evt.Verification != nil {
+			m.state.Verdict = verdictFromEvent(evt)
+			m.state.Verdict.Branch = m.state.GitBranch
+			if len(evt.Verification.Contract) > 0 {
+				m.state.Contract = evt.Verification.Contract
+			}
+		}
 	case protocol.EventToolStarted:
-		m.history.Append("tool", "started "+evt.ToolName)
+		// C2: the row is opened by the event and completed only by
+		// its own completion/failure event, keyed by call id.
+		verb := toolVerb(evt.ToolName)
+		target := Sanitize(evt.Target)
+		m.history.Cells = append(m.history.Cells, HistoryCell{
+			Role: "tool", Kind: "tool", CallID: string(evt.CallID),
+			State: stateRunning, Verb: verb, Target: target,
+			// Text keeps the ledger renderer readable on the same
+			// cells; classic renders the structured row.
+			Text: strings.TrimSpace(verb + " " + target),
+		})
 		m.state.Activity = "running " + evt.ToolName
 	case protocol.EventToolCompleted:
-		m.history.Append("tool", evt.ToolName+" done")
+		if cell := m.history.OpenToolCell(string(evt.CallID)); cell != nil {
+			cell.State = stateDone
+			cell.Result = Sanitize(evt.Result)
+		} else {
+			m.history.Append("tool", evt.ToolName+" done")
+		}
 		if m.state.Activity != "" && strings.HasPrefix(m.state.Activity, "running ") {
 			m.state.Activity = ""
 		}
 	case protocol.EventToolFailed:
-		m.history.Append("error", evt.ToolName+": "+evt.Error)
+		if cell := m.history.OpenToolCell(string(evt.CallID)); cell != nil {
+			cell.State = stateFailed
+			cell.Result = Sanitize(evt.Result)
+			if evt.Excerpt != "" {
+				m.history.Cells = append(m.history.Cells, HistoryCell{
+					Role: "tool", Kind: "tool_excerpt",
+					Excerpt: splitExcerpt(Sanitize(evt.Excerpt)),
+				})
+			}
+		} else {
+			m.history.Append("error", evt.ToolName+": "+evt.Error)
+		}
 		m.state.Activity = ""
+	case protocol.EventWarning:
+		if isLoopWarning(evt.Text) {
+			// C2: loop rows come only from real retry/repetition
+			// warnings.
+			m.history.Cells = append(m.history.Cells, HistoryCell{
+				Role: "system", Kind: "loop", Text: Sanitize(evt.Text),
+			})
+		} else {
+			m.history.Append("system", "[warning] "+evt.Text)
+		}
 	case protocol.EventError:
 		m.history.Append("error", evt.Error)
-	case protocol.EventWarning:
-		m.history.Append("system", "[warning] "+evt.Text)
 	case protocol.EventSteer:
 		// L4: shown as an event at the safe point; not terminal.
 		m.history.Append("system", "[steer] "+evt.Text)
 	case protocol.EventContextCompacted:
 		m.history.Append("system", "[context compacted]")
+	case protocol.EventPlanUpdated:
+		// C2: the plan is data; the classic next line renders
+		// only from this event.
+		m.state.Plan = evt.Plan
 	case protocol.EventSubagentStarted:
 		m.state.Activity = "subagent " + evt.Text
 	case protocol.EventSubagentCompleted, protocol.EventSubagentFailed:
@@ -376,6 +549,12 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 	case protocol.EventQuestionPrompted:
 		if len(evt.Questions) > 0 {
 			m.state.QuestionModal = NewQuestionState(evt.Questions)
+			m.state.Gate = GateState{
+				Active:   true,
+				Action:   evt.Questions[0].Question,
+				Options:  gateOptions(evt.Questions[0]),
+				Selected: safeIndex(evt.Questions[0]),
+			}
 		}
 	case protocol.EventSessionList:
 		m.state.SessionPicker.Sessions = evt.Sessions
@@ -404,7 +583,58 @@ func waitForEvent(ch <-chan protocol.EngineEvent) tea.Cmd {
 }
 
 func (m AppModel) Init() tea.Cmd {
-	return tea.Batch(waitForEvent(m.eventChan))
+	return tea.Batch(waitForEvent(m.eventChan), detectGitSubmodsCmd(m.state.Directory))
+}
+
+// gitSubmodsMsg delivers async submodule/nested-repo state from a
+// background detection command so the status bar (G4) can reflect it
+// without blocking boot.
+type gitSubmodsMsg struct {
+	submods []git.Submodule
+}
+
+// detectGitSubmodsCmd enumerates submodules and unregistered nested
+// git repos of dir. It is best-effort: a detection error yields an
+// empty message so the bar degrades to branch-only.
+func detectGitSubmodsCmd(dir string) tea.Cmd {
+	return func() tea.Msg {
+		subs, err := git.Submods(dir)
+		if err != nil {
+			return gitSubmodsMsg{}
+		}
+		return gitSubmodsMsg{submods: subs}
+	}
+}
+
+// submodsBadge renders a compact, color-coded submodule summary for
+// the status bar. It is empty when there are no submodules, so
+// hermetic golden frames are unaffected.
+func submodsBadge(subs []git.Submodule, theme Theme) string {
+	if len(subs) == 0 {
+		return ""
+	}
+	dirty, unreg := 0, 0
+	for _, s := range subs {
+		switch s.Status {
+		case "unregistered":
+			unreg++
+		case "clean":
+		default:
+			dirty++
+		}
+	}
+	style := theme.Muted
+	if dirty > 0 || unreg > 0 {
+		style = theme.Error
+	}
+	note := fmt.Sprintf(" +%d subs", len(subs))
+	if dirty > 0 {
+		note += fmt.Sprintf(" (%d dirty)", dirty)
+	}
+	if unreg > 0 {
+		note += fmt.Sprintf(" (%d unreg)", unreg)
+	}
+	return " " + style.Render(note)
 }
 
 // renderPacer throttles live-region re-renders
@@ -439,13 +669,18 @@ func (p *renderPacer) force() {
 
 // renderLive repaints the viewport from the
 // live region only. Committed history is never
-// re-rendered here (U9/U10).
+// re-rendered here (U9/U10). Row rendering is
+// layout-specific: classic rows or ledger cells.
 func (m *AppModel) renderLive() {
 	cells := m.history.Live()
 	if !m.state.Inline {
 		cells = m.history.Cells
 	}
-	m.viewport.SetContent(renderCells(*m, cells))
+	if m.state.Layout == "classic" {
+		m.viewport.SetContent(m.classicTranscript(cells))
+	} else {
+		m.viewport.SetContent(renderCells(*m, cells))
+	}
 	m.viewport.GotoBottom()
 }
 
@@ -455,6 +690,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case disarmExitMsg:
 		m.exitArmed = false
+		return m, nil
+
+	case demoTickMsg:
+		if m.state.Demo {
+			var cmd tea.Cmd
+			m, cmd = m.advanceDemo()
+			return m, cmd
+		}
+		return m, nil
+
+	case ollamaConfiguredMsg:
+		if msg.err != nil {
+			m.history.Append("error", "Ollama setup failed: "+msg.err.Error())
+			return m, nil
+		}
+		m.state.ModelName = "openai: llama3.1"
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
+		m.history.Append("system", "Ollama selected — provider points at http://localhost:11434/v1 with model llama3.1. Start Ollama and pull that model to run.")
 		return m, nil
 
 	case editorFinishedMsg:
@@ -487,10 +740,30 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.state.QuestionModal.Active {
+			// C3 gate keys: n = the option that keeps the constraint
+			// (always the focused default), y = allow once, v = view
+			// the diff. Letters answer only the gate, never while
+			// the composer has text.
+			if m.state.Gate.Active && m.composer.Input.Value() == "" {
+				// n always answers the safe option (the focused
+				// default); y/v answer the others in order.
+				idx := m.gateOptionIndex(msg.String())
+				if idx >= 0 && idx < len(m.state.Gate.Options) {
+					answer := m.state.Gate.Options[idx].Label
+					m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdAnswerQuestion, Answers: []string{answer}}
+					m.history.Append("system", "✓ Answered: "+answer)
+					m.state.QuestionModal = QuestionState{}
+					m.state.Gate = GateState{}
+					return m, nil
+				}
+			}
 			done, answers, cancelled := m.state.QuestionModal.HandleKey(msg)
 			if done {
+				// The modal and the classic gate are one state:
+				// resolving either clears both.
+				m.state.Gate = GateState{}
 				if cancelled {
 					m.history.Append("system", "[question skipped]")
 					m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdAnswerQuestion, Answers: []string{"skipped"}}
@@ -519,26 +792,26 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.state.SessionPicker.Active {
-			switch msg.Type {
-			case tea.KeyCtrlS, tea.KeyEsc:
+			switch msg.String() {
+			case "ctrl+s", "esc":
 				if m.state.SessionPicker.ConfirmDelete {
 					m.state.SessionPicker.ConfirmDelete = false
 					return m, nil
 				}
 				m.state.SessionPicker.Active = false
 				return m, nil
-			case tea.KeyUp:
+			case "up":
 				if m.state.SessionPicker.Selected > 0 {
 					m.state.SessionPicker.Selected--
 				}
 				return m, nil
-			case tea.KeyDown:
+			case "down":
 				filtered := FilterSessions(m.state.SessionPicker.Sessions, m.state.SessionPicker.Query)
 				if m.state.SessionPicker.Selected < len(filtered)-1 {
 					m.state.SessionPicker.Selected++
 				}
 				return m, nil
-			case tea.KeyEnter:
+			case "enter":
 				filtered := FilterSessions(m.state.SessionPicker.Sessions, m.state.SessionPicker.Query)
 				if len(filtered) > 0 && m.state.SessionPicker.Selected < len(filtered) {
 					sel := filtered[m.state.SessionPicker.Selected]
@@ -547,16 +820,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.history.Append("system", fmt.Sprintf("📂 Resumed session: %s", sel.Title))
 				}
 				return m, nil
-			case tea.KeyBackspace:
+			case "backspace":
 				if len(m.state.SessionPicker.Query) > 0 {
 					m.state.SessionPicker.Query = m.state.SessionPicker.Query[:len(m.state.SessionPicker.Query)-1]
 					m.state.SessionPicker.Selected = 0
 				}
 				return m, nil
 			default:
+				text := msg.Key().Text
 				if m.state.SessionPicker.ConfirmDelete {
-					if msg.Type == tea.KeyRunes {
-						ch := strings.ToLower(string(msg.Runes))
+					if text != "" {
+						ch := strings.ToLower(text)
 						if ch == "y" {
 							filtered := FilterSessions(m.state.SessionPicker.Sessions, m.state.SessionPicker.Query)
 							if len(filtered) > 0 && m.state.SessionPicker.Selected < len(filtered) {
@@ -580,8 +854,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
-				if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-					ch := string(msg.Runes)
+				if text != "" || msg.String() == "space" {
+					ch := text
+					if ch == "" {
+						ch = " "
+					}
 					if ch == "f" && m.state.SessionPicker.Query == "" {
 						filtered := FilterSessions(m.state.SessionPicker.Sessions, m.state.SessionPicker.Query)
 						if len(filtered) > 0 && m.state.SessionPicker.Selected < len(filtered) {
@@ -608,18 +885,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.state.MentionOverlay.Active {
-			switch msg.Type {
-			case tea.KeyUp:
+			switch msg.String() {
+			case "up":
 				if m.state.MentionOverlay.Selected > 0 {
 					m.state.MentionOverlay.Selected--
 				}
 				return m, nil
-			case tea.KeyDown:
+			case "down":
 				if m.state.MentionOverlay.Selected < len(m.state.MentionOverlay.Candidates)-1 {
 					m.state.MentionOverlay.Selected++
 				}
 				return m, nil
-			case tea.KeyTab, tea.KeyEnter:
+			case "tab", "enter":
 				if len(m.state.MentionOverlay.Candidates) > 0 && m.state.MentionOverlay.Selected < len(m.state.MentionOverlay.Candidates) {
 					c := m.state.MentionOverlay.Candidates[m.state.MentionOverlay.Selected]
 					newVal, newPos := ReplaceMentionWord(m.composer.Input.Value(), m.composer.Input.Position(), c.Path)
@@ -629,22 +906,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state.MentionOverlay.Candidates = nil
 					return m, nil
 				}
-			case tea.KeyEsc:
+			case "esc":
 				m.state.MentionOverlay.Active = false
 				m.state.MentionOverlay.Candidates = nil
 				return m, nil
 			}
 		}
 
-		if msg.Type == tea.KeyShiftTab || msg.String() == "shift+tab" || msg.String() == "backtab" {
+		if msg.String() == "shift+tab" {
 			return m.cycleWorkingMode()
 		}
 
-		switch msg.Type {
-		case tea.KeyShiftTab:
+		switch msg.String() {
+		case "shift+tab":
 			return m.cycleWorkingMode()
 
-		case tea.KeyCtrlC:
+		case "ctrl+c":
 			val := m.composer.Input.Value()
 			if len(val) > 0 {
 				m.composer.Input.Reset()
@@ -665,7 +942,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.history.Append("system", "Press Ctrl+C again to exit")
 			return m, disarmExitTimer()
 
-		case tea.KeyCtrlD:
+		case "ctrl+d":
 			val := m.composer.Input.Value()
 			if len(val) == 0 {
 				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdShutdown}
@@ -680,13 +957,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case tea.KeyCtrlZ:
+		case "ctrl+z":
 			// Bubbletea handles SuspendMsg: it releases the
 			// terminal, SIGSTOPs the process group, and
 			// restores everything on SIGCONT (L2).
 			return m, tea.Suspend
 
-		case tea.KeyEsc:
+		case "esc":
 			if m.state.Palette.Open {
 				if m.state.Palette.Mode != "palette" {
 					m.state.Palette.Mode = "palette"
@@ -708,7 +985,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case tea.KeyCtrlS:
+		case "ctrl+s":
 			m.state.SessionPicker.Active = !m.state.SessionPicker.Active
 			if m.state.SessionPicker.Active {
 				m.state.SessionPicker.Query = ""
@@ -717,22 +994,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case tea.KeyCtrlG:
+		case "ctrl+g":
 			return m, launchEditorCmd(m.composer.Input.Value())
 
-		case tea.KeyCtrlP:
+		case "ctrl+p":
 			m.state.Palette.Open = !m.state.Palette.Open
 			m.state.Palette.Query = ""
 			m.state.Palette.Selected = 0
 			m.state.Palette.Mode = "palette"
 			return m, nil
 
-		case tea.KeyCtrlO:
+		case "ctrl+o":
 			m.state.ExpandToolOutput = !m.state.ExpandToolOutput
 			m.renderLive()
 			return m, nil
 
-		case tea.KeyCtrlB:
+		case "ctrl+b":
 			if m.state.Busy {
 				m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdDetachTool}
 				m.history.Append("system", "[tool detached into background execution]")
@@ -741,7 +1018,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case tea.KeyCtrlW:
+		case "ctrl+w":
 			val := m.composer.Input.Value()
 			pos := m.composer.Input.Position()
 			if pos > 0 {
@@ -762,19 +1039,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case tea.KeyCtrlK:
-			val := m.composer.Input.Value()
-			pos := m.composer.Input.Position()
-			runes := []rune(val)
-			if pos < len(runes) {
-				m.composer.Undo.Push(val, pos)
-				killed := string(runes[pos:])
-				m.composer.KillRing.Push(killed, false, false)
-				m.composer.Input.SetValue(string(runes[:pos]))
-			}
+		case "ctrl+k":
+			// Classic Flow §1.4: ctrl+k is the actions palette
+			// (registry "ctrl+k menu" hint). Kill-line-forward
+			// loses its key here by design; ctrl+w/ctrl+u still
+			// feed the kill ring and undo still recovers.
+			m.state.Palette.Open = !m.state.Palette.Open
+			m.state.Palette.Query = ""
+			m.state.Palette.Selected = 0
+			m.state.Palette.Mode = "palette"
 			return m, nil
 
-		case tea.KeyCtrlU:
+		case "ctrl+u":
 			val := m.composer.Input.Value()
 			pos := m.composer.Input.Position()
 			runes := []rune(val)
@@ -787,7 +1063,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case tea.KeyCtrlY:
+		case "ctrl+y":
 			yanked := m.composer.KillRing.Yank()
 			if yanked != "" {
 				val := m.composer.Input.Value()
@@ -800,7 +1076,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case tea.KeyCtrlUnderscore:
+		case "ctrl+_":
 			val := m.composer.Input.Value()
 			pos := m.composer.Input.Position()
 			if snap, ok := m.composer.Undo.Undo(val, pos); ok {
@@ -811,8 +1087,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.state.Palette.Open {
-			switch msg.Type {
-			case tea.KeyCtrlC, tea.KeyEsc:
+			switch msg.String() {
+			case "ctrl+c", "esc":
 				if m.state.Palette.Mode != "palette" {
 					m.state.Palette.Mode = "palette"
 					m.state.Palette.ConnectKey = ""
@@ -823,14 +1099,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state.Palette.Query = ""
 				}
 				return m, nil
-			case tea.KeyUp:
+			case "up":
 				if m.state.Palette.Mode == "palette" {
 					if m.state.Palette.Selected > 0 {
 						m.state.Palette.Selected--
 					}
 				}
 				return m, nil
-			case tea.KeyDown:
+			case "down":
 				if m.state.Palette.Mode == "palette" {
 					filtered := FilterPalette(DefaultPaletteCatalog(), m.state.Palette.Query)
 					if m.state.Palette.Selected < len(filtered)-1 {
@@ -838,7 +1114,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case tea.KeyBackspace:
+			case "backspace":
 				switch m.state.Palette.Mode {
 				case "connect":
 					if len(m.state.Palette.ConnectKey) > 0 {
@@ -855,7 +1131,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case tea.KeyEnter:
+			case "enter":
 				switch m.state.Palette.Mode {
 				case "connect":
 					key := strings.TrimSpace(m.state.Palette.ConnectKey)
@@ -1061,8 +1337,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state.Palette.Open = false
 				return m, nil
 			default:
-				if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-					ch := string(msg.Runes)
+				if text := msg.Key().Text; text != "" || msg.String() == "space" {
+					ch := text
+					if ch == "" {
+						ch = " "
+					}
 					switch m.state.Palette.Mode {
 					case "connect":
 						m.state.Palette.ConnectKey += ch
@@ -1078,7 +1357,48 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		if msg.Type == tea.KeyEnter {
+		// "?" opens the key help when the composer is empty; with
+		// text in the composer it types a question mark instead.
+		if msg.String() == "?" && m.composer.Input.Value() == "" {
+			m.history.Append("system", "Keys:\n"+strings.TrimRight(KeyHelpText(), "\n"))
+			return m, nil
+		}
+
+		// SETUP choices (C1): k adds a key through the palette's
+		// connect flow; o configures a local Ollama endpoint. Both
+		// are inert while the composer has text (the letters type).
+		if m.needsSetup() && m.composer.Input.Value() == "" {
+			switch msg.String() {
+			case "k":
+				m.state.Palette.Open = true
+				m.state.Palette.Mode = "palette"
+				m.state.Palette.Query = "connect"
+				m.state.Palette.Selected = 0
+				return m, nil
+			case "o":
+				return m, configureOllamaCmd()
+			case "d":
+				// Recorded demo: replay the five-frame fixture
+				// through the same event path a live run uses.
+				m.history.Append("user", "harden POST /login: reject expired tokens and rate-limit failed logins")
+				m.state.Busy = true
+				m.state.Demo = true
+				m.state.DemoStep = 0
+				m.renderLive()
+				return m, demoTick()
+			}
+		}
+
+		// Verdict card key: d shows the diff. The t trace key waits
+		// for a real event-trace backer (CLASSIC.md §7).
+		if m.state.Verdict.Active && m.composer.Input.Value() == "" {
+			switch msg.String() {
+			case "d":
+				return m.executeSlashCommand("/diff")
+			}
+		}
+
+		if msg.String() == "enter" {
 			raw := m.composer.Input.Value()
 			input := strings.TrimSpace(ExpandPasteTokens(raw))
 			if strings.HasPrefix(input, "!") {
@@ -1117,6 +1437,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state.Width = msg.Width
 		m.state.Height = msg.Height
 		chrome := 6
+		if m.state.Layout != "ledger" {
+			chrome = m.classicChrome()
+		}
 		if msg.Height <= chrome {
 			chrome = msg.Height - 1
 		}
@@ -1127,10 +1450,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.Width = 1
 		}
 		if msg.Width > 6 {
-			m.composer.Input.Width = msg.Width - 6
+			m.composer.Input.SetWidth(msg.Width - 6)
 		}
 		if !m.state.Ready {
-			m.viewport = viewport.New(msg.Width, chrome)
+			m.viewport = viewport.New(viewport.WithWidth(msg.Width), viewport.WithHeight(chrome))
 			m.state.Ready = true
 			if m.state.Inline && !m.headerPrinted {
 				// The header scrolls away into
@@ -1139,8 +1462,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, tea.Printf("%s\n\n", m.welcomeCardView()))
 			}
 		} else {
-			m.viewport.Width = msg.Width
-			m.viewport.Height = chrome
+			m.viewport.SetWidth(msg.Width)
+			m.viewport.SetHeight(chrome)
 		}
 
 	case engineEventMsg:
@@ -1193,6 +1516,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, waitForEvent(m.eventChan))
 
+	case gitSubmodsMsg:
+		m.state.GitSubmods = msg.submods
+		return m, nil
+
 	case shellResultMsg:
 		m.state.Busy = false
 		m.state.Activity = ""
@@ -1226,15 +1553,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	val := m.composer.Input.Value()
+	inputStyles := m.composer.Input.Styles()
 	if strings.HasPrefix(val, "!") {
 		m.composer.Input.Prompt = "$ "
-		m.composer.Input.PromptStyle = m.theme.Accent
+		inputStyles.Focused.Prompt = m.theme.Accent
 		m.composer.Input.Placeholder = "Run shell command directly (e.g. ! git status)..."
 	} else {
 		m.composer.Input.Prompt = "> "
-		m.composer.Input.PromptStyle = m.theme.PromptPrefix
+		inputStyles.Focused.Prompt = m.theme.PromptPrefix
 		m.composer.Input.Placeholder = "Type a prompt or task (type / for commands, ! for shell)..."
 	}
+	m.composer.Input.SetStyles(inputStyles)
 	pos := m.composer.Input.Position()
 	if q, ok := ComputeMentionQuery(val, pos); ok {
 		m.state.MentionOverlay.Active = true
@@ -1691,7 +2020,7 @@ func (m AppModel) footerView() string {
 
 	var gitInfo string
 	if m.state.GitBranch != "" {
-		gitInfo = " " + m.theme.StatusGit.Render(m.state.GitBranch)
+		gitInfo = " " + m.theme.StatusGit.Render(m.state.GitBranch) + submodsBadge(m.state.GitSubmods, m.theme)
 	}
 
 	leftParts := modeBadge + " " + model + thinking + "  " + dirStyle + gitInfo
@@ -1761,6 +2090,22 @@ func (m AppModel) footerView() string {
 	return line1 + "\n" + line2
 }
 
+// View dispatches to the active layout. Classic is the default
+// (ui.layout = "classic"); ledger is the previous layout behind
+// ui.layout = "ledger". Both are pure functions of state.
+func (m AppModel) View() tea.View {
+	if m.state.Layout == "ledger" {
+		return m.ledgerView()
+	}
+	// Classic renders the gate inline (the classic gate block); the
+	// other overlays are layout-independent chrome.
+	if m.state.SessionPicker.Active || m.state.DiffViewer.Active ||
+		m.state.Palette.Open || m.state.MentionOverlay.Active || m.state.Btw.Active {
+		return m.ledgerView()
+	}
+	return m.classicView()
+}
+
 func formatTokens(n int) string {
 	if n >= 1000 {
 		if n%1000 == 0 {
@@ -1771,12 +2116,11 @@ func formatTokens(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-func (m AppModel) View() string {
-	start := time.Now()
-	defer func() { m.telemetry.RecordRender(time.Since(start)) }()
-
+// ledgerView is the previous full-screen layout, kept behind
+// ui.layout = "ledger" (experimental). Pure function of state.
+func (m AppModel) ledgerView() tea.View {
 	if !m.state.Ready {
-		return "Initializing NikiCode..."
+		return tea.NewView("Initializing NikiCode...")
 	}
 
 	composerBlock := m.composerView()
@@ -1831,7 +2175,9 @@ func (m AppModel) View() string {
 	if m.state.Debug {
 		body += "\n" + m.debugView()
 	}
-	return body
+	v := tea.NewView(body)
+	v.AltScreen = !m.state.Inline
+	return v
 }
 
 // activityView renders the single live activity
@@ -1883,8 +2229,11 @@ func (m AppModel) composerView() string {
 	return composerBox
 }
 
-// debugView renders boot-phase timings and frame
-// telemetry (B9).
+// debugView renders boot-phase timings and event
+// telemetry (B9). Render timing is not measured
+// here: View() is a pure function and performs no
+// clock reads (pure-render rule), so the overlay
+// reports event-side counters only.
 func (m AppModel) debugView() string {
 	var b strings.Builder
 	b.WriteString(m.theme.Muted.Render("── debug ─────────────────────────────\n"))
@@ -1896,16 +2245,11 @@ func (m AppModel) debugView() string {
 	} else {
 		b.WriteString(m.theme.Muted.Render("boot: no phases recorded\n"))
 	}
-	b.WriteString(m.theme.Muted.Render("frames: "))
-	b.WriteString(m.theme.Muted.Render(itoa(m.telemetry.Frames)))
-	b.WriteString("  events: ")
+	b.WriteString(m.theme.Muted.Render("events: "))
 	b.WriteString(m.theme.Muted.Render(itoa(m.telemetry.Events)))
 	b.WriteString("  deltas: ")
 	b.WriteString(m.theme.Muted.Render(itoa(m.telemetry.Deltas)))
 	b.WriteString("\n")
-	b.WriteString(m.theme.Muted.Render("render last: " + m.telemetry.LastRender.String() +
-		"  p95: " + m.telemetry.RenderP95().String() +
-		"  max: " + m.telemetry.MaxRenderCost().String() + "\n"))
 	return b.String()
 }
 

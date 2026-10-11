@@ -77,7 +77,17 @@ func (t *TurnRunner) pauseRequested() bool {
 func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.EngineEvent)) error {
 	turnID := protocol.NewTurnId()
 	t.currentTurn = string(turnID)
-	emit(protocol.EngineEvent{Type: protocol.EventTurnStarted, Timestamp: time.Now(), TurnID: turnID})
+	started := protocol.EngineEvent{Type: protocol.EventTurnStarted, Timestamp: time.Now(), TurnID: turnID}
+	// C3: the contract strip's requirements are extracted from the
+	// prompt at turn start; states stay queued until the verifier
+	// grades them. Real extraction, never invented rows.
+	for i, req := range verifier.ExtractRequirements(prompt) {
+		started.Contract = append(started.Contract, protocol.ContractReq{
+			ID: req.ID, State: "queued",
+		})
+		_ = i
+	}
+	emit(started)
 
 	// C9: environment context is collected once and refreshed on
 	// change — the block on the context always names the current
@@ -281,9 +291,24 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 				// An erroring verifier is never a pass (V3).
 				v = verifier.Verdict{Result: verifier.NotVerified, Reason: "verifier error: " + verr.Error()}
 			}
+			ver := &protocol.VerificationInfo{Attempt: t.verifyAttempt, Result: string(v.Result), Reason: v.Reason}
+			// C3: the verdict card and contract strip render only
+			// what the verifier measured.
+			ver.Tier = v.Tier
+			for _, r := range v.Requirements {
+				ver.Requirements = append(ver.Requirements, protocol.ReqStatus{
+					ID: r.ID, Text: r.Text, Evidence: r.Evidence, State: r.State,
+				})
+			}
+			ver.NotVerified = verifier.NotVerifiedLines(v.Requirements)
+			for i, state := range verifier.ContractStates(v.Requirements) {
+				ver.Contract = append(ver.Contract, protocol.ContractReq{
+					ID: fmt.Sprintf("R%d", i+1), State: state,
+				})
+			}
 			emit(protocol.EngineEvent{
 				Type: protocol.EventVerification, Timestamp: time.Now(), TurnID: turnID,
-				Verification: &protocol.VerificationInfo{Attempt: t.verifyAttempt, Result: string(v.Result), Reason: v.Reason},
+				Verification: ver,
 			})
 			if v.Passed() {
 				// O1: the final report carries totals (tokens +
@@ -340,13 +365,15 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 			if callID == "" {
 				callID = string(protocol.NewToolCallId())
 			}
-			emit(protocol.EngineEvent{
+			started := protocol.EngineEvent{
 				Type:      protocol.EventToolStarted,
 				Timestamp: time.Now(),
 				TurnID:    turnID,
 				CallID:    protocol.ToolCallId(callID),
 				ToolName:  tc.Tool,
-			})
+			}
+			started.Target = toolTarget(tc.Tool, tc.Args)
+			emit(started)
 
 			res, err := t.dispatchTool(ctx, tc.Tool, tc.Args)
 			output := res.Output
@@ -373,23 +400,28 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 				argRepairs = 0
 			}
 			if err != nil {
-				emit(protocol.EngineEvent{
+				failed := protocol.EngineEvent{
 					Type:      protocol.EventToolFailed,
 					Timestamp: time.Now(),
 					TurnID:    turnID,
 					CallID:    protocol.ToolCallId(callID),
 					Error:     err.Error(),
-				})
+				}
+				failed.Target = toolTarget(tc.Tool, tc.Args)
+				toolRowEventFields(&failed, tc.Tool, tc.Args, output, true)
+				emit(failed)
 				output = fmt.Sprintf("Tool error: %v", err)
 			} else {
-				emit(protocol.EngineEvent{
+				done := protocol.EngineEvent{
 					Type:      protocol.EventToolCompleted,
 					Timestamp: time.Now(),
 					TurnID:    turnID,
 					CallID:    protocol.ToolCallId(callID),
 					ToolName:  tc.Tool,
 					Text:      res.Output,
-				})
+				}
+				toolRowEventFields(&done, tc.Tool, tc.Args, res.Output, false)
+				emit(done)
 				// X4: tool output is data, not instructions. Text
 				// that asks for approval changes, network access,
 				// or disclosure is flagged right here; it is still

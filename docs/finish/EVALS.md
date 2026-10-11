@@ -26,27 +26,3 @@ empty-claim        PASS
 interrupt-turn     PASS
 two-turns          PASS
 ```
-
-## Small-model suite (M9) — AWAITS OWNER RUN
-
-The 20-task small-local-model suite has NOT been run by the agent: it
-requires a real local model (e.g. Ollama `qwen2.5-coder:3b`), which
-only the owner can run. **No pass rate is claimed.**
-
-Run it with the prepared harness:
-
-```
-NIKI_SMALL_MODEL=qwen2.5-coder:3b \
-NIKI_SMALL_QUANT=Q4_K_M \
-NIKI_SMALL_HW="$(uname -s)-$(uname -m)" \
-  tools/smallmodel_eval.sh
-```
-
-The script (`tools/smallmodel_eval.sh`) drives the same 20 fixed
-fixture tasks against the live local model via `nikicode exec
---provider ollama`, judges each by the real verifier, and appends the
-measured pass rate with model, quantization, hardware, and date to
-this file. Prerequisites: `ollama serve`, the model pulled, and
-`nikicode` built. The small-model profile ships only at or above the
-Phase 0 threshold, evaluated from that recorded rate.
-

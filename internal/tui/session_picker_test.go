@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
@@ -38,7 +38,7 @@ func TestSessionPickerKeyboardNavigation(t *testing.T) {
 	app := NewAppModel(cmdChan, eventChan)
 
 	// Press Ctrl+S to open
-	updated, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ := app.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m := updated.(AppModel)
 	if !m.state.SessionPicker.Active {
 		t.Fatalf("expected SessionPicker to be active")
@@ -61,14 +61,14 @@ func TestSessionPickerKeyboardNavigation(t *testing.T) {
 	}
 
 	// Press Down arrow
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(AppModel)
 	if m.state.SessionPicker.Selected != 1 {
 		t.Fatalf("expected selected index 1, got %d", m.state.SessionPicker.Selected)
 	}
 
 	// Press Enter to resume
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(AppModel)
 	if m.state.SessionPicker.Active {
 		t.Fatalf("expected SessionPicker to be closed after Enter")
@@ -103,14 +103,14 @@ func TestSessionPickerDeleteFlow(t *testing.T) {
 	}
 
 	// Press 'd' to trigger delete confirmation
-	updated, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated, _ := app.Update(tea.KeyPressMsg{Text: "d", Code: 'd'})
 	m := updated.(AppModel)
 	if !m.state.SessionPicker.ConfirmDelete {
 		t.Fatalf("expected ConfirmDelete to be true")
 	}
 
 	// Press 'y' to confirm deletion
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated, _ = m.Update(tea.KeyPressMsg{Text: "y", Code: 'y'})
 	m = updated.(AppModel)
 	if m.state.SessionPicker.ConfirmDelete {
 		t.Fatalf("expected ConfirmDelete to be false after confirmation")

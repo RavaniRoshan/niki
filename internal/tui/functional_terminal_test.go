@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
@@ -20,7 +20,7 @@ func TestShiftTabCyclesModes(t *testing.T) {
 	}
 
 	// 1st Shift+Tab -> Agent Always Ask (manual)
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = m2.(AppModel)
 	if m.state.Mode != "agent" || m.state.PermissionMode != "manual" {
 		t.Fatalf("expected agent/manual, got %s/%s", m.state.Mode, m.state.PermissionMode)
@@ -32,7 +32,7 @@ func TestShiftTabCyclesModes(t *testing.T) {
 
 	// 2nd Shift+Tab -> Plan Mode (readonly). X2: cycling SKIPS
 	// Never Ask — unattended execution needs explicit /yolo.
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = m2.(AppModel)
 	if m.state.Mode != "plan" || m.state.PermissionMode != "readonly" {
 		t.Fatalf("expected plan/readonly (Never Ask skipped), got %s/%s", m.state.Mode, m.state.PermissionMode)
@@ -47,7 +47,7 @@ func TestShiftTabCyclesModes(t *testing.T) {
 	}
 
 	// 3rd Shift+Tab -> Cycles back to Agent Ask When Needed
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	m = m2.(AppModel)
 	if m.state.Mode != "agent" || m.state.PermissionMode != "workspace_write" {
 		t.Fatalf("expected agent/workspace_write, got %s/%s", m.state.Mode, m.state.PermissionMode)
@@ -69,7 +69,7 @@ func TestShellFastPathDirectExecution(t *testing.T) {
 
 	// Type `! echo hello_niki_fast_path` and submit with Enter
 	m.composer.Input.SetValue("! echo hello_niki_fast_path")
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	// Must NOT send an LLM prompt turn on cmdChan!
@@ -144,7 +144,7 @@ func TestShellPromptSwitching(t *testing.T) {
 
 	// Simulate typing !
 	m.composer.Input.SetValue("!")
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'!'}})
+	m2, _ := m.Update(tea.KeyPressMsg{Text: "!", Code: '!'})
 	m = m2.(AppModel)
 
 	if m.composer.Input.Prompt != "$ " {
@@ -153,7 +153,7 @@ func TestShellPromptSwitching(t *testing.T) {
 
 	// Simulate deleting back to empty
 	m.composer.Input.SetValue("")
-	m3, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m3, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	m = m3.(AppModel)
 
 	if m.composer.Input.Prompt != "> " {
@@ -206,7 +206,7 @@ func TestSlashModeCommands(t *testing.T) {
 
 	// /yolo
 	m.composer.Input.SetValue("/yolo")
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 	if m.state.PermissionMode != "full_access" {
 		t.Fatalf("expected full_access after /yolo, got %s", m.state.PermissionMode)
@@ -214,7 +214,7 @@ func TestSlashModeCommands(t *testing.T) {
 
 	// /plan
 	m.composer.Input.SetValue("/plan")
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 	if m.state.Mode != "plan" {
 		t.Fatalf("expected plan after /plan, got %s", m.state.Mode)
@@ -222,7 +222,7 @@ func TestSlashModeCommands(t *testing.T) {
 
 	// /auto
 	m.composer.Input.SetValue("/auto")
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 	if m.state.PermissionMode != "workspace_write" {
 		t.Fatalf("expected workspace_write after /auto, got %s", m.state.PermissionMode)
@@ -230,7 +230,7 @@ func TestSlashModeCommands(t *testing.T) {
 
 	// /thinking high
 	m.composer.Input.SetValue("/thinking high")
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 	if m.state.ThinkingEffort != "high" {
 		t.Fatalf("expected thinking effort high, got %s", m.state.ThinkingEffort)

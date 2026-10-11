@@ -1,0 +1,28 @@
+ ▄███▄   niki 0.1.0                   
+███◑███  claude-sonnet · approvals ask
+ ▀███▀   /home/dev/projects/api · main
+Type a request · / for commands · ctrl+k for everything · ? for help
+
+› harden POST /login: reject expired tokens and rate-limit failed logins        
+  Reading the handler and its tests first, then adding a limiter for failed log…
+  Contract: 5 requirements. Assumed: limit is per client IP; only failed logins…
+✓ read  internal/auth/token.go                                         112 lines
+✓ read  internal/auth/token_test.go                                     64 lines
+✓ search  "RateLimit" in internal/**                                   3 matches
+◐ edit  internal/auth/limit.go                                                  
+  Writing the limiter now, then running the auth tests.                         
+✗ shell  go test ./internal/auth                              exit 1 · 2 failing
+    --- FAIL: TestRefreshKeepsSession (0.00s)                                   
+    token_test.go:81: session id changed after refresh                          
+↺ stream error: connection reset — retrying 1/4 (jittered backoff)              
+                                                                                
+                                                                                
+
+■ needs you  add golang.org/x/time?
+  [n] write the limiter without it (default)    [y] allow once    [v] view the diff
+  n keep the constraint · y allow once · v view diff · esc skip
+contract  R1 ○  R2 ○  R3 ○  R4 ○  R5 ○   0 of 5
+────────────────────────────────────────────────────────────────────────────────
+> answer the question above, or steer                                        
+ask · main · /home/dev/projects/api
+esc pause · n keep constraint · y allow once · v view diff · ctx 4%

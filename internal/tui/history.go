@@ -6,6 +6,25 @@ import "github.com/RavaniRoshan/niki/internal/tools"
 type HistoryCell struct {
 	Role string // user, assistant, system, tool, error
 	Text string
+	// Kind further types a cell: "tool" (one-line classic tool
+	// row), "tool_excerpt" (failure excerpt under a tool row),
+	// or "loop" (retry/repetition row). Empty means the role
+	// decides the rendering (C2).
+	Kind string
+	// CallID links tool cells to their engine events so a
+	// completion updates its own row (C2).
+	CallID string
+	// State is the row's real state: "running", "done", "failed"
+	// (set only by events; the glyph is rendered from it).
+	State string
+	// Verb is the fixed-list action verb (C2).
+	Verb string
+	// Target is the tool's real argument (path, command, pattern).
+	Target string
+	// Result is the real outcome summary, right-aligned on the row.
+	Result string
+	// Excerpt holds the failing output lines for a tool_excerpt cell.
+	Excerpt []string
 }
 
 // History accumulates transcript cells split at a
@@ -51,4 +70,20 @@ func (h *History) Finalize() []HistoryCell {
 	committed := h.Cells[h.Committed:]
 	h.Committed = len(h.Cells)
 	return committed
+}
+
+// OpenToolCell finds the running tool cell for a
+// call id, searching from the end (a call id maps to
+// one row). Returns nil when no open row exists.
+func (h *History) OpenToolCell(callID string) *HistoryCell {
+	if callID == "" {
+		return nil
+	}
+	for i := len(h.Cells) - 1; i >= h.Committed; i-- {
+		c := &h.Cells[i]
+		if c.Kind == "tool" && c.CallID == callID && c.State == stateRunning {
+			return c
+		}
+	}
+	return nil
 }

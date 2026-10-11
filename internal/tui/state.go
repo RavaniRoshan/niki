@@ -1,6 +1,11 @@
 package tui
 
-import "time"
+import (
+	"time"
+
+	"github.com/RavaniRoshan/niki/internal/git"
+	"github.com/RavaniRoshan/niki/internal/protocol"
+)
 
 // State holds UI presentation state.
 type State struct {
@@ -12,6 +17,21 @@ type State struct {
 	// where finalized history belongs to the
 	// terminal's native scrollback (U9).
 	Inline bool
+	// Layout selects the renderer: "classic" (the
+	// Classic Flow, default) or "ledger" (the
+	// previous full-screen layout, experimental)
+	// (C0).
+	Layout string
+	// TurnOutcome is set by real turn-end events and drives the
+	// orb state only: "done", "error", "interrupted", or ""
+	// (C0). Never invented between events.
+	TurnOutcome string
+	// Gate is the active decision block (C3); Active is false
+	// until a gate event arrives.
+	Gate GateState
+	// Verdict is the end-of-run card state (C3); Active is false
+	// until a verification event arrives.
+	Verdict VerdictState
 	// Debug toggles the telemetry overlay (B9).
 	Debug bool
 	// Activity is the single live activity line
@@ -26,6 +46,25 @@ type State struct {
 	// the B5 zero-redraw gate is unaffected.
 	SpinFrame int
 
+	// Plan is the latest plan from a real plan event (C2);
+	// the classic next line renders only from it.
+	Plan []protocol.PlanStep
+	// Contract is the turn's requirement contract (C3): extracted
+	// from the prompt at turn start and re-stated by the
+	// verification event. The contract strip renders only this.
+	Contract []protocol.ContractReq
+
+	// Demo replays the recorded five-frame fixture (C3): a
+	// scripted run, clearly not a live model. DemoStep advances
+	// through classicStageEvents; -1 when inactive.
+	Demo     bool
+	DemoStep int
+
+	// HideContractUI renders Classic without the contract strip and
+	// the verdict card — the plain-transcript variant of the C5
+	// validation study (design §9). Off by default.
+	HideContractUI bool
+
 	// Environment & Session Metadata
 	Directory      string
 	SessionID      string
@@ -36,6 +75,7 @@ type State struct {
 	ThinkingEffort string
 	ShellInputMode bool
 	GitBranch      string
+	GitSubmods     []git.Submodule
 
 	// Token Context Meter & Cost Accounting
 	UsedTokens int
@@ -59,16 +99,15 @@ type State struct {
 	MentionOverlay   MentionOverlayState
 }
 
-// FrameTelemetry records render-cost and event
-// counters for the debug overlay (B9).
+// FrameTelemetry records event counters and boot-phase
+// timings for the debug overlay (B9). Render timing is
+// deliberately not collected: View() is a pure function
+// (no clock reads), so per-frame render cost is not
+// measurable inside the render path.
 type FrameTelemetry struct {
-	Frames        int
-	Events        int
-	LastRender    time.Duration
-	RenderCosts   []time.Duration // rolling, capped
-	BootPhases    []BootPhase
-	Deltas        int
-	maxRenderCost time.Duration
+	Events     int
+	Deltas     int
+	BootPhases []BootPhase
 }
 
 // BootPhase is one recorded boot phase timing.
@@ -76,41 +115,3 @@ type BootPhase struct {
 	Name     string
 	Duration time.Duration
 }
-
-const maxRenderCosts = 120
-
-// RecordRender records one render cost.
-func (f *FrameTelemetry) RecordRender(d time.Duration) {
-	f.Frames++
-	f.LastRender = d
-	if d > f.maxRenderCost {
-		f.maxRenderCost = d
-	}
-	f.RenderCosts = append(f.RenderCosts, d)
-	if len(f.RenderCosts) > maxRenderCosts {
-		f.RenderCosts = f.RenderCosts[len(f.RenderCosts)-maxRenderCosts:]
-	}
-}
-
-// RenderP95 returns the 95th-percentile render
-// cost over the recorded window.
-func (f *FrameTelemetry) RenderP95() time.Duration {
-	if len(f.RenderCosts) == 0 {
-		return 0
-	}
-	sorted := make([]time.Duration, len(f.RenderCosts))
-	copy(sorted, f.RenderCosts)
-	for i := 1; i < len(sorted); i++ {
-		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
-		}
-	}
-	idx := (len(sorted) * 95) / 100
-	if idx >= len(sorted) {
-		idx = len(sorted) - 1
-	}
-	return sorted[idx]
-}
-
-// MaxRenderCost returns the worst render cost seen.
-func (f *FrameTelemetry) MaxRenderCost() time.Duration { return f.maxRenderCost }

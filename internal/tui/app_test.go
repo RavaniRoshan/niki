@@ -6,8 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
@@ -29,20 +28,20 @@ func TestReducedMotion(t *testing.T) {
 	cmdChan := make(chan protocol.EngineCommand, 8)
 	eventChan := make(chan protocol.EngineEvent, 8)
 	m := NewAppModel(cmdChan, eventChan)
-	if m.composer.Input.Cursor.Mode() != cursor.CursorBlink {
-		t.Fatalf("default cursor mode = %v, want %v", m.composer.Input.Cursor.Mode(), cursor.CursorBlink)
+	if !m.composer.Input.Styles().Cursor.Blink {
+		t.Fatal("default composer cursor should blink")
 	}
 	m.SetReducedMotion(true)
 	if !m.state.ReducedMotion {
 		t.Fatal("reduced motion not recorded")
 	}
-	if m.composer.Input.Cursor.Mode() != cursor.CursorStatic {
-		t.Fatalf("cursor mode = %v, want %v", m.composer.Input.Cursor.Mode(), cursor.CursorStatic)
+	if m.composer.Input.Styles().Cursor.Blink {
+		t.Fatal("reduced motion must make the cursor static")
 	}
 	// Toggling back restores the blink.
 	m.SetReducedMotion(false)
-	if m.composer.Input.Cursor.Mode() != cursor.CursorBlink {
-		t.Fatalf("cursor mode after restore = %v, want %v", m.composer.Input.Cursor.Mode(), cursor.CursorBlink)
+	if !m.composer.Input.Styles().Cursor.Blink {
+		t.Fatal("cursor should blink again after restore")
 	}
 }
 
@@ -65,7 +64,7 @@ func TestSlashCommandsIntercepted(t *testing.T) {
 
 	// Test /model
 	m.composer.Input.SetValue("/model")
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 	if len(m.history.Cells) == 0 || m.history.Cells[len(m.history.Cells)-1].Role != "system" {
 		t.Fatal("expected /model to append system cell")
@@ -73,7 +72,7 @@ func TestSlashCommandsIntercepted(t *testing.T) {
 
 	// Test /doctor
 	m.composer.Input.SetValue("/doctor")
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 	if len(m.history.Cells) < 2 || m.history.Cells[len(m.history.Cells)-1].Role != "system" {
 		t.Fatal("expected /doctor to append system cell")
@@ -92,7 +91,7 @@ func TestSlashExplainCites(t *testing.T) {
 	m.state.Directory = dir
 
 	m.composer.Input.SetValue("/explain `ComputeThing`")
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 	if len(m.history.Cells) == 0 {
 		t.Fatal("expected /explain to append a cell")
@@ -104,7 +103,7 @@ func TestSlashExplainCites(t *testing.T) {
 
 	// Unknown symbols are refused, not invented.
 	m.composer.Input.SetValue("/explain `NoSuchSymbolZZZ`")
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 	last = m.history.Cells[len(m.history.Cells)-1]
 	if !strings.Contains(last.Text, "Cannot answer") {

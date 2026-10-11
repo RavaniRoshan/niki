@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // DiffHunk holds a single hunk in a unified diff.
@@ -98,12 +98,12 @@ func (d *DiffViewerState) HandleKey(msg tea.KeyMsg) (closed bool) {
 		return false
 	}
 
-	switch msg.Type {
-	case tea.KeyEsc:
+	switch msg.String() {
+	case "esc":
 		d.Active = false
 		return true
 
-	case tea.KeyUp, tea.KeyCtrlP:
+	case "up", "ctrl+p":
 		if d.Selected > 0 {
 			d.Selected--
 			d.SelectedHunk = 0
@@ -111,7 +111,7 @@ func (d *DiffViewerState) HandleKey(msg tea.KeyMsg) (closed bool) {
 		}
 		return false
 
-	case tea.KeyDown, tea.KeyCtrlN:
+	case "down", "ctrl+n":
 		if d.Selected < len(d.Files)-1 {
 			d.Selected++
 			d.SelectedHunk = 0
@@ -119,7 +119,7 @@ func (d *DiffViewerState) HandleKey(msg tea.KeyMsg) (closed bool) {
 		}
 		return false
 
-	case tea.KeyPgUp:
+	case "pgup":
 		if d.ScrollOffset > 5 {
 			d.ScrollOffset -= 5
 		} else {
@@ -127,7 +127,7 @@ func (d *DiffViewerState) HandleKey(msg tea.KeyMsg) (closed bool) {
 		}
 		return false
 
-	case tea.KeyPgDown:
+	case "pgdown":
 		d.ScrollOffset += 5
 		return false
 

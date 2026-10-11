@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
@@ -21,7 +21,7 @@ func TestUnconfiguredModelPromptShowsAlert(t *testing.T) {
 
 	// Submit an AI prompt
 	m.composer.Input.SetValue("Write me a sorting function")
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	// Must NOT send to cmdChan, and must record alert card in history
@@ -54,7 +54,7 @@ func TestUnconfiguredModelAllowsLocalShellCommands(t *testing.T) {
 
 	// Shell command prefixed with '!' should execute without needing an AI model
 	m.composer.Input.SetValue("! echo 'offline works'")
-	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if cmd == nil {

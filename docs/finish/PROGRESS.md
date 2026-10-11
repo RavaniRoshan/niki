@@ -686,3 +686,32 @@ any context compaction.
   paths: 195 inside, 105 refused`; `[Q6 patch] 200 forward+reverse exact
   / 50 corrupted refused with empty output`.
 - Full suite green; gofmt + vet clean. X5+X7+X8+Q6 GREEN (105 rows).
+
+## 2026-10-11 — Slice Y: session R2/R3 + observability O3 + git G4 (P1)
+- R2 checkpoint fork: `Session.ForkAtCheckpoint(checkpointsSeen)` keeps
+  events through the Nth `context_compacted` marker. Fixed an off-by-one
+  that dropped the bounding marker from the fork.
+- R3 session export: new `session.ExportBundle` + `BuildExportBundle`
+  (`MarkdownTOC`, `JSONLines`), redacted payloads, frozen-timestamp
+  fixture so goldens are stable.
+- O3 `niki explain last`: new `internal/last` (`Summarize`/`Render`)
+  produces asked/changed/passed/looped/not-verified from the sqlite
+  event log; CLI `niki explain [session-id]` (latest session by default).
+- G4 submodules/nested: new `git.Submods` reports registered
+  submodules (path/URL/status via `git submodule status` + `.gitmodules`)
+  and unregistered nested git work trees (immediate subdir scan).
+- Acceptance printed: `[R2] fork at marker 1 keeps 3 events …`;
+  `[R3] markdown golden exact …`; `[R3] JSON golden exact …`;
+  `[O3 verified] golden exact …`; `[O3 unverified] golden exact …`;
+  `[G4] reported: registered submodule (vendor/dep, clean, URL) +
+  unregistered nested-repo`.
+- Packages git/last/session green; gofmt + vet clean. R2+R3+O3+G4 GREEN (109 rows).
+
+## 2026-10-11 — Slice Z: gap closure (I7 + O2 + O4 + Q3 + Q7 + U3)
+- I7 message catalog: new internal/i18n (English foundation, 14 user-facing keys) with T/Tr/MustT/Has/Untranslated. Gate: MustT panics on an unregistered key (hard-coded literal); T tracks keys absent from the catalog; all registered keys resolve. Acceptance: [I7] catalog well-formed: 14 keys; gate caught unregistered literal; Tr formats. Existing TUI literals untouched (asserted by snapshots) and migrate incrementally against the gate.
+- O2 trace export: new internal/trace (Document/Recorder/Export/Validate) on engine.Observe; schema_version mirrors U2; carries session_id + event_count + ordered events; rejects zero schema, count mismatch, missing type/timestamp. Acceptance: [O2] schema_version=1, event_count=4, round-trips, validates; malformed docs rejected.
+- O4 boot-trace acceptance: cmd/nikicode/main_boot_o4_test.go TestBootTraceListsEveryTask reproduces the canonical DAG (boot/config/registry/startup/detect/program/session-run) in-process, asserts file exists, header present, every task listed, durations >= 0. Acceptance: [O4] trace file exists, header + 7 tasks present.
+- Q3 perf budgets: new internal/perf (Budget/Check/Violation, 10% tolerance) + tools/perfbudget (measures --version p50 + binary size vs baseline.json) + perf-budget CI job. Acceptance: within tolerance clean; at boundary (=baseline+10%) clean; over absolute limit fails; non-slim build flagged as 17.1% regression.
+- Q7 dogfood log: docs/finish/DOGFOOD.md with six dated NIKI-on-NIKI entries.
+- U3 release notes: new internal/changelog (Entry/Changelog/FromCommits/ScanLog/RenderMarkdown) parsing conventional commits (breaking ! + oneline hash strip) into Added/Changed/Fixed/Removed/Other; golden testdata/changelog.golden. Acceptance: [U3] golden exact; ScanLog stripped hash prefix.
+- Evidence: go build ./... ok; go vet clean on all new packages; gofmt -l clean; full go test ./... -count=1 green (0 FAIL, 0 panic) including cmd/nikicode, git, last, session, trace, changelog, perf, i18n, tui.

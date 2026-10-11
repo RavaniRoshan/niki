@@ -4,7 +4,7 @@ import (
 	"io"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"path/filepath"
@@ -14,10 +14,14 @@ import (
 
 // renderFixed is renderAt with a frozen directory/branch so the
 // goldens are hermetic (no machine path or git state leaks in).
+// The frame is downsampled at the output boundary (Lip Gloss v2
+// renders full-fidelity ANSI; NO_COLOR/plain stripping happens
+// here, mirroring what the Bubble Tea renderer does live).
 func renderFixed(w, h int) string {
 	cmdChan := make(chan protocol.EngineCommand, 8)
 	eventChan := make(chan protocol.EngineEvent, 8)
 	m := NewAppModel(cmdChan, eventChan)
+	m.SetLayout("ledger")
 	um, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 	m = um.(AppModel)
 	m.state.Directory = "/repo"
@@ -25,7 +29,7 @@ func renderFixed(w, h int) string {
 	m.history.Append("user", "hello")
 	m.history.AppendDelta("hi there")
 	m.viewport.SetContent(m.RenderHistory())
-	return m.View()
+	return Downsample(m.View().Content)
 }
 
 // P1: unicode width correct; NO_COLOR, ASCII fallback, and a plain

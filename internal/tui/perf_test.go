@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
@@ -24,9 +24,9 @@ func TestInputEchoP95(t *testing.T) {
 	latencies := make([]time.Duration, 0, n)
 	for i := 0; i < n; i++ {
 		start := time.Now()
-		um, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		um, _ := m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
 		m = um.(AppModel)
-		_ = m.View()
+		_ = m.View().Content
 		latencies = append(latencies, time.Since(start))
 	}
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
@@ -181,9 +181,9 @@ func TestBoundedMemoryNoGCPause(t *testing.T) {
 	m, _, _ := newModel(false)
 	const n = 2000
 	for i := 0; i < n; i++ {
-		um, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		um, _ := m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
 		m = um.(AppModel)
-		_ = m.View()
+		_ = m.View().Content
 	}
 	runtime.ReadMemStats(&after)
 
@@ -214,8 +214,9 @@ func TestRenderCostFlatWithTranscript(t *testing.T) {
 		for i := 0; i < cells; i++ {
 			m.history.Append("assistant", strings.Repeat("line of transcript text ", 4))
 		}
+		m.renderLive()
 		start := time.Now()
-		_ = m.View()
+		_ = m.View().Content
 		return time.Since(start)
 	}
 	small := render(100)

@@ -20,7 +20,7 @@ func Default() Config {
 			Force:    false,
 		},
 		Provider:    ProviderConfig{Name: "", EnvKey: ""},
-		UI:          UIConfig{Inline: false, Theme: "default"},
+		UI:          UIConfig{Inline: false, Theme: "default", Layout: LayoutClassic},
 		Permissions: PermissionsConfig{Mode: "workspace_write"},
 		SelfExtend:  "off",
 		MCP:         MCPConfig{Servers: map[string]MCPServer{}},
@@ -202,6 +202,9 @@ func LoadWithProfile(explicitPath, profileName string) (ConfigWithSources, error
 	if out.SelfExtend != "off" && out.SelfExtend != "propose" {
 		out.SelfExtend = "off"
 	}
+	// C0: an unknown layout fails closed to classic (never to a
+	// blank screen); ledger is opt-in and stays experimental.
+	out.UI.Layout = NormalizeLayout(out.UI.Layout)
 	if out.Provider.Name == "" || out.Model.Name == "" {
 		detectedProv, detectedModel := AutoDetectProvider()
 		if out.Provider.Name == "" && detectedProv.Name != "" {

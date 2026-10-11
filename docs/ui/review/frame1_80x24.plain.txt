@@ -1,0 +1,25 @@
+  _____    niki 0.1.0                   
+ /  o  \   claude-sonnet - approvals ask
+ \_____/   /home/dev/projects/api - main
+Type a request - / for commands - ctrl+k for everything - ? for help
+
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+
+  o ready
+--------------------------------------------------------------------------------
+> Describe a change, or ask a question                                       
+ask - main - /home/dev/projects/api
+shift+tab mode - ctrl+o expand - ctrl+k menu - ? help

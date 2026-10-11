@@ -3,8 +3,8 @@ package tui
 import (
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // BtwState tracks a docked mini-agent lookup session.
@@ -20,8 +20,8 @@ func (b *BtwState) HandleKey(msg tea.KeyMsg) (closed bool) {
 	if !b.Active {
 		return false
 	}
-	switch msg.Type {
-	case tea.KeyEsc, tea.KeyEnter:
+	switch msg.String() {
+	case "esc", "enter":
 		b.Active = false
 		b.Busy = false
 		return true

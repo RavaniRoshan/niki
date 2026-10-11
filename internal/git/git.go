@@ -508,6 +508,102 @@ func Blame(dir, file string, line int) (BlameInfo, error) {
 	return info, nil
 }
 
+// Submodule describes a git submodule (G4): a nested repository
+// referenced from the parent's index. Path is the in-tree directory;
+// URL is its remote; Status reports whether it is at the checked-out
+// commit ("clean") or has local changes ("modified").
+type Submodule struct {
+	Path   string
+	URL    string
+	Status string
+}
+
+// Submods reports git-tracked submodules of the work tree at dir,
+// plus any nested git repositories that are NOT registered as
+// submodules (reported with an empty URL and Status "unregistered").
+// This is the single source the git/TUI layer consults so nested
+// repos are reported rather than silently skipped (G4).
+func Submods(dir string) ([]Submodule, error) {
+	outs, err := run(dir, "run this inside a git repository", "submodule", "status", "--recursive")
+	if err != nil {
+		// No submodules: still scan for unregistered nested repos, but
+		// only if we are at least in a work tree.
+		if !InWorkTree(dir) {
+			return nil, err
+		}
+		outs = ""
+	}
+	var subs []Submodule
+	for _, line := range strings.Split(strings.TrimRight(outs, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		st := "clean"
+		body := strings.TrimSpace(line)
+		switch {
+		case body[:1] == "+" || body[:1] == "-":
+			st = "modified"
+			body = strings.TrimSpace(body[1:])
+		case body[:1] == " ":
+			body = strings.TrimSpace(body[1:])
+		}
+		// body is "<sha> <path> [(url)]"; keep the first whitespace-delimited
+		// field after the sha as the path.
+		fields := strings.Fields(body)
+		var path string
+		if len(fields) >= 2 {
+			path = fields[1]
+		} else if len(fields) == 1 {
+			path = fields[0]
+		}
+		if path == "" {
+			continue
+		}
+		url, _ := submoduleURL(dir, path)
+		subs = append(subs, Submodule{Path: path, URL: url, Status: st})
+	}
+	// Nested but unregistered repos: any immediate subdirectory of dir
+	// that is its own git work tree and not already a tracked submodule.
+	extra, err := scanNestedRepos(dir, subs)
+	if err != nil {
+		return subs, nil
+	}
+	return append(subs, extra...), nil
+}
+
+// submoduleURL looks up the remote URL for path from .gitmodules.
+func submoduleURL(dir, path string) (string, error) {
+	cfg, err := run(dir, "", "config", "-f", ".gitmodules", "--get", "submodule."+path+".url")
+	if err != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(cfg), nil
+}
+
+// scanNestedRepos finds immediate subdirectories of dir that are git
+// work trees of their own but are not registered submodules.
+func scanNestedRepos(dir string, known []Submodule) ([]Submodule, error) {
+	knownSet := map[string]bool{}
+	for _, s := range known {
+		knownSet[s.Path] = true
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var found []Submodule
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == ".git" || knownSet[e.Name()] {
+			continue
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, e.Name(), ".git")); statErr != nil {
+			continue
+		}
+		found = append(found, Submodule{Path: e.Name(), URL: "", Status: "unregistered"})
+	}
+	return found, nil
+}
+
 // PRDraft renders a pull-request draft as markdown: base..HEAD commits
 // plus the diff stat. It writes nothing to the network; when out is
 // non-empty it also saves the file.

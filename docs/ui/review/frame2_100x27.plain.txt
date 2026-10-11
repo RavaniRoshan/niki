@@ -1,0 +1,25 @@
+  _____    niki 0.1.0                   
+ /  *  \   claude-sonnet - approvals ask
+ \_____/   /home/dev/projects/api - main
+Type a request - / for commands - ctrl+k for everything - ? for help
+
+> harden POST /login: reject expired tokens and rate-limit failed logins                            
+  Reading the handler and its tests first, then adding a limiter for failed logins.                 
+  Contract: 5 requirements. Assumed: limit is per client IP; only failed logins count.              
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+
+  - streaming… - esc pause
+contract  R1 queued  R2 queued  R3 queued  R4 queued  R5 queued   0 of 5
+----------------------------------------------------------------------------------------------------
+> steer with enter - queue with ctrl+enter                                                       
+ask - main - /home/dev/projects/api                ctrl+c stop - esc pause - ctrl+o expand - ctx 4%

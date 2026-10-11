@@ -68,6 +68,7 @@ func (s Standard) Verify(ctx context.Context, r Request) (Verdict, error) {
 		reason += "; test weakening: " + joinWeakening(weakened)
 	}
 	v.Reason = reason
+	v = structuredVerdict(v, reqs, results, tier)
 	return v, nil
 }
 

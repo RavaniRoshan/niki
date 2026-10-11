@@ -13,6 +13,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/provider"
+	"github.com/RavaniRoshan/niki/internal/session"
 	"github.com/RavaniRoshan/niki/internal/tools"
 	"github.com/RavaniRoshan/niki/internal/undo"
 	"github.com/RavaniRoshan/niki/internal/verifier"
@@ -42,6 +43,11 @@ type Engine struct {
 	// L5: first Esc asks for a pause at the next safe point; a
 	// second Esc (or CmdInterruptTurn) stops the run now.
 	pauseRequested atomic.Bool
+
+	// C3 gates: one pending question at a time; the answer
+	// channel hands the frontend's answers to the waiting handler.
+	questionMu   sync.Mutex
+	questionWait chan []string
 
 	// E3: per-turn checkpoints; set once via SetCheckpoints.
 	checkpoints *checkpoint.Manager
@@ -112,6 +118,15 @@ func NewEngine(bufferSize int, prov provider.ModelProvider, reg *tools.Registry,
 		},
 	}
 	eng.runner.PauseRequested = func() bool { return eng.pauseRequested.Load() }
+	// C3 gates: the ask_user_question tool asks through this handler,
+	// which emits the question event and blocks until the frontend
+	// answers (CmdAnswerQuestion). The event was defined but never
+	// emitted; this is the minimal wiring that makes it real.
+	if q, ok := reg.Get("ask_user_question"); ok {
+		if aq, ok := q.(*tools.AskUserQuestionTool); ok {
+			aq.SetPromptHandler(eng.promptHandler)
+		}
+	}
 	eng.undo = undo.NewStack()
 	eng.runner.Undo = eng.undo
 	eng.runner.HistoryEvents = eng.session.Snapshot
@@ -271,6 +286,9 @@ func (e *Engine) emit(evt protocol.EngineEvent) {
 
 func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 	switch cmd.Type {
+	case protocol.CmdAnswerQuestion:
+		// C3: deliver the gate answer to the waiting prompt handler.
+		e.deliverAnswer(cmd.Answers)
 	case protocol.CmdSubmitPrompt:
 		// B7: a prompt submitted before required capabilities are
 		// warm is refused rather than run against a cold subsystem.
@@ -543,12 +561,21 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 		e.mu.Unlock()
 		if store != nil && cmd.SessionID != "" {
 			newID, _ := store.Fork(cmd.SessionID, "Forked Session")
+			// R3 wiring: every fork ("niki fork") leaves a portable
+			// export trace — Markdown + JSON lines — beside the
+			// session log, so the forked session is usable standalone.
+			exportNote := ""
+			if ss, ok := store.(*session.Store); ok {
+				if _, _, err := ss.ExportSession(newID, "Forked Session"); err == nil {
+					exportNote = " · exported"
+				}
+			}
 			summaries, _ := store.ListSessionSummaries()
 			e.emit(protocol.EngineEvent{
 				Type:      protocol.EventSessionList,
 				Timestamp: time.Now(),
 				Sessions:  summaries,
-				Text:      "Forked session as " + string(newID),
+				Text:      "Forked session as " + string(newID) + exportNote,
 			})
 		}
 	case protocol.CmdResumeSession:
@@ -567,5 +594,69 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 				})
 			}
 		}
+	}
+}
+
+// promptHandler is the ask_user_question tool's hook (C3): it emits
+// the question event and blocks for the frontend's answer. A
+// cancelled turn or a closed channel answers "skipped" so the tool
+// never hangs the run.
+func (e *Engine) promptHandler(ctx context.Context, questions []tools.UserQuestion) ([]string, error) {
+	protocolQuestions := make([]protocol.UserQuestion, 0, len(questions))
+	for _, q := range questions {
+		safe := q.Safe
+		if safe < 0 || safe >= len(q.Options) {
+			safe = 0
+		}
+		protocolQuestions = append(protocolQuestions, protocol.UserQuestion{
+			Header:      q.Header,
+			Question:    q.Question,
+			Options:     q.Options,
+			AllowCustom: q.AllowCustom,
+			Safe:        safe,
+		})
+	}
+	wait := make(chan []string, 1)
+	e.questionMu.Lock()
+	if e.questionWait != nil {
+		// A second concurrent gate: the first one wins; this call
+		// skips rather than deadlocking the run.
+		e.questionMu.Unlock()
+		return []string{"skipped"}, nil
+	}
+	e.questionWait = wait
+	e.questionMu.Unlock()
+	defer func() {
+		e.questionMu.Lock()
+		if e.questionWait == wait {
+			e.questionWait = nil
+		}
+		e.questionMu.Unlock()
+	}()
+
+	e.emit(protocol.EngineEvent{
+		Type:      protocol.EventQuestionPrompted,
+		Timestamp: time.Now(),
+		Questions: protocolQuestions,
+	})
+	select {
+	case answers := <-wait:
+		return answers, nil
+	case <-ctx.Done():
+		return []string{"skipped"}, nil
+	}
+}
+
+// deliverAnswer routes a CmdAnswerQuestion to the waiting gate (C3).
+func (e *Engine) deliverAnswer(answers []string) {
+	e.questionMu.Lock()
+	wait := e.questionWait
+	e.questionMu.Unlock()
+	if wait == nil {
+		return
+	}
+	select {
+	case wait <- answers:
+	default:
 	}
 }

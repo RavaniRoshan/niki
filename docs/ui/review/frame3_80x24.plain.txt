@@ -1,0 +1,27 @@
+  _____    niki 0.1.0                   
+ /  *  \   claude-sonnet - approvals ask
+ \_____/   /home/dev/projects/api - main
+Type a request - / for commands - ctrl+k for everything - ? for help
+
+> harden POST /login: reject expired tokens and rate-limit failed logins        
+  Reading the handler and its tests first, then adding a limiter for failed l...
+  Contract: 5 requirements. Assumed: limit is per client IP; only failed logi...
+done read  internal/auth/token.go                                      112 lines
+done read  internal/auth/token_test.go                                  64 lines
+done search  "RateLimit" in internal/**                                3 matches
+running edit  internal/auth/limit.go                                            
+  Writing the limiter now, then running the auth tests.                         
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+
+  - writing internal/auth/limit.go - esc pause
+    next  run go test ./internal/auth
+contract  R1 queued  R2 queued  R3 queued  R4 queued  R5 queued   0 of 5
+--------------------------------------------------------------------------------
+> steer with enter - queue with ctrl+enter                                   
+ask - main - /home/dev/projects/api
+ctrl+c stop - esc pause - ctrl+o expand - ctx 4%

@@ -1,13 +1,21 @@
 package tui
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 )
+
+// frameProfile is the color profile applied when a full-fidelity
+// frame is reduced to a plain string outside the Bubble Tea
+// renderer (tests, dumps, logs). View() itself always emits
+// full-fidelity ANSI; downsample happens here, at the output
+// boundary (Lip Gloss v2 removed the renderer).
+var frameProfile colorprofile.Profile = colorprofile.NoTTY
 
 // Wordmark renders the original NikiCode brand lockup: the orb motif
 // (single eye, designed for NikiCode) beside the name. Nothing is
@@ -82,6 +90,9 @@ func CurrentDisplayMode() DisplayMode {
 	if os.Getenv("NIKI_PLAIN") == "1" {
 		return ModePlain
 	}
+	if os.Getenv("NIKI_ASCII") == "1" {
+		return ModeASCII
+	}
 	if UseASCII() {
 		return ModeASCII
 	}
@@ -93,9 +104,10 @@ func CurrentDisplayMode() DisplayMode {
 
 // UseASCII reports whether the terminal needs the ASCII fallback:
 // TERM=dumb has no unicode block/orb glyphs worth emitting, and
-// NIKI_PLAIN=1 requests plain output for logs/screen readers.
+// NIKI_PLAIN=1 or NIKI_ASCII=1 requests plain output for
+// logs/screen readers.
 func UseASCII() bool {
-	return os.Getenv("TERM") == "dumb" || os.Getenv("NIKI_PLAIN") == "1"
+	return os.Getenv("TERM") == "dumb" || os.Getenv("NIKI_PLAIN") == "1" || os.Getenv("NIKI_ASCII") == "1"
 }
 
 // ChromeBorder returns the frame border for the current display
@@ -124,16 +136,32 @@ func Ellipsis() string {
 	return "…"
 }
 
-// ApplyDisplayEnv refreshes lipgloss's default renderer from the
-// environment so NO_COLOR and NIKI_PLAIN take effect even when the
-// process started without them (a fresh renderer re-reads the env;
-// the stale default would keep a color profile). Call once at TUI
-// startup and in tests that change display env vars. The writer is
-// a parameter — the render path itself performs no process-output I/O.
+// ApplyDisplayEnv resolves the plain-string output profile from the
+// environment so NO_COLOR, NIKI_ASCII, and NIKI_PLAIN take effect
+// outside the Bubble Tea renderer (tests, dumps, logs). Call once at
+// TUI startup and in tests that change display env vars. The writer
+// is a parameter — the render path itself performs no process-output
+// I/O.
 func ApplyDisplayEnv(w io.Writer) {
-	r := lipgloss.NewRenderer(w)
-	if CurrentDisplayMode() == ModePlain || CurrentDisplayMode() == ModeASCII {
-		r = lipgloss.NewRenderer(w, termenv.WithProfile(termenv.Ascii))
+	p := colorprofile.Detect(w, os.Environ())
+	switch CurrentDisplayMode() {
+	case ModePlain, ModeASCII, ModeNoColor:
+		p = colorprofile.NoTTY
+	case ModeNormal:
 	}
-	lipgloss.SetDefaultRenderer(r)
+	frameProfile = p
+}
+
+// Downsample reduces a full-fidelity frame to the resolved output
+// profile (NO_COLOR/plain strip all sequences; ANSI256/TrueColor
+// downsample color depth). The Bubble Tea renderer applies the same
+// reduction on the live output path.
+func Downsample(s string) string {
+	if frameProfile == colorprofile.TrueColor {
+		return s
+	}
+	var buf bytes.Buffer
+	w := &colorprofile.Writer{Forward: &buf, Profile: frameProfile}
+	_, _ = w.Write([]byte(s))
+	return buf.String()
 }

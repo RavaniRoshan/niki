@@ -19,6 +19,12 @@ const (
 type Verdict struct {
 	Result Result `json:"result"`
 	Reason string `json:"reason,omitempty"`
+
+	// Tier is the graded trust tier code ("T0".."T3") (C3).
+	Tier string `json:"tier,omitempty"`
+	// Requirements is the per-requirement evidence in prompt order
+	// (C3): the verdict card renders exactly this.
+	Requirements []ReqEvidence `json:"requirements,omitempty"`
 }
 
 // Passed reports whether the verdict ends the run as done.

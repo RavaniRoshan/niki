@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
@@ -29,7 +29,7 @@ func TestQuestionModalNavigationAndSubmit(t *testing.T) {
 	}
 
 	// Navigate down to second option on Question 1
-	downKey := tea.KeyMsg{Type: tea.KeyDown}
+	downKey := tea.KeyPressMsg{Code: tea.KeyDown}
 	done, _, _ := state.HandleKey(downKey)
 	if done {
 		t.Fatalf("down key should not complete modal")
@@ -39,7 +39,7 @@ func TestQuestionModalNavigationAndSubmit(t *testing.T) {
 	}
 
 	// Press Enter to move to Question 2
-	enterKey := tea.KeyMsg{Type: tea.KeyEnter}
+	enterKey := tea.KeyPressMsg{Code: tea.KeyEnter}
 	done, _, _ = state.HandleKey(enterKey)
 	if done {
 		t.Fatalf("enter on first question should advance to question 2, not complete")

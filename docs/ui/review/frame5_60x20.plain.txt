@@ -1,0 +1,37 @@
+  _____    niki 0.1.0                   
+ /  *  \   claude-sonnet - approvals ask
+ \_____/   /home/dev/projects/api - main
+Type a request - / for commands - ctrl+k for everything -...
+
+    64 lines                                                
+done search  "RateLimit" in internal/**                     
+    3 matches                                               
+done edit  internal/auth/limit.go                           
+    +62 -4                                                  
+  Writing the limiter now, then running the auth tests.     
+failed shell  go test ./internal/auth                       
+    exit 1 - 2 failing                                      
+    --- FAIL: TestRefreshKeepsSession (0.00s)               
+    token_test.go:81: session id changed after refresh      
+! stream error: connection reset -- retrying 1/4 (jittered b
+  done  Answered: write the limiter without it              
+done shell  go test ./...                                   
+    31 passed                                               
+
+verified  5 of 5 required  -  trust T2 baseline-validated
+------------------------------------------------------------
+done R1  Expired tokens are rejected
+      go test ./... - passed
+done R2  Refresh keeps the session id
+      token_test.go:81 - passed
+done R3  Rate limit returns 429
+      limit_test.go:12 - passed
+done R4  Flag is documented
+      README.md - text check
+done R5  No new dependency
+      go.mod unchanged - tamper check clean
+not verified  load behavior: no check is configured for it
+branch main  $0.0008
+------------------------------------------------------------
+> steer with enter - queue with ctrl+enter               
+enter accept - d diff - ctx 4%

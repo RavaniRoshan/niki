@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
@@ -122,19 +123,15 @@ func TestDebugViewTelemetry(t *testing.T) {
 	um, _ = m.Update(engineEventMsg(<-eventChan))
 	m = um.(AppModel)
 	m.state.Debug = true
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "boot phases") {
 		t.Fatalf("debug view missing boot phases: %q", view)
 	}
 	if !strings.Contains(view, "engine") || !strings.Contains(view, "model") {
 		t.Fatalf("debug view missing phase names: %q", view)
 	}
-	if !strings.Contains(view, "frames:") || !strings.Contains(view, "render last:") {
-		t.Fatalf("debug view missing frame telemetry: %q", view)
-	}
-	// View() records render cost.
-	if m.telemetry.Frames == 0 {
-		t.Fatal("View did not record frame telemetry")
+	if !strings.Contains(view, "events:") {
+		t.Fatalf("debug view missing event telemetry: %q", view)
 	}
 }
 
@@ -184,15 +181,39 @@ func TestPacingHysteresis(t *testing.T) {
 // composer is the only bordered element in
 // the view.
 func TestComposerOnlyBorderedElement(t *testing.T) {
-	m, _, _ := newModel(false)
-	m.history.Append("user", "hi")
-	view := m.View()
-	borders := strings.Count(view, "┌") + strings.Count(view, "╭")
-	if borders != 1 {
-		t.Fatalf("expected exactly one bordered element (composer), found %d in %q", borders, view)
+	// Ledger: the composer is the only bordered element — one box
+	// is exactly two horizontal border edges (top and bottom),
+	// counted at line starts so prose cannot match. This holds in
+	// unicode and ASCII chrome alike.
+	// One box = two horizontal edges (top + bottom), counted at
+	// line starts so prose cannot match. Unicode borders differ at
+	// the corners; ASCII ones do not, so both are counted.
+	edges := func(view string, b lipgloss.Border) int {
+		run := strings.Repeat(b.Top, 5)
+		return strings.Count(view, "\n"+b.TopLeft+run) + strings.Count(view, "\n"+b.BottomLeft+run)
 	}
-	if !strings.Contains(view, "Type a prompt") {
-		t.Fatalf("composer missing from view: %q", view)
+	ledger, _, _ := newModel(false)
+	ledger.SetLayout("ledger")
+	ledger.history.Append("user", "hi")
+	lview := ledger.View().Content
+	if borders := edges(lview, ChromeBorder()); borders != 2 {
+		t.Fatalf("ledger: expected exactly one bordered element (composer), found %d edges in %q", borders, lview)
+	}
+	// Classic: the composer is a single rule with no box.
+	classic, _, _ := newModel(false)
+	classic.SetLayout("classic")
+	classic.history.Append("user", "hi")
+	cview := classic.View().Content
+	if borders := edges(cview, ChromeBorder()); borders != 0 {
+		t.Fatalf("classic: composer must be a rule, found %d borders in %q", borders, cview)
+	}
+	if !strings.Contains(cview, classicRule(classic.state.Width)) {
+		t.Fatalf("classic: composer rule missing: %q", cview)
+	}
+	// Downsample strips the virtual-cursor sequence between the
+	// placeholder's first glyph and the rest of the text.
+	if !strings.Contains(Downsample(cview), "Describe a change") {
+		t.Fatalf("classic: composer missing from view: %q", cview)
 	}
 }
 
@@ -205,7 +226,7 @@ func TestInlineHeaderScrollsAway(t *testing.T) {
 	// The first WindowSizeMsg in inline mode
 	// prints the header; simulate by checking
 	// the live view has no header.
-	view := m.View()
+	view := m.View().Content
 	if strings.Contains(view, "Local Coding Agent") {
 		t.Fatalf("header must scroll away in inline mode: %q", view)
 	}

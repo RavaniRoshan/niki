@@ -1,5 +1,24 @@
 package config
 
+// Layout names. Classic is the default; ledger is the previous
+// full-screen layout kept as an experimental option (C0).
+const (
+	LayoutClassic = "classic"
+	LayoutLedger  = "ledger"
+)
+
+// NormalizeLayout maps an unknown layout value to classic: an
+// unrecognized choice must never crash or blank the TUI, and the
+// default is always a working layout.
+func NormalizeLayout(layout string) string {
+	switch layout {
+	case LayoutLedger:
+		return LayoutLedger
+	default:
+		return LayoutClassic
+	}
+}
+
 type Config struct {
 	Model          ModelConfig          `toml:"model"`
 	SecondaryModel SecondaryModelConfig `toml:"secondary_model,omitempty"`
@@ -36,6 +55,10 @@ type ProviderConfig struct {
 type UIConfig struct {
 	Inline bool   `toml:"inline"`
 	Theme  string `toml:"theme"`
+	// Layout selects the TUI layout: "classic" (default, the
+	// Classic Flow) or "ledger" (the previous full-screen layout,
+	// experimental). Anything else fails closed to classic.
+	Layout string `toml:"layout"`
 	// ReducedMotion disables non-essential animation
 	// (U8): a static cursor instead of a blinking one.
 	ReducedMotion bool `toml:"reduced_motion"`

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/RavaniRoshan/niki/internal/protocol"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestTieredCtrlCBehavior(t *testing.T) {
@@ -15,7 +15,7 @@ func TestTieredCtrlCBehavior(t *testing.T) {
 
 	// Case 1: Non-empty composer text -> clears text without quitting
 	app.composer.Input.SetValue("my draft prompt")
-	model, cmd := app.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	app = model.(AppModel)
 	if cmd != nil {
 		t.Errorf("expected no quit cmd when input is non-empty, got %v", cmd)
@@ -29,7 +29,7 @@ func TestTieredCtrlCBehavior(t *testing.T) {
 
 	// Case 2: Turn is busy -> sends CmdInterruptTurn without quitting
 	app.state.Busy = true
-	model, cmd = app.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	model, cmd = app.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	app = model.(AppModel)
 	if cmd != nil {
 		t.Errorf("expected no quit cmd when busy, got %v", cmd)
@@ -46,14 +46,14 @@ func TestTieredCtrlCBehavior(t *testing.T) {
 	// Case 3: Empty and idle -> first Ctrl+C arms exit
 	app.state.Busy = false
 	app.exitArmed = false
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	model, _ = app.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	app = model.(AppModel)
 	if !app.exitArmed {
 		t.Fatal("expected exitArmed to be true after first Ctrl+C on empty input")
 	}
 
 	// Case 4: Second Ctrl+C while armed -> returns tea.Quit
-	model, cmd = app.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	model, cmd = app.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	_ = model.(AppModel)
 	// cmd should be tea.Quit
 	if cmd == nil {
@@ -67,7 +67,7 @@ func TestCtrlDBehavior(t *testing.T) {
 	app := NewAppModel(cmdChan, eventChan)
 
 	// Case 1: Empty input -> exits cleanly
-	model, cmd := app.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	model, cmd := app.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	_ = model.(AppModel)
 	if cmd == nil {
 		t.Fatal("expected tea.Quit command on Ctrl+D with empty input")
@@ -76,7 +76,7 @@ func TestCtrlDBehavior(t *testing.T) {
 	// Case 2: Non-empty input -> forward deletes char without quitting
 	app.composer.Input.SetValue("hello")
 	app.composer.Input.SetCursor(1) // at 'e'
-	model, cmd = app.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	model, cmd = app.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	app = model.(AppModel)
 	if cmd != nil {
 		t.Errorf("expected no quit cmd on Ctrl+D with text, got %v", cmd)
@@ -94,7 +94,7 @@ func TestKillRingAndUndoKeybindings(t *testing.T) {
 	// Test Ctrl+W (kill word backward)
 	app.composer.Input.SetValue("foo bar baz")
 	app.composer.Input.SetCursor(len("foo bar baz"))
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	model, _ := app.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
 	app = model.(AppModel)
 	if app.composer.Input.Value() != "foo bar " {
 		t.Fatalf("expected 'foo bar ', got %q", app.composer.Input.Value())
@@ -103,30 +103,33 @@ func TestKillRingAndUndoKeybindings(t *testing.T) {
 		t.Fatalf("expected yanked 'baz', got %q", app.composer.KillRing.Yank())
 	}
 
+	// Test Undo (Ctrl+_): undo restores the value before the ctrl+w
+	// kill above.
+	model, _ = app.Update(tea.KeyPressMsg{Code: '_', Mod: tea.ModCtrl})
+	app = model.(AppModel)
+	if app.composer.Input.Value() != "foo bar baz" {
+		t.Fatalf("expected restored 'foo bar baz' after undo, got %q", app.composer.Input.Value())
+	}
+
 	// Test Ctrl+Y (yank back)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	app.composer.Input.SetValue("foo bar ")
+	app.composer.Input.SetCursor(len("foo bar "))
+	model, _ = app.Update(tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 	app = model.(AppModel)
 	if app.composer.Input.Value() != "foo bar baz" {
 		t.Fatalf("expected 'foo bar baz' after yank, got %q", app.composer.Input.Value())
 	}
 
-	// Test Ctrl+K (kill line forward)
+	// Test Ctrl+K (Classic Flow §1.4: ctrl+k opens the actions
+	// palette; kill-line-forward lost its key by design).
+	app.composer.Input.SetValue("foo bar baz")
 	app.composer.Input.SetCursor(4) // after "foo "
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	model, _ = app.Update(tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl})
 	app = model.(AppModel)
-	if app.composer.Input.Value() != "foo " {
-		t.Fatalf("expected 'foo ', got %q", app.composer.Input.Value())
+	if !app.state.Palette.Open {
+		t.Fatal("expected ctrl+k to open the palette")
 	}
-	if app.composer.KillRing.Yank() != "bar baz" {
-		t.Fatalf("expected yanked 'bar baz', got %q", app.composer.KillRing.Yank())
-	}
-
-	// Test Undo (Ctrl+_)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlUnderscore})
-	app = model.(AppModel)
-	if app.composer.Input.Value() != "foo bar baz" {
-		t.Fatalf("expected restored 'foo bar baz' after undo, got %q", app.composer.Input.Value())
-	}
+	app.state.Palette.Open = false
 }
 
 func TestBracketedPasteCollapsingAndExpansion(t *testing.T) {

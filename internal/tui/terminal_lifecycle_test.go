@@ -5,8 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
@@ -16,7 +15,7 @@ import (
 // release + SIGSTOP + restore cycle.
 func TestCtrlZSuspends(t *testing.T) {
 	m, _, _ := newModel(false)
-	um, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlZ})
+	um, cmd := m.Update(tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl})
 	if _, ok := um.(AppModel); !ok {
 		t.Fatalf("ctrl+z must keep the model, got %T", um)
 	}
@@ -58,7 +57,7 @@ func TestResizeNeverPanics(t *testing.T) {
 				// A second resize on the live model must
 				// be safe too.
 				um2, _ := m2.Update(tea.WindowSizeMsg{Width: 5, Height: 2})
-				_ = um2.(AppModel).View()
+				_ = um2.(AppModel).View().Content
 			}()
 		}
 	}
@@ -68,15 +67,10 @@ func TestResizeNeverPanics(t *testing.T) {
 // rendered frame contains no ANSI escape sequences at all.
 func TestNoColorStripsColor(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
-	old := lipgloss.DefaultRenderer()
-	defer lipgloss.SetDefaultRenderer(old)
-	// A fresh renderer picks its color profile from the
-	// environment, so NO_COLOR degrades it to Ascii.
-	r := lipgloss.NewRenderer(os.Stdout)
-	lipgloss.SetDefaultRenderer(r)
+	ApplyDisplayEnv(os.Stdout)
 
 	m, _, _ := newModel(false)
-	out := m.View()
+	out := Downsample(m.View().Content)
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("NO_COLOR set but view contains escape sequences: %q", out)
 	}

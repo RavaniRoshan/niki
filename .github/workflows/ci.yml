@@ -117,3 +117,25 @@ jobs:
 
       - name: Headless CI Self-Check
         run: ./bin/nikicode ci --check
+
+  perf-budget:
+    name: Performance Budgets (Q3)
+    needs: build-and-verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Build Static Binary
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/nikicode ./cmd/nikicode
+
+      - name: Enforce Performance Budgets (fail >10% regression)
+        run: go run ./tools/perfbudget -bin bin/nikicode -baseline tools/perfbudget/baseline.json -runs 9

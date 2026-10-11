@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/RavaniRoshan/niki/internal/appserver"
@@ -25,6 +25,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/firstrun"
 	"github.com/RavaniRoshan/niki/internal/git"
 	"github.com/RavaniRoshan/niki/internal/intent"
+	"github.com/RavaniRoshan/niki/internal/last"
 	"github.com/RavaniRoshan/niki/internal/logx"
 	"github.com/RavaniRoshan/niki/internal/mcp"
 	"github.com/RavaniRoshan/niki/internal/memory"
@@ -484,6 +485,7 @@ func main() {
 				app.SetReducedMotion(true)
 			}
 			app.SetInline(inline || cfg.UI.Inline)
+			app.SetLayout(cfg.UI.Layout)
 
 			cwd, _ := os.Getwd()
 			app.SetDirectory(cwd)
@@ -510,15 +512,13 @@ func main() {
 			bootMark("startup")
 
 			var opts []tea.ProgramOption
-			if !inline && !cfg.UI.Inline {
-				opts = append(opts, tea.WithAltScreen())
-			}
-			// Terminal mode negotiation (L7): detect synchronized
-			// output and kitty keyboard support, enable the modes,
-			// and restore them on every exit path — normal return,
-			// error, and panic. Disable writes unconditionally;
-			// terminals that never enabled the modes ignore the
-			// pop sequences.
+			// Alt screen is a View property in Bubble Tea v2:
+			// AppModel.View sets AltScreen when not inline. Terminal
+			// mode negotiation (L7): detect synchronized output and
+			// kitty keyboard support, enable the modes, and restore
+			// them on every exit path — normal return, error, and
+			// panic. Disable writes unconditionally; terminals that
+			// never enabled the modes ignore the pop sequences.
 			caps, err := func() (terminal.Capabilities, error) {
 				dr := <-detectCh
 				return dr.caps, dr.err
@@ -546,10 +546,8 @@ func main() {
 				terminal.Disable(out)
 			}()
 			opts = append(opts, tea.WithOutput(terminal.NewSyncWriter(out, caps.SyncOutput)))
-			// Frame rate (B1/B5): bubbletea v1 flushes the first
-			// frame only on a renderer tick (standard_renderer.go
-			// listen()), so the tick interval directly bounds
-			// first paint: 120Hz bounds it to ~8ms after program
+			// Frame rate (B1/B5): bound the render cadence at
+			// 120Hz so first paint lands within ~8ms of program
 			// start (measured: warm 17ms). Each idle tick
 			// early-outs with no writes (proven: 0 idle redraws,
 			// 0 bytes), but every tick still wakes the process;
@@ -1261,6 +1259,42 @@ Brief description of the repository and architecture.
 			return nil
 		},
 	})
+
+	explainCmd := &cobra.Command{
+		Use:   "explain [session-id]",
+		Short: "Explain what the last run did (O3): asked / changed / passed / looped / not-verified",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := session.Open(filepath.Join(paths.Dir(), "sessions.db"))
+			if err != nil {
+				return err
+			}
+			defer func() { _ = store.Close() }()
+			var sid protocol.SessionId
+			if len(args) == 1 {
+				sid = protocol.SessionId(args[0])
+			} else {
+				ids, err := store.ListSessions()
+				if err != nil || len(ids) == 0 {
+					if err != nil {
+						return err
+					}
+					return fmt.Errorf("no sessions found")
+				}
+				sid = protocol.SessionId(ids[0])
+			}
+			evs, err := store.Events(sid)
+			if err != nil {
+				return err
+			}
+			if len(evs) == 0 {
+				return fmt.Errorf("no events for session %s", sid)
+			}
+			fmt.Print(last.Render(last.Summarize(evs)))
+			return nil
+		},
+	}
+	rootCmd.AddCommand(explainCmd)
 
 	skillsCmd := &cobra.Command{
 		Use:   "skills",

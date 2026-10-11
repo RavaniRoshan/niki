@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
@@ -58,12 +58,12 @@ func (q *QuestionState) HandleKey(msg tea.KeyMsg) (done bool, answers []string, 
 		totalOpts++
 	}
 
-	switch msg.Type {
-	case tea.KeyEsc:
+	switch msg.String() {
+	case "esc":
 		q.Active = false
 		return true, nil, true
 
-	case tea.KeyUp, tea.KeyCtrlP:
+	case "up", "ctrl+p":
 		if q.InCustom {
 			q.InCustom = false
 		} else if q.SelectedOpts[q.CurrentIdx] > 0 {
@@ -71,7 +71,7 @@ func (q *QuestionState) HandleKey(msg tea.KeyMsg) (done bool, answers []string, 
 		}
 		return false, nil, false
 
-	case tea.KeyDown, tea.KeyCtrlN:
+	case "down", "ctrl+n":
 		if q.SelectedOpts[q.CurrentIdx] < totalOpts-1 {
 			q.SelectedOpts[q.CurrentIdx]++
 			if curQ.AllowCustom && q.SelectedOpts[q.CurrentIdx] == len(curQ.Options) {
@@ -80,7 +80,7 @@ func (q *QuestionState) HandleKey(msg tea.KeyMsg) (done bool, answers []string, 
 		}
 		return false, nil, false
 
-	case tea.KeyTab:
+	case "tab":
 		if q.CurrentIdx < len(q.Questions)-1 {
 			q.CurrentIdx++
 			q.InCustom = false
@@ -90,21 +90,21 @@ func (q *QuestionState) HandleKey(msg tea.KeyMsg) (done bool, answers []string, 
 		}
 		return false, nil, false
 
-	case tea.KeySpace:
+	case "space":
 		sel := q.SelectedOpts[q.CurrentIdx]
 		if sel < len(curQ.Options) {
 			q.MultiChecked[q.CurrentIdx][sel] = !q.MultiChecked[q.CurrentIdx][sel]
 		}
 		return false, nil, false
 
-	case tea.KeyBackspace:
+	case "backspace":
 		if q.InCustom && len(q.CustomInputs[q.CurrentIdx]) > 0 {
 			txt := q.CustomInputs[q.CurrentIdx]
 			q.CustomInputs[q.CurrentIdx] = txt[:len(txt)-1]
 		}
 		return false, nil, false
 
-	case tea.KeyEnter:
+	case "enter":
 		// If there are more questions, advance to next question
 		if q.CurrentIdx < len(q.Questions)-1 {
 			q.CurrentIdx++
@@ -129,9 +129,12 @@ func (q *QuestionState) HandleKey(msg tea.KeyMsg) (done bool, answers []string, 
 		return true, ans, false
 
 	default:
-		if q.InCustom && (msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace) {
-			q.CustomInputs[q.CurrentIdx] += string(msg.Runes)
-			return false, nil, false
+		if q.InCustom {
+			text := msg.Key().Text
+			if text != "" || msg.String() == "space" {
+				q.CustomInputs[q.CurrentIdx] += text
+				return false, nil, false
+			}
 		}
 	}
 

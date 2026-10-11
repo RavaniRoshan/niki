@@ -73,9 +73,12 @@ func renderCells(m AppModel, cells []HistoryCell) string {
 }
 
 // RenderHistory renders the full transcript
-// (committed + live). The inline view uses
+// (committed + live), layout-specific. The inline view uses
 // renderCells over the live region only so
 // committed history is never re-rendered (U9).
 func (m AppModel) RenderHistory() string {
+	if m.state.Layout == "classic" {
+		return m.classicTranscript(m.history.Cells)
+	}
 	return renderCells(m, m.history.Cells)
 }

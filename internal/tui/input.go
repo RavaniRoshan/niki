@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"github.com/charmbracelet/bubbles/textinput"
+	"charm.land/bubbles/v2/textinput"
 )
 
 type Composer struct {
@@ -13,13 +13,19 @@ type Composer struct {
 func NewComposer(theme Theme) Composer {
 	ti := textinput.New()
 	ti.Prompt = "> "
-	ti.PromptStyle = theme.PromptPrefix
-	ti.TextStyle = theme.InputText
 	ti.Placeholder = "Type a prompt or task (type / for commands)..."
-	ti.PlaceholderStyle = theme.Placeholder
 	ti.Focus()
 	ti.CharLimit = 8192
-	ti.Width = 80
+	ti.SetWidth(80)
+	styles := textinput.DefaultStyles(true)
+	state := textinput.StyleState{
+		Text:        theme.InputText,
+		Prompt:      theme.PromptPrefix,
+		Placeholder: theme.Placeholder,
+	}
+	styles.Focused = state
+	styles.Blurred = state
+	ti.SetStyles(styles)
 	return Composer{
 		Input:    ti,
 		KillRing: NewKillRing(32),

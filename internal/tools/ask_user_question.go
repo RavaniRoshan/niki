@@ -13,6 +13,11 @@ type UserQuestion struct {
 	Question    string   `json:"question"`
 	Options     []string `json:"options"`
 	AllowCustom bool     `json:"allow_custom"`
+	// Safe is the 0-based index of the option that keeps the
+	// constraint (C3). The tool description instructs listing the
+	// safe option first; an absent or out-of-range value defaults
+	// to 0, never to nothing.
+	Safe int `json:"safe_option"`
 }
 
 type PromptHandlerFunc func(ctx context.Context, questions []UserQuestion) ([]string, error)

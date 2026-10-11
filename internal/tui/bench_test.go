@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
 )
@@ -22,7 +22,7 @@ func BenchmarkView80x24(b *testing.B) {
 	m.viewport.SetContent(m.RenderHistory())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = m.View()
+		_ = m.View().Content
 	}
 }
 
@@ -40,7 +40,7 @@ func BenchmarkViewFlatness100vs5000(b *testing.B) {
 		m.viewport.SetContent(m.RenderHistory())
 		b.Run(b.Name()+fmt.Sprintf("_%d", n), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				_ = m.View()
+				_ = m.View().Content
 			}
 		})
 	}
@@ -59,6 +59,6 @@ func BenchmarkView120x38(b *testing.B) {
 	m.viewport.SetContent(m.RenderHistory())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = m.View()
+		_ = m.View().Content
 	}
 }
