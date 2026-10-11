@@ -583,3 +583,33 @@ any context compaction.
   `TestSubagentWorktreeIsolation` PASS; fuzz no panic.
 - Full suite GO_TEST_EXIT=0 (49 ok); gofmt + vet clean.
   C4-C8+E2+E5+E7+H3+I6+L7+L8+P6+S3+G2+Q4 GREEN (84 rows).
+
+## 2026-10-11 — Slice V+S: verifier hardening (V5/V6/V7) + subagents (S1/S2/S4/S5)
+- V5 flake: `verifier.RerunChecks`/`detectFlake` rerun each check k
+  times; divergence -> inconclusive (never a pass), stable -> normal
+  tier, deterministic fail -> T1 not a flake.
+- V6 weakening: `verifier.DetectWeakening`/`MeasureTests` compare
+  per-test-file assertion/skip/commented counts before/after; removed
+  assertions, new skips, commented-out assertions cap the tier at T1.
+  Integrity now also tracks cross-stack test files (_test.rs,
+  .test.js/ts, .spec.js/ts) so their deletion is caught (V4 hardening).
+- V7 calibration: `verifier` SeedSuite (52 cases / 5 stacks) run
+  through the real Standard verifier with a ground-truth oracle; tamper
+  and weakening cases mutate the repo mid-run then pass. Writes
+  docs/verifier/TRUST_MODEL.md.
+- S1 roles: `agent.BuiltinRoles` explorer/implementer/reviewer with
+  closed tool allowlists (read-only absolute). S2 `Summarize`/bound.
+  S4 `SpawnTimed`/`SpawnRole` + per-subagent timeout. S5
+  `MaxNestingDepth=2` (depth-3 refused).
+- Acceptance printed: `[V5] flaky go-test -> T1 …`/`stable … T3`/
+  `consistently failing … T1`; `[V6] removed-assertions … (5 -> 4)`/
+  `new-skips … (0 -> 1)`/`commented-out …`/`weakened -> not-verified`/
+  `strengthening never flagged`; `[V7] 52 cases across 5 stacks:
+  52/52 gate-correct; tamper-verified=0 weakening-verified=0` + wrote
+  TRUST_MODEL.md; `[S1] explorer … (13)`/`implementer … (12)`/
+  `reviewer … (10)`/`unknown role refused`; `[S2] 100k-rune transcript
+  -> 1347-byte summary, 12 refs, truncated=true`; `[S4] subagent past
+  its timeout -> closed`/`generous timeout -> completed`; `[S5] depth
+  1 and 2 allowed, depth 3 refused`.
+- Full suite green; gofmt + vet clean. V5+V6+V7+S1+S2+S4+S5 GREEN
+  (91 rows).

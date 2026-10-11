@@ -36,6 +36,7 @@ func (s Standard) Verify(ctx context.Context, r Request) (Verdict, error) {
 			Reason: fmt.Sprintf("no allowlisted checks for this repo (%d requirement(s) extracted, none verifiable here)", len(reqs))}, nil
 	}
 	before := SnapshotIntegrity(s.Dir, checks)
+	strengthBefore := MeasureTests(s.Dir)
 
 	results := make([]CheckResult, 0, len(checks))
 	for _, c := range checks {
@@ -46,16 +47,39 @@ func (s Standard) Verify(ctx context.Context, r Request) (Verdict, error) {
 	drift := before.Diff(after)
 	integrityClean := len(drift) == 0
 
+	// V6: a suite "made green" by weakening its tests (removed
+	// assertions, new skips, commented-out checks) is not evidence.
+	weakened := DetectWeakening(strengthBefore, MeasureTests(s.Dir))
+
 	tier := Grade(results, integrityClean)
 	if !integrityClean && tier >= T2Passed {
 		// V4: tampering around the run blocks T2 — a green suite
 		// over deleted tests is not evidence.
 		tier = T1Weak
 	}
+	if len(weakened) > 0 && tier >= T2Passed {
+		// V6: weakening blocks T2 the same way deletion does.
+		tier = T1Weak
+	}
 	v := VerdictFor(tier)
-	v.Reason = fmt.Sprintf("%d requirement(s), %d check(s), trust %s%s",
+	reason := fmt.Sprintf("%d requirement(s), %d check(s), trust %s%s",
 		len(reqs), len(results), tier.String(), driftSuffix(drift))
+	if len(weakened) > 0 {
+		reason += "; test weakening: " + joinWeakening(weakened)
+	}
+	v.Reason = reason
 	return v, nil
+}
+
+func joinWeakening(w []WeakeningEvent) string {
+	parts := make([]string, 0, len(w))
+	for _, e := range w {
+		parts = append(parts, e.String())
+	}
+	if len(parts) > 4 {
+		parts = append(parts[:4], "…")
+	}
+	return strings.Join(parts, ", ")
 }
 
 func driftSuffix(drift []string) string {

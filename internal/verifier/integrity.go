@@ -29,6 +29,13 @@ func integrityMatch(path string) bool {
 		return true
 	case strings.HasSuffix(base, "_test.py"):
 		return true
+	// Cross-stack test files: a deleted/renamed test in any supported
+	// stack is tampering (V4/V7), so integrity tracks them all.
+	case strings.HasSuffix(base, "_test.rs"),
+		strings.HasSuffix(base, ".test.js"), strings.HasSuffix(base, ".test.ts"),
+		strings.HasSuffix(base, ".test.jsx"), strings.HasSuffix(base, ".test.tsx"),
+		strings.HasSuffix(base, ".spec.js"), strings.HasSuffix(base, ".spec.ts"):
+		return true
 	case base == "go.mod" || base == "go.sum" || base == "package-lock.json" || base == "yarn.lock" || base == "Cargo.lock":
 		return true
 	}
