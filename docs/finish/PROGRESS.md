@@ -664,3 +664,25 @@ any context compaction.
   "gpt-4o"`/`one retry per step`/`per-step budget`/`success resets`.
 - Full suite green; gofmt + vet clean. M2+M4+M5+M7+M8 GREEN, M9
   OWNER-VERIFY (101 rows green/verified).
+
+## 2026-10-11 — Slice X+Q6: safety policy/audit/red-team (X5/X7/X8) + path guard (Q6)
+- X5 network policy: new `sandbox.NetworkPolicy` — deny-all by
+  default; exact and `*.suffix` allowlist; URL host gating.
+- X7 audit log: new `internal/audit` — append-only JSONL of approvals
+  and sandbox denials; logx-style rotation to .1/.2/.3; ordered Read.
+- X8 red-team: new table-driven `TestRedTeamSuite30Plus` (38 cases):
+  shell AST, push refusal, directive flags, secret scrubbing, the new
+  path guard, network policy, verification traps, the mandated
+  LIFECYCLE-SCRIPT TRAP, SYMLINK ESCAPE, INSTRUCTION-IN-A-FILENAME,
+  plan containment, fail-closed approvals. Caught and fixed a real gap:
+  AnalyzeShell missed backgrounded statements (mvdan models `cmd &`
+  via Stmt.Background) — now too-complex.
+- Q6 properties: new `tools.ResolveSafe` guard; seeded tests prove
+  "success ⇒ inside" over 300 adversarial paths and patch round-trip
+  / error⇒empty over 250 generated cases.
+- Acceptance printed: `[X5] off by default … / allowlist … / URL gate …`;
+  `[X7] recorded 2 approvals + 1 sandbox denials … / rotated …`;
+  `[X8] 38/38 red-team cases passed …`; `[Q6 path] 300 adversarial
+  paths: 195 inside, 105 refused`; `[Q6 patch] 200 forward+reverse exact
+  / 50 corrupted refused with empty output`.
+- Full suite green; gofmt + vet clean. X5+X7+X8+Q6 GREEN (105 rows).

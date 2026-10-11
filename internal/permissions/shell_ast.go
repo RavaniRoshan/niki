@@ -29,6 +29,12 @@ func AnalyzeShell(cmd string) ShellVerdict {
 		if n == nil {
 			return false
 		}
+		// A backgrounded statement (cmd &) runs detached — treat as
+		// too complex (approval required).
+		if stmt, ok := n.(*syntax.Stmt); ok && stmt.Background {
+			tooComplex = true
+			return false
+		}
 		switch n.(type) {
 		case *syntax.File, *syntax.Stmt, *syntax.CallExpr, *syntax.Word,
 			*syntax.Lit, *syntax.SglQuoted, *syntax.DblQuoted, *syntax.Redirect,
