@@ -209,10 +209,11 @@ func RunTask(t Task, dir string) Result {
 	cmdChan <- protocol.EngineCommand{Type: protocol.CmdSubmitPrompt, Prompt: t.Prompt}
 
 	// Blocker tasks: wait for the tool to start, then interrupt.
+	// release closes only after the terminal event: closing it
+	// early lets the tool return normally and races cancellation.
 	if t.Blocker != "" {
 		<-started
 		cmdChan <- protocol.EngineCommand{Type: protocol.CmdInterruptTurn}
-		close(release)
 	}
 
 	terminalSet := map[protocol.EventType]bool{
@@ -235,6 +236,9 @@ loop:
 		}
 	}
 
+	if release != nil {
+		close(release)
+	}
 	for _, c := range t.FollowUps {
 		cmdChan <- c
 		events = append(events, collect("", 3*time.Second)...)

@@ -34,6 +34,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/recipes"
 	"github.com/RavaniRoshan/niki/internal/routing"
 	"github.com/RavaniRoshan/niki/internal/sandbox"
+	"github.com/RavaniRoshan/niki/internal/selfextend"
 	"github.com/RavaniRoshan/niki/internal/session"
 	"github.com/RavaniRoshan/niki/internal/skills"
 	"github.com/RavaniRoshan/niki/internal/soak"
@@ -1130,17 +1131,43 @@ Brief description of the repository and architecture.
 		},
 	})
 
-	rootCmd.AddCommand(&cobra.Command{
+	skillsCmd := &cobra.Command{
 		Use:   "skills",
-		Short: "List discovered skills",
+		Short: "List discovered skills (provenance + disabled state for self-extended ones)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			found, _ := skills.Discover(".")
+			home, _ := os.UserHomeDir()
 			for _, s := range found {
-				fmt.Printf("%s: %s\n", s.Name, s.Description)
+				extra := ""
+				// Self-extended skills live under the skills live
+				// dir with provenance (T5.7): show it, plus the
+				// disabled state after tamper or 3-strikes (T5.8).
+				if id, ok := selfextend.LiveSkillID(home, s.Path); ok {
+					if ok, warn := selfextend.Verify(home, id); ok {
+						extra = " [self-extended, provenance ok]"
+					} else {
+						extra = " [self-extended DISABLED: " + warn + "]"
+					}
+				}
+				fmt.Printf("%s: %s%s\n", s.Name, s.Description, extra)
 			}
 			return nil
 		},
+	}
+	skillsCmd.AddCommand(&cobra.Command{
+		Use:   "rm <name>",
+		Short: "Retire a self-extended skill (removes directory + provenance, no residue)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, _ := os.UserHomeDir()
+			if err := selfextend.Retire(home, args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("retired %s\n", args[0])
+			return nil
+		},
 	})
+	rootCmd.AddCommand(skillsCmd)
 
 	rootCmd.AddCommand(&cobra.Command{
 		Use:   "mcp",

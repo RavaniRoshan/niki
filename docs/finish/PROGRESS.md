@@ -526,3 +526,22 @@ any context compaction.
 - Full suite GO_TEST_EXIT=0 (46 ok); gofmt + vet clean; lint
   clean except pre-existing S1000. P1-P5+H1+H2+Q1+Q2+Q5+U1+U2
   GREEN (57 rows).
+
+## 2026-10-11 — Slice T: T5 self-extension + 10 sub-rows (P0)
+- New `internal/selfextend` (D-29): gaps, staging drafts,
+  offline tests, frontmatter, proposals, scope+double gate,
+  provenance enable, 3-strike audit, retire; config
+  `self_extend` default-off; `niki skills` provenance state +
+  `skills rm`.
+- Acceptance printed: `[T5.1] 3 detections logged …`;
+  `[T5.2] draft in staging; live hash unchanged`;
+  `[T5.3] ssh-grab + network skill fails offline` + good
+  passes; `[T5.4] frontmatter parsed, defaults closed …`;
+  `[T5.5] proposal shows …; nothing enabled`;
+  `[T5.6] scopes gated; denial deletes staging …`;
+  `[T5.7] provenance recorded; tamper disables with warning`;
+  `[T5.8] NOTICE: skill a1 auto-disabled after 3 consecutive
+  errors`; `[T5.9] retire removed … no residue`;
+  `[T5.10] default off; propose honored; garbage fails closed`.
+- Full suite GO_TEST_EXIT=0 (47 ok); gofmt + vet clean. T5 +
+  T5.1–T5.10 GREEN (68 rows).

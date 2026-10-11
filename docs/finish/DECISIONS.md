@@ -513,3 +513,27 @@ decisions were confirmed by the owner on 2026-10-10 (see docs/FINISH_PACK.md).
   forward-compat decode asserted so minor additions don't bump.
 - Rejected: goleak dependency (stdlib polling suffices, no new
   dep); versioning every JSONL line (the store meta owns it).
+
+## D-29 — T5 self-extension protocol (P0)
+
+- New `internal/selfextend`: `LogGap` (closed reason enum, JSONL)
+  → `Draft` (staging only) → `TestOffline` (fake HOME without
+  credentials, dead proxies, timeout; bwrap not required) →
+  `ParseFrontmatter` (closed defaults) → `RenderProposal`
+  (render-only, asserts nothing live) → `Gate` (scope + second
+  approval; denial = RemoveAll staging) → `Enable`
+  (PROVENANCE.json) → `Verify` (hash check, tamper disables +
+  warns) → `RecordRun` (3-strike audit) → `Retire` (RemoveAll).
+- T5.10: `self_extend` top-level config, default off, garbage
+  fails closed to off (never propose).
+- `niki skills` annotates self-extended entries (provenance ok /
+  DISABLED + reason); `niki skills rm` retires (idempotent).
+- Live layout `<home>/skills/<id>/{SKILL.md,run.sh,
+  PROVENANCE.json,audit.jsonl,DISABLED?}`; staging
+  `<home>/staging/<id>/` + `detections.jsonl`. Home is a
+  parameter everywhere (tests use tmp homes, never ~/.niki).
+- Rejected: requiring bwrap for the offline test (dead proxies
+  + fake HOME prove the same failure on any Linux); a TUI
+  proposal screen (Text() is the review surface; the gate is
+  the approval, UI-agnostic); versioning skills (provenance
+  hash covers identity; content change = disable, not v2).

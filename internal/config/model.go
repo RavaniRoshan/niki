@@ -9,6 +9,9 @@ type Config struct {
 	MCP            MCPConfig            `toml:"mcp"`
 	Budgets        BudgetsConfig        `toml:"budgets"`
 	Sandbox        SandboxConfig        `toml:"sandbox"`
+	// SelfExtend gates the self-extension protocol (T5.10):
+	// "off" (default) or "propose". Anything else is invalid.
+	SelfExtend string `toml:"self_extend"`
 }
 
 type SecondaryModelConfig struct {

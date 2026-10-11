@@ -22,6 +22,7 @@ func Default() Config {
 		Provider:    ProviderConfig{Name: "", EnvKey: ""},
 		UI:          UIConfig{Inline: false, Theme: "default"},
 		Permissions: PermissionsConfig{Mode: "workspace_write"},
+		SelfExtend:  "off",
 		MCP:         MCPConfig{Servers: map[string]MCPServer{}},
 		// D-09: budgets on by default (D-04 verifier backstop): wall
 		// time, cost, and steps per run; 0/"" disables a dimension.
@@ -195,6 +196,11 @@ func LoadWithProfile(explicitPath, profileName string) (ConfigWithSources, error
 			out.Sources["permissions"] = "blocked: untrusted project config"
 			out.Sources["sandbox"] = "blocked: untrusted project config"
 		}
+	}
+	// T5.10: self-extension is default-off; unknown values fail
+	// closed to off (never to propose).
+	if out.SelfExtend != "off" && out.SelfExtend != "propose" {
+		out.SelfExtend = "off"
 	}
 	if out.Provider.Name == "" || out.Model.Name == "" {
 		detectedProv, detectedModel := AutoDetectProvider()
