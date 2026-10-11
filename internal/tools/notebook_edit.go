@@ -15,7 +15,7 @@ type NotebookEditTool struct {
 func NewNotebookEditTool() *NotebookEditTool {
 	return &NotebookEditTool{
 		Base: Base{
-			SchemaStr: `{"required":["path","operation","cell_index"],"fields":{"path":"string","operation":"string","cell_index":"number","cell_type":"string","source":"string"}}`,
+			SchemaStr: `{"version":"1", "required":["path","operation","cell_index"],"fields":{"path":"string","operation":"string","cell_index":"number","cell_type":"string","source":"string"}}`,
 		},
 	}
 }

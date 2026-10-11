@@ -208,10 +208,14 @@ func (m AppModel) cycleWorkingMode() (AppModel, tea.Cmd) {
 	} else {
 		switch m.state.PermissionMode {
 		case "manual", "always":
-			m.state.Mode = "agent"
-			m.state.PermissionMode = "full_access"
-			m.history.Append("system", "⚡ Mode switched to: Agent · Never Ask (Yolo mode: all actions run unattended)")
-			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: "full_access"}
+			// X2: Shift+Tab cycling never lands on Never Ask —
+			// unattended execution needs the explicit /yolo
+			// command as confirmation, never a keypress away.
+			m.state.Mode = "plan"
+			m.state.PermissionMode = "readonly"
+			m.history.Append("system", "📋 Mode switched to: Plan Mode (Never Ask is skipped while cycling — type /yolo to confirm it explicitly)")
+			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPlanMode, Mode: "plan"}
+			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: "readonly"}
 		case "full_access", "yolo", "never":
 			m.state.Mode = "plan"
 			m.state.PermissionMode = "readonly"

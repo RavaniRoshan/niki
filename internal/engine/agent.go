@@ -340,6 +340,18 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 					ToolName:  tc.Tool,
 					Text:      res.Output,
 				})
+				// X4: tool output is data, not instructions. Text
+				// that asks for approval changes, network access,
+				// or disclosure is flagged right here; it is still
+				// delivered to the model as data.
+				if kinds := tools.ScanDirectives(res.Output); len(kinds) > 0 {
+					emit(protocol.EngineEvent{
+						Type:      protocol.EventWarning,
+						Timestamp: time.Now(),
+						TurnID:    turnID,
+						Text:      tools.DirectiveNote(kinds),
+					})
+				}
 				if tc.Tool == "edit_file" || tc.Tool == "write_file" || tc.Tool == "apply_patch" {
 					var pathObj struct {
 						Path string `json:"path"`

@@ -168,6 +168,35 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	return resp.Result, nil
 }
 
+// ToolInfo is one advertised tool with its server description.
+type ToolInfo struct {
+	Name        string
+	Description string
+}
+
+// ListToolInfos fetches the server's tools with descriptions via
+// tools/list. Descriptions are untrusted content (see ScanDescription).
+func (c *Client) ListToolInfos(ctx context.Context) ([]ToolInfo, error) {
+	raw, err := c.Call(ctx, "tools/list", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Tools []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+	out := make([]ToolInfo, 0, len(payload.Tools))
+	for _, t := range payload.Tools {
+		out = append(out, ToolInfo{Name: t.Name, Description: t.Description})
+	}
+	return out, nil
+}
+
 // ListTools fetches the server's tool names via
 // tools/list.
 func (c *Client) ListTools(ctx context.Context) ([]string, error) {

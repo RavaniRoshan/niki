@@ -14,7 +14,7 @@ type GlobTool struct {
 }
 
 func NewGlobTool() *GlobTool {
-	return &GlobTool{Base: Base{SchemaStr: `{"required":["pattern"],"fields":{"pattern":"string","root":"string"}}`}}
+	return &GlobTool{Base: Base{SchemaStr: `{"version":"1", "required":["pattern"],"fields":{"pattern":"string","root":"string"}}`}}
 }
 
 func (t *GlobTool) Name() string        { return "glob" }

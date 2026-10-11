@@ -34,7 +34,7 @@ func gitErr(err error) (ToolResult, error) {
 type GitStatusTool struct{ Base }
 
 func NewGitStatusTool() *GitStatusTool {
-	return &GitStatusTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string"}}`}}
+	return &GitStatusTool{Base: Base{SchemaStr: `{"version":"1", "required":[],"fields":{"dir":"string"}}`}}
 }
 
 func (t *GitStatusTool) Name() string            { return "git_status" }
@@ -68,7 +68,7 @@ func (t *GitStatusTool) Run(ctx context.Context, args json.RawMessage) (ToolResu
 type GitCommitTool struct{ Base }
 
 func NewGitCommitTool() *GitCommitTool {
-	return &GitCommitTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string","message":"string","stage":"string"}}`}}
+	return &GitCommitTool{Base: Base{SchemaStr: `{"version":"1", "required":[],"fields":{"dir":"string","message":"string","stage":"string"}}`}}
 }
 
 func (t *GitCommitTool) Name() string { return "git_commit" }
@@ -110,7 +110,7 @@ func (t *GitCommitTool) Run(ctx context.Context, args json.RawMessage) (ToolResu
 type GitBranchTool struct{ Base }
 
 func NewGitBranchTool() *GitBranchTool {
-	return &GitBranchTool{Base: Base{SchemaStr: `{"required":["action","name"],"fields":{"dir":"string","action":"string","name":"string"}}`}}
+	return &GitBranchTool{Base: Base{SchemaStr: `{"version":"1", "required":["action","name"],"fields":{"dir":"string","action":"string","name":"string"}}`}}
 }
 
 func (t *GitBranchTool) Name() string { return "git_branch" }
@@ -148,7 +148,7 @@ func (t *GitBranchTool) Run(ctx context.Context, args json.RawMessage) (ToolResu
 type GitRebaseTool struct{ Base }
 
 func NewGitRebaseTool() *GitRebaseTool {
-	return &GitRebaseTool{Base: Base{SchemaStr: `{"required":["onto"],"fields":{"dir":"string","onto":"string","abort":"boolean","continue":"boolean"}}`}}
+	return &GitRebaseTool{Base: Base{SchemaStr: `{"version":"1", "required":["onto"],"fields":{"dir":"string","onto":"string","abort":"boolean","continue":"boolean"}}`}}
 }
 
 func (t *GitRebaseTool) Name() string { return "git_rebase" }
@@ -191,7 +191,7 @@ func (t *GitRebaseTool) Run(ctx context.Context, args json.RawMessage) (ToolResu
 type GitBlameTool struct{ Base }
 
 func NewGitBlameTool() *GitBlameTool {
-	return &GitBlameTool{Base: Base{SchemaStr: `{"required":["file","line"],"fields":{"dir":"string","file":"string","line":"number"}}`}}
+	return &GitBlameTool{Base: Base{SchemaStr: `{"version":"1", "required":["file","line"],"fields":{"dir":"string","file":"string","line":"number"}}`}}
 }
 
 func (t *GitBlameTool) Name() string { return "git_blame" }
@@ -222,7 +222,7 @@ func (t *GitBlameTool) Run(ctx context.Context, args json.RawMessage) (ToolResul
 type GitLogTool struct{ Base }
 
 func NewGitLogTool() *GitLogTool {
-	return &GitLogTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string","n":"number"}}`}}
+	return &GitLogTool{Base: Base{SchemaStr: `{"version":"1", "required":[],"fields":{"dir":"string","n":"number"}}`}}
 }
 
 func (t *GitLogTool) Name() string            { return "git_log" }
@@ -258,7 +258,7 @@ func (t *GitLogTool) Run(ctx context.Context, args json.RawMessage) (ToolResult,
 type GitReviewTool struct{ Base }
 
 func NewGitReviewTool() *GitReviewTool {
-	return &GitReviewTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string"}}`}}
+	return &GitReviewTool{Base: Base{SchemaStr: `{"version":"1", "required":[],"fields":{"dir":"string"}}`}}
 }
 
 func (t *GitReviewTool) Name() string { return "git_review" }
@@ -291,7 +291,7 @@ func (t *GitReviewTool) Run(ctx context.Context, args json.RawMessage) (ToolResu
 type GitChangelogTool struct{ Base }
 
 func NewGitChangelogTool() *GitChangelogTool {
-	return &GitChangelogTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string","n":"number"}}`}}
+	return &GitChangelogTool{Base: Base{SchemaStr: `{"version":"1", "required":[],"fields":{"dir":"string","n":"number"}}`}}
 }
 
 func (t *GitChangelogTool) Name() string            { return "git_changelog" }
@@ -319,7 +319,7 @@ func (t *GitChangelogTool) Run(ctx context.Context, args json.RawMessage) (ToolR
 type GitDiffSummaryTool struct{ Base }
 
 func NewGitDiffSummaryTool() *GitDiffSummaryTool {
-	return &GitDiffSummaryTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string"}}`}}
+	return &GitDiffSummaryTool{Base: Base{SchemaStr: `{"version":"1", "required":[],"fields":{"dir":"string"}}`}}
 }
 
 func (t *GitDiffSummaryTool) Name() string { return "git_diff_summary" }
@@ -348,7 +348,7 @@ func (t *GitDiffSummaryTool) Run(ctx context.Context, args json.RawMessage) (Too
 type GitSmartCommitTool struct{ Base }
 
 func NewGitSmartCommitTool() *GitSmartCommitTool {
-	return &GitSmartCommitTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string"}}`}}
+	return &GitSmartCommitTool{Base: Base{SchemaStr: `{"version":"1", "required":[],"fields":{"dir":"string"}}`}}
 }
 
 func (t *GitSmartCommitTool) Name() string { return "git_smart_commit" }
@@ -381,7 +381,7 @@ func (t *GitSmartCommitTool) Run(ctx context.Context, args json.RawMessage) (Too
 type GitPRSummaryTool struct{ Base }
 
 func NewGitPRSummaryTool() *GitPRSummaryTool {
-	return &GitPRSummaryTool{Base: Base{SchemaStr: `{"required":[],"fields":{"dir":"string","base":"string"}}`}}
+	return &GitPRSummaryTool{Base: Base{SchemaStr: `{"version":"1", "required":[],"fields":{"dir":"string","base":"string"}}`}}
 }
 
 func (t *GitPRSummaryTool) Name() string { return "git_pr_summary" }

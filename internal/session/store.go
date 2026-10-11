@@ -52,6 +52,9 @@ func (s *Store) CreateSession(id protocol.SessionId, title string) error {
 }
 
 func (s *Store) AppendEvent(sessionID protocol.SessionId, evt protocol.EngineEvent) error {
+	// X3: the persisted log (sqlite + JSONL sidecar) never retains
+	// credential text.
+	evt = evt.Redacted()
 	payload, _ := json.Marshal(evt)
 	_, err := s.db.Exec(`INSERT INTO events (session_id, type, payload, ts) VALUES (?, ?, ?, ?)`, string(sessionID), string(evt.Type), string(payload), evt.Timestamp.Unix())
 	if err != nil {

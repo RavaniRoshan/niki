@@ -15,7 +15,7 @@ type WriteFileTool struct {
 }
 
 func NewWriteFileTool() *WriteFileTool {
-	return &WriteFileTool{Base: Base{SchemaStr: `{"required":["path","content"],"fields":{"path":"string","content":"string"}}`}}
+	return &WriteFileTool{Base: Base{SchemaStr: `{"version":"1", "required":["path","content"],"fields":{"path":"string","content":"string"}}`}}
 }
 
 func (t *WriteFileTool) Name() string        { return "write_file" }

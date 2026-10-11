@@ -14,10 +14,15 @@ import (
 
 // ServerConfig describes one MCP server.
 type ServerConfig struct {
-	Name     string
-	Command  string
-	Args     []string
+	Name    string
+	Command string
+	Args    []string
+	// Required servers start eagerly at boot (M4).
 	Required bool
+	// AllowedTools is the per-server allowlist (T3): when
+	// non-empty, only these server-local tool names may be
+	// called. Empty allows every (scanned-clean) tool.
+	AllowedTools []string
 }
 
 // Status is the read-only, truthful per-server state (M3).
@@ -51,8 +56,58 @@ type serverEntry struct {
 	client    *Client
 	qualified string
 	tools     []string
-	cached    bool // tools served from the persisted cache
-	err       string
+	// flagged holds server-local tool names whose descriptions
+	// were scanned as instruction-like (T3): hidden from the
+	// catalog and uncallable.
+	flagged []string
+	cached  bool // tools served from the persisted cache
+	err     string
+}
+
+// screenTools splits advertised tools into clean names and
+// flagged ones, scanning every description (T3).
+func screenTools(infos []ToolInfo) (clean, flagged []string) {
+	for _, ti := range infos {
+		if ti.Name == "" {
+			continue
+		}
+		if bad, _ := ScanDescription(ti.Description); bad {
+			flagged = append(flagged, ti.Name)
+			continue
+		}
+		clean = append(clean, ti.Name)
+	}
+	return clean, flagged
+}
+
+// adoptTools stores screened tools on the entry (caller holds m.mu).
+func adoptTools(e *serverEntry, infos []ToolInfo) {
+	clean, flagged := screenTools(infos)
+	e.tools, e.flagged = clean, flagged
+}
+
+// allowed reports whether a server-local tool passes the entry's
+// allowlist: an empty list allows all scanned-clean tools.
+func (e *serverEntry) allowed(tool string) bool {
+	if len(e.cfg.AllowedTools) == 0 {
+		return true
+	}
+	for _, a := range e.cfg.AllowedTools {
+		if a == tool {
+			return true
+		}
+	}
+	return false
+}
+
+// flaggedAs reports whether the tool was description-flagged.
+func (e *serverEntry) flaggedAs(tool string) bool {
+	for _, f := range e.flagged {
+		if f == tool {
+			return true
+		}
+	}
+	return false
 }
 
 func NewManager(cache *CatalogCache, emit func(protocol.EngineEvent)) *Manager {
@@ -129,7 +184,7 @@ func (m *Manager) StartRequired(ctx context.Context) {
 			m.emitStatus(e, protocol.EventMcpServerFailed)
 			continue
 		}
-		tools, err := e.client.ListTools(ctx)
+		infos, err := e.client.ListToolInfos(ctx)
 		if err != nil {
 			m.mu.Lock()
 			e.err = err.Error()
@@ -138,7 +193,8 @@ func (m *Manager) StartRequired(ctx context.Context) {
 			continue
 		}
 		m.mu.Lock()
-		e.tools = tools
+		adoptTools(e, infos)
+		tools := e.tools
 		m.mu.Unlock()
 		if m.cache != nil {
 			_ = m.cache.Save(tools)
@@ -182,7 +238,7 @@ func (m *Manager) StartOptional(ctx context.Context, name string) {
 			m.emitStatus(e, protocol.EventMcpServerFailed)
 			return
 		}
-		tools, err := e.client.ListTools(ctx)
+		infos, err := e.client.ListToolInfos(ctx)
 		if err != nil {
 			m.mu.Lock()
 			e.err = err.Error()
@@ -192,7 +248,8 @@ func (m *Manager) StartOptional(ctx context.Context, name string) {
 		}
 		m.mu.Lock()
 		e.cached = false
-		e.tools = tools
+		adoptTools(e, infos)
+		tools := e.tools
 		m.mu.Unlock()
 		if m.cache != nil {
 			_ = m.cache.Save(tools)
@@ -213,6 +270,12 @@ func (m *Manager) CallTool(ctx context.Context, qualifiedTool string, args json.
 	owner, tool, err := m.route(qualifiedTool)
 	if err != nil {
 		return "", err
+	}
+	if owner.flaggedAs(tool) {
+		return "", fmt.Errorf("mcp tool %q blocked: description flagged as instruction-like", qualifiedTool)
+	}
+	if !owner.allowed(tool) {
+		return "", fmt.Errorf("mcp tool %q not in server %q allow list", qualifiedTool, owner.cfg.Name)
 	}
 	if owner.client.StateOf() != StateReady {
 		return "", fmt.Errorf("mcp server %q not connected", owner.cfg.Name)
@@ -276,6 +339,21 @@ func (m *Manager) ToolCatalog() []string {
 		e := m.servers[name]
 		for _, t := range e.tools {
 			out = append(out, e.qualified+"_"+t)
+		}
+	}
+	return out
+}
+
+// FlaggedTools returns qualified names of tools hidden for
+// instruction-like descriptions (T3).
+func (m *Manager) FlaggedTools() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []string
+	for _, name := range m.order {
+		e := m.servers[name]
+		for _, f := range e.flagged {
+			out = append(out, e.qualified+"_"+f)
 		}
 	}
 	return out

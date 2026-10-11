@@ -99,7 +99,7 @@ func (p *approvalProvider) Stream(ctx context.Context, messages []provider.Messa
 // runApprovalScenario drives one engine run over the fixture.
 func runApprovalScenario(t *testing.T, wants int, deny bool, failTool bool) ([]protocol.EngineEvent, *sideEffectTool, *approvalGate, int) {
 	t.Helper()
-	tool := &sideEffectTool{Base: tools.Base{SchemaStr: `{"type":"object","properties":{}}`}, failAll: failTool}
+	tool := &sideEffectTool{Base: tools.Base{SchemaStr: `{"version":"1","required":[],"fields":{}}`}, failAll: failTool}
 	gate := &approvalGate{deny: deny}
 
 	reg := tools.DefaultRegistry()

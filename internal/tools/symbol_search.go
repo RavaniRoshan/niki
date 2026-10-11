@@ -19,7 +19,7 @@ type SymbolSearchTool struct {
 func NewSymbolSearchTool(idx *index.SymbolIndex) *SymbolSearchTool {
 	return &SymbolSearchTool{
 		Base: Base{
-			SchemaStr: `{"required":["query"],"fields":{"query":"string"}}`,
+			SchemaStr: `{"version":"1", "required":["query"],"fields":{"query":"string"}}`,
 		},
 		idx: idx,
 	}

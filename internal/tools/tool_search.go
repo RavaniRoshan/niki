@@ -19,7 +19,7 @@ type ToolSearchTool struct {
 func NewToolSearchTool(r *Registry) *ToolSearchTool {
 	return &ToolSearchTool{
 		Base: Base{
-			SchemaStr: `{"required":["query"],"fields":{"query":"string"}}`,
+			SchemaStr: `{"version":"1", "required":["query"],"fields":{"query":"string"}}`,
 		},
 		registry:   r,
 		discovered: make(map[string]bool),

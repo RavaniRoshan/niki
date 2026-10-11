@@ -30,45 +30,35 @@ func TestShiftTabCyclesModes(t *testing.T) {
 		t.Fatalf("expected CmdSetPermissionMode manual, got %+v", cmd1)
 	}
 
-	// 2nd Shift+Tab -> Agent Never Ask (full_access / Yolo)
-	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
-	m = m2.(AppModel)
-	if m.state.Mode != "agent" || m.state.PermissionMode != "full_access" {
-		t.Fatalf("expected agent/full_access, got %s/%s", m.state.Mode, m.state.PermissionMode)
-	}
-	cmd2 := <-cmdChan
-	if cmd2.Type != protocol.CmdSetPermissionMode || cmd2.Mode != "full_access" {
-		t.Fatalf("expected CmdSetPermissionMode full_access, got %+v", cmd2)
-	}
-
-	// 3rd Shift+Tab -> Plan Mode (readonly)
+	// 2nd Shift+Tab -> Plan Mode (readonly). X2: cycling SKIPS
+	// Never Ask — unattended execution needs explicit /yolo.
 	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = m2.(AppModel)
 	if m.state.Mode != "plan" || m.state.PermissionMode != "readonly" {
-		t.Fatalf("expected plan/readonly, got %s/%s", m.state.Mode, m.state.PermissionMode)
+		t.Fatalf("expected plan/readonly (Never Ask skipped), got %s/%s", m.state.Mode, m.state.PermissionMode)
 	}
-	cmd3a := <-cmdChan
-	cmd3b := <-cmdChan
-	if cmd3a.Type != protocol.CmdSetPlanMode || cmd3a.Mode != "plan" {
-		t.Fatalf("expected CmdSetPlanMode plan, got %+v", cmd3a)
+	cmd2a := <-cmdChan
+	cmd2b := <-cmdChan
+	if cmd2a.Type != protocol.CmdSetPlanMode || cmd2a.Mode != "plan" {
+		t.Fatalf("expected CmdSetPlanMode plan, got %+v", cmd2a)
 	}
-	if cmd3b.Type != protocol.CmdSetPermissionMode || cmd3b.Mode != "readonly" {
-		t.Fatalf("expected CmdSetPermissionMode readonly, got %+v", cmd3b)
+	if cmd2b.Type != protocol.CmdSetPermissionMode || cmd2b.Mode != "readonly" {
+		t.Fatalf("expected CmdSetPermissionMode readonly, got %+v", cmd2b)
 	}
 
-	// 4th Shift+Tab -> Cycles back to Agent Ask When Needed
+	// 3rd Shift+Tab -> Cycles back to Agent Ask When Needed
 	m2, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = m2.(AppModel)
 	if m.state.Mode != "agent" || m.state.PermissionMode != "workspace_write" {
 		t.Fatalf("expected agent/workspace_write, got %s/%s", m.state.Mode, m.state.PermissionMode)
 	}
-	cmd4a := <-cmdChan
-	cmd4b := <-cmdChan
-	if cmd4a.Type != protocol.CmdSetPlanMode || cmd4a.Mode != "false" {
-		t.Fatalf("expected CmdSetPlanMode false, got %+v", cmd4a)
+	cmd3a := <-cmdChan
+	cmd3b := <-cmdChan
+	if cmd3a.Type != protocol.CmdSetPlanMode || cmd3a.Mode != "false" {
+		t.Fatalf("expected CmdSetPlanMode false, got %+v", cmd3a)
 	}
-	if cmd4b.Type != protocol.CmdSetPermissionMode || cmd4b.Mode != "workspace_write" {
-		t.Fatalf("expected CmdSetPermissionMode workspace_write, got %+v", cmd4b)
+	if cmd3b.Type != protocol.CmdSetPermissionMode || cmd3b.Mode != "workspace_write" {
+		t.Fatalf("expected CmdSetPermissionMode workspace_write, got %+v", cmd3b)
 	}
 }
 

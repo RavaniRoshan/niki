@@ -187,6 +187,13 @@ func LoadWithProfile(explicitPath, profileName string) (ConfigWithSources, error
 		if isProjectConfig && !trusted {
 			// Ensure untrusted project MCP servers are not loaded
 			out.MCP = Default().MCP
+			// X6: an untrusted project can neither escalate
+			// approvals nor weaken the sandbox from its config.
+			out.Permissions = Default().Permissions
+			out.Sandbox.AllowUnsandboxed = false
+			out.Sandbox.ExcludedCommands = nil
+			out.Sources["permissions"] = "blocked: untrusted project config"
+			out.Sources["sandbox"] = "blocked: untrusted project config"
 		}
 	}
 	if out.Provider.Name == "" || out.Model.Name == "" {

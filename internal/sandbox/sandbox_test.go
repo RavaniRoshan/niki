@@ -74,7 +74,10 @@ func TestDetect(t *testing.T) {
 // writable binds shadowing the read-only root.
 func TestBubblewrapArgv(t *testing.T) {
 	argv := bwrapArgv([]string{"/workspace"}, "/workspace", "bash", []string{"-c", "echo hi"})
-	want := []string{
+	// Fixed prefix through --cap-drop ALL, then the HOME-hiding
+	// tmpfs (X1: present exactly when homeDir() is hideable), then
+	// the workspace binds, then the command.
+	wantPrefix := []string{
 		"bwrap",
 		"--ro-bind", "/", "/",
 		"--dev", "/dev",
@@ -84,15 +87,27 @@ func TestBubblewrapArgv(t *testing.T) {
 		"--die-with-parent",
 		"--new-session",
 		"--cap-drop", "ALL",
-		"--bind", "/workspace", "/workspace",
-		"--", "bash", "-c", "echo hi",
 	}
-	if len(argv) != len(want) {
-		t.Fatalf("argv = %v", argv)
+	for i := range wantPrefix {
+		if argv[i] != wantPrefix[i] {
+			t.Fatalf("argv[%d] = %q, want %q (full: %v)", i, argv[i], wantPrefix[i], argv)
+		}
 	}
-	for i := range want {
-		if argv[i] != want[i] {
-			t.Fatalf("argv[%d] = %q, want %q (full: %v)", i, argv[i], want[i], argv)
+	rest := argv[len(wantPrefix):]
+	home := homeDir()
+	if home != "" {
+		if len(rest) < 2 || rest[0] != "--tmpfs" || rest[1] != home {
+			t.Fatalf("HOME hiding tmpfs missing (full: %v)", argv)
+		}
+		rest = rest[2:]
+	}
+	wantRest := []string{"--bind", "/workspace", "/workspace", "--", "bash", "-c", "echo hi"}
+	if len(rest) != len(wantRest) {
+		t.Fatalf("argv tail = %v, want %v (full: %v)", rest, wantRest, argv)
+	}
+	for i := range wantRest {
+		if rest[i] != wantRest[i] {
+			t.Fatalf("argv tail[%d] = %q, want %q (full: %v)", i, rest[i], wantRest[i], argv)
 		}
 	}
 }

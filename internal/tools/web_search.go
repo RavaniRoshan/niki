@@ -31,7 +31,7 @@ type webSearchArgs struct {
 func NewWebSearchTool() *WebSearchTool {
 	t := &WebSearchTool{
 		Base: Base{
-			SchemaStr: `{"required":["query"],"fields":{"query":"string","mode":"string","location":"string"}}`,
+			SchemaStr: `{"version":"1", "required":["query"],"fields":{"query":"string","mode":"string","location":"string"}}`,
 		},
 		cache: make(map[string][]SearchResult),
 		mode:  "live",

@@ -27,7 +27,7 @@ type AskUserQuestionTool struct {
 func NewAskUserQuestionTool() *AskUserQuestionTool {
 	return &AskUserQuestionTool{
 		Base: Base{
-			SchemaStr: `{"required":["questions"]}`,
+			SchemaStr: `{"version":"1", "required":["questions"]}`,
 		},
 	}
 }

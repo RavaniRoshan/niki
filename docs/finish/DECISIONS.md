@@ -372,3 +372,49 @@ decisions were confirmed by the owner on 2026-10-10 (see docs/FINISH_PACK.md).
   contract); running repo-declared scripts (that is the trap V2
   closes); failing closed on unknown stacks (would brick
   non-code repos — Inconclusive is the honest answer).
+
+## D-22 — T1/T2/T3/T8 tool rows (P0)
+
+- T1: 36 tools, unique names (map registry), sizes recorded
+  (3329 schema bytes, biggest edit_file 182). No functional-duplicate
+  cull: the 36 names cover distinct surfaces (read vs grep vs
+  symbol search, shell vs exec_command, git family); culling is a
+  product call, not a safety row.
+- T2: `SchemaVersion="1"` on all 36 schemas; `ValidateArgs`
+  requires the version, checks required+types, rejects unknown
+  keys. Fixture schemas in engine tests had to be versioned too —
+  typeless `{}` shapes are now rejected (caught L6/steer tests,
+  fixed at the fixtures, full suite green).
+- T3: `AllowedTools` (empty = all clean tools) enforced in
+  `CallTool`; `ScanDescription` hides + blocks poisoned tools.
+  Timeouts (10s) and status events pre-existed. Cached catalogs
+  store clean names only; flags recompute on live list.
+- T8: `Kind` stamped in `Registry.Run` (deadlined ctx → timeout);
+  `IsError` kept for compat; bodies bounded by C2 capping.
+- Rejected: changing `Register` to refuse duplicates (test
+  fixtures legitimately override tools); baking the version into
+  the provider schema translation (registry-level check is the
+  choke point).
+
+## D-23 — X1/X2/X3/X4/X6 safety rows (P0)
+
+- X1: HOME hidden via `--tmpfs $HOME` ordered before workspace
+  binds (workspace under HOME still works); Seatbelt gains
+  home-read-deny + workspace re-allow (profile-content tested;
+  no macOS hardware here — documented, not claimed).
+- X2: the cycle skips Never Ask; explicit `/yolo` is the only
+  path (typing the command IS the confirmation). Default stays
+  `workspace_write`.
+- X3: one `Redacted()` copy method, applied at record/append/
+  export/render. Only Text+Error carriers are scrubbed (names,
+  plans, and structured fields are not secret-shaped; widening
+  risks false positives in code output).
+- X4: flag-and-deliver (warning + data), never flag-and-drop:
+  dropping tool output would blind the model to the rest of a
+  long result. Execution-side proof stays with the sandbox (X1)
+  and the AST gate (pre-existing red-team tests).
+- X6: untrusted configs lose MCP + approval escalation +
+  sandbox weakening. Provider/proxy pinning from project configs
+  is left alone (project-local Ollama is a legitimate setup).
+- Rejected: blocking tool delivery on directive hits (blinds the
+  model); refusing all project configs (legitimate setups break).

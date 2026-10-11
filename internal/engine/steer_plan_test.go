@@ -144,9 +144,9 @@ func (p *planProvider) Stream(ctx context.Context, messages []provider.Message) 
 func runSteerFixture(t *testing.T, steer string) ([]protocol.EngineEvent, *planProvider, []string, error) {
 	t.Helper()
 	prov := &planProvider{}
-	step := &planStepTool{Base: tools.Base{SchemaStr: `{"type":"object","properties":{"plan":{"type":"string"}},"required":["plan"]}`}}
+	step := &planStepTool{Base: tools.Base{SchemaStr: `{"version":"1","required":["plan"],"fields":{"plan":"string"}}`}}
 	gate := &planGateTool{
-		Base:    tools.Base{SchemaStr: `{"type":"object","properties":{}}`},
+		Base:    tools.Base{SchemaStr: `{"version":"1","required":[],"fields":{}}`},
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
 	}

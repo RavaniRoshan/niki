@@ -351,7 +351,7 @@ type ApplyPatchTool struct {
 
 func NewApplyPatchTool() *ApplyPatchTool {
 	return &ApplyPatchTool{
-		Base: Base{SchemaStr: `{"required":["path","patch"],"fields":{"path":"string","patch":"string","reverse":"boolean"}}`},
+		Base: Base{SchemaStr: `{"version":"1", "required":["path","patch"],"fields":{"path":"string","patch":"string","reverse":"boolean"}}`},
 	}
 }
 

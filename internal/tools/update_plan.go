@@ -23,7 +23,7 @@ type UpdatePlanTool struct {
 func NewUpdatePlanTool() *UpdatePlanTool {
 	return &UpdatePlanTool{
 		Base: Base{
-			SchemaStr: `{"required":["steps"]}`,
+			SchemaStr: `{"version":"1", "required":["steps"]}`,
 		},
 	}
 }

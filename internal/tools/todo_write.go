@@ -23,7 +23,7 @@ type TodoWriteTool struct {
 func NewTodoWriteTool() *TodoWriteTool {
 	return &TodoWriteTool{
 		Base: Base{
-			SchemaStr: `{"required":["todos"]}`,
+			SchemaStr: `{"version":"1", "required":["todos"]}`,
 		},
 	}
 }

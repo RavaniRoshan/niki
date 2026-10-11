@@ -16,7 +16,7 @@ type GrepTool struct {
 }
 
 func NewGrepTool() *GrepTool {
-	return &GrepTool{Base: Base{SchemaStr: `{"required":["pattern"],"fields":{"pattern":"string","root":"string","glob":"string"}}`}}
+	return &GrepTool{Base: Base{SchemaStr: `{"version":"1", "required":["pattern"],"fields":{"pattern":"string","root":"string","glob":"string"}}`}}
 }
 
 func (t *GrepTool) Name() string        { return "grep" }

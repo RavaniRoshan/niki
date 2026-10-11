@@ -8,10 +8,25 @@ import (
 	"sync"
 )
 
+// ResultKind types a tool result (T8): success, error, or timeout,
+// each with a bounded body (bounded by CapOutput in Run).
+type ResultKind string
+
+const (
+	ResultSuccess ResultKind = "success"
+	ResultError   ResultKind = "error"
+	ResultTimeout ResultKind = "timeout"
+)
+
 type ToolResult struct {
 	Output  string
 	IsError bool
+	Kind    ResultKind
 }
+
+// SchemaVersion versions every tool schema (T2). ValidateArgs
+// rejects schemas and arguments that do not carry it.
+const SchemaVersion = "1"
 
 // Base embeds fail-closed tool metadata: concurrency is unsafe and the tool
 // is not read-only unless the tool opts in.
@@ -39,15 +54,33 @@ func ValidateArgs(raw json.RawMessage, schema string) error {
 		return err
 	}
 	var s struct {
+		Version  string            `json:"version"`
 		Required []string          `json:"required"`
 		Fields   map[string]string `json:"fields"`
 	}
 	if err := json.Unmarshal([]byte(schema), &s); err != nil {
 		return err
 	}
+	if s.Version != SchemaVersion {
+		return fmt.Errorf("unsupported schema version %q (want %q)", s.Version, SchemaVersion)
+	}
 	for _, req := range s.Required {
 		if _, ok := m[req]; !ok {
 			return fmt.Errorf("missing required arg %q", req)
+		}
+	}
+	// Strict: unknown arguments are rejected (additionalProperties
+	// false). Known keys are required-names plus declared fields.
+	known := map[string]bool{}
+	for _, req := range s.Required {
+		known[req] = true
+	}
+	for name := range s.Fields {
+		known[name] = true
+	}
+	for name := range m {
+		if !known[name] {
+			return fmt.Errorf("unknown arg %q", name)
 		}
 	}
 	for name, typ := range s.Fields {
@@ -180,7 +213,17 @@ func (r *Registry) Run(ctx context.Context, name string, args json.RawMessage) (
 	}
 	res, err := t.Run(ctx, args)
 	if err != nil {
+		// A deadlined context is a timeout, not a generic error.
+		res.Kind = ResultError
+		if ctx.Err() == context.DeadlineExceeded {
+			res.Kind = ResultTimeout
+		}
 		return res, err
+	}
+	if res.IsError {
+		res.Kind = ResultError
+	} else {
+		res.Kind = ResultSuccess
 	}
 	r.mu.RLock()
 	sDir := r.sessionDir

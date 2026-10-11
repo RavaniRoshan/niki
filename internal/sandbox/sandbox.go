@@ -130,9 +130,13 @@ func (b *Bubblewrap) Run(ctx context.Context, dir, name string, args ...string) 
 }
 
 // bwrapArgv builds the bubblewrap command line. Binds
-// are ordered: the read-only root first, the writable
-// directories after, so a writable bind shadows the
-// read-only mount of the same subtree.
+// are ordered: the read-only root first, the hidden home
+// next, then the writable directories, so a writable bind
+// shadows both the read-only mount and the home hiding when
+// the workspace lives under $HOME. $HOME itself is replaced
+// by an empty tmpfs: credential paths (~/.ssh, tokens) are
+// hidden from sandboxed commands while the workspace bind
+// keeps the repo usable.
 func bwrapArgv(writableDirs []string, dir, name string, args []string) []string {
 	argv := []string{
 		"bwrap",
@@ -145,12 +149,29 @@ func bwrapArgv(writableDirs []string, dir, name string, args []string) []string 
 		"--new-session",
 		"--cap-drop", "ALL",
 	}
+	if home := homeDir(); home != "" {
+		argv = append(argv, "--tmpfs", home)
+	}
 	for _, d := range writableDirs {
 		argv = append(argv, "--bind", d, d)
 	}
 	argv = append(argv, "--", name)
 	argv = append(argv, args...)
 	return argv
+}
+
+// homeDir returns the user home for hiding, or "" when there is
+// nothing safe to hide (unset, root, or not a directory).
+func homeDir() string {
+	home := os.Getenv("HOME")
+	if home == "" || home == "/" {
+		return ""
+	}
+	fi, err := os.Stat(home)
+	if err != nil || !fi.IsDir() {
+		return ""
+	}
+	return home
 }
 
 // Seatbelt contains processes with macOS's Seatbelt
@@ -190,8 +211,15 @@ func seatbeltProfile(writableDirs []string) string {
 	b.WriteString("(allow default)\n")
 	b.WriteString("(deny network*)\n")
 	b.WriteString("(deny file-write*)\n")
+	// Hide the home directory (credential paths) from sandboxed
+	// commands; the workspace is re-allowed below when it lives
+	// under $HOME (later rules override earlier ones).
+	if home := homeDir(); home != "" {
+		fmt.Fprintf(&b, "(deny file-read* (subpath %q))\n", home)
+	}
 	for _, d := range writableDirs {
 		fmt.Fprintf(&b, "(allow file-write* (subpath %q))\n", d)
+		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", d)
 	}
 	return b.String()
 }

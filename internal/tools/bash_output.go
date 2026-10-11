@@ -17,7 +17,7 @@ func NewBashOutputTool(pm *ProcessManager) *BashOutputTool {
 	}
 	return &BashOutputTool{
 		Base: Base{
-			SchemaStr: `{"required":["process_id"],"fields":{"process_id":"string","offset":"number","limit":"number"}}`,
+			SchemaStr: `{"version":"1", "required":["process_id"],"fields":{"process_id":"string","offset":"number","limit":"number"}}`,
 		},
 		pm: pm,
 	}

@@ -440,3 +440,32 @@ any context compaction.
   (… T3 (clean))`.
 - Packages verifier/engine/cmd green, full build OK; gofmt clean.
   V1+V2+V3+V4 GREEN (28 rows).
+
+## 2026-10-11 — Slice Q: T1/T2/T3/T8 + X1/X2/X3/X4/X6 (P0)
+- Tools: T1 count/sizes/unique test; T2 version `"1"` on all 36
+  schemas + strict unknown-arg rejection (3 engine fixtures
+  re-versioned after the fallout broke L6/steer); T8 `Kind`
+  success/error/timeout + bounded bodies; T3 MCP `AllowedTools` +
+  `ScanDescription` (poisoned `helper` in the fake server).
+- Safety: X1 HOME hiding (bwrap tmpfs + Seatbelt profile) +
+  loopback-off escape test; X2 cycle skips Never Ask, `/yolo`
+  explicit only (pinned cycle test updated); X3 `Redacted()` at
+  trajectory/store/exports/UI; X4 `ScanDirectives` + engine
+  warning with README-trap fixture; X6 untrusted config loses
+  MCP + approval escalation + sandbox weakening.
+- Acceptance printed: `[T1] tools=36 schema_bytes=3329 …`;
+  `[T2] all 36 schemas carry version "1"` + strict rejection;
+  `[T8] kinds: success/error (+timeout on deadline)`;
+  `[T3] poisoned description flagged + hidden …` + allow-list +
+  `5 traps flagged, 4 clean pass`;
+  `[X1] HOME hidden, loopback unreachable, workspace writable`;
+  `[X2] default mode asks … 6 cycles, Never Ask never appears …
+  explicit /yolo confirms`;
+  `[X3] store files: 0 hits … scrubbed … exports: 0 hits … UI …
+  trajectory scrubbed`;
+  `[X4] flagged: … (approval-change, network-access, disclosure)
+  … approval mode unchanged; no shell ran it`;
+  `[X6] untrusted config contained …`.
+- Full suite GO_TEST_EXIT=0 (46 ok); gofmt clean; lint clean
+  except pre-existing S1000. T1+T2+T3+T8+X1+X2+X3+X4+X6 GREEN
+  (37 rows).

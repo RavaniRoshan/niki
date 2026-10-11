@@ -1,5 +1,7 @@
 package tui
 
+import "github.com/RavaniRoshan/niki/internal/tools"
+
 // HistoryCell is a semantic unit of the transcript.
 type HistoryCell struct {
 	Role string // user, assistant, system, tool, error
@@ -17,12 +19,15 @@ type History struct {
 }
 
 func (h *History) Append(role, text string) {
-	h.Cells = append(h.Cells, HistoryCell{Role: role, Text: text})
+	// X3: the visible transcript never retains credential text.
+	h.Cells = append(h.Cells, HistoryCell{Role: role, Text: tools.Redact(text)})
 }
 
 // AppendDelta appends to the last assistant
 // cell if it is still in the live region.
 func (h *History) AppendDelta(text string) {
+	// X3: streamed text is scrubbed too (deltas can carry secrets).
+	text = tools.Redact(text)
 	if len(h.Cells) > h.Committed && h.Cells[len(h.Cells)-1].Role == "assistant" {
 		h.Cells[len(h.Cells)-1].Text += text
 		return

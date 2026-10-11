@@ -16,7 +16,7 @@ type SpawnAgentTool struct {
 func NewSpawnAgentTool(ctrl AgentController) *SpawnAgentTool {
 	return &SpawnAgentTool{
 		Base: Base{
-			SchemaStr: `{"required":["name","prompt"],"fields":{"name":"string","prompt":"string","parent_id":"string","context_mode":"string","worktree":"boolean","budget_tokens":"number"}}`,
+			SchemaStr: `{"version":"1", "required":["name","prompt"],"fields":{"name":"string","prompt":"string","parent_id":"string","context_mode":"string","worktree":"boolean","budget_tokens":"number"}}`,
 		},
 		ctrl: ctrl,
 	}
@@ -73,7 +73,7 @@ type SendInputTool struct {
 func NewSendInputTool(ctrl AgentController) *SendInputTool {
 	return &SendInputTool{
 		Base: Base{
-			SchemaStr: `{"required":["agent_id","message"],"fields":{"agent_id":"string","message":"string"}}`,
+			SchemaStr: `{"version":"1", "required":["agent_id","message"],"fields":{"agent_id":"string","message":"string"}}`,
 		},
 		ctrl: ctrl,
 	}
@@ -116,7 +116,7 @@ type WaitAgentTool struct {
 func NewWaitAgentTool(ctrl AgentController) *WaitAgentTool {
 	return &WaitAgentTool{
 		Base: Base{
-			SchemaStr: `{"required":["agent_id"],"fields":{"agent_id":"string","timeout_seconds":"number"}}`,
+			SchemaStr: `{"version":"1", "required":["agent_id"],"fields":{"agent_id":"string","timeout_seconds":"number"}}`,
 		},
 		ctrl: ctrl,
 	}
@@ -166,7 +166,7 @@ type CloseAgentTool struct {
 func NewCloseAgentTool(ctrl AgentController) *CloseAgentTool {
 	return &CloseAgentTool{
 		Base: Base{
-			SchemaStr: `{"required":["agent_id"],"fields":{"agent_id":"string"}}`,
+			SchemaStr: `{"version":"1", "required":["agent_id"],"fields":{"agent_id":"string"}}`,
 		},
 		ctrl: ctrl,
 	}
@@ -207,7 +207,7 @@ type ResumeAgentTool struct {
 func NewResumeAgentTool(ctrl AgentController) *ResumeAgentTool {
 	return &ResumeAgentTool{
 		Base: Base{
-			SchemaStr: `{"required":["agent_id"],"fields":{"agent_id":"string"}}`,
+			SchemaStr: `{"version":"1", "required":["agent_id"],"fields":{"agent_id":"string"}}`,
 		},
 		ctrl: ctrl,
 	}

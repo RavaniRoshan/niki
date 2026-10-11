@@ -18,7 +18,7 @@ func NewExecCommandTool(pm *ProcessManager) *ExecCommandTool {
 	}
 	return &ExecCommandTool{
 		Base: Base{
-			SchemaStr: `{"required":["command"],"fields":{"command":"string","background":"boolean","dir":"string","timeout_seconds":"number"}}`,
+			SchemaStr: `{"version":"1", "required":["command"],"fields":{"command":"string","background":"boolean","dir":"string","timeout_seconds":"number"}}`,
 		},
 		pm: pm,
 	}

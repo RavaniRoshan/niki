@@ -16,7 +16,7 @@ type ReadFileTool struct {
 }
 
 func NewReadFileTool() *ReadFileTool {
-	return &ReadFileTool{Base: Base{SchemaStr: `{"required":["path"],"fields":{"path":"string","offset":"number","limit":"number"}}`}}
+	return &ReadFileTool{Base: Base{SchemaStr: `{"version":"1", "required":["path"],"fields":{"path":"string","offset":"number","limit":"number"}}`}}
 }
 
 func (t *ReadFileTool) Name() string        { return "read_file" }

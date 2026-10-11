@@ -34,7 +34,7 @@ type WebFetchTool struct {
 func NewWebFetchTool() *WebFetchTool {
 	return &WebFetchTool{
 		Base: Base{
-			SchemaStr: `{"required":["url"],"fields":{"url":"string"}}`,
+			SchemaStr: `{"version":"1", "required":["url"],"fields":{"url":"string"}}`,
 		},
 		client: &http.Client{
 			Timeout: 15 * time.Second,

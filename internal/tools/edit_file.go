@@ -20,7 +20,7 @@ type EditFileTool struct {
 func NewEditFileTool() *EditFileTool {
 	return &EditFileTool{
 		Base: Base{
-			SchemaStr: `{"required":["path","old_string","new_string"],"fields":{"path":"string","old_string":"string","new_string":"string","expected_hash":"string","replace_all":"boolean"}}`,
+			SchemaStr: `{"version":"1", "required":["path","old_string","new_string"],"fields":{"path":"string","old_string":"string","new_string":"string","expected_hash":"string","replace_all":"boolean"}}`,
 		},
 	}
 }

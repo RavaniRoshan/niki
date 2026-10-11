@@ -25,7 +25,8 @@ func NewSession() *Session {
 func (s *Session) Record(e protocol.EngineEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.Events = append(s.Events, e)
+	// X3: trajectories never retain credential text.
+	s.Events = append(s.Events, e.Redacted())
 }
 
 // Snapshot returns a copy of the recorded events for checkpoint

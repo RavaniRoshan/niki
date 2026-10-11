@@ -17,7 +17,7 @@ func NewWriteStdinTool(pm *ProcessManager) *WriteStdinTool {
 	}
 	return &WriteStdinTool{
 		Base: Base{
-			SchemaStr: `{"required":["process_id"],"fields":{"process_id":"string","input":"string","chars":"string","eof":"boolean","interrupt":"boolean"}}`,
+			SchemaStr: `{"version":"1", "required":["process_id"],"fields":{"process_id":"string","input":"string","chars":"string","eof":"boolean","interrupt":"boolean"}}`,
 		},
 		pm: pm,
 	}

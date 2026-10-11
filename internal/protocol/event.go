@@ -3,6 +3,8 @@ package protocol
 import (
 	"time"
 
+	"github.com/RavaniRoshan/niki/internal/tools"
+
 	"github.com/RavaniRoshan/niki/internal/provider"
 )
 
@@ -104,6 +106,15 @@ type EngineEvent struct {
 }
 
 type Usage = provider.Usage
+
+// Redacted returns a copy with credential-like text scrubbed from
+// the free-text carriers (X3). Callers persist or render the copy,
+// never the original.
+func (e EngineEvent) Redacted() EngineEvent {
+	e.Text = tools.Redact(e.Text)
+	e.Error = tools.Redact(e.Error)
+	return e
+}
 
 type PlanStep struct {
 	Description string `json:"description"`

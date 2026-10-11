@@ -25,7 +25,7 @@ type ViewImageTool struct {
 func NewViewImageTool() *ViewImageTool {
 	return &ViewImageTool{
 		Base: Base{
-			SchemaStr: `{"required":["path"],"fields":{"path":"string","detail":"string"}}`,
+			SchemaStr: `{"version":"1", "required":["path"],"fields":{"path":"string","detail":"string"}}`,
 		},
 	}
 }

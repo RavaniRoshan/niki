@@ -16,6 +16,9 @@ func ExportToMarkdown(sessionID protocol.SessionId, store *Store) (string, error
 	if err != nil {
 		return "", err
 	}
+	for i := range evts {
+		evts[i] = evts[i].Redacted()
+	}
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# NikiCode Session Transcript: %s\n\n", sessionID)
@@ -46,6 +49,9 @@ func ExportToHTML(sessionID protocol.SessionId, store *Store) (string, error) {
 	evts, err := store.Events(sessionID)
 	if err != nil {
 		return "", err
+	}
+	for i := range evts {
+		evts[i] = evts[i].Redacted()
 	}
 
 	var sb strings.Builder

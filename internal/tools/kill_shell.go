@@ -17,7 +17,7 @@ func NewKillShellTool(pm *ProcessManager) *KillShellTool {
 	}
 	return &KillShellTool{
 		Base: Base{
-			SchemaStr: `{"required":["process_id"],"fields":{"process_id":"string","signal":"string"}}`,
+			SchemaStr: `{"version":"1", "required":["process_id"],"fields":{"process_id":"string","signal":"string"}}`,
 		},
 		pm: pm,
 	}

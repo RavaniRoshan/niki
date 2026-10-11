@@ -31,7 +31,7 @@ type ShellTool struct {
 }
 
 func NewShellTool() *ShellTool {
-	return &ShellTool{Base: Base{SchemaStr: `{"required":["command"],"fields":{"command":"string","timeout_seconds":"number","dir":"string","dangerously_disable_sandbox":"boolean"}}`}}
+	return &ShellTool{Base: Base{SchemaStr: `{"version":"1", "required":["command"],"fields":{"command":"string","timeout_seconds":"number","dir":"string","dangerously_disable_sandbox":"boolean"}}`}}
 }
 
 func (t *ShellTool) Name() string        { return "shell" }
