@@ -1,20 +1,19 @@
+
 # Binaries
-bin/
-*.exe
-*.out
-
-# Go workspace
-/go.work
-
 # Editor
-.vscode/
-.idea/
-
-# Secrets
-*.local
-.env
-
+# Go workspace
 # Media & assets
-*.png
+# Secrets
+*.exe
 *.gif
+*.local
+*.out
+*.png
+.env
+.idea/
+.vscode/
+/go.work
+/tmp/opencode/nikibin*
+bin/
+nikicode
 tool-results/
