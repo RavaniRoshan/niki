@@ -634,3 +634,33 @@ any context compaction.
   positional renders empty / single-pass … / braced ${1}`;
   `[T9] recorded 6 calls … niki stats table … persist locally`.
 - Full suite green; gofmt + vet clean. T4+T6+T7+T9 GREEN (95 rows).
+
+## 2026-10-11 — Slice M: small-model support (M2/M4/M5/M7/M8/M9)
+- M2 text-format tool calls: `engine.RecoverTextCall` parses
+  `<tool_name>{json}</tool_name>` and ```json {"tool":...}``` blocks;
+  candidate-only — registry rejects near-miss names, schema gate
+  rejects bad args; recovery logged.
+- M4 micro-step plans: `engine.MicroPlan` — each step has a done
+  criterion + check; a step cannot close until its check passes.
+- M5 small-window budgets: `contextwin.Profile`/`Budgets` size repo-map,
+  file-read, tool-output limits to the window; compaction earlier for
+  small windows (60% @≤32k vs 80% @200k). 8k golden frozen.
+- M7 decoding per phase: `engine.DecodingFor` — tool=0.0, plan=0.1,
+  text=0.7; explicit output caps + stop sequences; unknown fails safe.
+- M8 escalation: `engine.Escalator` — off unless configured; 2nd
+  consecutive failure of a step offers one retry on the larger model.
+- M9 small-model eval: `tools/smallmodel_eval.sh` prepared (OWNER-VERIFY,
+  needs a real local model); EVALS.md carries an explicit "AWAITS OWNER
+  RUN — no pass rate is claimed" note. No rate fabricated.
+- Acceptance printed: `[M2] exact … near-miss "read_fil" … refused`/
+  `fenced bogus … refused`/`malformed args refused`/`prose recovers
+  nothing`; `[M4] close refused before check …`/`failed check keeps
+  open`/`closes only after check passes`/`checkless closes`/`no
+  criterion refused`; `[M5] 8k profile: repo-map=1000 file-read=2000
+  tool-output=1333 compact@60%`/`8k@4800 vs 200k@160000`/`surfaces all
+  smaller`/`no budget exceeds window`; `[M7] temperatures: tool=0.0
+  plan=0.1 text=0.7`/`output caps 1024/2048/4096`/`stops set`/`unknown
+  fails safe`; `[M8] off by default`/`2nd failure -> escalate to
+  "gpt-4o"`/`one retry per step`/`per-step budget`/`success resets`.
+- Full suite green; gofmt + vet clean. M2+M4+M5+M7+M8 GREEN, M9
+  OWNER-VERIFY (101 rows green/verified).
