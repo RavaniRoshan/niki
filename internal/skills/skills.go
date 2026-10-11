@@ -137,7 +137,10 @@ func parseSkill(path string) (Skill, error) {
 					s.Context = strings.TrimSpace(strings.TrimPrefix(line, "context:"))
 				}
 			}
-			s.Body = strings.TrimSpace(parts[2])
+			// T4: discovery parses frontmatter only. The body is NOT
+			// read here — it loads lazily on the first LoadBody (when
+			// the skill is actually invoked), so listing skills never
+			// touches every file's contents.
 		} else {
 			return s, fmt.Errorf("bad frontmatter")
 		}

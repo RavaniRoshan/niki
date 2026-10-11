@@ -613,3 +613,24 @@ any context compaction.
   1 and 2 allowed, depth 3 refused`.
 - Full suite green; gofmt + vet clean. V5+V6+V7+S1+S2+S4+S5 GREEN
   (91 rows).
+
+## 2026-10-11 — Slice T: skills/hooks/commands/stats (T4/T6/T7/T9)
+- T4: skills discovery now parses frontmatter only; the body is read
+  lazily on `LoadBody` (invocation), not at discovery (fixed the eager
+  body-read in `parseSkill`). Discovery scans user + project roots.
+- T6: new `internal/hooks` — lifecycle hooks (session start/end,
+  pre/post tool use, prompt submit, stop); a blocking pre_tool_use hook
+  vetoes the call; hooks run only in trusted projects.
+- T7: new `internal/slashcmd` — custom slash commands from Markdown
+  with $ARGUMENTS/$1/${1} substitution (single-pass, no re-expansion).
+- T9: new `internal/toolstats` + `nikicode stats` — local per-tool
+  counts/failures in an append-only JSONL under $HOME; nothing leaves
+  the machine.
+- Acceptance printed: `[T4] discovered from user + project roots …
+  body empty after discovery, loaded on invoke … optional script`;
+  `[T6] blocking … vetoed … / passing allows / non-blocking (exit 3)
+  does not veto / untrusted skipped / trusted executed / all 6 events`;
+  `[T7] discovered /review … /review 42 security -> … / missing
+  positional renders empty / single-pass … / braced ${1}`;
+  `[T9] recorded 6 calls … niki stats table … persist locally`.
+- Full suite green; gofmt + vet clean. T4+T6+T7+T9 GREEN (95 rows).

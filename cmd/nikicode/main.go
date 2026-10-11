@@ -41,6 +41,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/soak"
 	"github.com/RavaniRoshan/niki/internal/terminal"
 	"github.com/RavaniRoshan/niki/internal/tools"
+	"github.com/RavaniRoshan/niki/internal/toolstats"
 	"github.com/RavaniRoshan/niki/internal/tui"
 	"github.com/RavaniRoshan/niki/internal/update"
 	"github.com/RavaniRoshan/niki/internal/verifier"
@@ -843,6 +844,26 @@ func main() {
 	}
 	updateCmd.Flags().String("output", "", "explicit install destination (required)")
 	rootCmd.AddCommand(updateCmd)
+	// `nikicode stats` — local per-tool usage (T9). Reads the local
+	// append-only stats log and prints counts/failures. Nothing is
+	// transmitted; the command only ever reads a file under $HOME.
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "stats",
+		Short: "Show local per-tool usage statistics (counts, failures)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, err := toolstats.Open(toolstats.DefaultPath())
+			if err != nil {
+				return err
+			}
+			agg, err := st.Aggregate()
+			if err != nil {
+				return err
+			}
+			fmt.Print(toolstats.Render(agg))
+			return nil
+		},
+	})
 	rootCmd.AddCommand(newCICommand())
 	rootCmd.AddCommand(newHelpCommand())
 	rootCmd.AddCommand(newExamplesCommand())
