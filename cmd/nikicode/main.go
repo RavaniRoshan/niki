@@ -39,6 +39,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/terminal"
 	"github.com/RavaniRoshan/niki/internal/tools"
 	"github.com/RavaniRoshan/niki/internal/tui"
+	"github.com/RavaniRoshan/niki/internal/verifier"
 )
 
 var (
@@ -372,6 +373,14 @@ func main() {
 			if err := applyBudget(eng, cfg); err != nil {
 				fmt.Fprintf(os.Stderr, "budget config invalid (budgets disabled): %v\n", err)
 			}
+			// V: the real verifier — completion claims run the
+			// stack allowlist (V2) against extracted requirements
+			// (V1), graded into trust tiers (V3) with integrity
+			// snapshots (V4). Repos with no allowlisted checks
+			// verify as inconclusive (never a pass).
+			if cwd, cerr := os.Getwd(); cerr == nil {
+				eng.SetVerifier(verifier.Standard{Dir: cwd}, 0)
+			}
 			// Live config reload (C5): /reload re-reads the
 			// config file and swaps the provider and the
 			// permission mode without a restart.
@@ -590,6 +599,14 @@ func main() {
 			eng, cmdChan, eventChan := engine.NewEngine(100, buildProvider(cfg), reg, guard)
 			if err := applyBudget(eng, cfg); err != nil {
 				fmt.Fprintf(os.Stderr, "budget config invalid (budgets disabled): %v\n", err)
+			}
+			// V: the real verifier — completion claims run the
+			// stack allowlist (V2) against extracted requirements
+			// (V1), graded into trust tiers (V3) with integrity
+			// snapshots (V4). Repos with no allowlisted checks
+			// verify as inconclusive (never a pass).
+			if cwd, cerr := os.Getwd(); cerr == nil {
+				eng.SetVerifier(verifier.Standard{Dir: cwd}, 0)
 			}
 			bootMark("engine")
 			go func() { _ = eng.Run() }()

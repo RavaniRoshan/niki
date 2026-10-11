@@ -415,3 +415,28 @@ any context compaction.
   (env-b)`.
 - Packages tools/skills/envctx/engine/contextwin green; gofmt
   clean. C1+C2+C3+C9 GREEN (24 rows).
+
+## 2026-10-11 — Slice P: V1–V4 real verifier (P0)
+- New `internal/verifier` pieces (D-21): requirements.go
+  (ExtractRequirements + 5 golden fixtures), stacks.go
+  (DetectStack/ChecksFor/SelectChecks + README-trap test),
+  tiers.go (T0–T3 Grade/VerdictFor + per-tier test),
+  integrity.go (SnapshotIntegrity/Diff + deletion tests),
+  standard.go (Standard.Verify with injectable Runner, 120s
+  check timeout, T2-block on drift).
+- Wired `verifier.Standard{Dir: cwd}` as the default verifier in
+  both product paths (TUI rootCmd + exec), lifting the L3 interim.
+- Acceptance printed: `[V1 empty/single/multi/bullets/prose]`;
+  `[V2] allowlist only: [go-test go-vet] (README trap ignored)`;
+  `[V2] unknown stack: zero checks, no guess`;
+  `[V3 T0/T1/T1-timeout/T2/T3]` tier→verdict lines;
+  `[V4] drift flagged: [removed: calc_test.go]`;
+  `[V4] mid-run deletion -> not-verified (… T1 (weak); integrity
+  drift: removed: victim_test.go)`;
+  `[V] all-pass -> verified (… T3 (clean))`;
+  `[V] one failure -> not-verified (… T1 (weak))`;
+  `[V] no checks -> inconclusive …`;
+  `[V] real toolchain (go test + go vet on fixture) -> verified
+  (… T3 (clean))`.
+- Packages verifier/engine/cmd green, full build OK; gofmt clean.
+  V1+V2+V3+V4 GREEN (28 rows).

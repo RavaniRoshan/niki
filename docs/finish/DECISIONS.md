@@ -340,3 +340,35 @@ decisions were confirmed by the owner on 2026-10-10 (see docs/FINISH_PACK.md).
 - Rejected: a separate env message (compaction could drop it);
   watching with fsnotify (poll-per-turn is cheaper and enough).
 
+
+## D-21 — V1–V4 real verifier (P0)
+
+- V1 `ExtractRequirements`: deterministic sentence split, filler
+  ("thanks", bare greetings) dropped, 200-rune cap; empty prompt
+  yields one requirement so the contract is never vacuous.
+- V2 `SelectChecks`: manifests only (go.mod; package.json AND a
+  test script; Cargo.toml; pyproject/setup.py). Fixed argv per
+  stack; unknown → zero checks, never a guess. README/comment/tool
+  output text is data and cannot reach argv (no string from the
+  repo ever becomes a command).
+- V3 `Grade`/`VerdictFor`: T0 no results → Inconclusive; any
+  fail/timeout/skip → T1 → NotVerified; all pass → T2 → Verified;
+  pass + integrity clean → T3. `Passed()` is Verified-only, so
+  Inconclusive can never end a run as done.
+- V4 `SnapshotIntegrity`/`Diff`: test/CI/lockfile hashes + check
+  argv, 200-file cap, VCS/build dirs skipped. `Standard.Verify`
+  judges only the run window: pre-existing drift is reported but
+  does not taint; mid-run drift downgrades T2+ to T1 (a green
+  suite over deleted tests is not evidence).
+- `Standard` runs each check with a 120s timeout, truncates check
+  output to 4k, and takes an injectable `Runner` (tests fake it;
+  production execs). Wired as the default verifier in both product
+  paths (TUI + exec) with maxLoops 0 (D-04 unbounded, backstopped
+  by L2 budgets) — this lifts the L3 interim (runs no longer end
+  not-verified for lack of a verifier; checkless repos verify as
+  Inconclusive, still never a pass). Test-weakening patterns
+  (assertion removal, new skips, `|| true`) are V6 (P1), not here.
+- Rejected: model-based requirement extraction (nondeterministic
+  contract); running repo-declared scripts (that is the trap V2
+  closes); failing closed on unknown stacks (would brick
+  non-code repos — Inconclusive is the honest answer).
