@@ -17,8 +17,10 @@ const (
 	MaxOutputChars = 50000
 	// MaxLineLength is the maximum length of a single line before being split.
 	MaxLineLength = 2000
-	// PreviewByteCap is the maximum size of the inline preview.
-	PreviewByteCap = 2048
+	// PreviewHeadChars bounds the head of an over-limit preview.
+	PreviewHeadChars = 1024
+	// PreviewTailChars bounds the tail of an over-limit preview.
+	PreviewTailChars = 1024
 )
 
 // SplitLongLines splits any lines longer than maxLen with newlines.
@@ -58,7 +60,8 @@ func ToolOptsOutFromCapping(toolName string) bool {
 
 // CapOutput applies line splitting and bounds output to 50k characters.
 // If output exceeds 50k characters, it persists the full output to disk
-// and returns a ~2KB preview cut cleanly at a newline boundary.
+// and returns a ~2KB head-and-tail preview (head and tail each cut
+// cleanly at a newline boundary) with the on-disk reference.
 func CapOutput(toolName string, output string, sessionDir string) (string, bool) {
 	output = SplitLongLines(output, MaxLineLength)
 
@@ -86,19 +89,26 @@ func CapOutput(toolName string, output string, sessionDir string) (string, bool)
 
 	_ = os.WriteFile(fullPath, []byte(output), 0o600)
 
-	previewLen := PreviewByteCap
-	if previewLen > len(output) {
-		previewLen = len(output)
+	// Head-and-tail: the head shows where the output started, the
+	// tail where it ended (exit codes, summaries, and errors live at
+	// the tail). Both edges cut at newline boundaries.
+	head := output
+	if len(head) > PreviewHeadChars {
+		head = head[:PreviewHeadChars]
+	}
+	if lastNL := strings.LastIndex(head, "\n"); lastNL > 0 {
+		head = head[:lastNL]
+	}
+	tail := output
+	if len(tail) > PreviewTailChars {
+		tail = tail[len(tail)-PreviewTailChars:]
+	}
+	if firstNL := strings.Index(tail, "\n"); firstNL >= 0 {
+		tail = tail[firstNL+1:]
 	}
 
-	preview := output[:previewLen]
-	lastNL := strings.LastIndex(preview, "\n")
-	if lastNL > 0 {
-		preview = preview[:lastNL]
-	}
+	cappedMsg := fmt.Sprintf("\n... [output capped: %d characters exceed %d limit. Showing first %d and last %d characters. Full output saved to: %s]",
+		len(output), MaxOutputChars, len(head), len(tail), fullPath)
 
-	cappedMsg := fmt.Sprintf("\n... [output capped: %d characters exceed %d limit. Preview shown. Full output saved to: %s]",
-		len(output), MaxOutputChars, fullPath)
-
-	return preview + cappedMsg, true
+	return head + cappedMsg + "\n" + tail, true
 }

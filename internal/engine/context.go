@@ -47,6 +47,16 @@ type ContextAssembler struct {
 	BreakerTripped  bool
 	// LastTier records the most aggressive tier applied.
 	LastTier string
+	// EnvBlock is the latest <environment> block (C9: OS, shell,
+	// cwd, git branch/status). Snapshot prepends it to the system
+	// message copy; empty means no env context attached.
+	EnvBlock string
+}
+
+// SetEnvBlock attaches (or clears, when empty) the environment
+// context block injected at snapshot time.
+func (c *ContextAssembler) SetEnvBlock(block string) {
+	c.EnvBlock = block
 }
 
 func NewContextAssembler() *ContextAssembler {
@@ -64,7 +74,14 @@ func (c *ContextAssembler) Add(m provider.Message) {
 }
 
 func (c *ContextAssembler) Snapshot() []provider.Message {
-	return append([]provider.Message{}, c.Messages...)
+	out := append([]provider.Message{}, c.Messages...)
+	// The env block rides on the system message copy, so compaction
+	// tiers (which always keep index 0) keep it automatically, and
+	// the stored Messages stay pristine for assertions.
+	if c.EnvBlock != "" && len(out) > 0 && out[0].Role == "system" {
+		out[0].Content += "\n" + c.EnvBlock
+	}
+	return out
 }
 
 // TokenEstimate is a rough 4-chars-per-token estimate.

@@ -393,3 +393,25 @@ any context compaction.
 - Full suite GO_TEST_EXIT=0 (45 ok); gofmt clean; golangci-lint
   clean except a pre-existing S1000 in a Slice-L test. E3+E4 GREEN
   (20 rows).
+
+## 2026-10-11 — Slice O: C1 + C2 + C3 + C9 context rows (P0)
+- C1 (D-19): `skills.ResolveInstructionSet` (global, root-to-dir,
+  lazy `Load`) + hierarchy/laziness/per-directory test.
+- C2 (D-18): `CapOutput` head-and-tail preview (1024+1024, newline
+  cuts) with disk persistence + reference; 10 MB acceptance test
+  (2210-byte preview, 10640089 bytes retrievable, byte-identical).
+- C3: index-free proof — grep/glob/read with PATH stripped to an
+  empty dir; symbol_search degrades with "not initialized".
+- C9 (D-20): new `internal/envctx` (collect once, 2s timeout,
+  `Watcher.Refresh` on change) wired into `TurnRunner` +
+  `ContextAssembler.SetEnvBlock` (system-message copy injection);
+  branch-change refresh tests at package and engine level.
+- Acceptance printed: `[C1] hierarchy global->root->dir, contents
+  lazy …`; `[C1] per-directory set: root sees 2 files, sub sees
+  3`; `[C2] 10 MB output -> 2210-byte head+tail preview, full
+  10640089 bytes retrievable`; `[C3] grep+glob+read work with PATH
+  stripped …`; `[C9] collected once, refreshed on branch change …`;
+  `[C9] env block attached on turn 1 (env-a), refreshed on turn 2
+  (env-b)`.
+- Packages tools/skills/envctx/engine/contextwin green; gofmt
+  clean. C1+C2+C3+C9 GREEN (24 rows).

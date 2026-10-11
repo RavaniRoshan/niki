@@ -229,3 +229,65 @@ func InstructionsRootToCwd(dir string, maxBytes int) []Instruction {
 	}
 	return out
 }
+
+// InstructionSet is the resolved instruction hierarchy for one
+// working directory: global (user config dir), then repository
+// root down to the directory itself (C1). Paths are resolved up
+// front; file contents load lazily on the first Load call, so
+// merely resolving instructions never touches the disk beyond
+// cheap stats.
+type InstructionSet struct {
+	Paths    []string
+	Loaded   bool
+	contents []Instruction
+	maxBytes int
+}
+
+// ResolveInstructionSet builds the lazy hierarchy for dir: one
+// global file set from configDir, then InstructionsRootToCwd paths
+// (root first, the file's own directory last).
+func ResolveInstructionSet(dir, configDir string, maxBytes int) *InstructionSet {
+	set := &InstructionSet{maxBytes: maxBytes}
+	seen := map[string]bool{}
+	add := func(p string) {
+		if seen[p] || p == "" {
+			return
+		}
+		seen[p] = true
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			set.Paths = append(set.Paths, p)
+		}
+	}
+	for _, name := range []string{"AGENTS.md", "NIKICODE.md", "NIKI.md"} {
+		add(filepath.Join(configDir, name))
+	}
+	// Instructions walks upward (file's directory first); reverse it
+	// so the root comes first. Paths only — no file is read here.
+	upward := Instructions(dir)
+	for i := len(upward) - 1; i >= 0; i-- {
+		add(upward[i])
+	}
+	return set
+}
+
+// Load reads every resolved file (skipping files that vanished
+// since resolution — proof the read happens here, not at resolve
+// time) and bounds each to maxBytes. Later calls are no-ops.
+func (s *InstructionSet) Load() []Instruction {
+	if s.Loaded {
+		return s.contents
+	}
+	s.Loaded = true
+	for _, p := range s.Paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		if s.maxBytes > 0 && len(content) > s.maxBytes {
+			content = content[:s.maxBytes]
+		}
+		s.contents = append(s.contents, Instruction{Path: p, Content: content})
+	}
+	return s.contents
+}

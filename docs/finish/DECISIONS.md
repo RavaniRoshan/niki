@@ -307,3 +307,36 @@ decisions were confirmed by the owner on 2026-10-10 (see docs/FINISH_PACK.md).
   recording the full file set eagerly at turn start (cost);
   checkout-based restore (would move HEAD).
 
+## D-18 — C2 head-and-tail previews (P0)
+
+- `CapOutput` keeps the 50k threshold, disk persistence (0600) and
+  the on-disk reference, but the preview is now head (1024) +
+  marker + tail (1024), each cut at a newline boundary. The tail
+  matters most: exit codes, summaries and errors live at the end.
+- Rejected: raising the inline cap instead (context cost);
+  tail-only (loses what the command was doing).
+
+## D-19 — C1 lazy instruction hierarchy (P0)
+
+- `ResolveInstructionSet(dir, configDir, max)`: global config-dir
+  files, then the upward walk reversed (repo root first, the
+  file's own directory last). Resolution stats paths only;
+  `Load()` reads + bounds contents once and skips files deleted
+  since resolve (the laziness proof). Wiring into the turn system
+  prompt is future work; the hierarchy + laziness contract the row
+  requires is implemented and tested.
+- Rejected: eager reads at resolve (waste); merging contents into
+  one blob (per-file provenance lost).
+
+## D-20 — C9 environment context (P0)
+
+- New `internal/envctx`: best-effort collection (2s git timeout so
+  a hung repo can never stall a turn), OS/shell/cwd/branch plus
+  porcelain truncated to 20 lines. `Watcher.Refresh` reports the
+  first collection and any later fact change.
+- The block rides on the system-message COPY at `Snapshot()` time,
+  so compaction tiers (which always keep index 0) keep it
+  automatically and stored messages stay pristine for assertions.
+- Rejected: a separate env message (compaction could drop it);
+  watching with fsnotify (poll-per-turn is cheaper and enough).
+

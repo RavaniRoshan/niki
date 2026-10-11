@@ -12,6 +12,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/budget"
 	"github.com/RavaniRoshan/niki/internal/checkpoint"
 	"github.com/RavaniRoshan/niki/internal/diagnostics"
+	"github.com/RavaniRoshan/niki/internal/envctx"
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/provider"
@@ -58,6 +59,10 @@ type TurnRunner struct {
 	// currentTurn is the turn id of the Run currently in flight;
 	// dispatchTool keys checkpoint/undo captures by it.
 	currentTurn string
+
+	// envWatches the working directory (C9): collected once, the
+	// block is refreshed on the context whenever it changes.
+	env *envctx.Watcher
 }
 
 // streamRetryBase is the first-retry floor for L6 stream retries
@@ -72,6 +77,18 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 	turnID := protocol.NewTurnId()
 	t.currentTurn = string(turnID)
 	emit(protocol.EngineEvent{Type: protocol.EventTurnStarted, Timestamp: time.Now(), TurnID: turnID})
+
+	// C9: environment context is collected once and refreshed on
+	// change — the block on the context always names the current
+	// OS/shell/cwd/branch/status.
+	if t.env == nil {
+		t.env = envctx.New()
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if snap, changed := t.env.Refresh(cwd); changed || t.Context.EnvBlock == "" {
+			t.Context.SetEnvBlock(snap.Block())
+		}
+	}
 
 	// E3: a checkpoint exists BEFORE the turn does anything — files
 	// are captured at first touch, the git tree snapshot (shadow ref,
