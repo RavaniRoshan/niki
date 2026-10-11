@@ -262,3 +262,54 @@ func sanitizeTopic(s string) string {
 	reg := regexp.MustCompile(`[^a-z0-9_-]+`)
 	return reg.ReplaceAllString(s, "-")
 }
+
+// Forget removes a whole topic file and its index line (C8).
+func (s *Store) Forget(topicName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	topicName = sanitizeTopic(topicName)
+	if topicName == "" {
+		return fmt.Errorf("no topic named")
+	}
+	_ = os.Remove(filepath.Join(s.topicDir, topicName+".md"))
+	data, err := os.ReadFile(s.indexPath)
+	if err != nil {
+		return nil
+	}
+	var kept []string
+	for _, ln := range strings.Split(string(data), "\n") {
+		if strings.Contains(ln, "("+topicName+")") || strings.HasPrefix(ln, "- "+topicName+":") {
+			continue
+		}
+		kept = append(kept, ln)
+	}
+	return os.WriteFile(s.indexPath, []byte(strings.Join(kept, "\n")), 0o644)
+}
+
+// Show prints topics (or one topic) to stdout (C8: shown).
+func (s *Store) Show(topic string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	names := []string{}
+	if topic != "" {
+		names = []string{sanitizeTopic(topic)}
+	} else {
+		entries, err := os.ReadDir(s.topicDir)
+		if err != nil {
+			return nil
+		}
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				names = append(names, strings.TrimSuffix(e.Name(), ".md"))
+			}
+		}
+	}
+	for _, n := range names {
+		data, err := os.ReadFile(filepath.Join(s.topicDir, n+".md"))
+		if err != nil {
+			continue
+		}
+		fmt.Printf("## %s\n%s\n", n, data)
+	}
+	return nil
+}

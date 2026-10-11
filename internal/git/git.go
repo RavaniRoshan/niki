@@ -539,3 +539,58 @@ func PRDraft(dir, base, out string) (string, error) {
 	}
 	return draft, nil
 }
+
+// StageHunks stages only the accepted hunks of a modified tracked
+// file (E5: diff review per hunk before commit). keep[i] accepts
+// hunk i (0-based, in `git diff -U0` order); rejected hunks stay
+// in the worktree only. New files are refused (stage them whole).
+func StageHunks(dir, file string, keep []bool) error {
+	out, err := run(dir, "modify a tracked file first", "diff", "-U0", "--", file)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(out) == "" {
+		return &GitError{Args: []string{"diff"}, Hint: "no changes to review in " + file}
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	var header []string
+	var hunks [][]string
+	for _, ln := range lines {
+		if strings.HasPrefix(ln, "@@") {
+			hunks = append(hunks, []string{ln})
+		} else if len(hunks) == 0 {
+			header = append(header, ln)
+		} else {
+			hunks[len(hunks)-1] = append(hunks[len(hunks)-1], ln)
+		}
+	}
+	if len(keep) != len(hunks) {
+		return &GitError{Args: []string{"diff"}, Hint: fmt.Sprintf("file has %d hunks, got %d decisions", len(hunks), len(keep))}
+	}
+	var patch strings.Builder
+	for _, hln := range header {
+		// Drop the index line: it pins the full post-image blob
+		// and would reject any partial-hunk application.
+		if strings.HasPrefix(hln, "index ") {
+			continue
+		}
+		patch.WriteString(hln + "\n")
+	}
+	accepted := 0
+	for i, h := range hunks {
+		if keep[i] {
+			patch.WriteString(strings.Join(h, "\n") + "\n")
+			accepted++
+		}
+	}
+	if accepted == 0 {
+		return nil // reject all: stage nothing, worktree untouched
+	}
+	cmd := exec.Command("git", "apply", "--cached", "--unidiff-zero", "-")
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(patch.String())
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return &GitError{Args: []string{"apply", "--cached"}, Hint: strings.TrimSpace(string(out))}
+	}
+	return nil
+}

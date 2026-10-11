@@ -13,6 +13,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/checkpoint"
 	"github.com/RavaniRoshan/niki/internal/diagnostics"
 	"github.com/RavaniRoshan/niki/internal/envctx"
+	"github.com/RavaniRoshan/niki/internal/locale"
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/provider"
@@ -295,7 +296,9 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 				}
 				emit(protocol.EngineEvent{Type: protocol.EventTurnCompleted, Timestamp: time.Now(), TurnID: turnID,
 					Usage: &report,
-					Text:  fmt.Sprintf("usage: %d prompt + %d completion = %d tokens over %d steps (est. cost $%.4f)", report.PromptTokens, report.CompletionTokens, report.TotalTokens, stepsUsed, routing.CalculateCost(t.budgetModel, report)),
+					Text: fmt.Sprintf("usage: %s prompt + %s completion = %s tokens over %d steps (est. cost $%.4f)",
+						locale.FormatInt(report.PromptTokens), locale.FormatInt(report.CompletionTokens), locale.FormatInt(report.TotalTokens),
+						stepsUsed, routing.CalculateCost(t.budgetModel, report)),
 				})
 				return nil
 			}

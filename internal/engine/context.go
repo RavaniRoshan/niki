@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"encoding/json"
+	"strings"
+
 	"github.com/RavaniRoshan/niki/internal/provider"
 )
 
@@ -139,6 +142,90 @@ func (c *ContextAssembler) Compact() (compacted bool) {
 		c.BreakerTripped = true
 	}
 	return false
+}
+
+// Summarize renders the structured compaction record (C6): goal,
+// decisions, open items, and file list. It is computed from the
+// working set at compaction time; the full history stays in the
+// session log untouched (different store, never compacted).
+func (c *ContextAssembler) Summarize() string {
+	var goal string
+	var decisions, open, files []string
+	seenFiles := map[string]bool{}
+	for _, m := range c.Messages {
+		switch m.Role {
+		case "user":
+			if goal == "" {
+				goal = truncateRunes(m.Content, 200)
+			}
+		case "assistant":
+			if text := truncateRunes(strings.TrimSpace(m.Content), 200); text != "" {
+				decisions = append(decisions, text)
+			}
+			for _, tc := range m.ToolCalls {
+				open = append(open, tc.Tool)
+				for _, p := range toolCallPaths(tc.Args) {
+					if !seenFiles[p] {
+						seenFiles[p] = true
+						files = append(files, p)
+					}
+				}
+			}
+		}
+	}
+	var b strings.Builder
+	b.WriteString("goal: " + goal + "\n")
+	b.WriteString("decisions:\n")
+	for _, d := range decisions {
+		b.WriteString("- " + d + "\n")
+	}
+	b.WriteString("open items:\n")
+	for _, o := range open {
+		b.WriteString("- " + o + "\n")
+	}
+	b.WriteString("files:\n")
+	for _, f := range files {
+		b.WriteString("- " + f + "\n")
+	}
+	return b.String()
+}
+
+func truncateRunes(s string, max int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= max {
+		return string(r)
+	}
+	return string(r[:max])
+}
+
+// toolCallPaths extracts "path" fields from tool args JSON.
+func toolCallPaths(argsJSON string) []string {
+	var a map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
+		return nil
+	}
+	var out []string
+	var walk func(v any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			for k, v2 := range t {
+				if k == "path" {
+					if p, ok := v2.(string); ok && p != "" {
+						out = append(out, p)
+					}
+				} else {
+					walk(v2)
+				}
+			}
+		case []any:
+			for _, v2 := range t {
+				walk(v2)
+			}
+		}
+	}
+	walk(a)
+	return out
 }
 
 // ForceCompact unconditionally applies compaction (used by /compact command).

@@ -545,3 +545,41 @@ any context compaction.
   `[T5.10] default off; propose honored; garbage fails closed`.
 - Full suite GO_TEST_EXIT=0 (47 ok); gofmt + vet clean. T5 +
   T5.1–T5.10 GREEN (68 rows).
+
+## 2026-10-11 — Slice U: P1 context/edit/observability batch (C4-C8, E2/E5/E7, H3, I6, L7/L8, P6, S3, G2, Q4)
+- Resumed an interrupted slice (uncommitted WIP from the prior
+  session) and drove it to green. Covers 16 rows: 12 carried in the
+  WIP (C4, C5, C6, C7, C8, E2, E5, E7, H3, I6, L7, P6) + 4 that were
+  GREEN at the Phase 0 audit but never had their Final evidence
+  filled in (L8, S3, G2, Q4).
+- New code: `internal/index` Map (C4 repo outline under a token
+  budget, AST + regex fallback); `internal/engine` StablePrefix (C5
+  cache-stable system→tools→instructions order) + ContextAssembler
+  .Summarize (C6 structured goal/decisions/open/files record, log
+  untouched); `internal/update` (I6 opt-in, checksum-before-install,
+  tamper refused) + `nikicode update`; `internal/locale` (P6 number/
+  date per LANG, cell-truncation) wired into the usage report;
+  `git.StageHunks` (E5 per-hunk staging); `memory.Forget/Show` (C8);
+  `nikicode remember` (the ONLY memory writer) + `init` now also
+  writes a commented nikicode.toml (H3, never overwrites).
+- Proven from pre-existing code/tests: L7 (tools.Registry.Batch
+  sequential for unsafe tools), L8 (Guard + engine phase gate), E2
+  (diagnostics), E7 (ProposeCommitMessage/PRSummary + G3 push guard),
+  S3 (agent concurrency semaphore), G2 (implementer worktree),
+  Q4 (fuzz 114k/136k/55k execs, no panic).
+- Acceptance printed: `[I6] manifest fetched …` + `tampered
+  download refused`; `[C4] 10k files -> map within 2000 tokens …`;
+  `[C5] prefix byte-identical across turns (165 bytes) …`;
+  `[C6] structured compaction golden exact …` + `session log
+  untouched (5 events)`; `[C7] mentions resolve incl. gitignored
+  paths`; `[C8] reads never write (0 topic files)` + `explicit
+  remember stores …`; `[E2] same-turn diagnostics reached the
+  model`; `[E5] hunk 1 staged, hunk 2 worktree-only` + `reject-all
+  stages nothing`; `[E7] commit draft from staged evidence …` + `PR
+  draft lists branch commits … nothing pushed`; `[H3] init creates
+  commented config + instructions; never overwrites`; `[P6] de_DE
+  1.234.567 … en_US 1,234,567 …` + `long strings truncate cleanly`;
+  agent `TestSubagentLimitsAndBudgets`/`TestRunSwarmConcurrency`/
+  `TestSubagentWorktreeIsolation` PASS; fuzz no panic.
+- Full suite GO_TEST_EXIT=0 (49 ok); gofmt + vet clean.
+  C4-C8+E2+E5+E7+H3+I6+L7+L8+P6+S3+G2+Q4 GREEN (84 rows).

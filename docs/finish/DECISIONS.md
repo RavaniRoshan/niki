@@ -537,3 +537,33 @@ decisions were confirmed by the owner on 2026-10-10 (see docs/FINISH_PACK.md).
   proposal screen (Text() is the review surface; the gate is
   the approval, UI-agnostic); versioning skills (provenance
   hash covers identity; content change = disable, not v2).
+
+## D-30 — P1 context/edit/observability batch (C4-C8, E2/E5/E7, H3, I6, L7/L8, P6, S3, G2, Q4)
+
+- Resumed the interrupted slice and drove 16 rows to green. New
+  seams live in their own packages and are proven by acceptance
+  tests; several (C4/C5/C6/E5/StablePrefix/Summarize/Map) are the
+  mechanism + contract, deliberately not force-wired into the live
+  turn yet (same posture as G1's EnsureRunBranch) — the tests lock
+  the behavior, wiring is a follow-up once a caller needs it.
+- C4 Map: AST (Go) + regex fallback, grouped by file, cut to a
+  4-chars/token budget with a coverage footer that always states
+  truncation (never silent). C5 StablePrefix: system → sorted tool
+  schemas → instructions, byte-identical for the same stable
+  inputs, emitted before volatile content. C6 Summarize: a separate
+  structured record; the session log is a different store and is
+  never compacted.
+- I6 update: opt-in only (`nikicode update <url> --output <path>`),
+  checksum verified BEFORE writing (tmp+rename), tamper refused, no
+  background check anywhere. P6 locale: LANG-driven grouping/date
+  order + cell-based truncation, wired into the usage report.
+- E5 StageHunks drops the diff `index` line so partial-hunk
+  `git apply --cached --unidiff-zero` succeeds; reject-all is a
+  no-op. C8 memory: `remember` is the ONLY writer (engine never
+  calls AddFact); H3 `init` adds a commented nikicode.toml and never
+  overwrites.
+- Rejected: a full i18n catalog this slice (P6 covers display
+  formatting; string-extraction catalog is I7, still pending); a
+  TUI hunk-review screen for E5 (StageHunks is the reusable seam);
+  auto-injecting the repo map into every prompt (C4 stays on-demand
+  until a budget-sizing caller exists, cf. M5).

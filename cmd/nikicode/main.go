@@ -27,6 +27,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/intent"
 	"github.com/RavaniRoshan/niki/internal/logx"
 	"github.com/RavaniRoshan/niki/internal/mcp"
+	"github.com/RavaniRoshan/niki/internal/memory"
 	"github.com/RavaniRoshan/niki/internal/paths"
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/protocol"
@@ -41,6 +42,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/terminal"
 	"github.com/RavaniRoshan/niki/internal/tools"
 	"github.com/RavaniRoshan/niki/internal/tui"
+	"github.com/RavaniRoshan/niki/internal/update"
 	"github.com/RavaniRoshan/niki/internal/verifier"
 )
 
@@ -772,6 +774,75 @@ func main() {
 	execCmd.Flags().BoolVar(&execGitHubCheck, "github-check", false, "Output conclusion formatted as GitHub Check Run JSON")
 	execCmd.Flags().StringVar(&execOutputFile, "output", "", "Write output to specified file")
 	rootCmd.AddCommand(execCmd)
+	// `nikicode remember` — the ONLY writer to the user-owned
+	// memory file (C8): facts are stored solely by this explicit
+	// command, shown with --list, edited as plain files on disk,
+	// forgotten with --forget. Nothing is saved silently: the
+	// engine never calls AddFact on its own.
+	rememberCmd := &cobra.Command{
+		Use:   "remember [--topic NAME] [--list [TOPIC]] [--forget TOPIC] [fact...]",
+		Short: "Explicitly store, show, or forget a durable memory fact",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			topic, _ := cmd.Flags().GetString("topic")
+			list, _ := cmd.Flags().GetString("list")
+			forget, _ := cmd.Flags().GetString("forget")
+			showList, _ := cmd.Flags().GetBool("show-list")
+			st, err := memory.NewStore("")
+			if err != nil {
+				return err
+			}
+			switch {
+			case forget != "":
+				return st.Forget(forget)
+			case showList || list != "":
+				return st.Show(list)
+			default:
+				if len(args) == 0 {
+					return fmt.Errorf("usage: nikicode remember [--topic NAME] <fact> | --list [TOPIC] | --forget TOPIC")
+				}
+				if topic == "" {
+					topic = "general"
+				}
+				if err := st.AddFact(topic, strings.Join(args, " ")); err != nil {
+					return err
+				}
+				fmt.Printf("remembered under %q\n", topic)
+				return nil
+			}
+		},
+	}
+	rememberCmd.Flags().String("topic", "", "memory topic")
+	rememberCmd.Flags().String("list", "", "show facts for a topic (empty for all)")
+	rememberCmd.Flags().Bool("show-list", false, "show all topics")
+	rememberCmd.Flags().String("forget", "", "forget a whole topic")
+	rootCmd.AddCommand(rememberCmd)
+	// `nikicode update` — the ONLY update path (I6, opt-in): no
+	// background or automatic check exists anywhere. Fetches the
+	// manifest, verifies the payload checksum BEFORE installing,
+	// and refuses tampered downloads.
+	updateCmd := &cobra.Command{
+		Use:   "update <manifest-url>",
+		Short: "Check for and install an update (opt-in; checksum-verified)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			m, err := update.FetchManifest(args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("update %s available (sha256 %.12s…)\n", m.Version, m.SHA256)
+			dst, _ := cmd.Flags().GetString("output")
+			if dst == "" {
+				return fmt.Errorf("refusing to self-replace without --output <path> (explicit destination required)")
+			}
+			if err := update.Download(m, dst); err != nil {
+				return err
+			}
+			fmt.Printf("installed %s to %s (checksum verified)\n", m.Version, dst)
+			return nil
+		},
+	}
+	updateCmd.Flags().String("output", "", "explicit install destination (required)")
+	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(newCICommand())
 	rootCmd.AddCommand(newHelpCommand())
 	rootCmd.AddCommand(newExamplesCommand())
@@ -1010,14 +1081,13 @@ func main() {
 
 	rootCmd.AddCommand(&cobra.Command{
 		Use:   "init",
-		Short: "Initialize an AGENTS.md instructions template in the current directory",
+		Short: "Initialize an AGENTS.md instructions template and a commented nikicode.toml in the current directory (never overwrites)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := "AGENTS.md"
 			if _, err := os.Stat(target); err == nil {
 				fmt.Println("AGENTS.md already exists in current directory")
-				return nil
-			}
-			template := `# AGENTS.md — Instructions for NikiCode
+			} else {
+				template := `# AGENTS.md — Instructions for NikiCode
 
 ## Project Overview
 Brief description of the repository and architecture.
@@ -1027,10 +1097,50 @@ Brief description of the repository and architecture.
 - Run tests and verify changes before completing tasks.
 - Keep changes minimal and focused.
 `
-			if err := os.WriteFile(target, []byte(template), 0o644); err != nil {
+				if err := os.WriteFile(target, []byte(template), 0o644); err != nil {
+					return err
+				}
+				fmt.Println("✓ Created AGENTS.md template in current directory")
+			}
+			// H3: a commented config next to it; existing files
+			// are never overwritten.
+			cfgTarget := "nikicode.toml"
+			if _, err := os.Stat(cfgTarget); err == nil {
+				fmt.Println("nikicode.toml already exists in current directory")
+				return nil
+			}
+			cfgTemplate := `# nikicode.toml — NikiCode project config (commented defaults).
+# Copy values out of comments to change them. Never put API keys
+# here: keys live in the OS keychain or environment (see I4).
+
+# version = 1
+
+# [provider]
+# name = "ollama"        # openai | anthropic | responses | ollama | mock
+# base_url = ""          # override the provider endpoint
+# env_key = ""           # env var holding the API key
+
+# [model]
+# name = "qwen2.5-coder:7b-instruct"
+
+# [permissions]
+# mode = "workspace_write"  # readonly | workspace_write | manual | full_access
+
+# [budgets]
+# wall_time = "10m"
+# cost_usd = 2.0
+# steps = 100
+
+# [sandbox]
+# enabled = false
+# allow_unsandboxed = false
+
+# self_extend = "off"    # off | propose (T5: default off)
+`
+			if err := os.WriteFile(cfgTarget, []byte(cfgTemplate), 0o644); err != nil {
 				return err
 			}
-			fmt.Println("✓ Created AGENTS.md template in current directory")
+			fmt.Println("✓ Created nikicode.toml template in current directory")
 			return nil
 		},
 	})
