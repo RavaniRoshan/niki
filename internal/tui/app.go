@@ -459,6 +459,11 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 		m.history.AppendDelta(evt.Text)
 		m.telemetry.Deltas++
 		m.state.Activity = "streaming…"
+	case protocol.EventReasoningDelta:
+		// U2: the collapsed reasoning line accumulates only from
+		// these events. No provider emits one yet, so live runs
+		// show no reasoning line — absence, never a placeholder.
+		m.history.AppendReasoningDelta(evt.Text)
 	case protocol.EventTurnStarted:
 		m.state.Busy = true
 		m.state.Activity = "thinking…"
@@ -541,6 +546,10 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 		m.history.Cells = append(m.history.Cells, HistoryCell{
 			Role: "tool", Kind: "tool", CallID: string(evt.CallID),
 			State: stateRunning, Verb: verb, Target: target,
+			// U2/E1: the engine attributes the call to a plan
+			// step; empty means no step owns it and no header
+			// renders.
+			Step: evt.Step,
 			// Text keeps the ledger renderer readable on the same
 			// cells; classic renders the structured row.
 			Text: strings.TrimSpace(verb + " " + target),
@@ -552,6 +561,14 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 			cell.Result = Sanitize(evt.Result)
 		} else {
 			m.history.Append("tool", evt.ToolName+" done")
+		}
+		// U2/E2: the diff block renders only from the patch
+		// event's real diff — absent when the tool changed no
+		// bytes.
+		if evt.Diff != "" {
+			m.history.Cells = append(m.history.Cells, HistoryCell{
+				Role: "tool", Kind: "diff", Diff: splitExcerpt(Sanitize(evt.Diff)),
+			})
 		}
 		if m.state.Activity != "" && strings.HasPrefix(m.state.Activity, "running ") {
 			m.state.Activity = ""

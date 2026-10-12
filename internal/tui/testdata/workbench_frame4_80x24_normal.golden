@@ -2,16 +2,16 @@
 ███◑███  claude-sonnet · mode act     
  ▀███▀   /home/dev/projects/api · main
 ────────────────────────────────────────────────────────────────────────────────
-PLAN                   ✓ read  intern……oken.go            CONTEXT          
+PLAN                   ✓ read  internal/auth/token.go     CONTEXT          
 ✓ 1. Read the handler…     112 lines                        5.1k / 128k    
-◐ 2. Add the limiter   ✓ read  intern……_test.go                            
+◐ 2. Add the limiter   ✓ read  internal/a……oken_test.go                    
 ○ 3. run go test ./in…     64 lines                       COST             
-                       ✓ search  "Rate……nal/**              turn $0.0008   
+                       ✓ search  "RateLimi……internal/**     turn $0.0008   
                            3 matches                        session $0.0008
                        ◐ edit  internal/auth/limit.go                      
                                                                            
                          Writing the limiter now, then r…                  
-                       ✗ shell  g……th                                      
+                       ✗ shell  go test ./internal/auth                    
                            exit 1 · 2 failing                              
                            --- FAIL: TestRefreshKeepsSess                  
                        ■ needs you  add golang.org/x/tim…                  

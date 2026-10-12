@@ -3,9 +3,9 @@
  \_____/   /home/dev/projects/api - main
 --------------------------------------------------------------------------------
 PLAN                       64 lines                       CONTEXT          
-done 1. Read the ha... done search  "R......al/**           5.1k / 128k    
+done 1. Read the ha... done search  "RateL......nternal/*   5.1k / 128k    
 running 2. Add the ...     3 matches                                       
-queued 3. run go te... done edit  inte......limit.go      COST             
+queued 3. run go te... done edit  internal/auth/limit.go  COST             
                        verified  5 of 5 required  -  t...   turn $0.0008   
                        ----------------------------------   session $0.0008
                        done R1  Expired tokens are rej...                  

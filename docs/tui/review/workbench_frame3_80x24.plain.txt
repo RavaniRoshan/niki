@@ -7,11 +7,11 @@ done 1. Read the ha... expired tokens and rate-limit        5.1k / 128k
 running 2. Add the ... failed logins                                       
 queued 3. run go te...   Reading the handler and its t... COST             
                          Contract: 5 requirements. Ass...   turn $0.0008   
-                       done read  int......ken.go           session $0.0008
+                       done read  internal/auth/token.go    session $0.0008
                            112 lines                                       
-                       done read  int......test.go                         
+                       done read  interna......ken_test.g                  
                            64 lines                                        
-                       done search  "R......al/**                          
+                       done search  "RateL......nternal/*                  
                            3 matches                                       
                        running edit  internal/auth/limit.                  
                                                                            
@@ -19,6 +19,6 @@ queued 3. run go te...   Reading the handler and its t... COST
                                                                            
                                                                            
                          - writing internal/auth/limit...                  
-                       contract  ○ 0 of 5                                  
+                       contract  queued 0 of 5                             
 > > steer with enter - queue with ctrl+enter                   
 [o] working - claude-sonnet - esc interrupt

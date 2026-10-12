@@ -11,7 +11,7 @@
                            [1;38;2;249;115;22m◐[m [1;38;2;241;245;249medit[m  [38;2;148;163;184minternal/auth/limit.go[m                                    
                                [38;2;148;163;184m[m                                                              
                              [38;2;241;245;249mWriting the limiter now, then running the aut…[m                  
-                           [38;2;239;68;68m✗[m [1;38;2;241;245;249mshell[m  [38;2;148;163;184mgo test ……rnal/auth[m                                      
+                           [38;2;239;68;68m✗[m [1;38;2;241;245;249mshell[m  [38;2;148;163;184mgo test ./internal/auth[m                                  
                                [38;2;148;163;184mexit 1 · 2 failing[m                                            
                                [38;2;239;68;68m--- FAIL: TestRefreshKeepsSession (0.00s)[m                     
                                [38;2;239;68;68mtoken_test.go:81: session id changed after r[m                  

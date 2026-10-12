@@ -8,7 +8,7 @@ running 2. Add the limiter     3 matches
 queued 3. run go test .... done edit  internal/auth/limit.go                COST             
                                +62 -4                                         turn $0.0008   
                              Writing the limiter now, then running the a...   session $0.0008
-                           failed shell  go te......nal/auth                                 
+                           failed shell  go test ./internal/auth                             
                            verified  5 of 5 required  -  trust T2 baseli...                  
                            ------------------------------------------------                  
                            done R1  Expired tokens are rejected                              

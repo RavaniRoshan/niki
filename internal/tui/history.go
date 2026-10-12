@@ -1,6 +1,8 @@
 package tui
 
-import "github.com/RavaniRoshan/niki/internal/tools"
+import (
+	"github.com/RavaniRoshan/niki/internal/tools"
+)
 
 // HistoryCell is a semantic unit of the transcript.
 type HistoryCell struct {
@@ -8,8 +10,10 @@ type HistoryCell struct {
 	Text string
 	// Kind further types a cell: "tool" (one-line classic tool
 	// row), "tool_excerpt" (failure excerpt under a tool row),
-	// or "loop" (retry/repetition row). Empty means the role
-	// decides the rendering (C2).
+	// "loop" (retry/repetition row), "diff" (the real unified
+	// diff under a patching tool's row, U2/E2), or "reasoning"
+	// (a provider reasoning-summary line, U2). Empty means the
+	// role decides the rendering (C2).
 	Kind string
 	// CallID links tool cells to their engine events so a
 	// completion updates its own row (C2).
@@ -25,6 +29,15 @@ type HistoryCell struct {
 	Result string
 	// Excerpt holds the failing output lines for a tool_excerpt cell.
 	Excerpt []string
+	// Step is the plan step this tool call serves (U2/E1): the
+	// engine's in_progress step label at emit time. Empty means
+	// the call is not attributed to a step and no step header
+	// renders above it.
+	Step string
+	// Diff holds the real unified diff lines of a "diff" cell
+	// (U2/E2): the patching tool's before/after bytes as the
+	// engine computed them.
+	Diff []string
 }
 
 // History accumulates transcript cells split at a
@@ -52,6 +65,19 @@ func (h *History) AppendDelta(text string) {
 		return
 	}
 	h.Cells = append(h.Cells, HistoryCell{Role: "assistant", Text: text})
+}
+
+// AppendReasoningDelta appends provider reasoning text to the last
+// reasoning cell if it is still open in the live region (U2), so a
+// stream of reasoning deltas renders as one collapsed line.
+func (h *History) AppendReasoningDelta(text string) {
+	// X3: reasoning text is scrubbed like any other streamed text.
+	text = tools.Redact(text)
+	if len(h.Cells) > h.Committed && h.Cells[len(h.Cells)-1].Kind == "reasoning" {
+		h.Cells[len(h.Cells)-1].Text += text
+		return
+	}
+	h.Cells = append(h.Cells, HistoryCell{Role: "system", Kind: "reasoning", Text: text})
 }
 
 // Live returns the cells after the committed

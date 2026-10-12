@@ -534,9 +534,16 @@ func TestWriteWorkbenchFrameDumps(t *testing.T) {
 			os.Unsetenv("NO_COLOR")
 		}
 		frameProfile = profile
-		for _, stage := range []string{"frame1", "frame2", "frame3", "frame4", "frame5"} {
+		// frame6 is the recorded full run (U2): plan, step headers,
+		// the real diff, the reasoning line, the failing test.
+		for _, stage := range []string{"frame1", "frame2", "frame3", "frame4", "frame5", "frame6"} {
 			for _, size := range sizes {
-				m := workbenchFixture(t, size.w, size.h, stage)
+				var m AppModel
+				if stage == "frame6" {
+					m = workbenchFullRun(t, size.w, size.h)
+				} else {
+					m = workbenchFixture(t, size.w, size.h, stage)
+				}
 				out := Downsample(m.View().Content)
 				suffix := ".ansi"
 				if plain {

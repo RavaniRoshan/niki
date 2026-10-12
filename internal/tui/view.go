@@ -19,6 +19,28 @@ func renderCells(m AppModel, cells []HistoryCell) string {
 	promptMark, bulletMark, treeMark, errMark, starMark := markers()
 	var out string
 	for _, c := range cells {
+		// U2 cells first: the diff and reasoning rows exist only in
+		// the classic/workbench trace shapes; the ledger fossil
+		// renders their real content, never a blank role row.
+		switch c.Kind {
+		case "diff":
+			for _, l := range c.Diff {
+				style := m.theme.ToolDetail
+				switch {
+				case strings.HasPrefix(l, "+"):
+					style = m.theme.Success
+				case strings.HasPrefix(l, "-"):
+					style = m.theme.Error
+				}
+				out += "  " + style.Render(localizeSep(l)) + "\n"
+			}
+			out += "\n"
+			continue
+		case "reasoning":
+			out += m.theme.Thinking.Render("thought") + "\n" +
+				"  " + m.theme.Thinking.Render(localizeSep(c.Text)) + "\n\n"
+			continue
+		}
 		c.Text = Sanitize(c.Text)
 		switch c.Role {
 		case "user":
@@ -77,7 +99,7 @@ func renderCells(m AppModel, cells []HistoryCell) string {
 // renderCells over the live region only so
 // committed history is never re-rendered (U9).
 func (m AppModel) RenderHistory() string {
-	if m.state.Layout == "classic" {
+	if m.state.Layout == "classic" || m.state.Layout == "workbench" {
 		return m.classicTranscript(m.history.Cells)
 	}
 	return renderCells(m, m.history.Cells)

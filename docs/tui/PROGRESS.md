@@ -98,3 +98,73 @@ Verification (all printed this session):
 
 Open: §10 owner calls (default flip, E1-E5). U2 (step grouping
 via E1, diff block via E2) is blocked on the E1/E2 answers.
+
+## 2026-10-12 — U2: run trace (steps, diffs, reasoning) — built and tested
+
+Seam extensions (all additive, optional fields; schema version
+unchanged): `EngineEvent.Step` (E1), `EngineEvent.Diff` (E2),
+`EventReasoningDelta` (E6) in internal/protocol/event.go.
+
+Engine (internal/engine/trace_u2.go + agent.go wiring):
+- `plan_updated` finally has an emitter: after a successful
+  update_plan call the engine emits the tool's own steps (its
+  single source of truth, read through the registry). Status map:
+  in_progress -> active; pending/completed/cancelled pass through.
+- Tool events carry `Step` = the in_progress step's label at emit
+  time; no plan means no attribution (never invented).
+- `edit_file`/`write_file`/`notebook_edit` completions carry
+  `Diff` = the unified diff computed from the file's real
+  before/after bytes (engine's own writer: common prefix/suffix
+  trimmed, one hunk, correct line counts). apply_patch does not
+  fire it yet (its args are a patch, not a path) - documented.
+- New engine tests (trace_u2_test.go): plan event contents, step
+  attribution sequence (incl. the no-plan case), real diff on
+  edit, no diff on a no-op edit, and unifiedDiff unit cases
+  (unchanged/insert/delete/multi-change/created-file). All printed
+  green.
+
+TUI (history.go cells, classic.go renderers, app.go wiring):
+- Step headers: tool rows group under `-- step N - label`, N from
+  trace order, stable per frame; unattributed calls render with no
+  header.
+- Diff block: real +/- lines with a 40-line cap and a labeled
+  remainder; tabs expand to four spaces explicitly (Lip Gloss's
+  render rule, now owned by the renderer).
+- Reasoning line: collapsed to one row (`thought - ctrl+o expand`),
+  ctrl+o expands (6-line cap, labeled remainder); absent when no
+  reasoning event fired.
+- Tool-row width fix: under 80 columns the target no longer
+  reserves the result's width when the result moved to its own
+  line (classic goldens unaffected; workbench frames keep full
+  targets).
+- Plain-mode fix found by the new tests: the narrow contract
+  strip's aggregate glyph now degrades to its word; two classic
+  60x20 plain goldens changed (`○` -> `queued`), diff printed
+  before acceptance.
+
+Verification (all printed):
+- Per-element absent-before/present-after: request line, result
+  lines, step headers (incl. grouping/order), diff block (incl.
+  no-patch-run absence and placement under its row), reasoning
+  line (absent/collapsed/expanded), activity line (absent idle,
+  present in flight, absent after the run ends).
+- Full-run fixture (frame6): plan, three attributed steps, the
+  real diff, the reasoning line, the failing test - fits 100x27,
+  80x24, 60x20 with no overflow; same events render the same
+  trace in the Stream view.
+- Goldens: 6 new workbench_frame6 frames (3 sizes x normal/plain)
+  printed then accepted; 22 workbench frames 1-5 and 2 classic
+  plain frames regenerated for the two reviewed fixes (diffs
+  printed).
+- Gates: build, vet, full suite, race (tui+engine), golangci-lint
+  (0 issues), PTY e2e all green.
+- Perf (ttff, 3-run medians): first paint 6.61 ms (U1: 6.34,
+  baseline 5.7), idle RSS 23.25 MB (U1: 22.84) - inside the rig's
+  noise band, no regression over 10%; render flatness unchanged
+  (170us @100 rows vs 200us @5000).
+- ANSI dumps: docs/tui/review/workbench_frame6_* (36 files total
+  in the review dir).
+
+Open: E3 checkpoints, E4 subagent names, the Agent detail panel
+(no producer), the apply_patch diff, the default-layout flip
+(SECTION 10).

@@ -6,15 +6,15 @@ running 2. Add ...   Reading the handler and its tests fi...
 queued 3. run g...   Contract: 5 requirements. Assumed: l...
                    done read  internal/auth/token.go        
                        112 lines                            
-                   done read  interna......en_test.go       
+                   done read  internal/auth/token_test.go   
                        64 lines                             
-                   done search  "Rate......ternal/**        
+                   done search  "RateLimit" in internal/**  
                        3 matches                            
                    running edit  internal/auth/limit.go     
                                                             
                      Writing the limiter now, then runnin...
                                                             
                      - writing internal/auth/limit.go - e...
-                   contract  ○ 0 of 5                       
+                   contract  queued 0 of 5                  
 > > steer with enter - queue with ctrl+ente
 [o] working - claude-sonnet - esc interrupt

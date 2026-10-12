@@ -11,7 +11,7 @@ queued 3. run go test ....     64 lines                                     COST
                            running edit  internal/auth/limit.go                              
                                                                                              
                              Writing the limiter now, then running the a...                  
-                           failed shell  go te......nal/auth                                 
+                           failed shell  go test ./internal/auth                             
                                exit 1 - 2 failing                                            
                                --- FAIL: TestRefreshKeepsSession (0.00s)                     
                                token_test.go:81: session id changed after r                  
@@ -22,6 +22,6 @@ queued 3. run go test ....     64 lines                                     COST
                              [n] write the limiter without it (default)                      
                            [y] allow once                                                    
                            [v] view the diff                                                 
-                           contract  ○ 0 of 5                                                
+                           contract  queued 0 of 5                                           
 > > answer the question above, or steer                                            
 [o] working - claude-sonnet - esc interrupt

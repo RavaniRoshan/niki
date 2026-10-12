@@ -8,7 +8,7 @@ PLAN                           64 lines                                     CONT
 ○ 3. run go test ./intern… ✓ edit  internal/auth/limit.go                   COST             
                                +62 −4                                         turn $0.0008   
                              Writing the limiter now, then running the aut…   session $0.0008
-                           ✗ shell  go test ……rnal/auth                                      
+                           ✗ shell  go test ./internal/auth                                  
                            verified  5 of 5 required  ·  trust T2 baseline…                  
                            ────────────────────────────────────────────────                  
                            ✓ R1  Expired tokens are rejected                                 

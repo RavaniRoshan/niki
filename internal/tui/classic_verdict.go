@@ -79,28 +79,40 @@ func (m AppModel) classicContractLine() string {
 }
 
 // summaryState is the strip's aggregate state for narrow widths.
+// Plain mode renders the word, never the raw glyph (P1: plain mode
+// is pure ASCII).
 func (m AppModel) summaryState(contract []protocol.ContractReq) string {
+	glyph, word := "\u25cb", "queued"
 	for _, c := range contract {
 		if c.State == "fail" || c.State == "needs" {
-			return "\u2717"
-		}
-	}
-	for _, c := range contract {
-		if c.State == "running" {
-			return "◐"
-		}
-	}
-	allPass := true
-	for _, c := range contract {
-		if c.State != "pass" {
-			allPass = false
+			glyph, word = "\u2717", "failed"
 			break
 		}
 	}
-	if allPass {
-		return "✓"
+	if word == "queued" {
+		for _, c := range contract {
+			if c.State == "running" {
+				glyph, word = "\u25d0", "running"
+				break
+			}
+		}
 	}
-	return "○"
+	if word == "queued" {
+		allPass := true
+		for _, c := range contract {
+			if c.State != "pass" {
+				allPass = false
+				break
+			}
+		}
+		if allPass {
+			glyph, word = "\u2713", "done"
+		}
+	}
+	if plainGlyphWords() {
+		return word
+	}
+	return glyph
 }
 
 // renderContractState maps a contract state to its glyph.

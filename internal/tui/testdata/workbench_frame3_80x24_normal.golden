@@ -7,11 +7,11 @@ PLAN                   › harden POST /login: reject       CONTEXT
 ◐ 2. Add the limiter   failed logins                                       
 ○ 3. run go test ./in…   Reading the handler and its tes… COST             
                          Contract: 5 requirements. Assum…   turn $0.0008   
-                       ✓ read  intern……oken.go              session $0.0008
+                       ✓ read  internal/auth/token.go       session $0.0008
                            112 lines                                       
-                       ✓ read  intern……_test.go                            
+                       ✓ read  internal/a……oken_test.go                    
                            64 lines                                        
-                       ✓ search  "Rate……nal/**                             
+                       ✓ search  "RateLimi……internal/**                    
                            3 matches                                       
                        ◐ edit  internal/auth/limit.go                      
                                                                            

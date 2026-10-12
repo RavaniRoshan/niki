@@ -2,14 +2,14 @@
 ────────────────────────────────────────────────────────────
 PLAN               ✓ read  internal/auth/token.go           
 ✓ 1. Read the han…     112 lines                            
-◐ 2. Add the limi… ✓ read  internal/a……ken_test.go          
+◐ 2. Add the limi… ✓ read  internal/auth/token_test.go      
 ○ 3. run go test …     64 lines                             
-                   ✓ search  "RateLim……nternal/**           
+                   ✓ search  "RateLimit" in internal/**     
                        3 matches                            
                    ◐ edit  internal/auth/limit.go           
                                                             
                      Writing the limiter now, then running …
-                   ✗ shell  go t……l/auth                    
+                   ✗ shell  go test ./internal/auth         
                    ■ needs you  add golang.org/x/time?      
                      n keep the constraint · y allow once ·…
                      [n] write the limiter without it (defa…

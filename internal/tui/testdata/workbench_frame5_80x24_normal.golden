@@ -3,9 +3,9 @@
  ▀███▀   /home/dev/projects/api · main
 ────────────────────────────────────────────────────────────────────────────────
 PLAN                       64 lines                       CONTEXT          
-✓ 1. Read the handler… ✓ search  "Rate……nal/**              5.1k / 128k    
+✓ 1. Read the handler… ✓ search  "RateLimi……internal/**     5.1k / 128k    
 ◐ 2. Add the limiter       3 matches                                       
-○ 3. run go test ./in… ✓ edit  interna……/limit.go         COST             
+○ 3. run go test ./in… ✓ edit  internal/auth/limit.go     COST             
                        verified  5 of 5 required  ·  tru…   turn $0.0008   
                        ──────────────────────────────────   session $0.0008
                        ✓ R1  Expired tokens are rejected                   

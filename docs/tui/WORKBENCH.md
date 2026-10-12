@@ -1,6 +1,6 @@
 # NikiCode Workbench — layout spec (docs/tui/WORKBENCH.md)
 
-Status: **U1 built and tested (2026-10-12); U0 approval items in
+Status: **U1+U2 built and tested (2026-10-12); U0 approval items in
 §10 remain open** — the shell is selectable via
 `ui.layout = "workbench"` while the default stays `classic` until
 the owner's call. Build status: §11.
@@ -91,10 +91,10 @@ minimal seam additions in §6, proposed, not yet built), **DEFER**
 | Element | Driver | States | Absent rule | Status |
 |---|---|---|---|---|
 | request line | the user's actual submit (Op `CmdSubmitPrompt` + local append) | always once sent | ABSENT before first submit | HAVE |
-| Step headers | `plan_updated` + tool→step attribution (`EngineEvent.Step`, E1) | one per step that owns a tool | ABSENT until a tool is attributed to a step | EXTEND (E1) |
+| Step headers | `plan_updated` + tool→step attribution (`EngineEvent.Step`, E1) | one per step that owns a tool | ABSENT until a tool is attributed to a step | HAVE (U2; E1 built) |
 | Tool rows | `tool_started` / `tool_completed` / `tool_failed` with `Target`, `Result`, `Excerpt`, `Duration` | running · done · failed | ABSENT when no tool ran | HAVE |
-| Diff block | `EngineEvent.Diff` on the patch tool's completion (E2) | shown under the Edit row | ABSENT when no patch applied | EXTEND (E2) |
-| Reasoning line | none (no reasoning-summary event exists) | — | ABSENT always, until an event exists | DEFER |
+| Diff block | `EngineEvent.Diff` on the patch tool's completion (E2) | shown under the Edit row | ABSENT when no patch applied | HAVE (U2; E2 built) |
+| Reasoning line | `reasoning_delta` (`Text`); no provider emits one yet, so live runs show no line until a provider gains a reasoning channel | collapsed · expanded (ctrl+o) | ABSENT when the model produced none — which, with no producer, is always | HAVE (U2; producer pending) |
 | Activity line | the in-flight op from real events (`state.Activity` is set only by events: turn_started, tool_started, subagent_*, mcp_*, steer, budget_*) | live action only | ABSENT when idle | HAVE |
 | Prose | `assistant_text_delta` (streamed) → `assistant_message_done` (settled) | streaming · done | ABSENT before the first delta | HAVE |
 | Esc-interrupt hint | `Busy` + registry key | only while running | ABSENT when idle | HAVE |
@@ -181,11 +181,23 @@ reader tolerates their absence (schema version stays 1).
   in_progress plan step's label, set by the engine on
   `tool_started`/`tool_completed`/`tool_failed`. The TUI groups tool
   rows under a step header only when the event names the step. No
-  field, no header.
+  field, no header. **BUILT (U2)**: the engine reads the plan from
+  the `update_plan` tool's own steps (its single source of
+  truth) and emits `plan_updated` after a successful
+  `update_plan` call.
 - **E2 — Patch diff.** `EngineEvent.Diff string`: the unified diff
   attached by `apply_patch`/`edit` at `tool_completed`. Feeds the
   centre diff block, the diff viewer, and the verdict `d` key.
   `/diff` keeps its working-tree read, labeled as the working tree.
+  **BUILT (U2)** for the tools whose paths the engine tracks
+  (`edit_file`, `write_file`, `notebook_edit`): the diff is
+  computed from the file's real before/after bytes by the
+  engine's own unified-diff writer (common prefix/suffix
+  trimmed, one honest hunk with correct line counts).
+  `apply_patch` does not yet fire the event — its args are a
+  patch, not a path, so the engine cannot attribute its
+  changes without parsing the patch grammar; it shows no
+  diff block until then.
 - **E3 — Checkpoints.** `EventCheckpointCreated` with `Text` = the
   checkpoint label, emitted where `internal/checkpoint` snapshots
   are taken (engine undo/rewind path already has the call sites).
@@ -198,10 +210,22 @@ reader tolerates their absence (schema version stays 1).
   `ModeChanged` would replace today's Op-echo header updates. Not
   needed to build; recorded so the echo is not mistaken for an
   event.
+- **E6 — Reasoning deltas (new, U2).** `EventReasoningDelta` with
+  `Text` carries provider reasoning summaries. The event exists and
+  the TUI renders it (collapsed by default, ctrl+o expands), but NO
+  provider emits one — the provider layer has no reasoning channel
+  at all. The line therefore stays absent in every live run until
+  a provider gains one; the renderer and its tests are real, and
+  the absence is the honest state, not a stub.
 
 ## 7. Deferrals (no event source — the element is absent, not faked)
 
-- Reasoning line: no reasoning-summary event exists.
+- Reasoning line: the event exists (E6) and the renderer is built,
+  but no provider emits a reasoning delta, so the line is absent in
+  live runs until a provider gains a reasoning channel.
+- `apply_patch` diff block: the engine cannot attribute a patch
+  tool's changed files without parsing the patch grammar; the diff
+  block shows for `edit_file`/`write_file`/`notebook_edit` only.
 - Agent detail panel: the child's stream is intentionally not
   forwarded; forwarding it is a core design change, not a UI one.
 - Checkpoints rail: until E3 is approved.
@@ -316,7 +340,32 @@ docs/tui/PROGRESS.md):
   (the registry hints yield below 80, where the composer row
   already shows the palette hint and "?" lists every key).
 
-Not in U1 (later slices or deferrals): step grouping (E1), the
-diff block/diff viewer from patch events (E2), checkpoints (E3),
-subagent names (E4), the Agent detail panel (§7), and the
-default-layout flip (§10).
+U2 (run trace) is **built and tested** on top of U1:
+- Step headers: tool rows group under the plan step the engine
+  attributed them to (`EngineEvent.Step`, E1 built). The engine
+  emits `plan_updated` from the `update_plan` tool's own steps -
+  that event had no emitter before; the plan rail and the
+  headers now share one real source.
+- Diff block: the patching tool's completion carries the real
+  unified diff (`EngineEvent.Diff`, E2 built), computed by the
+  engine from the file's own before/after bytes (prefix/suffix
+  trimmed, correct hunk line counts, tested for insert,
+  delete, multi-change and created-file). Tabs expand to four
+  spaces explicitly in the block renderer.
+- Reasoning line: the `reasoning_delta` event and the collapsed
+  renderer (ctrl+o expands) are built (E6); no provider emits
+  one yet, so live runs show no line - proven absent before and
+  present after through the same event path.
+- Plain-mode fix found by the U2 tests: the narrow contract
+  strip's aggregate glyph now degrades to its word (two classic
+  plain goldens updated, diff printed: `○` -> `queued`).
+- Tool-row width fix: under 80 columns the target no longer
+  reserves the result's width when the result moved to its own
+  line (frame6 and the workbench frames keep full targets;
+  classic goldens unaffected).
+
+Not yet built (later slices or deferrals): the diff VIEWER fed
+from patch events (E2's diff block is built; the viewer still
+reads the working tree via /diff), checkpoints (E3), subagent
+names (E4), the Agent detail panel (§7), and the default-layout
+flip (§10).

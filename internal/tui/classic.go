@@ -202,15 +202,34 @@ func (m AppModel) classicSay(text string) string {
 
 // classicTranscript renders the classic transcript rows from cells.
 // Tool rows, excerpts, and loop rows render only from their events
-// (C2/C3); system notes stay dim.
+// (C2/C3); step headers group tool rows under the plan step the
+// engine attributed them to (U2/E1); system notes stay dim.
 func (m AppModel) classicTranscript(cells []HistoryCell) string {
 	var out []string
+	// Step ordinals are derived from trace order and stay stable
+	// within a frame: the first distinct step label is step 1, the
+	// next new one step 2, and a recurring label keeps its number.
+	ordinals := map[string]int{}
+	lastStep := ""
 	for _, c := range cells {
+		if c.Kind == "tool" && c.Step != "" && c.Step != lastStep {
+			n, ok := ordinals[c.Step]
+			if !ok {
+				n = len(ordinals) + 1
+				ordinals[c.Step] = n
+			}
+			lastStep = c.Step
+			out = append(out, m.classicStepHeader(n, c.Step))
+		}
 		switch c.Kind {
 		case "tool":
 			out = append(out, m.classicToolRow(c))
 		case "tool_excerpt":
 			out = append(out, m.classicExcerpt(c))
+		case "diff":
+			out = append(out, m.classicDiffBlock(c))
+		case "reasoning":
+			out = append(out, m.classicReasoning(c))
 		case "loop":
 			out = append(out, m.classicLoopRow(c))
 		default:
@@ -228,6 +247,107 @@ func (m AppModel) classicTranscript(cells []HistoryCell) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+// classicStepHeader renders the step rule that opens a step's tool
+// rows: `── step 1 · <label> ────`, the label from the engine's
+// plan event and the ordinal from trace order (U2/E1). ASCII/plain
+// degrade through the same rule and separator glyphs.
+func (m AppModel) classicStepHeader(n int, label string) string {
+	width := m.state.Width
+	if width < 20 {
+		width = 20
+	}
+	prefix := ruleChar() + ruleChar() + " step " + itoa(n) + " " + sep() + " "
+	budget := width - CellWidth(prefix) - 1
+	if budget < 4 {
+		budget = 4
+	}
+	if CellWidth(label) > budget {
+		label = TruncateTo(label, budget)
+	}
+	head := prefix + m.theme.ToolName.Render(label)
+	pad := width - CellWidth(prefix) - CellWidth(label) - 2
+	if pad > 0 {
+		head += " " + m.theme.ToolTree.Render(strings.Repeat(ruleChar(), pad))
+	}
+	return head
+}
+
+// diffBlockMaxLines caps a rendered diff block; the remainder is a
+// labeled count, never silently dropped (the full diff stays on the
+// event and in the diff viewer).
+const diffBlockMaxLines = 40
+
+// classicDiffBlock renders the real unified diff under the patching
+// tool's row (U2/E2): + lines success, - lines error, headers muted.
+func (m AppModel) classicDiffBlock(c HistoryCell) string {
+	var b strings.Builder
+	lines := c.Diff
+	dropped := 0
+	if len(lines) > diffBlockMaxLines {
+		dropped = len(lines) - diffBlockMaxLines
+		lines = lines[:diffBlockMaxLines]
+	}
+	for _, l := range lines {
+		style := m.theme.ToolDetail
+		switch {
+		case strings.HasPrefix(l, "+++"), strings.HasPrefix(l, "---"):
+			style = m.theme.Muted
+		case strings.HasPrefix(l, "@@"):
+			style = m.theme.Muted
+		case strings.HasPrefix(l, "+"):
+			style = m.theme.Success
+		case strings.HasPrefix(l, "-"):
+			style = m.theme.Error
+		}
+		// Lip Gloss expands tabs to four spaces when rendering; do
+		// it here so the block's alignment is owned by the renderer,
+		// not an implicit library detail.
+		b.WriteString("  " + style.Render(localizeSep(strings.ReplaceAll(l, "\t", "    "))) + "\n")
+	}
+	if dropped > 0 {
+		b.WriteString("  " + m.theme.Muted.Render(fmt.Sprintf("+%d more lines", dropped)))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// reasoningCollapsedLines and reasoningMaxLines cap the expanded
+// reasoning text; the collapsed line is always one row.
+const (
+	reasoningMaxLines = 6
+)
+
+// classicReasoning renders the provider reasoning line: collapsed to
+// one row by default (ctrl+o expands), absent entirely when no
+// reasoning event ever fired (U2). No glyph — a plain word, per the
+// originality rules.
+func (m AppModel) classicReasoning(c HistoryCell) string {
+	hint := "thought " + sep() + " ctrl+o expand"
+	if !m.state.ExpandToolOutput {
+		return m.theme.Thinking.Render(localizeSep(hint))
+	}
+	width := m.state.Width - 4
+	if width < 10 {
+		width = 10
+	}
+	logical := strings.Split(strings.TrimRight(c.Text, "\n"), "\n")
+	dropped := 0
+	if len(logical) > reasoningMaxLines {
+		dropped = len(logical) - reasoningMaxLines
+		logical = logical[:reasoningMaxLines]
+	}
+	var lines []string
+	for _, l := range logical {
+		if CellWidth(l) > width {
+			l = TruncateTo(l, width)
+		}
+		lines = append(lines, "  "+m.theme.Thinking.Render(localizeSep(l)))
+	}
+	if dropped > 0 {
+		lines = append(lines, "  "+m.theme.Muted.Render(fmt.Sprintf("+%d more lines", dropped)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // classicPlaceholder is the composer placeholder for the current state

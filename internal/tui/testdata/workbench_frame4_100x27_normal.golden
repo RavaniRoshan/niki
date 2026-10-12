@@ -11,7 +11,7 @@ PLAN                       ✓ read  internal/auth/token.go                   CO
                            ◐ edit  internal/auth/limit.go                                    
                                                                                              
                              Writing the limiter now, then running the aut…                  
-                           ✗ shell  go test ……rnal/auth                                      
+                           ✗ shell  go test ./internal/auth                                  
                                exit 1 · 2 failing                                            
                                --- FAIL: TestRefreshKeepsSession (0.00s)                     
                                token_test.go:81: session id changed after r                  

@@ -64,6 +64,12 @@ type TurnRunner struct {
 	// envWatches the working directory (C9): collected once, the
 	// block is refreshed on the context whenever it changes.
 	env *envctx.Watcher
+
+	// lastDiff is the real unified diff of the file mutation just
+	// performed by a dispatched tool (U2/E2), consumed when the
+	// tool's completion event is emitted. Empty unless the last
+	// dispatch changed bytes.
+	lastDiff string
 }
 
 // streamRetryBase is the first-retry floor for L6 stream retries
@@ -371,6 +377,9 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 				TurnID:    turnID,
 				CallID:    protocol.ToolCallId(callID),
 				ToolName:  tc.Tool,
+				// U2/E1: the call is attributed to the plan step in
+				// progress right now; empty means no step owns it.
+				Step: t.activeStepLabel(),
 			}
 			started.Target = toolTarget(tc.Tool, tc.Args)
 			emit(started)
@@ -406,6 +415,7 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 					TurnID:    turnID,
 					CallID:    protocol.ToolCallId(callID),
 					Error:     err.Error(),
+					Step:      t.activeStepLabel(),
 				}
 				failed.Target = toolTarget(tc.Tool, tc.Args)
 				toolRowEventFields(&failed, tc.Tool, tc.Args, output, true)
@@ -419,9 +429,18 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 					CallID:    protocol.ToolCallId(callID),
 					ToolName:  tc.Tool,
 					Text:      res.Output,
+					Step:      t.activeStepLabel(),
 				}
 				toolRowEventFields(&done, tc.Tool, tc.Args, res.Output, false)
+				// U2/E2: the real diff rides on the patching tool's
+				// completion event; empty for every other tool.
+				done.Diff = t.lastDiff
 				emit(done)
+				// U2/E1: the plan tool's effect is its own event —
+				// the left rail and the step headers render from it.
+				if tc.Tool == "update_plan" {
+					t.emitPlanUpdate(turnID, emit)
+				}
 				// X4: tool output is data, not instructions. Text
 				// that asks for approval changes, network access,
 				// or disclosure is flagged right here; it is still
@@ -602,6 +621,9 @@ func invalidArgsSchema(reg *tools.Registry, name string, err error) (string, boo
 }
 
 func (t *TurnRunner) dispatchTool(ctx context.Context, name, argsJSON string) (tools.ToolResult, error) {
+	// U2/E2: a fresh dispatch resets the pending diff; only a real
+	// byte change re-arms it.
+	t.lastDiff = ""
 	if t.Perm != nil && !t.Perm.Allow(name) {
 		return tools.ToolResult{}, &Error{Kind: ErrPermission, Message: "tool not allowed in current mode: " + name}
 	}
@@ -684,7 +706,8 @@ func captureFilePreImage(path string) *filePreImage {
 
 // recordFileChange pushes the effect when the tool actually changed
 // the bytes (or created the file) and records the post-state in the
-// turn checkpoint.
+// turn checkpoint. When the bytes changed, it also stashes the real
+// unified diff (U2/E2) for the tool's completion event.
 func (t *TurnRunner) recordFileChange(tool string, pre *filePreImage) {
 	post, err := os.ReadFile(pre.path)
 	if err != nil {
@@ -702,6 +725,9 @@ func (t *TurnRunner) recordFileChange(tool string, pre *filePreImage) {
 			mode = fi.Mode().Perm()
 		}
 	}
+	// The diff is computed from the file's own before/after bytes —
+	// the tool's real effect, never a model claim.
+	t.lastDiff = unifiedDiff(pre.path, string(pre.before), string(post))
 	if t.Checkpoints != nil && t.currentTurn != "" {
 		t.Checkpoints.RecordAfter(t.currentTurn, pre.path, post)
 	}

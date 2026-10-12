@@ -1,7 +1,7 @@
 [◑] NikiCode v0.1.0  claude-sonnet · act  /home/dev/project…
 ────────────────────────────────────────────────────────────
 PLAN                   64 lines                             
-✓ 1. Read the han… ✓ search  "RateLim……nternal/**           
+✓ 1. Read the han… ✓ search  "RateLimit" in internal/**     
 ◐ 2. Add the limi… verified  5 of 5 required  ·  trust T2 b…
 ○ 3. run go test … ─────────────────────────────────────────
                    ✓ R1  Expired tokens are rejected        

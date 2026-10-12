@@ -1,7 +1,7 @@
 [o] NikiCode v0.1.0  claude-sonnet - act  /home/dev/proje...
 ------------------------------------------------------------
 PLAN                   64 lines                             
-done 1. Read th... done search  "Rate......ternal/**        
+done 1. Read th... done search  "RateLimit" in internal/**  
 running 2. Add ... verified  5 of 5 required  -  trust T2...
 queued 3. run g... -----------------------------------------
                    done R1  Expired tokens are rejected     

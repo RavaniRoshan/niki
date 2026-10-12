@@ -898,3 +898,31 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
 - Docs: docs/tui/WORKBENCH.md (+§11 build status, queue marked
   DEFER — no queue state exists), docs/tui/PROGRESS.md,
   CONFIG.md layout values current.
+
+## 2026-10-12 — Workbench U2: run trace built (E1/E2/E6 seam + emitters + renderers)
+
+- Seam (additive, schema unchanged): EngineEvent.Step (E1),
+  EngineEvent.Diff (E2), EventReasoningDelta (E6).
+- Engine: plan_updated now emitted from the update_plan tool's
+  own steps (the event had no emitter); tool events carry the
+  in_progress step label; edit_file/write_file/notebook_edit
+  completions carry the real unified diff from the file's
+  before/after bytes (engine's own prefix/suffix-trimmed writer,
+  unit-tested). apply_patch's diff and a reasoning producer are
+  documented gaps, not stubs.
+- TUI: step headers group tool rows under the attributed step;
+  the diff block renders real +/- lines under the patching row
+  (40-line cap, labeled remainder); the reasoning line is
+  collapsed by default and expands on ctrl+o, absent when no
+  event fired. Two layout fixes found by the new tests: the
+  narrow contract strip's glyph degrades to its word in plain
+  mode (2 classic goldens updated, diff printed), and tool-row
+  targets no longer reserve a result's width when it moved to its
+  own line.
+- Tests: engine emitters + diff unit cases; per-element
+  absent/present for every trace element; full-run frame6 at
+  three widths with no overflow; stream parity. Gates: build,
+  vet, full suite, race, lint (0 issues), PTY e2e green. Perf:
+  first paint 6.61 ms (baseline 5.7), idle RSS 23.25 MB (22.9) -
+  no regression over 10%. Dumps + goldens in docs/tui/review/ and
+  internal/tui/testdata/.

@@ -177,3 +177,22 @@ judgment is human and belongs to the owner.
   fields; the engine copies them into the verification event.
 - The `[d]` recorded demo replays the five-frame fixture through the
   same event path a live run uses (no model call).
+
+## 9. Run-trace additions (2026-10-12, U2)
+
+The Stream view shares the Workbench's trace cells, so three
+elements now render in classic too, each from its real event:
+- Step headers (`-- step N - label`): tool rows group under the
+  plan step the engine attributed them to (EngineEvent.Step).
+- Diff block: a patching tool's completion carries the real
+  unified diff (EngineEvent.Diff); the block renders + lines
+  success, - lines error, capped at 40 lines with a labeled count.
+- Thought line: the reasoning_delta event and the collapsed
+  renderer (ctrl+o expands) exist; no provider emits reasoning
+  yet, so the line is absent in live runs.
+Two layout fixes came with them: the narrow contract strip's
+aggregate glyph degrades to its word in plain mode (the two
+60x20 plain goldens changed accordingly), and under 80 columns a
+tool row's target no longer reserves the width of a result that
+moved to its own line. The §7 deferral for the thought line now
+reads: the event exists, the producer does not.

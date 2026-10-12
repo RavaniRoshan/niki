@@ -23,7 +23,7 @@ failed shell  go test ./internal/auth
   [n] write the limiter without it (default)
 [y] allow once
 [v] view the diff
-contract  ○ 0 of 5
+contract  queued 0 of 5
 ------------------------------------------------------------
 > answer the question above, or steer                    
 esc pause - n keep constraint - y allow once - v view diff - ctx 4%

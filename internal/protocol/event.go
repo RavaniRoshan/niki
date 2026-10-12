@@ -47,6 +47,7 @@ const (
 	EventBudgetStopped        EventType = "budget_stopped"
 	EventVerification         EventType = "verification"
 	EventTurnNotVerified      EventType = "turn_not_verified"
+	EventReasoningDelta       EventType = "reasoning_delta"
 )
 
 // VerificationInfo reports one verifier attempt (L3).
@@ -152,6 +153,17 @@ type EngineEvent struct {
 	// from the prompt at turn start: one entry per requirement,
 	// all queued. The contract strip renders only this.
 	Contract []ContractReq `json:"contract,omitempty"`
+
+	// Step is the plan step a tool call serves (U2/E1): the
+	// in_progress step's label at emit time, set by the engine.
+	// Empty means the engine does not attribute this call to a
+	// step, and the TUI renders no step header for it — the
+	// grouping is never invented in the frontend.
+	Step string `json:"step,omitempty"`
+	// Diff is the real unified diff of a file mutation, attached
+	// by the engine at the patching tool's completion (U2/E2).
+	// Empty when the tool changed no bytes.
+	Diff string `json:"diff,omitempty"`
 }
 
 type Usage = provider.Usage
@@ -172,5 +184,5 @@ func (e EngineEvent) Redacted() EngineEvent {
 
 type PlanStep struct {
 	Description string `json:"description"`
-	Status      string `json:"status"` // pending, active, completed, failed
+	Status      string `json:"status"` // pending, active, completed, failed, cancelled
 }

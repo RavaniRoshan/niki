@@ -20,7 +20,7 @@ running edit  internal/auth/limit.go
 
   - writing internal/auth/limit.go - esc pause
     next  run go test ./internal/auth
-contract  ○ 0 of 5
+contract  queued 0 of 5
 ------------------------------------------------------------
 > steer with enter - queue with ctrl+enter               
 ctrl+c stop - esc pause - ctrl+o expand - ctx 4%

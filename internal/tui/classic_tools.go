@@ -148,7 +148,13 @@ func (m AppModel) classicToolRow(c HistoryCell) string {
 	// Prefix width in cells: glyph(1) + space + verb + two spaces.
 	prefixWidth := 1 + 1 + CellWidth(verb) + 2
 	resultWidth := lipgloss.Width(result)
-	maxTarget := width - prefixWidth - resultWidth - 2
+	// Under 80 the result moves to its own line, so the target gets
+	// the full row width (it is not squeezed by a result that is
+	// not on its line).
+	maxTarget := width - prefixWidth - 2
+	if width >= 80 {
+		maxTarget = width - prefixWidth - resultWidth - 2
+	}
 	if CellWidth(c.Target) > maxTarget {
 		c.Target = middleTruncate(c.Target, maxTarget)
 	}
