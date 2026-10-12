@@ -1341,32 +1341,33 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.state.Palette.InputBuffer = ""
 						return m, nil
 					case "set_secondary_model":
-						parts := strings.SplitN(item.Payload, ":", 2)
-						cfg, _ := config.Load("")
-						if len(parts) == 2 {
-							cfg.SecondaryModel.Provider = parts[0]
-							cfg.SecondaryModel.Model = parts[1]
-						} else {
-							cfg.SecondaryModel.Model = item.Payload
-						}
-						_ = config.SaveUserConfig(cfg)
-						m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
-						m.history.Append("system", fmt.Sprintf("🤖 Secondary subagent model set to: %s", item.Payload))
+						payload := item.Payload
 						m.state.Palette.Open = false
-						return m, nil
+						return m, editConfigCmd(
+							fmt.Sprintf("🤖 Secondary subagent model set to: %s", payload),
+							func(c *config.Config) {
+								if provider, model, ok := strings.Cut(payload, ":"); ok {
+									c.SecondaryModel.Provider = strings.TrimSpace(provider)
+									c.SecondaryModel.Model = strings.TrimSpace(model)
+								} else {
+									c.SecondaryModel.Model = payload
+								}
+							})
 					case "set_model":
-						parts := strings.SplitN(item.Payload, ":", 2)
-						if len(parts) == 2 {
-							cfg, _ := config.Load("")
-							cfg.Provider.Name = parts[0]
-							cfg.Model.Name = parts[1]
-							_ = config.SaveUserConfig(cfg)
-							m.state.ModelName = item.Payload
-							m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
-							m.history.Append("system", fmt.Sprintf("⚡ Switched to model: %s", item.Payload))
-						}
+						payload := item.Payload
+						provider, model, ok := strings.Cut(payload, ":")
 						m.state.Palette.Open = false
-						return m, nil
+						if !ok {
+							return m, nil
+						}
+						return m, tea.Batch(
+							editConfigCmd(fmt.Sprintf("⚡ Switched to model: %s", payload),
+								func(c *config.Config) {
+									c.Provider.Name = strings.TrimSpace(provider)
+									c.Model.Name = strings.TrimSpace(model)
+								}),
+							func() tea.Msg { return modelPickedMsg{name: payload} },
+						)
 					case "set_mode":
 						m.state.PermissionMode = item.Payload
 						m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdSetPermissionMode, Mode: item.Payload}
@@ -1698,18 +1699,20 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 		parts := strings.Fields(input)
 		if len(parts) > 1 {
 			modelArg := parts[1]
-			m.state.ModelName = modelArg
-			cfg, _ := config.Load("")
-			if strings.Contains(modelArg, ":") {
-				sub := strings.SplitN(modelArg, ":", 2)
-				cfg.Provider.Name = strings.TrimSpace(sub[0])
-				cfg.Model.Name = strings.TrimSpace(sub[1])
-			} else {
-				cfg.Model.Name = modelArg
-			}
-			_ = config.SaveUserConfig(cfg)
-			m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
-			m.history.Append("system", fmt.Sprintf("⚡ Switched to model: %s", modelArg))
+			provider, modelName, ok := strings.Cut(modelArg, ":")
+			m.state.Palette.Open = false
+			return m, tea.Batch(
+				editConfigCmd(fmt.Sprintf("⚡ Switched to model: %s", modelArg),
+					func(c *config.Config) {
+						if ok {
+							c.Provider.Name = strings.TrimSpace(provider)
+							c.Model.Name = strings.TrimSpace(modelName)
+						} else {
+							c.Model.Name = modelArg
+						}
+					}),
+				func() tea.Msg { return modelPickedMsg{name: modelArg} },
+			)
 		} else {
 			m.history.Append("system", fmt.Sprintf("⚡ Active Model: %s (context window: %s tokens)", m.state.ModelName, formatTokens(m.state.MaxTokens)))
 			m.state.Palette.Open = true

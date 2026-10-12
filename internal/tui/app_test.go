@@ -70,6 +70,10 @@ func TestSlashCommandsIntercepted(t *testing.T) {
 		t.Fatal("expected /model to append system cell")
 	}
 
+	// /model opens the model picker; close it before the next command.
+	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = m2.(AppModel)
+
 	// Test /doctor
 	m.composer.Input.SetValue("/doctor")
 	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})

@@ -363,3 +363,35 @@ what remains.
   code and mid-turn Ctrl+C assumptions, the wall_time wrap flake,
   the GNU-only sed in the refactor recipe, and the inline
   keychain/config I/O in Update.
+
+## 2026-10-12 — Skill-guided TUI review (review-tui + bubbletea/go/tui-design/localize)
+
+Scope: 3b7d0c3..HEAD (the Classic Flow diff). Protocol per the
+review-tui skill (gates G1-G4; companion skills loaded: go-code-review,
+bubbletea-code-review, review-verification-protocol,
+go-testing-code-review; plus the user-installed golang-pro,
+tui-design, and localize lenses).
+
+- Major (found and fixed during the review): three more palette/slash
+  paths still did config.Load/SaveUserConfig inline in Update —
+  palette set_model and set_secondary_model (app.go) and the
+  /model <arg> slash command — the same class as the earlier
+  keychain fix. All three now dispatch editConfigCmd (+modelPickedMsg
+  for labels) and surface save failures through configSavedMsg. A
+  grep for config/keychain/disk I/O in internal/tui now matches only
+  command closures.
+- Minor: spinGlyph (app.go:2273) is orphaned — only its test calls it
+  after the classic/ledger activity lines moved to
+  SpinGlyphWithStyle; State.ShellInputMode (state.go:76) is dead.
+  Both left in place (pre-existing, out of scope to delete).
+- Informational: the classic layout has no Up/Down row focus
+  (design §6 lists it) — net-new state, not a blocker; the classic
+  strings are English literals with internal/i18n unused by the TUI
+  (localize lens — wiring is net-new); the light theme remains a
+  no-op (PACK defines a distinct light set; lipgloss v2 requires the
+  manual branch).
+- Good patterns preserved: pure View (test-enforced), zero blocking
+  I/O in Update (grep-verified), styles confined to theme.go
+  (lintcheck-enforced), registry-driven footer hints with a
+  dispatch test, the tamper test preceding the verdict card, and
+  errors.Join for aggregated connect failures.
