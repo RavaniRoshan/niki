@@ -1,18 +1,16 @@
 <div align="center">
 
-<table>
-<tr>
-<td align="right" width="120"><img src="docs/assets/nikicode-mascot-olive.svg" width="110" alt="Nib, the NikiCode mascot"></td>
-<td align="left"><pre>
-##    ## ###### ##    ## ######  ######  ######  ###### ########
-###   ##   ##   ##   ##   ##   ##    ## ##    ## ##    ## ##      
-####  ##   ##   ##  ##   ##   ##       ##    ## ##    ## ##      
-## ## ##   ##   ## ##   ##   ##       ##    ## ##    ## ######  
-##  ####   ##   ######   ##   ##    ## ##    ## ##    ## ##      
-##   ### ###### ##   ## ######  ######  ######  ###### ########
+<table style="border: none"><tr>
+<td style="border: none" align="right" valign="middle" width="130"><img src="docs/assets/nikicode-mascot-olive.svg" width="120" alt="Nib, the NikiCode mascot"></td>
+<td style="border: none" align="left" valign="middle"><pre>
+##    # ######  ##    # ######   ######  ###### ####### #######
+###   #   ##    ##   #    ##    ##   ## ##   ## ##    # ##     
+####  #   ##    ##  #     ##    ##      ##   ## ##    # ##     
+## ## #   ##    ####      ##    ##      ##   ## ##    # #####  
+##  ###   ##    ##   #    ##    ##   ## ##   ## ##    # ##     
+##   ## ######  ##    # ######   ######  ###### ####### #######
 </pre></td>
-</tr>
-</table>
+</tr></table>
 
 **NikiCode is an agentic coding tool that lives in your terminal, understands your codebase, and helps you code faster by executing routine tasks, explaining complex code, and handling git workflows — all through natural language commands.**
 <!-- claims: C1 C2 C3 C4 C5 C6 -->
