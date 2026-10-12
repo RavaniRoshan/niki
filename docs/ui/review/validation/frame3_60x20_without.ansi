@@ -1,7 +1,7 @@
-[1;38;2;249;115;22m ▄███▄ [m  [1;38;2;56;189;248mniki [m[38;2;100;116;139m0.1.0[m                   
+[1;38;2;249;115;22m ▄███▄ [m  [1;38;2;56;189;248mniki [m[38;2;125;139;166m0.1.0[m                   
 [1;38;2;249;115;22m███◑███[m  [38;2;241;245;249mclaude-sonnet · approvals ask[m
-[1;38;2;249;115;22m ▀███▀ [m  [38;2;100;116;139m/home/dev/projects/api · main[m
-[38;2;71;85;105mType a request · / for commands · ctrl+k for everything · ?…[m
+[1;38;2;249;115;22m ▀███▀ [m  [38;2;125;139;166m/home/dev/projects/api · main[m
+[38;2;118;133;159mType a request · / for commands · ctrl+k for everything · ?…[m
 
 [38;2;248;250;252;48;2;30;41;59m› harden POST /login: reject expired tokens and rate-limit[m[48;2;30;41;59m  [m
 [38;2;248;250;252;48;2;30;41;59mfailed logins[m[48;2;30;41;59m                                               [m
@@ -18,8 +18,8 @@
   [38;2;241;245;249mWriting the limiter now, then running the auth tests.[m     
                                                             
 
-  [1;38;2;249;115;22m◐ [m[38;2;249;115;22mwriting internal/auth/limit.go[m[38;2;100;116;139m · esc pause[m
-    [38;2;100;116;139mnext  run go test ./internal/auth[m
+  [1;38;2;249;115;22m◐ [m[38;2;249;115;22mwriting internal/auth/limit.go[m[38;2;125;139;166m · esc pause[m
+    [38;2;125;139;166mnext  run go test ./internal/auth[m
 ────────────────────────────────────────────────────────────
-[1;38;2;241;245;249m> [m[7;37ms[m[38;2;71;85;105mteer with enter · queue with ctrl+enter[m[38;2;71;85;105m               [m
-[38;2;100;116;139mctrl+c stop · esc pause · ctrl+o expand · ctx 4%[m
+[1;38;2;241;245;249m> [m[7;37ms[m[38;2;118;133;159mteer with enter · queue with ctrl+enter[m[38;2;118;133;159m               [m
+[38;2;125;139;166mctrl+c stop · esc pause · ctrl+o expand · ctx 4%[m

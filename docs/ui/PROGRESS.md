@@ -324,3 +324,22 @@ what remains.
   accepts (TestRecipeRefactor was failing on macos-latest).
 - Gates: full suite, build/vet/gofmt, whole-repo lint 0 issues,
   NIKI_PTY_TESTS=1 cmd tests pass.
+
+## 2026-10-12 — PACK-mandated contrast test; two token fixes
+
+- The PACK visual spec requires "text contrast at least 4.5:1,
+  glyphs at least 3:1, tested in a unit test" — no such test existed.
+  Added TestThemeContrast: WCAG relative luminance over the actual
+  theme tokens, read through lipgloss v2's color.Color, against the
+  backgrounds they render on (terminal dark default + the raised
+  row's painted background).
+- The test immediately found two real failures in the live palette:
+  muted text (#64748b, 3.81:1) and the composer placeholder
+  (#475569, 2.39:1) both read as TEXT and both failed 4.5:1. Fixed
+  the tokens: muted -> #7d8ba6 (5.27:1), placeholder -> #76859f
+  (4.85:1, which also lifts the ledger composer border to 4.85:1).
+  All seven glyph/status roles pass >= 3:1 (lowest: error 4.81:1);
+  the raised row is 13.98:1 with a visible background separation.
+  The dim hierarchy is preserved (placeholder < muted < tool
+  detail).
+- Gates: full suite, build/vet/gofmt, lint clean.
