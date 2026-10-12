@@ -821,3 +821,30 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
 - Gates: build/vet/gofmt/full suite/race(tui)/lint clean; pre-existing
   issues in untouched files listed in docs/ui/PROGRESS.md.
 - STOP at OWNER REVIEW: docs/ui/review/ holds the ANSI frame dumps.
+
+## 2026-10-12 — Classic Flow: post-slice fixes, CI repaired, contrast test
+
+- Product bugs found and fixed by the finally-running CI (its lint
+  step had been crash-broken since 2026-10-11, hiding everything
+  behind it): keychain/config I/O inline in Update (a real macOS
+  blocking hang), GNU-only `sed -i` in the refactor recipe (BSD
+  incompatibility), PTY tests hardcoding an unbuilt binary path,
+  two tests asserting pre-L3 exit codes and mid-turn Ctrl+C, the
+  wall_time budget flake under instrumentation, and the
+  wall-of-pre-existing lint findings (11, all mechanical).
+- Test/perf honesty: TestIdleNoRedrawsAndCPU now measures the
+  program's marginal CPU above a pre-program baseline; the GC-pause
+  gate applies without -race and logs under it (detector overhead,
+  build-tag selected); the connect test uses a hermetic memory
+  keychain backend.
+- PACK-mandated contrast unit test added (was missing): it found
+  and fixed two real failures in the live palette — muted text
+  (3.81:1) and the composer placeholder (2.39:1), both raised above
+  4.5:1. All glyph roles clear 3:1.
+- Perf contract re-run after v2 + classic: first paint unchanged
+  (5.7ms), idle RSS 22.9MB vs 20.5MB (+11%, ultraviolet/cellbuf;
+  absolute gates hold). Docs: docs/PERF.md §8, docs/ui/CLASSIC.md
+  (+§7 deferrals, §8 notes), CONFIG.md schema current incl.
+  ui.layout, docs/ui/review/ (ANSI dumps + validation harness).
+- CI: green through lint, PTY e2e, and the ubuntu race matrix;
+  macOS matrix verified across the last three pushes.
