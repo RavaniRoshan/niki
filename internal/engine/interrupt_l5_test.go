@@ -108,9 +108,7 @@ func (g *gatedWriteTool) Run(ctx context.Context, args json.RawMessage) (tools.T
 	_ = json.Unmarshal(args, &a)
 	if strings.HasSuffix(a.Path, "file2.txt") {
 		g.once.Do(func() { close(g.entered) })
-		select {
-		case <-g.release:
-		}
+		<-g.release
 	}
 	return g.inner.Run(ctx, args)
 }

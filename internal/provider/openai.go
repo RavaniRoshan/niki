@@ -142,12 +142,8 @@ func (o *OpenAIProvider) StreamWithTools(ctx context.Context, messages []Message
 	var wireTools []openaiTool
 	for _, ts := range tools {
 		wireTools = append(wireTools, openaiTool{
-			Type: "function",
-			Function: openaiFunction{
-				Name:        ts.Name,
-				Description: ts.Description,
-				Parameters:  ts.Parameters,
-			},
+			Type:     "function",
+			Function: openaiFunction(ts),
 		})
 	}
 
@@ -190,7 +186,6 @@ func (o *OpenAIProvider) StreamWithTools(ctx context.Context, messages []Message
 		}
 
 		scanner := NewSSEScanner(resp.Body)
-		sawDone := false
 		// Accumulated tool-call deltas keyed by choice index; flushed when the
 		// provider signals completion (finish_reason=tool_calls) or at stream end.
 		pending := map[int]*struct {
@@ -233,18 +228,14 @@ func (o *OpenAIProvider) StreamWithTools(ctx context.Context, messages []Message
 			ev, err := scanner.Next()
 			if err != nil {
 				if err == io.EOF {
-					if !sawDone {
-						errs <- fmt.Errorf("stream truncated: connection closed before completion")
-						return
-					}
-					break
+					errs <- fmt.Errorf("stream truncated: connection closed before completion")
+					return
 				}
 				errs <- fmt.Errorf("stream truncated: %w", err)
 				return
 			}
 			data := strings.TrimSpace(ev.Data)
 			if data == "[DONE]" {
-				sawDone = true
 				break
 			}
 			var chunk chatChunk

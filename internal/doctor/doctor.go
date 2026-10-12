@@ -301,7 +301,7 @@ func Run(p Probes) []Result {
 	}
 
 	// Config validity first: a parse error must not cascade.
-	cfgResult := Result{ID: "config validity", Status: StatusFail, Detail: "config not loaded", Fix: ""}
+	var cfgResult Result
 	if cfgErr != nil {
 		cfgResult = CheckConfigValidity(p.ConfigPath, func(string) (config.Config, error) {
 			return config.Config{}, cfgErr
@@ -360,9 +360,10 @@ func DefaultProbes(configPath string) Probes {
 // Render renders one result the way the doctor command prints it.
 func Render(r Result) string {
 	mark := "✓"
-	if r.Status == StatusFail {
+	switch r.Status {
+	case StatusFail:
 		mark = "✗"
-	} else if r.Status == StatusWarn {
+	case StatusWarn:
 		mark = "!"
 	}
 	out := fmt.Sprintf("%s %s: %s", mark, r.ID, r.Detail)

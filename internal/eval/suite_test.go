@@ -33,10 +33,6 @@ func setupDir(t *testing.T, dir string) {
 	write(t, filepath.Join(dir, "README.md"), trap)
 }
 
-func toolsCall(id, tool, args string) provider.ToolCall {
-	return provider.ToolCall{ID: id, Tool: tool, Args: args}
-}
-
 // Q2: behavioral eval suite — 20 fixed tasks on fixture repos, each
 // with an expected verdict. The pass rate is stored in EVALS.md.
 func TestBehavioralSuite(t *testing.T) {

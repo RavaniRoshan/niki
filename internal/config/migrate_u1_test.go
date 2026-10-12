@@ -34,7 +34,7 @@ func TestMigrateDryRunAndBackup(t *testing.T) {
 	t.Logf("[U1] dry run plans without touching: %q, %q", planned[0].Description, planned[1].Description)
 
 	// Real run: backup first, then migrate.
-	planned, err = Migrate(path, false)
+	_, err = Migrate(path, false)
 	if err != nil {
 		t.Fatal(err)
 	}

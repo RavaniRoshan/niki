@@ -254,3 +254,24 @@ what remains.
 - Gates: go build/vet/gofmt clean; go test ./... all ok; race clean
   on internal/tui; golangci-lint clean on changed packages (1
   pre-existing QF1011 in untouched firstrun_cmd_test.go).
+
+## 2026-10-12 — CI unblocked; pre-existing lint debt cleared
+
+- CI had been red since 2026-10-11T12:10 (four commits): the lint
+  step's golangci-lint (built with Go 1.24) could not load a go.mod
+  targeting 1.26.0 and crashed with exit 3 before analyzing — so the
+  repo's recorded "0 issues" was against a step that never ran.
+  Workflow fixed: go-version '1.24' -> '1.26' in all five jobs, and
+  the linter is now built from source with that toolchain.
+- Fixing the step surfaced 11 pre-existing findings across packages
+  this work never touched; all cleared (mechanical only, no behavior
+  change): ineffassign in migrate_u1_test/doctor/openai (the openai
+  one was a genuinely dead assignment — the [DONE] branch breaks
+  before the flag is ever read again, removed with the variable),
+  QF1011 firstrun_cmd_test, QF1003 doctor Render (tagged switch),
+  S1000 interrupt_l5_test, QF1001 prefix_c5_test + textcall_m2 (De
+  Morgan), QF1008 eval (embedded selector), QF1002 git (tagged
+  switch), S1008 verifier integrity, plus two dead helpers
+  (eval toolsCall, i18n readFileBytes).
+- Gates: golangci-lint run (whole repo) 0 issues; go build/vet/gofmt
+  clean; go test ./... all ok; race clean on tui/provider/doctor.

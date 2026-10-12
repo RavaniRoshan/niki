@@ -35,7 +35,7 @@ func TestStablePrefixByteIdentical(t *testing.T) {
 			instr = i
 		}
 	}
-	if !(sys < tools && tools < instr) {
+	if sys >= tools || tools >= instr {
 		t.Fatalf("[C5] prefix order wrong:\n%s", p1)
 	}
 	// Specs sorted by name regardless of input order.

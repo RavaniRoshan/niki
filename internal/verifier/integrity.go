@@ -39,10 +39,7 @@ func integrityMatch(path string) bool {
 	case base == "go.mod" || base == "go.sum" || base == "package-lock.json" || base == "yarn.lock" || base == "Cargo.lock":
 		return true
 	}
-	if strings.Contains(filepath.ToSlash(path), ".github/workflows/") {
-		return true
-	}
-	return false
+	return strings.Contains(filepath.ToSlash(path), ".github/workflows/")
 }
 
 func hashFile(path string) (string, bool) {

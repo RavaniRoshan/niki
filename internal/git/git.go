@@ -540,11 +540,11 @@ func Submods(dir string) ([]Submodule, error) {
 		}
 		st := "clean"
 		body := strings.TrimSpace(line)
-		switch {
-		case body[:1] == "+" || body[:1] == "-":
+		switch body[:1] {
+		case "+", "-":
 			st = "modified"
 			body = strings.TrimSpace(body[1:])
-		case body[:1] == " ":
+		case " ":
 			body = strings.TrimSpace(body[1:])
 		}
 		// body is "<sha> <path> [(url)]"; keep the first whitespace-delimited

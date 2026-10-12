@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
-
 	"github.com/RavaniRoshan/niki/internal/config"
 	"github.com/RavaniRoshan/niki/internal/firstrun"
 	"github.com/RavaniRoshan/niki/internal/provider"
@@ -87,7 +85,7 @@ func TestFirstRunMessageCoversAllBranches(t *testing.T) {
 // newDemoCommand must exist as a cobra command wired with a RunE (guard
 // against a future refactor silently dropping the demo entry point).
 func TestDemoCommandIsCobra(t *testing.T) {
-	var cmd *cobra.Command = newDemoCommand()
+	cmd := newDemoCommand()
 	if cmd.Use == "" || cmd.RunE == nil {
 		t.Fatal("demo command must have Use and RunE")
 	}

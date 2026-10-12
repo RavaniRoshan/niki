@@ -164,7 +164,7 @@ func RunTask(t Task, dir string) Result {
 		release = make(chan struct{})
 		started = make(chan struct{})
 		bt := &blockingTool{release: release, started: started}
-		bt.Base.SchemaStr = bt.Schema()
+		bt.SchemaStr = bt.Schema()
 		reg.Register(bt)
 		_ = release
 		_ = started
