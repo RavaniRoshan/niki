@@ -22,5 +22,5 @@ Type a request · / for commands · ctrl+k for everything · ? for help
     next  run go test ./internal/auth
 contract  R1 ○  R2 ○  R3 ○  R4 ○  R5 ○   0 of 5
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-> steer with enter · queue with ctrl+enter                                                       
+> steer with enter                                                                               
 ask · main · /home/dev/projects/api                ctrl+c stop · esc pause · ctrl+o expand · ctx 4%

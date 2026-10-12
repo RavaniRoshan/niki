@@ -18,7 +18,6 @@ var CoreSlashCommands = []CommandDef{
 	{Name: "/resume", Description: "Resume a previous session"},
 	{Name: "/status", Description: "Show engine and MCP readiness status"},
 	{Name: "/diff", Description: "Show pending and applied file diffs"},
-	{Name: "/btw", Description: "Docked mini-agent for quick queries without context pollution (/btw <query>)"},
 	{Name: "/mode", Description: "Cycle or set mode (/mode [ask|always|yolo|plan])"},
 	{Name: "/plan", Description: "Toggle read-only plan mode exploration"},
 	{Name: "/yolo", Description: "Set mode to Never Ask (unrestricted automatic execution)"},

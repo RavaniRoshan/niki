@@ -21,6 +21,6 @@
   [1;38;2;249;115;22m◐ [m[38;2;249;115;22mwriting internal/auth/limit.go[m[38;2;125;139;166m · esc pause[m
     [38;2;125;139;166mnext  run go test ./internal/auth[m
 ────────────────────────────────────────────────────────────────────────────────
-[1;38;2;241;245;249m> [m[7;37ms[m[38;2;118;133;159mteer with enter · queue with ctrl+enter[m[38;2;118;133;159m                                   [m
+[1;38;2;241;245;249m> [m[7;37ms[m[38;2;118;133;159mteer with enter[m[38;2;118;133;159m                                                           [m
 [38;2;125;139;166mask · main · /home/dev/projects/api[m
 [38;2;125;139;166mctrl+c stop · esc pause · ctrl+o expand · ctx 4%[m

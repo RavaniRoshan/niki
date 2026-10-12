@@ -23,5 +23,5 @@ queued 3. run go test ....   Contract: 5 requirements. Assumed: limit is... COST
                                                                                              
                              - writing internal/auth/limit.go - esc pause                    
                            contract  queued 0 of 5                                           
-> > steer with enter - queue with ctrl+enter                                      mode act - ctrl+k
+> > steer with enter                                                              mode act - ctrl+k
 [o] working - claude-sonnet - esc interrupt                 ctrl+c stop - esc pause - ctrl+o expand

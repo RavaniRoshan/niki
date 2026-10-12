@@ -380,6 +380,22 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 			e.turnCancel()
 		}
 		e.mu.Unlock()
+	case protocol.CmdCompact:
+		// U7: real compaction or a real refusal — the frontend's
+		// confirmation is no longer a fabrication. The compactor is
+		// the context assembler the turns run on.
+		e.mu.Lock()
+		running := e.turnRunning
+		e.mu.Unlock()
+		if running {
+			e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "compact refused: a turn is running"})
+			return
+		}
+		if e.runner.Context.Compact() {
+			e.emit(protocol.EngineEvent{Type: protocol.EventContextCompacted, Timestamp: time.Now()})
+			return
+		}
+		e.emit(protocol.EngineEvent{Type: protocol.EventWarning, Timestamp: time.Now(), Text: "compact: nothing to fold (context is already within budget)"})
 	case protocol.CmdRefreshSkills:
 		e.emit(protocol.EngineEvent{Type: protocol.EventSkillDiscovered, Timestamp: time.Now(), Text: "skills refreshed"})
 	case protocol.CmdRefreshMcp:

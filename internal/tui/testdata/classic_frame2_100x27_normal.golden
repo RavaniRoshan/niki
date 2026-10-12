@@ -20,5 +20,5 @@ Type a request · / for commands · ctrl+k for everything · ? for help
 
   ◐ reading the project · esc pause
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-> steer with enter · queue with ctrl+enter                                                       
+> steer with enter                                                                               
 ask · main · /home/dev/projects/api                ctrl+c stop · esc pause · ctrl+o expand · ctx 4%

@@ -16,5 +16,5 @@ queued 3. run g...     +62 -4
                        token_test.go:81: session id changed 
                                                             
                    contract  queued 0 of 5                  
-> > steer with enter - queue with ctrl+   mode act - ctrl+k
+> > steer with enter                      mode act - ctrl+k
 [o] working - claude-sonnet - checkpoints 1 - esc interrupt

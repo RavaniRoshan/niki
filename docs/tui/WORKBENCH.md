@@ -103,7 +103,6 @@ minimal seam additions in §6, proposed, not yet built), **DEFER**
 | Element | Driver | States | Absent rule | Status |
 |---|---|---|---|---|
 | input | local editor state (the real textarea) | always | never | HAVE |
-| queue | no queue state exists in the TUI and no `QueueChanged` event exists; the classic "queue with ctrl+enter" hint was aspirational | queued · sent | ABSENT (the row does not exist) | DEFER |
 | mode chip | `state.Mode`/`PermissionMode`, now authoritative from the engine's `mode_changed` events (U5; the Op echo stays as the local action's trace row) | always | never | HAVE |
 
 ### Popups (over the centre)
@@ -113,7 +112,6 @@ minimal seam additions in §6, proposed, not yet built), **DEFER**
 | Command palette | one registry: `DefaultPaletteCatalog` + `CoreSlashCommands` + `KeyBindings` | open · closed | ABSENT when closed | HAVE |
 | Diff viewer | `EngineEvent.Diff` accumulation (E2); `/diff` keeps its labeled working-tree read | per patch | ABSENT when no patch exists | EXTEND (E2) |
 | Agent detail | subagent child stream — intentionally not forwarded to the parent (`engine/subagent.go`) | — | ABSENT (cannot fabricate a stream) | DEFER |
-| Transcript pager | committed history cells (real rows) | open · closed | ABSENT when closed | HAVE |
 
 ### Right rail
 | Element | Driver | States | Absent rule | Status |
@@ -433,3 +431,50 @@ from patch events (E2's diff block is built; the viewer still
 reads the working tree via /diff), checkpoints (E3), subagent
 names (E4), the Agent detail panel (§7), and the default-layout
 flip (§10).
+
+## 12. The wiring audit (U7, 2026-10-12)
+
+`internal/tui/wiring_u7.go` is the single source of truth: every
+rendered element, its real Op/Event driver, its absent-state rule,
+its status (HAVE/DEFER) and the test that proves
+absent-before/present-after. `TestWiringAudit` is the build check:
+
+- any element with no driver fails the build (no element may exist
+  without an event);
+- any DEFER without a reason fails;
+- any HAVE element with an absent state whose named proof test
+  does not exist in the package fails;
+- the registry and this file's §3 wiring table must name the same
+  elements — either drift fails.
+
+Current state (printed by the test): **30 elements registered,
+28 HAVE, 2 DEFER** (the reasoning line — the event and renderer
+exist, no provider emits it yet; and the agent detail panel — the
+subagent child stream is intentionally not forwarded).
+
+### Removals (no event and no purpose — deleted, not hidden)
+
+| Removed | Why |
+|---|---|
+| `/btw` overlay and command | no event source exists for a docked mini-agent, and its response text was fabricated |
+| Swarm progress renderer (`RenderSwarmProgress`, `BrailleLevels`, `SwarmAgent`, `State.SwarmAgents`) | no event ever filled `SwarmAgents`; the subagent lifecycle events feed the Agents rail instead |
+| `spinGlyph` helper | dead function superseded by `SpinGlyphWithStyle`; its width test now points at the live function |
+| `State.ShellInputMode` | written by nothing, read by nothing |
+| The composer's "queue with ctrl+enter" affordance | no queue state exists and no `QueueChanged` event exists |
+| The Transcript pager row in the wiring table | no implementation, no key, no event |
+| `/agents`' hardcoded "0 active child agents" | fabricated count; now the real agent list from the real events |
+| `/export`'s "ready for session" confirmation | fabricated; now writes the real transcript to a real file or reports the real failure |
+| `/compact`'s "Past turns folded" confirmation | fabricated; the engine now has a real `CmdCompact` handler that compacts or refuses with a real event |
+
+### Recorded evidence
+
+- A real session in the Workbench (the real binary in a real PTY,
+  the mock provider standing in for the model, labelled as such):
+  `docs/tui/review/workbench_session_100x27.ansi` and its
+  plain-text twin, recorded by
+  `TestRecordWorkbenchSession` (`NIKI_WRITE_SESSION=1`).
+- The frame dumps of the key states: `docs/tui/review/`
+  (workbench frames 1-6 at three widths, normal and plain).
+- Headless parity: `TestHeadlessSameEventVocabulary` runs the real
+  binary's `exec --jsonl` and asserts the same event vocabulary the
+  views render over the same seam.

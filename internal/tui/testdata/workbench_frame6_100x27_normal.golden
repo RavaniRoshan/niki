@@ -23,5 +23,5 @@ PLAN                       ✓ plan  3 steps                                  CO
                                token_test.go:81: session id changed after r                  
                                                                                              
                            contract  ○ 0 of 5                                                
-> > steer with enter · queue with ctrl+enter                                      mode act · ctrl+k
+> > steer with enter                                                              mode act · ctrl+k
 [◑] working · claude-sonnet · checkpoints 1 · esc interrupt ctrl+c stop · esc pause · ctrl+o expand

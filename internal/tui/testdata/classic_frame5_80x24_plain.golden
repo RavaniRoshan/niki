@@ -28,5 +28,5 @@ done R5  No new dependency                 go.mod unchanged - tamper check clean
 not verified  load behavior: no check is configured for it
 branch main  $0.0008
 --------------------------------------------------------------------------------
-> steer with enter - queue with ctrl+enter                                   
+> steer with enter                                                           
 ask - main - /home/dev/projects/api              enter accept - d diff - ctx 4%

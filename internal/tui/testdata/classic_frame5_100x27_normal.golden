@@ -28,5 +28,5 @@ verified  5 of 5 required  ·  trust T2 baseline-validated
 not verified  load behavior: no check is configured for it
 branch main  $0.0008
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-> steer with enter · queue with ctrl+enter                                                       
+> steer with enter                                                                               
 ask · main · /home/dev/projects/api                                  enter accept · d diff · ctx 4%

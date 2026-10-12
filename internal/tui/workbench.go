@@ -314,8 +314,6 @@ func (m AppModel) wbCentreOverlay(width int) string {
 		return truncLines(RenderPaletteView(m.state.Palette, m.theme, width), width)
 	case m.state.QuestionModal.Active && !m.state.Gate.Active:
 		return truncLines(m.state.QuestionModal.Render(m.theme, width), width)
-	case m.state.Btw.Active:
-		return truncLines(m.state.Btw.Render(m.theme, width), width)
 	}
 	if m.state.MentionOverlay.Active && len(m.state.MentionOverlay.Candidates) > 0 {
 		return truncLines(RenderMentionOverlay(m.state.MentionOverlay.Candidates, m.state.MentionOverlay.Selected, m.theme, width), width)

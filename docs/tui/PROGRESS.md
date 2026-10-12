@@ -271,3 +271,32 @@ Verification: build, vet, full suite, race (tui/engine/importer),
 lint (0 issues), PTY e2e green. Perf (ttff medians): first paint
 5.72 ms (baseline 5.7), idle RSS 23.35 MB (22.9) — no regression
 over 10%.
+
+## 2026-10-12 — U7: the wiring audit, the removals, the recorded session
+
+- internal/tui/wiring_u7.go: the element registry (driver, absent
+  rule, status, proof test) — the single source of truth.
+  TestWiringAudit fails the build on an element with no event, a
+  DEFER without a reason, a proof test that does not exist, or any
+  drift from WORKBENCH.md's wiring table. Current: 30 elements
+  (28 HAVE, 2 DEFER), table in sync.
+- Removals (all with reasons, printed by TestWiringRemovalsPrinted
+  and recorded in WORKBENCH.md SECTION 12): /btw (fabricated
+  response, no event source), the swarm renderer (never fed),
+  spinGlyph (dead), State.ShellInputMode (dead), the queue
+  affordance (no queue exists), the Transcript pager row (no
+  implementation). Fabrications fixed rather than removed:
+  /agents (real agent list), /export (writes the real file),
+  /compact (a real engine CmdCompact handler).
+- Evidence: a real Workbench session recorded from the real binary
+  in a PTY (docs/tui/review/workbench_session_100x27.ansi + plain
+  twin; mock provider labelled in the file); headless parity
+  proven by TestHeadlessSameEventVocabulary (exec --jsonl emits
+  the same vocabulary over the same seam).
+- The audit's proof-coverage requirement forced two new tests:
+  TestTraceNoticeRow (notice rows absent/present) and
+  TestDiffViewerFromRealDiff (the viewer opens on a real
+  working-tree diff, absent on a clean tree).
+- Gates: build, vet, full suite, race, lint (0 issues), PTY e2e
+  green. Perf (ttff medians): first paint 6.23 ms (baseline 5.7),
+  idle RSS 23.4 MB (22.9) — inside the rig's noise band.

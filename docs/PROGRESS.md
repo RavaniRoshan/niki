@@ -971,3 +971,21 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
   green; perf first paint 5.72 ms (baseline 5.7), idle RSS 23.35
   MB (22.9) — no regression. Docs: WORKBENCH.md SECTION 3/6/11,
   ledgers.
+
+## 2026-10-12 — Workbench U7: wiring audit, dead-chrome removals, recorded session
+
+- internal/tui/wiring_u7.go is the element registry; the audit
+  test fails the build on an element with no event, a DEFER without
+  a reason, a missing proof test, or drift from the WORKBENCH.md
+  wiring table (30 elements, 28 HAVE / 2 DEFER, in sync).
+- Removed with reasons (WORKBENCH.md SECTION 12): /btw, the swarm
+  renderer, spinGlyph, State.ShellInputMode, the queue affordance,
+  the transcript-pager row. Fixed fabrications: /agents (real
+  count), /export (real file write), /compact (real engine
+  handler).
+- Recorded a real Workbench session (real binary, real PTY, mock
+  provider labelled) into docs/tui/review/; headless parity proven
+  over the same seam (exec --jsonl vocabulary test).
+- Gates: build, vet, full suite, race, lint (0 issues), PTY e2e
+  green; perf first paint 6.23 ms (baseline 5.7), idle RSS 23.4 MB
+  (22.9) — no regression over 10%.

@@ -20,5 +20,5 @@ queued 3. run go te... done edit  internal/auth/limit.go  COST
                              go.mod unchanged - tamper...                  
                        not verified  load behavior: no...                  
                        branch main  $0.0008                                
-> > steer with enter - queue with ctrl+enter                  mode act - ctrl+k
+> > steer with enter                                          mode act - ctrl+k
 [o] working - claude-sonnet - esc interrupt               enter accept - d diff

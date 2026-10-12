@@ -16,5 +16,5 @@ PLAN               thought · ctrl+o expand
                        token_test.go:81: session id changed 
                                                             
                    contract  ○ 0 of 5                       
-> > steer with enter · queue with ctrl+   mode act · ctrl+k
+> > steer with enter                      mode act · ctrl+k
 [◑] working · claude-sonnet · checkpoints 1 · esc interrupt

@@ -22,5 +22,5 @@ failed logins
     next  run go test ./internal/auth
 contract  ○ 0 of 5
 ────────────────────────────────────────────────────────────
-> steer with enter · queue with ctrl+enter               
+> steer with enter                                       
 ctrl+c stop · esc pause · ctrl+o expand · ctx 4%

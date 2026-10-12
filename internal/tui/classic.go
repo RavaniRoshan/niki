@@ -357,7 +357,7 @@ func (m AppModel) classicPlaceholder() string {
 	case m.state.QuestionModal.Active || m.state.Gate.Active:
 		return "answer the question above, or steer"
 	case m.state.Busy:
-		return "steer with enter " + sep() + " queue with ctrl+enter"
+		return "steer with enter"
 	default:
 		return "Describe a change, or ask a question"
 	}

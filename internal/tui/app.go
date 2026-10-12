@@ -947,14 +947,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		if m.state.Btw.Active {
-			closed := m.state.Btw.HandleKey(msg)
-			if closed {
-				m.renderLive()
-			}
-			return m, nil
-		}
-
 		if m.state.SessionPicker.Active {
 			switch msg.String() {
 			case "ctrl+s", "esc":
@@ -1897,7 +1889,18 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 			m.history.Append("system", fmt.Sprintf("Current thinking effort: %s. Usage: /thinking [off | low | medium | high]", cur))
 		}
 	case input == "/agents":
-		m.history.Append("system", "Subagents: 0 active child agents in root session.")
+		// U7: the real agent list from the real subagent events;
+		// never a hardcoded count.
+		if len(m.state.Agents) == 0 {
+			m.history.Append("system", "agents: none (the rail shows subagents when the engine spawns them)")
+			break
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "agents: %d\n", len(m.state.Agents))
+		for _, a := range m.state.Agents {
+			b.WriteString("  " + a.ID + " " + sep() + " " + a.Status + "\n")
+		}
+		m.history.Append("system", strings.TrimRight(b.String(), "\n"))
 	case input == "/diff" || strings.HasPrefix(input, "/diff"):
 		dir := m.state.Directory
 		if dir == "" {
@@ -1915,19 +1918,6 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 				m.state.DiffViewer.Active = true
 				m.renderLive()
 			}
-		}
-	case strings.HasPrefix(input, "/btw"):
-		query := strings.TrimSpace(strings.TrimPrefix(input, "/btw"))
-		if query == "" {
-			m.history.Append("system", "Usage: /btw <query> — ask a quick question without context pollution.")
-		} else {
-			m.state.Btw = BtwState{
-				Active:   true,
-				Query:    query,
-				Response: fmt.Sprintf("Quick context for '%s': verified in docs/PACK.md, internal/tui, and internal/engine.", query),
-				Busy:     false,
-			}
-			m.renderLive()
 		}
 	case input == "/undo":
 		// E4: real engine command; the engine's answer arrives as an
@@ -2040,6 +2030,9 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case input == "/editor":
 		return m, launchEditorCmd(m.composer.Input.Value())
 	case strings.HasPrefix(input, "/export"):
+		// U7: a real file with the real transcript, or a real
+		// failure — never a confirmation for a file that was not
+		// written.
 		format := "markdown"
 		parts := strings.Fields(input)
 		if len(parts) > 1 && strings.ToLower(parts[1]) == "html" {
@@ -2050,7 +2043,43 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 			ext = "html"
 		}
 		dest := fmt.Sprintf("session-%s.%s", m.state.SessionID, ext)
-		m.history.Append("system", fmt.Sprintf("✓ Export format %s ready for session %s (file: %s)", format, m.state.SessionID, dest))
+		var b strings.Builder
+		if format == "html" {
+			b.WriteString("<h1>session " + m.state.SessionID + "</h1>\n<pre>\n")
+		}
+		for _, c := range m.history.Cells {
+			line := c.Text
+			switch {
+			case c.Kind == "tool":
+				line = "- [" + c.State + "] " + c.Verb + " " + c.Target
+				if c.Result != "" {
+					line += " (" + c.Result + ")"
+				}
+			case c.Kind == "diff":
+				for _, l := range c.Diff {
+					b.WriteString(line + l + "\n")
+					if format == "html" {
+						b.WriteString("  ")
+					}
+				}
+				continue
+			case c.Role == "user":
+				line = "> " + line
+			case c.Role == "assistant":
+				// streamed prose as-is
+			default:
+				line = "- " + line
+			}
+			b.WriteString(line + "\n")
+		}
+		if format == "html" {
+			b.WriteString("</pre>\n")
+		}
+		if err := os.WriteFile(dest, []byte(b.String()), 0o600); err != nil {
+			m.history.Append("error", "Export failed: "+err.Error())
+			return m, nil
+		}
+		m.history.Append("system", fmt.Sprintf("exported %d row(s) to %s (%s)", len(m.history.Cells), dest, format))
 	case strings.HasPrefix(input, "/explain ") || input == "/explain":
 		question := strings.TrimSpace(strings.TrimPrefix(input, "/explain"))
 		dir := m.state.Directory
@@ -2275,7 +2304,7 @@ func (m AppModel) View() tea.View {
 	// Classic renders the gate inline (the classic gate block); the
 	// other overlays are layout-independent chrome.
 	if m.state.SessionPicker.Active || m.state.DiffViewer.Active ||
-		m.state.Palette.Open || m.state.MentionOverlay.Active || m.state.Btw.Active {
+		m.state.Palette.Open || m.state.MentionOverlay.Active {
 		return m.ledgerView()
 	}
 	return m.classicView()
@@ -2311,9 +2340,6 @@ func (m AppModel) ledgerView() tea.View {
 	if m.state.MentionOverlay.Active && len(m.state.MentionOverlay.Candidates) > 0 && !m.state.SessionPicker.Active {
 		overlay := RenderMentionOverlay(m.state.MentionOverlay.Candidates, m.state.MentionOverlay.Selected, m.theme, m.state.Width)
 		composerBlock = lipgloss.JoinVertical(lipgloss.Left, overlay, composerBlock)
-	}
-	if m.state.Btw.Active {
-		composerBlock = lipgloss.JoinVertical(lipgloss.Left, m.state.Btw.Render(m.theme, m.state.Width), composerBlock)
 	}
 
 	var body string
@@ -2374,14 +2400,6 @@ func (m AppModel) activityView() string {
 	actText := m.theme.ActivityText.Render(displayText)
 	hint := m.theme.ActivityHint.Render(" (esc to interrupt)")
 	return "  " + glyph + actText + hint
-}
-
-// spinGlyph is the activity-sweep frame: ◐◓◑◒ at 120ms while working
-// (visual spec cadence), a static ◐ under reduced motion, ASCII
-// -\|/ on dumb terminals. Every frame is one cell wide: the line
-// never shifts layout.
-func spinGlyph(frame int, reduced, ascii bool) string {
-	return SpinGlyphWithStyle(SpinnerSweep, frame, reduced, ascii)
 }
 
 func (m AppModel) composerView() string {

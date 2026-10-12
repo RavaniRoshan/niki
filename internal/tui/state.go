@@ -73,7 +73,6 @@ type State struct {
 	PermissionMode string
 	Mode           string
 	ThinkingEffort string
-	ShellInputMode bool
 	GitBranch      string
 	GitSubmods     []git.Submodule
 
@@ -93,8 +92,6 @@ type State struct {
 	ExpandToolOutput bool
 	QuestionModal    QuestionState
 	DiffViewer       DiffViewerState
-	Btw              BtwState
-	SwarmAgents      []SwarmAgent
 	SessionPicker    SessionPickerState
 	MentionOverlay   MentionOverlayState
 

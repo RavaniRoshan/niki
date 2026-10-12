@@ -22,5 +22,5 @@
     [38;2;125;139;166mnext  run go test ./internal/auth[m
 [38;2;125;139;166mcontract[m  [38;2;125;139;166m○[m 0 of 5
 ────────────────────────────────────────────────────────────
-[1;38;2;241;245;249m> [m[7;37ms[m[38;2;118;133;159mteer with enter · queue with ctrl+enter[m[38;2;118;133;159m               [m
+[1;38;2;241;245;249m> [m[7;37ms[m[38;2;118;133;159mteer with enter[m[38;2;118;133;159m                                       [m
 [38;2;125;139;166mctrl+c stop · esc pause · ctrl+o expand · ctx 4%[m

@@ -33,5 +33,5 @@ done R5  No new dependency
 not verified  load behavior: no check is configured for it
 branch main  $0.0008
 ------------------------------------------------------------
-> steer with enter - queue with ctrl+enter               
+> steer with enter                                       
 enter accept - d diff - ctx 4%

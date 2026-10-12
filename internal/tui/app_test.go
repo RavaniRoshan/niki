@@ -177,7 +177,7 @@ func TestSpinGlyphWidthStable(t *testing.T) {
 	seen := map[string]bool{}
 	for f := 0; f < 8; f++ {
 		for _, ascii := range []bool{false, true} {
-			g := spinGlyph(f, false, ascii)
+			g := SpinGlyphWithStyle(SpinnerSweep, f, false, ascii)
 			if len([]rune(g)) != 1 {
 				t.Fatalf("frame %d ascii=%v is not one cell: %q", f, ascii, g)
 			}
