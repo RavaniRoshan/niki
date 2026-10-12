@@ -213,3 +213,61 @@ Verification: build, vet, full suite, race (tui+engine), lint
 5.79 ms (baseline 5.7), idle RSS 23.1 MB (22.9) - no regression;
 render flatness unchanged (188us @100 vs 204us @5000); 36 dumps
 in docs/tui/review/.
+
+## 2026-10-12 — U5: modes/approvals/palette + U6: nikicode import
+
+U5:
+- protocol.EventModeChanged (Mode + PlanActive fields): the engine
+  emits it on CmdSetPermissionMode/CmdSetPlanMode with the mode it
+  actually holds; the TUI applies it as the authoritative mode
+  state and the composer chip renders plan|act|yolo from it (the
+  local Op echo remains the trace row for the user's own action).
+- Approvals: the engine's prompt handler (the real
+  ask_user_question path) is now proven by test — it emits
+  question_prompted with the safe option index and blocks until
+  the frontend answers via CmdAnswerQuestion. The workbench
+  approvals popup renders from it, defaults focus to the
+  constraint-keeping option (marked "(default)"), and is absent
+  when nothing is pending.
+- One registry: a test walks the palette catalog, the slash
+  registry and the key registry — every palette slash command is a
+  registered command that dispatches, and /help lists every
+  registered command and advertised key. It found THREE DEAD
+  COMMANDS: /status (palette), /new and /resume (help) —
+  advertised with no dispatcher. All three now dispatch from real
+  state: /status renders the real session state (model, mode,
+  context, cost, budget, plan/agents/checkpoints counts),
+  /resume opens the real session picker, /new clears the
+  transcript and truthfully notes the engine keeps its session id.
+- Composer width fix found by the chip test: the palette hint was
+  silently dropped at 100 columns (the input width left no room);
+  the input now reserves prompt+hint+spacing, and all 36 workbench
+  goldens were regenerated with the diff printed (one line each:
+  the hint appears).
+
+U6 — `nikicode import --from claude-code|codex`
+  (internal/importer + cmd/nikicode/import_cmd.go):
+- Detect/Preview/Apply/Undo. Preview is the command's default;
+  --yes applies; --undo reverses from the journal.
+- Map, never copy: CLAUDE.md maps to an AGENTS.md note (their
+  wording never reproduced — asserted), skills into
+  .agents/skills/, commands into .nikicode/commands/, known
+  settings keys and MCP servers into nikicode.toml; Codex's global
+  AGENTS.md into ~/.nikicode/AGENTS.md. Unknown keys are skipped
+  WITH a report (env, sandbox_mode, ... — asserted in tests).
+- Safety: existing NikiCode files are never overwritten — merges
+  keep the user's section, replacements are backed up, and undo
+  restores them byte-identical; writes are temp+rename; every
+  import is journalled under .nikicode/.
+- First run: the first-run guidance carries the import offer when
+  a Codex or Claude Code project is detected (cmd test proves the
+  offer and its absence on a plain repo).
+- Tests: fixtures for both sources; preview-writes-nothing;
+  apply-then-undo (upstream files untouched); no-verbatim-wording;
+  unknown-key reports; overwrite protection + backup restore;
+  codex global mapping.
+
+Verification: build, vet, full suite, race (tui/engine/importer),
+lint (0 issues), PTY e2e green. Perf (ttff medians): first paint
+5.72 ms (baseline 5.7), idle RSS 23.35 MB (22.9) — no regression
+over 10%.

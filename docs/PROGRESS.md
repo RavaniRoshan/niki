@@ -946,3 +946,28 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
   green; perf first paint 5.79 ms (baseline 5.7), idle RSS 23.1
   MB (22.9) - no regression. Docs: WORKBENCH.md SECTION 3/6/11,
   ledgers, docs/tui/review/.
+
+## 2026-10-12 — Workbench U5 (modes/approvals/palette) + U6 (nikicode import)
+
+- protocol.EventModeChanged: the engine emits real mode switches
+  (permission mode + plan flag); the TUI's mode state and composer
+  chip (plan|act|yolo) render from the event.
+- Approvals popup: the engine's prompt handler is now proven to
+  emit question_prompted with the safe option index and block for
+  the frontend's answer; the popup focuses the constraint-keeping
+  option and is absent when nothing is pending.
+- One registry: a test walks palette/slash/keys and found THREE
+  DEAD COMMANDS (/status in the palette; /new, /resume in help).
+  All three now dispatch from real state.
+- nikicode import (internal/importer + `nikicode import`
+  subcommand): preview by default, --yes applies, --undo reverses
+  from a journal. Map-never-copy (CLAUDE.md -> an AGENTS.md note,
+  never their wording), skills/commands into NikiCode's roots,
+  known settings + MCP servers into nikicode.toml, unknown keys
+  skipped with a report, backup-before-replace, byte-identical
+  undo. First-run guidance offers it when a Codex/Claude project
+  is detected.
+- Gates: build, vet, full suite, race, lint (0 issues), PTY e2e
+  green; perf first paint 5.72 ms (baseline 5.7), idle RSS 23.35
+  MB (22.9) — no regression. Docs: WORKBENCH.md SECTION 3/6/11,
+  ledgers.

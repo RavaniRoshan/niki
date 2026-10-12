@@ -23,5 +23,5 @@ queued 3. run go test .... done edit  internal/auth/limit.go                COST
                                  go.mod unchanged - tamper check clean                       
                            not verified  load behavior: no check is conf...                  
                            branch main  $0.0008                                              
-> > steer with enter - queue with ctrl+enter                                       
+> > steer with enter - queue with ctrl+enter                                      mode act - ctrl+k
 [o] working - claude-sonnet - esc interrupt                                   enter accept - d diff

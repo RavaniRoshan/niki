@@ -23,5 +23,5 @@ queued 3. run go test ....     64 lines                                     COST
                            [y] allow once                                                    
                            [v] view the diff                                                 
                            contract  queued 0 of 5                                           
-> > answer the question above, or steer                                            
+> > answer the question above, or steer                                           mode act - ctrl+k
 [o] working - claude-sonnet - esc interrupt

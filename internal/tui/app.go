@@ -470,6 +470,17 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 		if evt.Text != "" {
 			m.state.Checkpoints = append(m.state.Checkpoints, CheckpointRow{Label: evt.Text})
 		}
+	case protocol.EventModeChanged:
+		// U5: the mode state is authoritative from the engine's
+		// event; the mode chip and the hint state render from it.
+		if evt.Mode != "" {
+			m.state.PermissionMode = evt.Mode
+		}
+		if evt.PlanActive {
+			m.state.Mode = "plan"
+		} else if m.state.Mode == "plan" {
+			m.state.Mode = "agent"
+		}
 	case protocol.EventTurnStarted:
 		m.state.Busy = true
 		m.state.Activity = "thinking…"
@@ -1985,6 +1996,42 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 		}
 	case input == "/reload":
 		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
+	case input == "/status":
+		// U5: every field is real session state; nothing is probed
+		// or invented. Unknown instruments read "—".
+		var b strings.Builder
+		b.WriteString("session " + orDash(m.state.SessionID) + "\n")
+		b.WriteString("model " + m.wbModel() + " " + sep() + " mode " + m.wbMode() + " " + sep() + " approvals " + permissionShort(m.state.PermissionMode) + "\n")
+		if m.state.UsedTokens > 0 && m.state.MaxTokens > 0 {
+			pct := float64(m.state.UsedTokens) / float64(m.state.MaxTokens) * 100
+			fmt.Fprintf(&b, "context %s / %s (%.0f%%) ", formatTokens(m.state.UsedTokens), formatTokens(m.state.MaxTokens), pct)
+		} else {
+			b.WriteString("context " + dash() + " ")
+		}
+		b.WriteString(sep() + " cost " + m.wbSessionCost() + "\n")
+		if m.state.BudgetState != "" {
+			fmt.Fprintf(&b, "budget %.0f%% %s\n", m.state.BudgetPct*100, strings.ToUpper(m.state.BudgetState))
+		}
+		fmt.Fprintf(&b, "plan steps %d %s ", len(m.state.Plan), sep())
+		fmt.Fprintf(&b, "agents %d %s ", len(m.state.Agents), sep())
+		fmt.Fprintf(&b, "checkpoints %d", len(m.state.Checkpoints))
+		m.history.Append("system", b.String())
+	case input == "/new":
+		// Fresh working transcript. The engine keeps its session id
+		// (no new-session op exists), and the row says so.
+		m.history.Cells = nil
+		m.history.Committed = 0
+		m.state.Plan = nil
+		m.state.Contract = nil
+		m.state.Verdict = VerdictState{}
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdStartSession}
+		m.history.Append("system", fmt.Sprintf("new session: transcript cleared %s session %s", sep(), orDash(m.state.SessionID)))
+	case input == "/resume":
+		// The real session picker (the same flow /sessions opens).
+		m.state.SessionPicker.Active = true
+		m.state.SessionPicker.Query = ""
+		m.state.SessionPicker.Selected = 0
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdListSessions}
 	case input == "/sessions":
 		m.state.SessionPicker.Active = true
 		m.state.SessionPicker.Query = ""

@@ -23,5 +23,5 @@ PLAN                       ✓ read  internal/auth/token.go                   CO
                            [y] allow once                                                    
                            [v] view the diff                                                 
                            contract  ○ 0 of 5                                                
-> > answer the question above, or steer                                            
+> > answer the question above, or steer                                           mode act · ctrl+k
 [◑] working · claude-sonnet · esc interrupt

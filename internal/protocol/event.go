@@ -53,6 +53,11 @@ const (
 	// where the snapshot is taken. The right rail and the status
 	// count render only from these events.
 	EventCheckpointCreated EventType = "checkpoint_created"
+	// EventModeChanged reports a real mode switch (U5): the engine
+	// emits it when a mode command (or a config reload) changes the
+	// permission mode or plan mode. The frontend applies it as the
+	// authoritative mode state; the mode chip renders from it.
+	EventModeChanged EventType = "mode_changed"
 )
 
 // VerificationInfo reports one verifier attempt (L3).
@@ -169,6 +174,15 @@ type EngineEvent struct {
 	// by the engine at the patching tool's completion (U2/E2).
 	// Empty when the tool changed no bytes.
 	Diff string `json:"diff,omitempty"`
+
+	// Mode is the permission mode after a mode switch (U5):
+	// readonly | workspace_write | full_access | manual. Set on
+	// mode_changed events only.
+	Mode string `json:"mode,omitempty"`
+	// PlanActive reports plan mode after a mode switch (U5);
+	// together with Mode it names the workbench mode
+	// (plan | act | yolo). Set on mode_changed events only.
+	PlanActive bool `json:"plan_active,omitempty"`
 }
 
 type Usage = provider.Usage

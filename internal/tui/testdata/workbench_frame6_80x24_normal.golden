@@ -20,5 +20,5 @@ PLAN                   ✓ read  internal/auth/token.go     CONTEXT
                            token_test.go:81: session id c                  
                                                                            
                        contract  ○ 0 of 5                                  
-> > steer with enter · queue with ctrl+enter                   
+> > steer with enter · queue with ctrl+enter                  mode act · ctrl+k
 [◑] working · claude-sonnet · checkpoints 1 · esc interrupt

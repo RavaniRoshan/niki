@@ -16,5 +16,5 @@ PLAN                   64 lines
                          go.mod unchanged · tamper check cl…
                    not verified  load behavior: no check is…
                    branch main  $0.0008                     
-> > steer with enter · queue with ctrl+ente
+> > steer with enter · queue with ctrl+   mode act · ctrl+k
 [◑] working · claude-sonnet · esc interrupt

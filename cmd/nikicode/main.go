@@ -24,6 +24,7 @@ import (
 	"github.com/RavaniRoshan/niki/internal/engine"
 	"github.com/RavaniRoshan/niki/internal/firstrun"
 	"github.com/RavaniRoshan/niki/internal/git"
+	"github.com/RavaniRoshan/niki/internal/importer"
 	"github.com/RavaniRoshan/niki/internal/intent"
 	"github.com/RavaniRoshan/niki/internal/last"
 	"github.com/RavaniRoshan/niki/internal/logx"
@@ -149,7 +150,25 @@ func providerHost(rawURL string) string {
 // firstRunMessage turns the ordered first-run detection result into the
 // first-turn guidance shown when no model provider is configured.
 func firstRunMessage(d firstrun.Detection) string {
-	return "no AI model configured. " + d.Offer
+	return "no AI model configured. " + d.Offer + importOffer()
+}
+
+// importOffer names the import path when the current project was set
+// up with Codex or Claude Code (U6): the first-run guidance carries
+// it so an arriving user can bring their setup. Nothing is imported
+// without an explicit `nikicode import` run.
+func importOffer() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	switch importer.Detect(cwd) {
+	case importer.SourceClaudeCode:
+		return " A Claude Code project was detected: `nikicode import --from claude-code` maps its setup (instructions, skills, commands, settings, MCP servers) into NikiCode's files — preview first, reversible, never overwritten without a backup."
+	case importer.SourceCodex:
+		return " A Codex project was detected: `nikicode import --from codex` maps its setup into NikiCode's files — preview first, reversible, never overwritten without a backup."
+	}
+	return ""
 }
 
 // budgetSummary renders the terminal budget event for --github-check.
@@ -866,6 +885,7 @@ func main() {
 	rootCmd.AddCommand(newHelpCommand())
 	rootCmd.AddCommand(newExamplesCommand())
 	rootCmd.AddCommand(newDemoCommand())
+	rootCmd.AddCommand(newImportCommand())
 
 	// `nikicode do` routes one natural-language instruction to a recipe,
 	// an explanation, or a git workflow — deterministically, with no

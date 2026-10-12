@@ -431,12 +431,12 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 				e.runner.Perm.PlanMode = false
 			}
 		}
+		mode := cmd.Mode
+		planActive := e.runner.Perm != nil && e.runner.Perm.PlanMode
 		e.mu.Unlock()
-		e.emit(protocol.EngineEvent{
-			Type:      protocol.EventConfigReloaded,
-			Timestamp: time.Now(),
-			Text:      fmt.Sprintf("Permission mode set to %s", cmd.Mode),
-		})
+		// U5: the mode switch is its own event — the frontend's
+		// mode state and chip render from it.
+		e.emitModeChanged(mode, planActive)
 	case protocol.CmdSetPlanMode:
 		e.mu.Lock()
 		if e.runner.Perm != nil {
@@ -446,12 +446,13 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 				_ = e.runner.Perm.ExitPlanMode(true)
 			}
 		}
+		planActive := e.runner.Perm != nil && e.runner.Perm.PlanMode
+		mode := string(permissions.ModeReadOnly)
+		if !planActive && e.runner.Perm != nil {
+			mode = string(e.runner.Perm.Mode)
+		}
 		e.mu.Unlock()
-		e.emit(protocol.EngineEvent{
-			Type:      protocol.EventConfigReloaded,
-			Timestamp: time.Now(),
-			Text:      fmt.Sprintf("Plan mode set to %s", cmd.Mode),
-		})
+		e.emitModeChanged(mode, planActive)
 	case protocol.CmdUndo:
 		e.mu.Lock()
 		running := e.turnRunning
@@ -595,6 +596,17 @@ func (e *Engine) handleCommand(cmd protocol.EngineCommand) {
 			}
 		}
 	}
+}
+
+// emitModeChanged publishes a real mode switch (U5): the permission
+// mode and the plan-mode flag the engine actually holds now.
+func (e *Engine) emitModeChanged(mode string, planActive bool) {
+	e.emit(protocol.EngineEvent{
+		Type:       protocol.EventModeChanged,
+		Timestamp:  time.Now(),
+		Mode:       mode,
+		PlanActive: planActive,
+	})
 }
 
 // promptHandler is the ask_user_question tool's hook (C3): it emits

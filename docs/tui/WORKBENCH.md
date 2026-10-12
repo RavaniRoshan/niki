@@ -104,12 +104,12 @@ minimal seam additions in §6, proposed, not yet built), **DEFER**
 |---|---|---|---|---|
 | input | local editor state (the real textarea) | always | never | HAVE |
 | queue | no queue state exists in the TUI and no `QueueChanged` event exists; the classic "queue with ctrl+enter" hint was aspirational | queued · sent | ABSENT (the row does not exist) | DEFER |
-| mode chip | `state.Mode`/`PermissionMode` + the registry's palette hint | always | never | HAVE |
+| mode chip | `state.Mode`/`PermissionMode`, now authoritative from the engine's `mode_changed` events (U5; the Op echo stays as the local action's trace row) | always | never | HAVE |
 
 ### Popups (over the centre)
 | Element | Driver | States | Absent rule | Status |
 |---|---|---|---|---|
-| Approvals (gate) | `question_prompted` (`Questions`, `Safe` index) | pending · answered | ABSENT when nothing pending | HAVE (C3; safest option focused) |
+| Approvals (gate) | `question_prompted` (`Questions`, `Safe` index) — the engine's real approval/question emitter (the prompt handler blocks the turn for the answer) | pending · answered | ABSENT when nothing pending | HAVE (C3/U5; safest option focused, emitter proven) |
 | Command palette | one registry: `DefaultPaletteCatalog` + `CoreSlashCommands` + `KeyBindings` | open · closed | ABSENT when closed | HAVE |
 | Diff viewer | `EngineEvent.Diff` accumulation (E2); `/diff` keeps its labeled working-tree read | per patch | ABSENT when no patch exists | EXTEND (E2) |
 | Agent detail | subagent child stream — intentionally not forwarded to the parent (`engine/subagent.go`) | — | ABSENT (cannot fabricate a stream) | DEFER |
@@ -208,10 +208,12 @@ reader tolerates their absence (schema version stays 1).
   string` on the subagent events; without it the Agents rail renders
   the real id only. E4 also lists what the child stream would need
   for the Agent detail panel — out of scope for U1–U4, DEFER.
-- **E5 — Model/mode events (optional, later).** `ModelChanged` /
-  `ModeChanged` would replace today's Op-echo header updates. Not
-  needed to build; recorded so the echo is not mistaken for an
-  event.
+- **E5 — Model/mode events.** `ModeChanged` **BUILT (U5)**: the
+  engine emits it on the permission-mode and plan-mode commands
+  with the mode it actually holds, and the frontend's mode state
+  and chip render from it. `ModelChanged` is still deferred —
+  the model label keeps its Op echo, recorded so the echo is not
+  mistaken for an event.
 - **E6 — Reasoning deltas (new, U2).** `EventReasoningDelta` with
   `Text` carries provider reasoning summaries. The event exists and
   the TUI renders it (collapsed by default, ctrl+o expands), but NO
@@ -383,6 +385,48 @@ U3 (rails + mascot) is **built and tested**:
   the idle/working body at 1.16:1. Monochrome now drops hue,
   not luminance; all four body colors clear 3:1 in every
   theme variant SelectTheme returns.
+
+U5 (modes/approvals/palette) is **built and tested**:
+- `mode_changed` events: the engine emits them on the
+  permission-mode and plan-mode commands carrying the mode it
+  actually holds; the frontend applies them as the
+  authoritative mode state and the composer chip renders
+  plan | act | yolo from them.
+- The approvals popup: its source event is proven real — the
+  engine's prompt handler emits `question_prompted` with the
+  safe option index and blocks until the frontend answers
+  through CmdAnswerQuestion. The popup defaults focus to the
+  constraint-keeping option and is absent when nothing is
+  pending (workbench-level test).
+- One registry: a test proves every palette slash command is
+  a registered slash command that dispatches, and the /help
+  output lists every registered command and every advertised
+  key. The test found three DEAD commands (palette /status,
+  help /new and /resume — advertised with no dispatcher);
+  all three now dispatch from real state (/status renders the
+  real session state, /resume opens the real session picker,
+  /new clears the transcript and says the session id is
+  unchanged).
+
+U6 (`nikicode import`) is **built and tested**:
+- internal/importer: Detect (CLAUDE.md/.claude -> claude-code;
+  .codex or CODEX_HOME -> codex), Preview (map, never copy),
+  Apply (backup-before-replace, temp+rename writes, journal),
+  Undo (created files removed, backups restored).
+- Mappings: CLAUDE.md -> an AGENTS.md mapping NOTE (their
+  wording is never reproduced — proven by a test), skills
+  into .agents/skills/, commands into .nikicode/commands/,
+  known settings keys into nikicode.toml, MCP servers into
+  [mcp.servers.*]. Codex's global AGENTS.md maps to
+  ~/.nikicode/AGENTS.md; its config's known keys map the same
+  way. Unknown keys are skipped WITH a report, and the report
+  is asserted in tests. Existing NikiCode files are never
+  overwritten: the merge keeps the user's value, backs up
+  anything replaced, and undo restores it byte-identical.
+- The command previews by default and applies only with
+  --yes; first-run guidance carries the import offer when a
+  Codex or Claude Code project is detected (proven in
+  cmd/nikicode tests).
 
 Not yet built (later slices or deferrals): the diff VIEWER fed
 from patch events (E2's diff block is built; the viewer still

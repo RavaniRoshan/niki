@@ -454,9 +454,11 @@ func (m *AppModel) workbenchSyncViewport() {
 		h = 1
 	}
 	m.viewport.SetHeight(h)
-	// Leave room on the composer row for the palette hint.
-	if m.state.Width > 30 {
-		m.composer.Input.SetWidth(m.state.Width - 22)
+	// Leave room on the composer row for the palette hint: the
+	// input renders padded to its set width, so reserve prompt(2)
+	// + hint(~17) + spacing.
+	if m.state.Width > 40 {
+		m.composer.Input.SetWidth(m.state.Width - 26)
 	} else {
 		m.composer.Input.SetWidth(m.state.Width - 6)
 	}

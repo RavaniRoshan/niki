@@ -20,5 +20,5 @@ PLAN                       64 lines                       CONTEXT
                              go.mod unchanged · tamper c…                  
                        not verified  load behavior: no c…                  
                        branch main  $0.0008                                
-> > steer with enter · queue with ctrl+enter                   
+> > steer with enter · queue with ctrl+enter                  mode act · ctrl+k
 [◑] working · claude-sonnet · esc interrupt               enter accept · d diff

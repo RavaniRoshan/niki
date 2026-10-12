@@ -16,5 +16,5 @@ queued 3. run g... -----------------------------------------
                          go.mod unchanged - tamper check ...
                    not verified  load behavior: no check ...
                    branch main  $0.0008                     
-> > steer with enter - queue with ctrl+ente
+> > steer with enter - queue with ctrl+   mode act - ctrl+k
 [o] working - claude-sonnet - esc interrupt

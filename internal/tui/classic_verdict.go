@@ -273,6 +273,14 @@ func orBranch(b string) string {
 	return b
 }
 
+// orDash names a value or the unknown marker (P22).
+func orDash(s string) string {
+	if s == "" {
+		return dash()
+	}
+	return s
+}
+
 func fmtCost(c float64) string {
 	return fmt.Sprintf("$%.4f", c)
 }
