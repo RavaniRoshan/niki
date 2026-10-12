@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/RavaniRoshan/niki/internal/protocol"
+	"github.com/RavaniRoshan/niki/internal/secrets"
 )
 
 func TestPaletteCatalogAndFilter(t *testing.T) {
@@ -77,8 +79,31 @@ func TestPaletteSelectSpinnerStyle(t *testing.T) {
 	}
 }
 
+// memBackend is an in-memory secrets.Backend for hermetic tests.
+type memBackend struct{ store map[string]string }
+
+func (b *memBackend) Set(service, account, key string) error {
+	b.store[service+"/"+account] = key
+	return nil
+}
+
+func (b *memBackend) Get(service, account string) (string, error) {
+	if v, ok := b.store[service+"/"+account]; ok {
+		return v, nil
+	}
+	return "", errors.New("secret not found")
+}
+
+func (b *memBackend) Delete(service, account string) error {
+	delete(b.store, service+"/"+account)
+	return nil
+}
+
 func TestPaletteConnectFlow(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	// The connect command writes the OS keychain; inject a memory
+	// backend so the test never touches (or blocks on) the real one.
+	secrets.UseBackendForTest(t, &memBackend{store: map[string]string{}})
 	cmdChan := make(chan protocol.EngineCommand, 8)
 	eventChan := make(chan protocol.EngineEvent, 8)
 	m := NewAppModel(cmdChan, eventChan)
