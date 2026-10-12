@@ -452,6 +452,7 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 		}
 		cost := routing.CalculateCost(m.state.ModelName, *evt.Usage)
 		m.state.TotalCost += cost
+		m.state.TurnCost += cost
 	}
 	switch evt.Type {
 	case protocol.EventAssistantTextDelta:
@@ -464,6 +465,7 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 		m.state.BudgetState = ""
 		m.state.BudgetPct = 0
 		m.state.TurnOutcome = ""
+		m.state.TurnCost = 0
 		m.state.Contract = evt.Contract
 		m.state.Verdict = VerdictState{}
 	case protocol.EventBudgetGauge:
@@ -591,7 +593,20 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 		m.state.Plan = evt.Plan
 	case protocol.EventSubagentStarted:
 		m.state.Activity = "subagent " + evt.Text
+		// U1: the left rail's Agents list comes only from these
+		// lifecycle events; the engine's agent id is the only
+		// identity they carry.
+		m.state.Agents = append(m.state.Agents, AgentRow{ID: evt.Text, Status: "running"})
 	case protocol.EventSubagentCompleted, protocol.EventSubagentFailed:
+		status := "done"
+		if evt.Type == protocol.EventSubagentFailed {
+			status = "failed"
+		}
+		for i := range m.state.Agents {
+			if m.state.Agents[i].ID == evt.Text {
+				m.state.Agents[i].Status = status
+			}
+		}
 		if m.state.Activity != "" && strings.HasPrefix(m.state.Activity, "subagent ") {
 			m.state.Activity = ""
 		}
@@ -740,18 +755,32 @@ func (p *renderPacer) force() {
 // renderLive repaints the viewport from the
 // live region only. Committed history is never
 // re-rendered here (U9/U10). Row rendering is
-// layout-specific: classic rows or ledger cells.
+// layout-specific: classic rows, workbench
+// rows at the centre-column width, or ledger
+// cells.
 func (m *AppModel) renderLive() {
 	cells := m.history.Live()
 	if !m.state.Inline {
 		cells = m.history.Cells
 	}
-	if m.state.Layout == "classic" {
+	switch m.state.Layout {
+	case "classic":
 		m.viewport.SetContent(m.classicTranscript(cells))
-	} else {
+	case "workbench":
+		// The centre column is narrower than the screen: rows are
+		// laid out at the centre width so right-aligned results
+		// and evidence land inside the column, never clipped.
+		_, centreW, _ := m.wbColumns()
+		mc := *m
+		mc.state.Width = centreW
+		m.viewport.SetContent(mc.classicTranscript(cells))
+	default:
 		m.viewport.SetContent(renderCells(*m, cells))
 	}
 	m.viewport.GotoBottom()
+	// U1: the workbench's centre viewport is sized by the shell's
+	// remaining height (the live area's line count varies).
+	m.workbenchSyncViewport()
 }
 
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1500,7 +1529,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state.Width = msg.Width
 		m.state.Height = msg.Height
 		chrome := 6
-		if m.state.Layout != "ledger" {
+		switch m.state.Layout {
+		case "workbench":
+			chrome = m.workbenchChrome()
+		case "ledger":
+		default:
 			chrome = m.classicChrome()
 		}
 		if msg.Height <= chrome {
@@ -1528,6 +1561,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.SetWidth(msg.Width)
 			m.viewport.SetHeight(chrome)
 		}
+		// U1: the workbench sizes its own centre viewport.
+		m.workbenchSyncViewport()
 
 	case engineEventMsg:
 		evt := protocol.EngineEvent(msg)
@@ -2156,9 +2191,14 @@ func (m AppModel) footerView() string {
 }
 
 // View dispatches to the active layout. Classic is the default
-// (ui.layout = "classic"); ledger is the previous layout behind
-// ui.layout = "ledger". Both are pure functions of state.
+// (ui.layout = "classic", the alias "stream" mapping to it);
+// workbench is the three-rail full-screen layout (U1); ledger is
+// the previous full-screen layout behind ui.layout = "ledger".
+// All are pure functions of state.
 func (m AppModel) View() tea.View {
+	if m.state.Layout == "workbench" {
+		return m.workbenchView()
+	}
 	if m.state.Layout == "ledger" {
 		return m.ledgerView()
 	}

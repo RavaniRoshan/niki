@@ -1,0 +1,27 @@
+  _____    NikiCode  v0.1.0             
+ /  o  \   claude-sonnet - mode act     
+ \_____/   /home/dev/projects/api - main
+----------------------------------------------------------------------------------------------------
+PLAN                           64 lines                                     CONTEXT          
+done 1. Read the handle... done search  "RateLimit" in internal/**            5.1k / 128k    
+running 2. Add the limiter     3 matches                                                     
+queued 3. run go test .... done edit  internal/auth/limit.go                COST             
+                               +62 -4                                         turn $0.0008   
+                             Writing the limiter now, then running the a...   session $0.0008
+                           failed shell  go te......nal/auth                                 
+                           verified  5 of 5 required  -  trust T2 baseli...                  
+                           ------------------------------------------------                  
+                           done R1  Expired tokens are rejected                              
+                                 go test ./... - passed                                      
+                           done R2  Refresh keeps the session id                             
+                                 token_test.go:81 - passed                                   
+                           done R3  Rate limit returns 429                                   
+                                 limit_test.go:12 - passed                                   
+                           done R4  Flag is documented                                       
+                                 README.md - text check                                      
+                           done R5  No new dependency                                        
+                                 go.mod unchanged - tamper check clean                       
+                           not verified  load behavior: no check is conf...                  
+                           branch main  $0.0008                                              
+> > steer with enter - queue with ctrl+enter                                       
+[o] working - claude-sonnet - esc interrupt                                   enter accept - d diff

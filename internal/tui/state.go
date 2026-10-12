@@ -97,6 +97,26 @@ type State struct {
 	SwarmAgents      []SwarmAgent
 	SessionPicker    SessionPickerState
 	MentionOverlay   MentionOverlayState
+
+	// Agents is the live subagent list (U1): one row per real
+	// subagent lifecycle event (started/completed/failed), keyed
+	// by the agent id the engine emits. Empty means the Agents
+	// rail is absent (P21), never a placeholder.
+	Agents []AgentRow
+	// TurnCost accumulates this turn's provider-reported cost
+	// (U1); reset at turn_started, shown only after usage
+	// arrives (P22).
+	TurnCost float64
+}
+
+// AgentRow is one live subagent in the left rail.
+type AgentRow struct {
+	// ID is the engine-emitted agent id (the only identity the
+	// subagent events carry today; names await E4).
+	ID string
+	// Status is "running", "done", or "failed" — set only by the
+	// matching lifecycle event.
+	Status string
 }
 
 // FrameTelemetry records event counters and boot-phase

@@ -1,0 +1,20 @@
+[o] NikiCode v0.1.0  claude-sonnet - act  /home/dev/proje...
+------------------------------------------------------------
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+> > Describe a change, or ask a question   
+[o] idle - claude-sonnet                                   

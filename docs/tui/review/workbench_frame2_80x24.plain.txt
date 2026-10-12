@@ -1,0 +1,24 @@
+  _____    NikiCode  v0.1.0             
+ /  o  \   claude-sonnet - mode act     
+ \_____/   /home/dev/projects/api - main
+--------------------------------------------------------------------------------
+ > harden POST /login: reject       CONTEXT          
+ expired tokens and rate-limit        5.1k / 128k    
+ failed logins                                       
+   Reading the handler and its t... COST             
+   Contract: 5 requirements. Ass...   turn $0.0008   
+                                      session $0.0008
+                                                     
+                                                     
+                                                     
+                                                     
+                                                     
+                                                     
+                                                     
+                                                     
+                                                     
+                                                     
+   - streaming... - esc pause                        
+ contract  ○ 0 of 5                                  
+> > steer with enter - queue with ctrl+enter                   
+[o] working - claude-sonnet - esc interrupt

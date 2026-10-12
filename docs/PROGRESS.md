@@ -848,3 +848,53 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
   ui.layout, docs/ui/review/ (ANSI dumps + validation harness).
 - CI: green through lint, PTY e2e, and the ubuntu race matrix;
   macOS matrix verified across the last three pushes.
+
+## 2026-10-12 — Workbench U0: design doc, stopped for approval
+
+- Audited the real Op/Event seam (internal/protocol/event.go) and
+  the current TUI against the Workbench mission; every mission
+  element mapped to its actual driver in docs/tui/WORKBENCH.md
+  (HAVE / EXTEND / DEFER per row, no element without an event).
+- Drafted docs/tui/WORKBENCH.md (layout, regions, wiring table,
+  Nib spec, one-core-three-views split, 4 proposed minimal seam
+  extensions, deferrals, U1–U7 plan) and docs/tui/PROGRESS.md.
+- No UI code written — U0 stops for owner approval per the process
+  rules. Open questions: WORKBENCH.md §10 (layout approval, seam
+  extensions E1–E5, alt-screen-vs-inline split, ui.layout names).
+- Pack-name mismatch recorded: the mission named
+  docs/FINAL_PACK_V2.md and docs/TUI_PACK.md; neither exists.
+  DESIGN_V2.md + CAPABILITY_PACK.md + PACK.md visual_spec +
+  docs/ui/CLASSIC.md are the real sources and were read.
+
+## 2026-10-12 — Workbench U1: three-rail shell built, tested, green
+
+- `ui.layout = "workbench"` selects the new full-screen
+  three-rail shell (config.NormalizeLayout; "stream" is an
+  accepted alias of classic). Default stays "classic" until the
+  owner's §10 call — the flip is one constant.
+- internal/tui/workbench.go: header (orb >=80, compact below;
+  em dash until a model is configured), left rail (PLAN from
+  plan_updated, AGENTS from the subagent lifecycle events — the
+  rail finally has its real event source), centre (viewport +
+  live block: inline gate, verdict card, contract strip), right
+  rail (CONTEXT, COST — em dash until usage), composer, status
+  bar (state word, counts, interrupt hint, registry hints).
+  state.Agents + state.TurnCost added and event-filled.
+- P21/P22 enforced: the activity line is absent when idle; the
+  instruments never fake a zero; CHECKPOINTS is proven absent
+  after a full run (no checkpoint event exists).
+- Fixed a real layout bug found by the tests: the rune-based
+  truncator over-measured ANSI-styled strings and clipped the
+  rails mid-escape — width.go now has ANSI-aware
+  TruncateStyledTo/ansiWidth, the single styled-truncation path.
+- Gates: build, vet, full suite, race (internal/tui), lint
+  (0 issues), PTY e2e all green; 30 workbench goldens (5 stages
+  x 3 sizes x normal/plain) printed then accepted; originality
+  guard extended to the workbench frames (ledger fossil
+  excluded by design); ANSI dumps in docs/tui/review/.
+- Perf (ttff, 3-run medians): first paint 6.34 ms (baseline
+  5.7), idle RSS 22.84 MB (22.9) — no regression; the workbench
+  is not in the default boot path. Detail in docs/tui/PROGRESS.md.
+- Docs: docs/tui/WORKBENCH.md (+§11 build status, queue marked
+  DEFER — no queue state exists), docs/tui/PROGRESS.md,
+  CONFIG.md layout values current.

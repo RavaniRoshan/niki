@@ -1,0 +1,27 @@
+[1;38;2;249;115;22m ▄███▄ [m  [1;38;2;56;189;248mNikiCode[m  [38;2;125;139;166mv0.1.0[m             
+[1;38;2;249;115;22m███◑███[m  [38;2;241;245;249mclaude-sonnet · mode act[m     
+[1;38;2;249;115;22m ▀███▀ [m  [38;2;125;139;166m/home/dev/projects/api · main[m
+────────────────────────────────────────────────────────────────────────────────────────────────────
+[38;2;125;139;166mPLAN[m                       [38;2;248;250;252;48;2;30;41;59m› harden POST /login: reject expired tokens and[m[48;2;30;41;59m [m [38;2;125;139;166mCONTEXT[m          
+[38;2;34;197;94m✓[m [38;2;125;139;166m1.[m [38;2;241;245;249mRead the handler and… [38;2;248;250;252;48;2;30;41;59mrate-limit failed logins[m[48;2;30;41;59m                        [m   [38;2;241;245;249m5.1k / 128k[m    
+[1;38;2;249;115;22m◐[m [38;2;125;139;166m2.[m [38;2;241;245;249mAdd the limiter[m         [38;2;241;245;249mReading the handler and its tests first, then…[m                  
+[38;2;125;139;166m○[m [38;2;125;139;166m3.[m [38;2;241;245;249mrun go test ./intern…   [38;2;241;245;249mContract: 5 requirements. Assumed: limit is p…[m [38;2;125;139;166mCOST[m             
+                           [38;2;34;197;94m✓[m [1;38;2;241;245;249mread[m  [38;2;148;163;184minternal/auth/token.go[m                     [38;2;241;245;249mturn $0.0008[m   
+                               [38;2;148;163;184m112 lines[m                                      [38;2;241;245;249msession $0.0008[m
+                           [38;2;34;197;94m✓[m [1;38;2;241;245;249mread[m  [38;2;148;163;184minternal/auth/token_test.go[m                               
+                               [38;2;148;163;184m64 lines[m                                                      
+                           [38;2;34;197;94m✓[m [1;38;2;241;245;249msearch[m  [38;2;148;163;184m"RateLimit" in internal/**[m                              
+                               [38;2;148;163;184m3 matches[m                                                     
+                           [1;38;2;249;115;22m◐[m [1;38;2;241;245;249medit[m  [38;2;148;163;184minternal/auth/limit.go[m                                    
+                               [38;2;148;163;184m[m                                                              
+                             [38;2;241;245;249mWriting the limiter now, then running the aut…[m                  
+                                                                                             
+                                                                                             
+                                                                                             
+                                                                                             
+                                                                                             
+                                                                                             
+                             [1;38;2;249;115;22m◐ [m[38;2;249;115;22mwriting internal/auth/limit.go[m[38;2;125;139;166m · esc pause[m                    
+                           [38;2;125;139;166mcontract[m  [38;2;125;139;166m○[m 0 of 5                                                
+[1;38;2;241;245;249m> [m[1;38;2;241;245;249m> [m[7;37ms[m[38;2;118;133;159mteer with enter · queue with ctrl+enter[m[38;2;118;133;159m                                       [m
+[[1;38;2;249;115;22m◑[m] [38;2;241;245;249mworking[m · claude-sonnet · [38;2;125;139;166mesc interrupt[m                 [38;2;125;139;166mctrl+c stop · esc pause · ctrl+o expand[m

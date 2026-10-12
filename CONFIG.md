@@ -44,7 +44,7 @@ disable_preconnect = false        # background TCP/TLS preconnect after first pa
 [ui]
 inline = false                    # commit settled rows to native scrollback
 theme = "default"                 # default, dark, light, monochrome
-layout = "classic"                # "classic" (default) or "ledger" (experimental)
+layout = "classic"                # "workbench" (three-rail, full-screen), "classic" (default; the alias "stream" maps to it), or "ledger" (experimental)
 reduced_motion = false            # static composer cursor, static sweep frames
 
 # Approval policy
@@ -77,7 +77,8 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
 Inline mode prints the layout header once to native scrollback and keeps
 only the live area (activity line, composer, footer) in View(); alt-screen
 mode (the default) keeps the header on screen. Layout specifics: see
-docs/ui/CLASSIC.md (classic) — its spec is the default layout.
+docs/tui/WORKBENCH.md (workbench, the three-rail full-screen layout) and
+docs/ui/CLASSIC.md (classic, the default inline flow, aliased "stream").
 
 ---
 

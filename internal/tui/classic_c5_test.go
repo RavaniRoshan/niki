@@ -81,12 +81,22 @@ func TestOriginalityGuardOverGoldenFrames(t *testing.T) {
 		"Thought for",
 		"Welcome to",
 	}
+	// The guard covers the two product surfaces: the classic flow
+	// and the workbench. The ledger frames (frame_*.golden) are
+	// the frozen experimental fossil with their own boxed chrome,
+	// kept behind ui.layout = "ledger" — not part of the surface
+	// this guard protects.
 	goldens, err := filepath.Glob(filepath.Join("testdata", "classic_frame*.golden"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	wbGoldens, err := filepath.Glob(filepath.Join("testdata", "workbench_frame*.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	goldens = append(goldens, wbGoldens...)
 	if len(goldens) == 0 {
-		t.Fatal("no classic goldens found for the originality guard")
+		t.Fatal("no golden frames found for the originality guard")
 	}
 	for _, g := range goldens {
 		frame, err := os.ReadFile(g)
@@ -136,7 +146,7 @@ func TestOriginalityGuardOverGoldenFrames(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("[guard] %d classic golden frames clean", len(goldens))
+	t.Logf("[guard] %d golden frames clean", len(goldens))
 }
 
 // The guard fails on a deliberately injected forbidden signature —

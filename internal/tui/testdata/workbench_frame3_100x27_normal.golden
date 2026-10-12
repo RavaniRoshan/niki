@@ -1,0 +1,27 @@
+ ▄███▄   NikiCode  v0.1.0             
+███◑███  claude-sonnet · mode act     
+ ▀███▀   /home/dev/projects/api · main
+────────────────────────────────────────────────────────────────────────────────────────────────────
+PLAN                       › harden POST /login: reject expired tokens and  CONTEXT          
+✓ 1. Read the handler and… rate-limit failed logins                           5.1k / 128k    
+◐ 2. Add the limiter         Reading the handler and its tests first, then…                  
+○ 3. run go test ./intern…   Contract: 5 requirements. Assumed: limit is p… COST             
+                           ✓ read  internal/auth/token.go                     turn $0.0008   
+                               112 lines                                      session $0.0008
+                           ✓ read  internal/auth/token_test.go                               
+                               64 lines                                                      
+                           ✓ search  "RateLimit" in internal/**                              
+                               3 matches                                                     
+                           ◐ edit  internal/auth/limit.go                                    
+                                                                                             
+                             Writing the limiter now, then running the aut…                  
+                                                                                             
+                                                                                             
+                                                                                             
+                                                                                             
+                                                                                             
+                                                                                             
+                             ◐ writing internal/auth/limit.go · esc pause                    
+                           contract  ○ 0 of 5                                                
+> > steer with enter · queue with ctrl+enter                                       
+[◑] working · claude-sonnet · esc interrupt                 ctrl+c stop · esc pause · ctrl+o expand

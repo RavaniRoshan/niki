@@ -1,0 +1,24 @@
+  _____    NikiCode  v0.1.0             
+ /  o  \   claude-sonnet - mode act     
+ \_____/   /home/dev/projects/api - main
+--------------------------------------------------------------------------------
+PLAN                       64 lines                       CONTEXT          
+done 1. Read the ha... done search  "R......al/**           5.1k / 128k    
+running 2. Add the ...     3 matches                                       
+queued 3. run go te... done edit  inte......limit.go      COST             
+                       verified  5 of 5 required  -  t...   turn $0.0008   
+                       ----------------------------------   session $0.0008
+                       done R1  Expired tokens are rej...                  
+                             go test ./... - passed                        
+                       done R2  Refresh keeps the sess...                  
+                             token_test.go:81 - passed                     
+                       done R3  Rate limit returns 429                     
+                             limit_test.go:12 - passed                     
+                       done R4  Flag is documented                         
+                             README.md - text check                        
+                       done R5  No new dependency                          
+                             go.mod unchanged - tamper...                  
+                       not verified  load behavior: no...                  
+                       branch main  $0.0008                                
+> > steer with enter - queue with ctrl+enter                   
+[o] working - claude-sonnet - esc interrupt               enter accept - d diff

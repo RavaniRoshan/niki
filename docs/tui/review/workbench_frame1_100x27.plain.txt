@@ -1,0 +1,27 @@
+  _____    NikiCode  v0.1.0             
+ /  o  \   claude-sonnet - mode act     
+ \_____/   /home/dev/projects/api - main
+----------------------------------------------------------------------------------------------------
+  CONTEXT     
+    --        
+              
+  COST        
+    turn --   
+    session --
+              
+              
+              
+              
+              
+              
+              
+              
+              
+              
+              
+              
+              
+              
+              
+> > Describe a change, or ask a question                                           
+[o] idle - claude-sonnet                      shift+tab mode - ctrl+o expand - ctrl+k menu - ? help

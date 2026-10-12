@@ -1,0 +1,20 @@
+[o] NikiCode v0.1.0  claude-sonnet - act  /home/dev/proje...
+------------------------------------------------------------
+PLAN                   64 lines                             
+done 1. Read th... done search  "Rate......ternal/**        
+running 2. Add ... verified  5 of 5 required  -  trust T2...
+queued 3. run g... -----------------------------------------
+                   done R1  Expired tokens are rejected     
+                         go test ./... - passed             
+                   done R2  Refresh keeps the session id    
+                         token_test.go:81 - passed          
+                   done R3  Rate limit returns 429          
+                         limit_test.go:12 - passed          
+                   done R4  Flag is documented              
+                         README.md - text check             
+                   done R5  No new dependency               
+                         go.mod unchanged - tamper check ...
+                   not verified  load behavior: no check ...
+                   branch main  $0.0008                     
+> > steer with enter - queue with ctrl+ente
+[o] working - claude-sonnet - esc interrupt

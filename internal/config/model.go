@@ -1,10 +1,14 @@
 package config
 
 // Layout names. Classic is the default; ledger is the previous
-// full-screen layout kept as an experimental option (C0).
+// full-screen layout kept as an experimental option (C0);
+// workbench is the three-rail full-screen layout (U1);
+// "stream" is an accepted alias of classic (the Stream view).
 const (
-	LayoutClassic = "classic"
-	LayoutLedger  = "ledger"
+	LayoutClassic   = "classic"
+	LayoutLedger    = "ledger"
+	LayoutWorkbench = "workbench"
+	LayoutStream    = "stream"
 )
 
 // NormalizeLayout maps an unknown layout value to classic: an
@@ -14,6 +18,12 @@ func NormalizeLayout(layout string) string {
 	switch layout {
 	case LayoutLedger:
 		return LayoutLedger
+	case LayoutWorkbench:
+		return LayoutWorkbench
+	case LayoutStream:
+		// The Stream view IS the classic inline flow under its
+		// mission name.
+		return LayoutClassic
 	default:
 		return LayoutClassic
 	}
@@ -56,8 +66,10 @@ type UIConfig struct {
 	Inline bool   `toml:"inline"`
 	Theme  string `toml:"theme"`
 	// Layout selects the TUI layout: "classic" (default, the
-	// Classic Flow) or "ledger" (the previous full-screen layout,
-	// experimental). Anything else fails closed to classic.
+	// Classic Flow; the alias "stream" maps to it), "workbench"
+	// (the three-rail full-screen layout), or "ledger" (the
+	// previous full-screen layout, experimental). Anything else
+	// fails closed to classic.
 	Layout string `toml:"layout"`
 	// ReducedMotion disables non-essential animation
 	// (U8): a static cursor instead of a blinking one.

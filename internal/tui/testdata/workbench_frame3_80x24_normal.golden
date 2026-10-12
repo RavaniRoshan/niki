@@ -1,0 +1,24 @@
+ ▄███▄   NikiCode  v0.1.0             
+███◑███  claude-sonnet · mode act     
+ ▀███▀   /home/dev/projects/api · main
+────────────────────────────────────────────────────────────────────────────────
+PLAN                   › harden POST /login: reject       CONTEXT          
+✓ 1. Read the handler… expired tokens and rate-limit        5.1k / 128k    
+◐ 2. Add the limiter   failed logins                                       
+○ 3. run go test ./in…   Reading the handler and its tes… COST             
+                         Contract: 5 requirements. Assum…   turn $0.0008   
+                       ✓ read  intern……oken.go              session $0.0008
+                           112 lines                                       
+                       ✓ read  intern……_test.go                            
+                           64 lines                                        
+                       ✓ search  "Rate……nal/**                             
+                           3 matches                                       
+                       ◐ edit  internal/auth/limit.go                      
+                                                                           
+                         Writing the limiter now, then r…                  
+                                                                           
+                                                                           
+                         ◐ writing internal/auth/limit.g…                  
+                       contract  ○ 0 of 5                                  
+> > steer with enter · queue with ctrl+enter                   
+[◑] working · claude-sonnet · esc interrupt

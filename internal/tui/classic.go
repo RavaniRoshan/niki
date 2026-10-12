@@ -15,11 +15,14 @@ import (
 
 // SetLayout selects the layout renderer. Unknown values fall back to
 // classic (config.NormalizeLayout already guarantees this, but the TUI
-// never trusts an unvalidated string).
+// never trusts an unvalidated string). "stream" is the mission name
+// for the classic inline flow.
 func (m *AppModel) SetLayout(layout string) {
 	switch layout {
 	case "ledger":
 		m.state.Layout = "ledger"
+	case "workbench":
+		m.state.Layout = "workbench"
 	default:
 		m.state.Layout = "classic"
 	}
@@ -61,6 +64,8 @@ func classicRule(width int) string {
 // classicOrb renders the one-eyed orb for the current run state. The
 // eye is driven only by real events: working, done, error,
 // interrupted, idle (C0). ASCII fallback art under plain/ASCII mode.
+// The art itself lives in nibArt (one module, WORKBENCH.md §4); the
+// classic eye mapping stays here so the classic goldens hold.
 func (m AppModel) classicOrb() string {
 	eye, asciiEye := "◐", "o"
 	style := m.theme.Accent
@@ -76,16 +81,7 @@ func (m AppModel) classicOrb() string {
 		eye, asciiEye = "◑", "*"
 		style = m.theme.ActivityGlyph
 	}
-	if UseASCII() {
-		return lipgloss.JoinVertical(lipgloss.Left,
-			style.Render("  _____ "),
-			style.Render(" /  "+asciiEye+"  \\"),
-			style.Render(" \\_____/ "))
-	}
-	return lipgloss.JoinVertical(lipgloss.Left,
-		style.Render(" ▄███▄ "),
-		style.Render("███"+eye+"███"),
-		style.Render(" ▀███▀ "))
+	return nibArt(eye, asciiEye, style)
 }
 
 // permissionShort maps a permission mode to its footer label.
