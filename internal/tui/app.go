@@ -1459,7 +1459,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// The header scrolls away into
 				// native scrollback (U4).
 				m.headerPrinted = true
-				cmds = append(cmds, tea.Printf("%s\n\n", m.welcomeCardView()))
+				cmds = append(cmds, tea.Printf("%s\n\n", m.scrollbackHeader()))
 			}
 		} else {
 			m.viewport.SetWidth(msg.Width)

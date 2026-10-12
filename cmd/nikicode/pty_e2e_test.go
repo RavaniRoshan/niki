@@ -372,10 +372,15 @@ func TestArgvFastPathScoped(t *testing.T) {
 	cmd := exec.Command(bin, "exec", "version")
 	cmd.Env = append(os.Environ(), "HOME="+t.TempDir(), "NIKICODE_MOCK=1")
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("exec version failed: %v\n%s", err, out)
-	}
+	// The prompt reaches the run path, so the L3 rule applies: no
+	// allowlisted checks in the empty temp dir means the run ends
+	// not-verified and exec exits non-zero. The fast-path
+	// assertion is the banner, not the exit code.
 	if strings.Contains(string(out), "nikicode version") {
 		t.Fatalf("fast path hijacked exec version: %s", out)
 	}
+	if err == nil && !strings.Contains(string(out), "Acknowledged") {
+		t.Fatalf("exec version neither hit the fast path nor ran: %v\n%s", err, out)
+	}
+	t.Logf("exec version routed to the run path (err=%v)", err)
 }

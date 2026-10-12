@@ -225,3 +225,32 @@ what remains.
   PROTOCOL.md (the 6-8 developer script and pass criteria).
 - Gates re-run: build, vet, gofmt, full suite, race (tui), lint — all
   clean.
+
+## 2026-10-12 — Post-review fixes and evidence
+
+- Inline mode bug: `--inline` printed the ledger welcome card
+  ("Welcome to NikiCode!") to scrollback instead of the classic
+  header. Fixed via AppModel.scrollbackHeader(); classic prints the
+  orb header (+ SETUP when unconfigured), ledger keeps its card.
+  Tested (TestInlineScrollbackHeader) and smoked in a real pty.
+- CONFIG.md's schema block predated the real config structs; replaced
+  with the actual schema, documenting ui.layout = "classic"|"ledger"
+  (default classic) alongside inline/theme/reduced_motion.
+- Perf contract re-run after the v2 + classic change (PACK §):
+  tools/ttff on both binaries, same machine, 3 runs each, medians —
+  first paint 5.7ms (unchanged, v1 5.7ms), idle RSS 22.9MB vs 20.5MB
+  (+11%, attributed to ultraviolet/cellbuf; absolute gates hold:
+  <40MB and <2x Codex's 69.3MB). Recorded in docs/PERF.md §8 with
+  the cause. Idle-CPU test now measures the program's MARGINAL cost
+  above a pre-program baseline (0.67-1.0% at 30 FPS; source-verified
+  that v2 performs no View() calls while idle — the renderer's
+  ticker early-outs with zero writes).
+- Pre-existing red test fixed: TestArgvFastPathScoped asserted
+  exit 0 for `exec version`, but the L3 rule (no allowlisted checks
+  in the temp dir -> not-verified) exits non-zero. The test now
+  guards the fast-path banner (the regression it exists for) and
+  accepts the not-verified exit. It was red at 3b7d0c3 (pre-my-work);
+  the new assertion still fails if the fast path hijacks the prompt.
+- Gates: go build/vet/gofmt clean; go test ./... all ok; race clean
+  on internal/tui; golangci-lint clean on changed packages (1
+  pre-existing QF1011 in untouched firstrun_cmd_test.go).

@@ -122,3 +122,32 @@ View80x24-16              58.17µ ± ∞ ¹   49.58µ ± ∞ ¹  -14.77% (p=0.00
 2. **Preconnect Concurrency**: Moving TLS handshakes off the main thread cut first-paint latency from ~10 ms to 5.9 ms.
 3. **Argv Fast Routing**: Bypassing CLI argument tree evaluation on `--version` eliminated 13 ms of dynamic initialization.
 
+
+## 8. Charm v2 + Classic layout re-measurement (2026-10-12)
+
+Trigger: the TUI stack moved from Bubble Tea v1 to v2 (bubbletea v2.1.0,
+bubbles v2.2.1, lipgloss v2.0.6) and the Classic Flow became the default
+layout. Same machine, same rig (`tools/ttff -json`), three runs each,
+medians, binaries built at `3b7d0c3` (v1) and `cd29b57` (v2 + classic):
+
+| Binary | first paint (median) | input-ready (median) | idle RSS (median) | bytes before prompt |
+|---|---|---|---|---|
+| v1 (`3b7d0c3`) | 5.7 ms | 5.7 ms | 20.5 MB | 16 B |
+| v2 + classic (`cd29b57`) | 5.7 ms | 5.7 ms | 22.9 MB | 16 B |
+| Delta | 0.0 ms | 0.0 ms | +2.4 MB (+11%) | 0 |
+
+- First paint / input-ready: unchanged within noise (both ~6 ms; the 40 ms
+  aspiration and the 20 ms budget hold). The v2 renderer draws on the
+  message path (no idle View calls — source-verified in
+  `charm.land/bubbletea/v2@v2.1.0/tea.go`), so layout cost is per-event,
+  not per-tick.
+- Idle RSS: +2.4 MB, attributed to the v2 stack (ultraviolet screen +
+  cellbuf buffers replace the v1 renderer's). Absolute gates hold:
+  22.9 MB < 40 MB, and < 2x Codex's 69.3 MB. The 10% relative bar is
+  exceeded on RSS only; recorded with the cause rather than hidden.
+- Idle CPU: the deterministic unit test (`TestIdleNoRedrawsAndCPU`) now
+  measures the program's marginal cost above a pre-program baseline
+  (0.67-1.0% at the test's 30 FPS; the ticker early-outs with no diff —
+  zero writes). Production runs 120 FPS, where the 2026-10-08 recorded
+  deviation (owner) still applies: ~1.8% idle on this WSL2 VM vs the
+  <1% gate, held by the unit test.

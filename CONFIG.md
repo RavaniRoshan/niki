@@ -34,40 +34,50 @@ nikicode config show --sources
 ```toml
 # Model & Provider
 model = "claude-3-5-sonnet"
-provider = "anthropic"            # "anthropic", "responses", "openai"
-api_key = "sk-..."                # or set ANTHROPIC_API_KEY / OPENAI_API_KEY
-
-# Performance & Boot
-disable_preconnect = false        # set true to disable background TCP/TLS preconnect
-boot_trace = false                # or set NIKI_BOOT_TRACE=1 to write boot timeline
+provider = "anthropic"            # "anthropic", "responses", "openai", "mock"
+api_key = "sk-..."                # never written to disk; keychain or env_key
+env_key = "ANTHROPIC_API_KEY"     # env var the key is read from
+base_url = ""                     # custom OpenAI-compatible endpoint
+disable_preconnect = false        # background TCP/TLS preconnect after first paint
 
 # TUI & Terminal
-mode = "inline"                   # "inline" (default) or "fullscreen"
-reduced_motion = false            # disables mascot and spinner animations
+[ui]
+inline = false                    # commit settled rows to native scrollback
+theme = "default"                 # default, dark, light, monochrome
+layout = "classic"                # "classic" (default) or "ledger" (experimental)
+reduced_motion = false            # static composer cursor, static sweep frames
+
+# Approval policy
+[permissions]
+mode = "workspace_write"          # readonly, workspace_write, manual, full_access
+
+# Per-run budgets (0 / "" disables a dimension)
+[budgets]
+wall_time = "10m"
+cost_usd = 2.0
+steps = 100
 
 # Sandbox & Security
-sandbox_backend = "bubblewrap"    # "bubblewrap" or "fallback"
-deny_network = true               # blocks outbound network in command sandbox
-writable_roots = ["."]            # paths writable by sandboxed commands
-trusted_projects = ["/home/user/projects/trusted"]
+[sandbox]
+enabled = false
+auto_allow = true
+allow_unsandboxed = true
+fail_if_unavailable = false
+excluded_commands = []
 
-# Profiles
-[profiles.fast]
-model = "gpt-4o-mini"
-provider = "openai"
-
-[profiles.deep]
-model = "claude-3-7-sonnet"
-provider = "anthropic"
+# Self-extension protocol
+self_extend = "off"               # "off" (default) or "propose"
 
 # MCP Servers (global or trusted project only)
-[mcp.filesystem]
+[mcp.servers.filesystem]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
-required = false
-startup_timeout_sec = 10
-tool_timeout_sec = 30
 ```
+
+Inline mode prints the layout header once to native scrollback and keeps
+only the live area (activity line, composer, footer) in View(); alt-screen
+mode (the default) keeps the header on screen. Layout specifics: see
+docs/ui/CLASSIC.md (classic) — its spec is the default layout.
 
 ---
 

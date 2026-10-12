@@ -92,6 +92,16 @@ func parseInt(s string) int64 {
 // TestIdleNoRedrawsAndCPU (B5): while idle the program
 // performs zero redraws and consumes no measurable CPU.
 func TestIdleNoRedrawsAndCPU(t *testing.T) {
+	// Pre-program baseline: the harness and Go runtime's own CPU
+	// rate on this machine, measured before the TUI exists. The
+	// idle gate below measures the program's MARGINAL cost — this
+	// VM is noisy (the v1 notes record ~2.5% for a bare 120Hz
+	// ticker here), so whole-process rates are meaningless.
+	baseCPU := cpuTime()
+	baseStart := time.Now()
+	time.Sleep(1500 * time.Millisecond)
+	procBase := float64(cpuTime()-baseCPU) / float64(time.Since(baseStart)) * 100
+
 	out := &countingWriter{}
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -131,12 +141,17 @@ func TestIdleNoRedrawsAndCPU(t *testing.T) {
 	p.Quit()
 	<-runDone
 
+	// Marginal cost: the program's idle rate above the harness's
+	// own rate, floored at zero.
 	cpuPercent := 0.0
 	if idleWall > 0 {
-		cpuPercent = float64(idleCPU) / float64(idleWall) * 100
+		cpuPercent = float64(idleCPU)/float64(idleWall)*100 - procBase
 	}
-	t.Logf("idle_redraws=%d idle_cpu_percent=%.2f (wall=%s cpu=%s)",
-		idleWrites, cpuPercent, idleWall.Round(time.Millisecond), idleCPU.Round(time.Millisecond))
+	if cpuPercent < 0 {
+		cpuPercent = 0
+	}
+	t.Logf("idle_redraws=%d idle_cpu_marginal_percent=%.2f (proc_baseline=%.2f wall=%s cpu=%s)",
+		idleWrites, cpuPercent, procBase, idleWall.Round(time.Millisecond), idleCPU.Round(time.Millisecond))
 	if idleWrites != 0 {
 		t.Errorf("idle program performed %d redraws, want 0", idleWrites)
 	}

@@ -217,3 +217,33 @@ func TestPlainTranscriptVariant(t *testing.T) {
 		t.Log("plain variant keeps the transcript rows")
 	}
 }
+
+// C5+: the inline scrollback header is part of the product surface —
+// classic prints the orb header (and SETUP when unconfigured), never
+// the ledger welcome card. The originality guard covers it too.
+func TestInlineScrollbackHeader(t *testing.T) {
+	m := classicModel(100, 27, true)
+	m.state.Inline = true
+	header := Downsample(m.scrollbackHeader())
+	if !strings.Contains(header, "niki") {
+		t.Fatalf("classic scrollback header missing the identity row: %q", header)
+	}
+	if !strings.Contains(header, "SETUP") {
+		t.Fatalf("unconfigured classic header must carry the SETUP block: %q", header)
+	}
+	for _, forbidden := range []string{"Welcome to", "NikiCode!", "Local Coding Agent"} {
+		if strings.Contains(header, forbidden) {
+			t.Fatalf("ledger chrome %q leaked into the classic scrollback header", forbidden)
+		}
+	}
+	m.state.ModelName = "claude-sonnet"
+	if strings.Contains(m.scrollbackHeader(), "SETUP") {
+		t.Fatal("SETUP must hide once configured")
+	}
+	// Ledger keeps its card.
+	l := classicModel(100, 27, true)
+	l.SetLayout("ledger")
+	if !strings.Contains(l.scrollbackHeader(), "Welcome to") {
+		t.Fatal("ledger must keep its welcome card on its own layout")
+	}
+}

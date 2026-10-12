@@ -383,6 +383,20 @@ func (m AppModel) classicInlineBody() string {
 	return strings.Join(parts, "\n")
 }
 
+// scrollbackHeader is the header printed once to native scrollback
+// in inline mode (U4): the classic orb header (with the SETUP block
+// when unconfigured), or the ledger welcome card on that layout.
+func (m AppModel) scrollbackHeader() string {
+	if m.state.Layout == "ledger" {
+		return m.welcomeCardView()
+	}
+	header := m.classicHeader()
+	if m.needsSetup() {
+		header += "\n\n" + m.classicSetup()
+	}
+	return header
+}
+
 // classicNarrow is the under-50-column notice: one line, the run
 // continues (design §3). A pending gate stays visible so a decision
 // is never hidden by the resize.
