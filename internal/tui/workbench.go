@@ -209,17 +209,34 @@ func agentRowState(status string) string {
 	}
 }
 
-// wbRightRail renders CONTEXT and COST. CHECKPOINTS is absent: no
-// checkpoint event exists yet, so the section is never drawn
-// (WORKBENCH.md §7). Unknown instruments read "—" (P22).
+// wbRightRail renders CONTEXT, CHECKPOINTS, and COST. CHECKPOINTS
+// is absent when no checkpoint event has arrived (P21); the
+// instruments read "—" for unknowns (P22).
 func (m AppModel) wbRightRail(width int) string {
 	var b strings.Builder
 	b.WriteString(m.theme.Muted.Render("CONTEXT") + "\n")
-	b.WriteString("  " + m.wbContextText() + "\n\n")
-	b.WriteString(m.theme.Muted.Render("COST") + "\n")
+	b.WriteString("  " + m.wbContextText() + "\n")
+	if cps := m.wbCheckpointsSection(width); cps != "" {
+		b.WriteString("\n" + cps + "\n")
+	}
+	b.WriteString("\n" + m.theme.Muted.Render("COST") + "\n")
 	b.WriteString("  " + m.theme.Assistant.Render("turn "+m.wbTurnCost()) + "\n")
 	b.WriteString("  " + m.theme.Assistant.Render("session "+m.wbSessionCost()))
 	return truncLines(b.String(), width)
+}
+
+// wbCheckpointsSection renders the real checkpoint list from the
+// checkpoint events; absent when none exist.
+func (m AppModel) wbCheckpointsSection(width int) string {
+	if len(m.state.Checkpoints) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(m.theme.Muted.Render("CHECKPOINTS") + "\n")
+	for _, cp := range m.state.Checkpoints {
+		b.WriteString(m.renderStateGlyph(stateDone) + " " + m.theme.Assistant.Render(truncLines(cp.Label, width-4)) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // wbContextText is the real used/window pair, or "—" before the
@@ -352,6 +369,9 @@ func (m AppModel) wbStatusBar(width int) string {
 	left := "[" + m.wbOrbOneRow() + "] " + stateWord + " " + sep() + " " + m.wbModel()
 	if n := len(m.state.Agents); n > 0 {
 		left += " " + sep() + " " + m.theme.Muted.Render(fmt.Sprintf("agents %d", n))
+	}
+	if n := len(m.state.Checkpoints); n > 0 {
+		left += " " + sep() + " " + m.theme.Muted.Render(fmt.Sprintf("checkpoints %d", n))
 	}
 	if m.state.Busy {
 		left += " " + sep() + " " + m.theme.Muted.Render("esc interrupt")

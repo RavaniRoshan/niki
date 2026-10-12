@@ -30,6 +30,9 @@ func fullRunTrace() []protocol.EngineEvent {
 				{ID: "R1", State: "queued"}, {ID: "R2", State: "queued"}, {ID: "R3", State: "queued"},
 				{ID: "R4", State: "queued"}, {ID: "R5", State: "queued"},
 			}},
+		// A real run's checkpoint is created before the turn does
+		// anything (U3/E3): the rail and the count render from it.
+		{Type: protocol.EventCheckpointCreated, TurnID: "t1", Text: "turn 1"},
 		{Type: protocol.EventAssistantTextDelta, TurnID: "t1",
 			Text:  "Reading the handler and its tests first, then adding a limiter for failed logins.",
 			Usage: &protocol.Usage{PromptTokens: 5120, TotalTokens: 5120}},

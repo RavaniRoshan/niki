@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/RavaniRoshan/niki/internal/checkpoint"
 	"github.com/RavaniRoshan/niki/internal/permissions"
 	"github.com/RavaniRoshan/niki/internal/protocol"
 	"github.com/RavaniRoshan/niki/internal/provider"
@@ -228,5 +229,67 @@ func TestUnifiedDiff(t *testing.T) {
 	got = unifiedDiff("new.go", "", "package new\n")
 	if !strings.Contains(got, "@@ -0,0 +1,1 @@") || !strings.Contains(got, "+package new") {
 		t.Fatalf("created-file diff wrong:\n%s", got)
+	}
+}
+
+// U3/E3: the turn's checkpoint creation is a real event carrying the
+// checkpoint's own turn number; no checkpoint manager means no
+// event (never an invented row).
+func TestCheckpointCreatedEvent(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	// A checkpoint manager on a temp base dir: the git tree snapshot
+	// shells to git and fails silently in a non-repo dir.
+	reg := tools.DefaultRegistry()
+	prov := provider.NewMockProvider()
+	prov.ChunkDelay = time.Millisecond
+	prov.Scripts["checkpoint the work"] = "done"
+	runner := &TurnRunner{
+		verifier:    passVerifier(),
+		Provider:    prov,
+		Registry:    reg,
+		Context:     NewContextAssembler(),
+		Perm:        permissions.NewGuard(permissions.ModeFullAccess),
+		Checkpoints: checkpoint.NewManager(t.TempDir()),
+	}
+	var events []protocol.EngineEvent
+	emit := func(evt protocol.EngineEvent) { events = append(events, evt) }
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := runner.Run(ctx, "checkpoint the work", emit); err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+	var label string
+	saw := false
+	for _, ev := range events {
+		if ev.Type == protocol.EventCheckpointCreated {
+			saw = true
+			label = ev.Text
+		}
+	}
+	if !saw {
+		t.Fatal("a turn with a checkpoint manager must emit checkpoint_created")
+	}
+	if label != "turn 1" {
+		t.Fatalf("checkpoint label = %q, want the checkpoint's own turn number (turn 1)", label)
+	}
+
+	// Without a checkpoint manager there is no event at all.
+	runner2 := &TurnRunner{
+		verifier: passVerifier(),
+		Provider: prov,
+		Registry: reg,
+		Context:  NewContextAssembler(),
+		Perm:     permissions.NewGuard(permissions.ModeFullAccess),
+	}
+	var events2 []protocol.EngineEvent
+	emit2 := func(evt protocol.EngineEvent) { events2 = append(events2, evt) }
+	if err := runner2.Run(ctx, "checkpoint the work", emit2); err != nil {
+		t.Fatalf("turn failed: %v", err)
+	}
+	for _, ev := range events2 {
+		if ev.Type == protocol.EventCheckpointCreated {
+			t.Fatal("no checkpoint manager must produce no checkpoint event")
+		}
 	}
 }

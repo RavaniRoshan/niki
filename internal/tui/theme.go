@@ -130,7 +130,12 @@ func SelectTheme(name string) Theme {
 	th := NewDefaultTheme()
 	switch name {
 	case "monochrome":
-		mono := lipgloss.NewStyle()
+		// Monochrome drops hue, not luminance: every overridden role
+		// keeps a visible foreground so glyphs and the mascot stay
+		// legible. An unstyled style resolves to the terminal
+		// default, which fails the 3:1 UI-glyph contrast bar the
+		// mascot gate checks (found by the U3 contrast test).
+		mono := lipgloss.NewStyle().Foreground(lipgloss.Color("#f1f5f9"))
 		th.Header = mono.Bold(true)
 		th.Accent = mono
 		th.User = mono.Bold(true)

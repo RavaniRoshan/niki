@@ -926,3 +926,23 @@ hardening proof) UNVERIFIED. See CHECKLIST.md.
   first paint 6.61 ms (baseline 5.7), idle RSS 23.25 MB (22.9) -
   no regression over 10%. Dumps + goldens in docs/tui/review/ and
   internal/tui/testdata/.
+
+## 2026-10-12 — Workbench U3: checkpoints rail (E3) + mascot proof set
+
+- protocol.EventCheckpointCreated carries the checkpoint's own
+  turn number; the engine emits it where the turn's checkpoint is
+  created (no manager, no event). The right rail's CHECKPOINTS
+  section and the status-bar count render only from it; absent
+  when none. frame6 now includes a real checkpoint event (6
+  goldens regenerated, diff printed).
+- Mascot: all five run states proven in the header orb and the
+  status bar (body color AND eye shape), constant width across
+  states, ASCII eyes o/*/x, NO_COLOR legible, no self-scheduled
+  redraw. The per-theme contrast gate found a real bug -
+  monochrome stripped the foreground (1.16:1); it now keeps a
+  visible neutral, and all four body colors clear 3:1 in every
+  theme variant.
+- Gates: build, vet, full suite, race, lint (0 issues), PTY e2e
+  green; perf first paint 5.79 ms (baseline 5.7), idle RSS 23.1
+  MB (22.9) - no regression. Docs: WORKBENCH.md SECTION 3/6/11,
+  ledgers, docs/tui/review/.

@@ -5,12 +5,12 @@
 PLAN                   done read  internal/auth/token.go  CONTEXT          
 done 1. Read the ha...     112 lines                        5.1k / 128k    
 running 2. Add the ... thought - ctrl+o expand                             
-queued 3. run go te... -- step 2 - Add the limiter -----  COST             
-                       done edit  internal/auth/limit.go    turn $0.0008   
-                           +62 -4                           session $0.0008
-                         --- a/internal/auth/limit.go                      
-                         +++ b/internal/auth/limit.go                      
-                         @@ -4,1 +4,1 @@                                   
+queued 3. run go te... -- step 2 - Add the limiter -----  CHECKPOINTS      
+                       done edit  internal/auth/limit.go  done turn 1      
+                           +62 -4                                          
+                         --- a/internal/auth/limit.go     COST             
+                         +++ b/internal/auth/limit.go       turn $0.0008   
+                         @@ -4,1 +4,1 @@                    session $0.0008
                          -    return true                                  
                          +    return allowed()                             
                        -- step 3 - run go test ./inte...                   
@@ -21,4 +21,4 @@ queued 3. run go te... -- step 2 - Add the limiter -----  COST
                                                                            
                        contract  queued 0 of 5                             
 > > steer with enter - queue with ctrl+enter                   
-[o] working - claude-sonnet - esc interrupt
+[o] working - claude-sonnet - checkpoints 1 - esc interrupt

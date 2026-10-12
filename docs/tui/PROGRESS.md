@@ -168,3 +168,48 @@ Verification (all printed):
 Open: E3 checkpoints, E4 subagent names, the Agent detail panel
 (no producer), the apply_patch diff, the default-layout flip
 (SECTION 10).
+
+## 2026-10-12 — U3: checkpoints rail (E3) + the mascot proof set
+
+Seam: `EventCheckpointCreated` (protocol) with `Text` = the
+checkpoint's own turn number. Engine: emitted where the turn's
+checkpoint is created (agent.go); no manager means no event
+(engine test proves both directions).
+
+TUI: state.Checkpoints filled only from the event; the right
+rail's CHECKPOINTS section and the status-bar count are absent
+when none exist; the full-run fixture now carries a real
+checkpoint event, so frame6 shows the rail (6 goldens
+regenerated, diff printed: CHECKPOINTS/`turn 1` section added,
+COST shifted down).
+
+Mascot proof set (rails_u3_test.go):
+- All five run states render in the header orb AND the status bar
+  with the state word; the eye shape itself distinguishes
+  idle/working (half-lit), done (filled), error (hollow) - color
+  is never the only signal.
+- Constant width: the header orb's total row width and its own
+  7-cell width are identical across all five states.
+- ASCII eyes o (idle/working), * (done), x (error); NO_COLOR
+  frames carry no escapes.
+- No self-scheduled redraw: Init starts no mascot tick; the
+  frame is byte-identical between events; a same-size resize
+  changes nothing.
+- Contrast gate per theme variant found and fixed a REAL bug:
+  SelectTheme("monochrome") stripped the foreground, leaving the
+  idle/working body at 1.16:1. Monochrome now keeps a visible
+  neutral foreground (#f1f5f9); all four mascot body colors
+  clear 3:1 in default/dark/light/monochrome. (Note for the
+  record: "light" is still a no-op alias of the dark palette -
+  the gate measures what SelectTheme actually returns.)
+
+Rails re-proven in one place (U3 table test): Plan (absent then
+present), Agents (absent then present), Context (em dash then
+real, never a fake zero), Checkpoints (absent then present, plus
+absence in a run that created none), Cost (em dash then real).
+
+Verification: build, vet, full suite, race (tui+engine), lint
+(0 issues), PTY e2e all green; perf ttff medians first paint
+5.79 ms (baseline 5.7), idle RSS 23.1 MB (22.9) - no regression;
+render flatness unchanged (188us @100 vs 204us @5000); 36 dumps
+in docs/tui/review/.

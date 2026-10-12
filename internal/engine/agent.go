@@ -115,7 +115,16 @@ func (t *TurnRunner) Run(ctx context.Context, prompt string, emit func(protocol.
 		if t.HistoryEvents != nil {
 			hist = t.HistoryEvents()
 		}
-		_, _ = t.Checkpoints.CreateCheckpoint(string(turnID), nil, hist)
+		// U3/E3: the checkpoint's creation is its own event — the
+		// label is the checkpoint's real turn number.
+		if cp, cerr := t.Checkpoints.CreateCheckpoint(string(turnID), nil, hist); cerr == nil && cp != nil {
+			emit(protocol.EngineEvent{
+				Type:      protocol.EventCheckpointCreated,
+				Timestamp: time.Now(),
+				TurnID:    turnID,
+				Text:      fmt.Sprintf("turn %d", cp.TurnNumber),
+			})
+		}
 		if cwd, err := os.Getwd(); err == nil {
 			_, _ = t.Checkpoints.CreateGitTreeSnapshot(string(turnID), cwd)
 		}

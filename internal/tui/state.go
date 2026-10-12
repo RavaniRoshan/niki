@@ -107,6 +107,17 @@ type State struct {
 	// (U1); reset at turn_started, shown only after usage
 	// arrives (P22).
 	TurnCost float64
+	// Checkpoints is the real checkpoint list (U3/E3): one row per
+	// checkpoint_created event, labeled with the checkpoint's own
+	// turn number. Empty means the CHECKPOINTS rail section is
+	// absent (P21).
+	Checkpoints []CheckpointRow
+}
+
+// CheckpointRow is one real checkpoint in the right rail.
+type CheckpointRow struct {
+	// Label is the engine's checkpoint label ("turn N").
+	Label string
 }
 
 // AgentRow is one live subagent in the left rail.

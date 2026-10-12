@@ -48,6 +48,11 @@ const (
 	EventVerification         EventType = "verification"
 	EventTurnNotVerified      EventType = "turn_not_verified"
 	EventReasoningDelta       EventType = "reasoning_delta"
+	// EventCheckpointCreated reports a real checkpoint (U3/E3): the
+	// label is the checkpoint's own turn number, set by the engine
+	// where the snapshot is taken. The right rail and the status
+	// count render only from these events.
+	EventCheckpointCreated EventType = "checkpoint_created"
 )
 
 // VerificationInfo reports one verifier attempt (L3).

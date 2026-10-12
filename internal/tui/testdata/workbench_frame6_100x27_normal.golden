@@ -5,12 +5,12 @@
 PLAN                       ✓ plan  3 steps                                  CONTEXT          
 ✓ 1. Read the handler and…     3 steps                                        5.1k / 128k    
 ◐ 2. Add the limiter       ── step 1 · Read the handler and its tests ────                   
-○ 3. run go test ./intern… ✓ read  internal/auth/token.go                   COST             
-                               112 lines                                      turn $0.0008   
-                           thought · ctrl+o expand                            session $0.0008
-                           ── step 2 · Add the limiter ───────────────────                   
-                           ✓ edit  internal/auth/limit.go                                    
-                               +62 −4                                                        
+○ 3. run go test ./intern… ✓ read  internal/auth/token.go                   CHECKPOINTS      
+                               112 lines                                    ✓ turn 1         
+                           thought · ctrl+o expand                                           
+                           ── step 2 · Add the limiter ───────────────────  COST             
+                           ✓ edit  internal/auth/limit.go                     turn $0.0008   
+                               +62 −4                                         session $0.0008
                              --- a/internal/auth/limit.go                                    
                              +++ b/internal/auth/limit.go                                    
                              @@ -4,1 +4,1 @@                                                 
@@ -24,4 +24,4 @@ PLAN                       ✓ plan  3 steps                                  CO
                                                                                              
                            contract  ○ 0 of 5                                                
 > > steer with enter · queue with ctrl+enter                                       
-[◑] working · claude-sonnet · esc interrupt                 ctrl+c stop · esc pause · ctrl+o expand
+[◑] working · claude-sonnet · checkpoints 1 · esc interrupt ctrl+c stop · esc pause · ctrl+o expand

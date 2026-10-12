@@ -5,12 +5,12 @@
 PLAN                   ✓ read  internal/auth/token.go     CONTEXT          
 ✓ 1. Read the handler…     112 lines                        5.1k / 128k    
 ◐ 2. Add the limiter   thought · ctrl+o expand                             
-○ 3. run go test ./in… ── step 2 · Add the limiter ─────  COST             
-                       ✓ edit  internal/auth/limit.go       turn $0.0008   
-                           +62 −4                           session $0.0008
-                         --- a/internal/auth/limit.go                      
-                         +++ b/internal/auth/limit.go                      
-                         @@ -4,1 +4,1 @@                                   
+○ 3. run go test ./in… ── step 2 · Add the limiter ─────  CHECKPOINTS      
+                       ✓ edit  internal/auth/limit.go     ✓ turn 1         
+                           +62 −4                                          
+                         --- a/internal/auth/limit.go     COST             
+                         +++ b/internal/auth/limit.go       turn $0.0008   
+                         @@ -4,1 +4,1 @@                    session $0.0008
                          -    return true                                  
                          +    return allowed()                             
                        ── step 3 · run go test ./intern…                   
@@ -21,4 +21,4 @@ PLAN                   ✓ read  internal/auth/token.go     CONTEXT
                                                                            
                        contract  ○ 0 of 5                                  
 > > steer with enter · queue with ctrl+enter                   
-[◑] working · claude-sonnet · esc interrupt
+[◑] working · claude-sonnet · checkpoints 1 · esc interrupt

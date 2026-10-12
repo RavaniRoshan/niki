@@ -464,6 +464,12 @@ func applyEvent(m *AppModel, evt protocol.EngineEvent) {
 		// these events. No provider emits one yet, so live runs
 		// show no reasoning line — absence, never a placeholder.
 		m.history.AppendReasoningDelta(evt.Text)
+	case protocol.EventCheckpointCreated:
+		// U3/E3: the CHECKPOINTS rail renders only these events;
+		// the label is the checkpoint's real turn number.
+		if evt.Text != "" {
+			m.state.Checkpoints = append(m.state.Checkpoints, CheckpointRow{Label: evt.Text})
+		}
 	case protocol.EventTurnStarted:
 		m.state.Busy = true
 		m.state.Activity = "thinking…"

@@ -119,14 +119,14 @@ minimal seam additions in §6, proposed, not yet built), **DEFER**
 | Element | Driver | States | Absent rule | Status |
 |---|---|---|---|---|
 | Context meter | `Usage` on `assistant_message_done` (+ window from `SetModel`) | real used/window | shows "—" until the first usage event; never a fake 0 | HAVE (P22 change from the current 0% footer) |
-| Checkpoints | none (`checkpoint` package exists; no event) | — | ABSENT until an event exists | EXTEND (E3) |
+| Checkpoints | `checkpoint_created` (`Text` = the checkpoint's turn number, emitted where the snapshot is taken) | one row per checkpoint | ABSENT when none exist | HAVE (U3; E3 built) |
 | Cost | `Usage` → `routing.CalculateCost` (turn and session accumulators) | real $ | "—" until the provider reports usage | HAVE |
 
 ### Status bar
 | Element | Driver | States | Absent rule | Status |
 |---|---|---|---|---|
 | mascot + run state | run state machine | idle/working/done/error/interrupted | never | HAVE |
-| agent count / checkpoint count | live agent list / checkpoint list | counts | ABSENT when zero | HAVE (agents) / EXTEND (checkpoints, E3) |
+| agent count / checkpoint count | live agent list / checkpoint list | counts | ABSENT when zero | HAVE |
 | interrupt hint | registry key + `Busy` | only while running | ABSENT when idle | HAVE |
 
 ### Notifications / errors
@@ -200,8 +200,10 @@ reader tolerates their absence (schema version stays 1).
   diff block until then.
 - **E3 — Checkpoints.** `EventCheckpointCreated` with `Text` = the
   checkpoint label, emitted where `internal/checkpoint` snapshots
-  are taken (engine undo/rewind path already has the call sites).
-  Feeds the right rail and the status-bar count.
+  are taken. **BUILT (U3)**: the engine emits it at the turn's
+  checkpoint creation with the checkpoint's own turn number; the
+  right rail's CHECKPOINTS section and the status-bar count render
+  only from it.
 - **E4 — Subagent identity (optional).** `EngineEvent.AgentName
   string` on the subagent events; without it the Agents rail renders
   the real id only. E4 also lists what the child stream would need
@@ -228,7 +230,6 @@ reader tolerates their absence (schema version stays 1).
   block shows for `edit_file`/`write_file`/`notebook_edit` only.
 - Agent detail panel: the child's stream is intentionally not
   forwarded; forwarding it is a core design change, not a UI one.
-- Checkpoints rail: until E3 is approved.
 - Queue: no queue state exists in the TUI at all (the classic
   "queue with ctrl+enter" hint was aspirational); the element is
   absent until a queue exists. No engine event is proposed.
@@ -363,6 +364,25 @@ U2 (run trace) is **built and tested** on top of U1:
   reserves the result's width when the result moved to its own
   line (frame6 and the workbench frames keep full targets;
   classic goldens unaffected).
+
+U3 (rails + mascot) is **built and tested**:
+- Checkpoints (E3 built): the engine emits `checkpoint_created`
+  where the snapshot is taken (label = the checkpoint's own
+  turn number); the right rail's CHECKPOINTS section and the
+  status-bar count render only from it and are absent when
+  none exist.
+- Nib is proven across all five run states (idle/working/done/
+  error/interrupted) in BOTH the header orb and the status bar:
+  body color and eye shape change together (color is never the
+  only signal), the art is constant-width across states, the
+  ASCII eyes are o/*/x, NO_COLOR keeps every state legible,
+  and the mascot never schedules a redraw of its own (it
+  changes only when a real run-state event arrives).
+- The mascot contrast gate found and fixed a real bug: the
+  monochrome theme stripped the foreground entirely, leaving
+  the idle/working body at 1.16:1. Monochrome now drops hue,
+  not luminance; all four body colors clear 3:1 in every
+  theme variant SelectTheme returns.
 
 Not yet built (later slices or deferrals): the diff VIEWER fed
 from patch events (E2's diff block is built; the viewer still
