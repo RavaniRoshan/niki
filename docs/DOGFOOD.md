@@ -67,8 +67,8 @@ What actually ran inside NikiCode itself during this pack:
   `do "no, name=svc …"` run, not a unit test.
 - `nikicode exec` fixture turns validated the headless path after every
   invasive change (session backgrounding, fast-path scoping).
-- `nikicode bench` measured every table in docs/BENCH.md; the Codex
-  modal gate and the 0x0-PTTY lesson both came from live black-box runs.
+- `nikicode bench` measured every table in docs/BENCH.md; the modal
+  gate and the 0x0-PTTY lesson both came from live black-box runs.
 - `nikicode soak --turns 200` ran the stability evidence, not a demo.
 
 What hurt (friction log):
@@ -77,9 +77,9 @@ What hurt (friction log):
   inputs; first-time users guess phrasing. Mitigation logged, unbuilt.
 - Multistep `do` journals each step: undo granularity is per-step, which
   is right, but nothing tells the user that until they try it.
-- The update-modal episode (Codex) has no NikiCode equivalent to learn
-  from — our first paint never blocks on network by construction (boot
-  DAG), and the bench proves it.
+- The update-modal episode observed on the references has no NikiCode
+  equivalent to learn from — our first paint never blocks on network by
+  construction (boot DAG), and the bench proves it.
 
 What did NOT happen: a full week of living in the NikiCode TUI. This
 pack was built in long sessions with frequent real-terminal verification,
