@@ -302,3 +302,25 @@ what remains.
   dimension keeps its stop case (no inflation can flip that).
 - Gates: NIKI_PTY_TESTS=1 ./cmd/nikicode (all pass), full suite,
   build/vet/gofmt, whole-repo golangci-lint 0 issues.
+
+## 2026-10-12 — Purity fix: no I/O in Update (macOS CI hang)
+
+- CI's finally-running matrix exposed a real product bug, not a test
+  bug: TestPaletteConnectFlow hung until the 10-minute timeout on
+  macOS because the connect flow called secrets.Set (OS keychain)
+  synchronously inside Update — a blocking, purity-rule-violating
+  call. On Linux the keychain backend fails fast into session memory,
+  which is why it only hung on macOS.
+- All TUI config/keychain I/O moved into tea.Cmds: connectKeyCmd
+  (keychain write + provider/model selection + save), editConfigCmd
+  (generic palette edits: custom model, custom endpoint, MCP add),
+  configureOllamaCmd, each reporting through keyConnectedMsg /
+  configSavedMsg / modelPickedMsg. Update now performs no I/O at
+  all; the three palette tests drive the returned commands and
+  assert the resulting cells (with HOME isolated to a temp dir —
+  they previously wrote the real ~/.config).
+- Also fixed the portability bug CI found in the refactor recipe:
+  GNU-only `sed -i` -> `sed -i.bak` + cleanup, which BSD/macOS sed
+  accepts (TestRecipeRefactor was failing on macos-latest).
+- Gates: full suite, build/vet/gofmt, whole-repo lint 0 issues,
+  NIKI_PTY_TESTS=1 cmd tests pass.

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -201,6 +202,75 @@ func (m AppModel) advanceDemo() (AppModel, tea.Cmd) {
 		return m, nil
 	}
 	return m, demoTick()
+}
+
+// keyConnectedMsg carries the connect flow's result (I4): the
+// keychain write and config save both happened in the command.
+type keyConnectedMsg struct {
+	prov           string
+	modelName      string
+	keychainStored bool
+	err            error
+}
+
+// connectKeyCmd stores the key in the OS keychain (session memory
+// when unavailable), saves the provider/model selection to the user
+// config (keys are stripped before writing — SaveUserConfig's hard
+// floor), and reloads. All I/O happens here, never in Update.
+func connectKeyCmd(prov, key string) tea.Cmd {
+	return func() tea.Msg {
+		keychainStored, serr := secrets.Set(prov, key)
+		cfg, _ := config.Load("")
+		switch prov {
+		case "anthropic":
+			cfg.Provider.Name = "anthropic"
+			cfg.Provider.APIKey = key
+			if cfg.Model.Name == "" || cfg.Model.Name == "gpt-4o-mini" {
+				cfg.Model.Name = "claude-3-5-sonnet"
+			}
+		case "openai":
+			cfg.Provider.Name = "openai"
+			cfg.Provider.APIKey = key
+			if cfg.Model.Name == "" {
+				cfg.Model.Name = "gpt-4o"
+			}
+		case "openrouter":
+			cfg.Provider.Name = "openai"
+			cfg.Provider.BaseURL = "https://openrouter.ai/api/v1"
+			cfg.Provider.APIKey = key
+		case "deepseek":
+			cfg.Provider.Name = "openai"
+			cfg.Provider.BaseURL = "https://api.deepseek.com"
+			cfg.Provider.APIKey = key
+			cfg.Model.Name = "deepseek-chat"
+		}
+		werr := config.SaveUserConfig(cfg)
+		return keyConnectedMsg{
+			prov: prov, modelName: cfg.Provider.Name + ": " + cfg.Model.Name,
+			keychainStored: keychainStored, err: errors.Join(serr, werr),
+		}
+	}
+}
+
+// modelPickedMsg updates the header's model label after a model
+// selection command (the label is state, not I/O).
+type modelPickedMsg struct{ name string }
+
+// configSavedMsg reports a palette config edit's result; the edit
+// and the disk write both happened in the command.
+type configSavedMsg struct {
+	note string
+	err  error
+}
+
+// editConfigCmd applies an edit to the user config inside the
+// command and saves it (Update performs no I/O).
+func editConfigCmd(note string, edit func(*config.Config)) tea.Cmd {
+	return func() tea.Msg {
+		cfg, _ := config.Load("")
+		edit(&cfg)
+		return configSavedMsg{note: note, err: config.SaveUserConfig(cfg)}
+	}
 }
 
 // streamInterval is the minimum spacing between
@@ -700,6 +770,37 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case keyConnectedMsg:
+		if msg.err != nil {
+			m.history.Append("error", "Connect failed: "+msg.err.Error())
+			return m, nil
+		}
+		m.state.ModelName = msg.modelName
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
+		if msg.keychainStored {
+			m.history.Append("system", fmt.Sprintf("✓ Connected %s API key (stored in OS keychain) and reloaded provider (%s)!", msg.prov, m.state.ModelName))
+		} else {
+			m.history.Append("system", fmt.Sprintf("✓ Connected %s API key (session only — keychain unavailable; export %s in your shell profile to persist) and reloaded provider (%s)!", msg.prov, envVarForProvider(msg.prov), m.state.ModelName))
+		}
+		return m, nil
+
+	case modelPickedMsg:
+		if msg.name != "" {
+			m.state.ModelName = msg.name
+		}
+		return m, nil
+
+	case configSavedMsg:
+		if msg.err != nil {
+			m.history.Append("error", "Config save failed: "+msg.err.Error())
+			return m, nil
+		}
+		m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
+		if msg.note != "" {
+			m.history.Append("system", msg.note)
+		}
+		return m, nil
+
 	case ollamaConfiguredMsg:
 		if msg.err != nil {
 			m.history.Append("error", "Ollama setup failed: "+msg.err.Error())
@@ -1136,83 +1237,51 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "connect":
 					key := strings.TrimSpace(m.state.Palette.ConnectKey)
 					prov := m.state.Palette.ConnectProvider
-					if key != "" {
-						cfg, _ := config.Load("")
-						// I4: the key goes to the OS keychain (session
-						// memory when unavailable) — never to the config
-						// file; SaveUserConfig strips it as a hard floor.
-						keychainStored, _ := secrets.Set(prov, key)
-						switch prov {
-						case "anthropic":
-							cfg.Provider.Name = "anthropic"
-							cfg.Provider.APIKey = key
-							if cfg.Model.Name == "" || cfg.Model.Name == "gpt-4o-mini" {
-								cfg.Model.Name = "claude-3-5-sonnet"
-							}
-						case "openai":
-							cfg.Provider.Name = "openai"
-							cfg.Provider.APIKey = key
-							if cfg.Model.Name == "" {
-								cfg.Model.Name = "gpt-4o"
-							}
-						case "openrouter":
-							cfg.Provider.Name = "openai"
-							cfg.Provider.BaseURL = "https://openrouter.ai/api/v1"
-							cfg.Provider.APIKey = key
-						case "deepseek":
-							cfg.Provider.Name = "openai"
-							cfg.Provider.BaseURL = "https://api.deepseek.com"
-							cfg.Provider.APIKey = key
-							cfg.Model.Name = "deepseek-chat"
-						}
-						_ = config.SaveUserConfig(cfg)
-						m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
-						m.state.ModelName = cfg.Provider.Name + ": " + cfg.Model.Name
-						if keychainStored {
-							m.history.Append("system", fmt.Sprintf("✓ Connected %s API key (stored in OS keychain) and reloaded provider (%s)!", prov, m.state.ModelName))
-						} else {
-							m.history.Append("system", fmt.Sprintf("✓ Connected %s API key (session only — keychain unavailable; export %s in your shell profile to persist) and reloaded provider (%s)!", prov, envVarForProvider(prov), m.state.ModelName))
-						}
-					}
 					m.state.Palette.Open = false
 					m.state.Palette.Mode = "palette"
 					m.state.Palette.ConnectKey = ""
-					return m, nil
+					if key == "" {
+						return m, nil
+					}
+					// I4: all keychain/config I/O happens in the
+					// command (never in Update); Update only records
+					// the result message.
+					return m, connectKeyCmd(prov, key)
 
 				case "custom_model":
 					val := strings.TrimSpace(m.state.Palette.InputBuffer)
-					if val != "" {
-						cfg, _ := config.Load("")
-						if strings.Contains(val, ":") {
-							parts := strings.SplitN(val, ":", 2)
-							cfg.Provider.Name = parts[0]
-							cfg.Model.Name = parts[1]
-						} else {
-							cfg.Model.Name = val
-						}
-						_ = config.SaveUserConfig(cfg)
-						m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
-						m.state.ModelName = cfg.Provider.Name + ": " + cfg.Model.Name
-						m.history.Append("system", fmt.Sprintf("⚡ Switched custom model to: %s", val))
-					}
 					m.state.Palette.Open = false
 					m.state.Palette.Mode = "palette"
 					m.state.Palette.InputBuffer = ""
-					return m, nil
+					if val == "" {
+						return m, nil
+					}
+					note := fmt.Sprintf("⚡ Switched custom model to: %s", val)
+					provider, model := "", val
+					if strings.Contains(val, ":") {
+						parts := strings.SplitN(val, ":", 2)
+						provider, model = strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+					}
+					return m, tea.Batch(
+						editConfigCmd(note, func(c *config.Config) {
+							if provider != "" {
+								c.Provider.Name = provider
+							}
+							c.Model.Name = model
+						}),
+						func() tea.Msg { return modelPickedMsg{name: provider + ": " + model} },
+					)
 
 				case "custom_endpoint":
 					val := strings.TrimSpace(m.state.Palette.InputBuffer)
-					if val != "" {
-						cfg, _ := config.Load("")
-						cfg.Provider.BaseURL = val
-						_ = config.SaveUserConfig(cfg)
-						m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
-						m.history.Append("system", fmt.Sprintf("🌐 Provider base URL set to: %s", val))
-					}
 					m.state.Palette.Open = false
 					m.state.Palette.Mode = "palette"
 					m.state.Palette.InputBuffer = ""
-					return m, nil
+					if val == "" {
+						return m, nil
+					}
+					return m, editConfigCmd(fmt.Sprintf("🌐 Provider base URL set to: %s", val),
+						func(c *config.Config) { c.Provider.BaseURL = val })
 
 				case "mcp_add":
 					val := strings.TrimSpace(m.state.Palette.InputBuffer)
@@ -1233,26 +1302,19 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, nil
 					case 2:
 						m.state.Palette.MCPArgs = val
-						cfg, _ := config.Load("")
-						if cfg.MCP.Servers == nil {
-							cfg.MCP.Servers = make(map[string]config.MCPServer)
-						}
-						var args []string
-						if m.state.Palette.MCPArgs != "" {
-							args = strings.Fields(m.state.Palette.MCPArgs)
-						}
-						cfg.MCP.Servers[m.state.Palette.MCPName] = config.MCPServer{
-							Command: m.state.Palette.MCPCmd,
-							Args:    args,
-						}
-						_ = config.SaveUserConfig(cfg)
-						m.cmdChan <- protocol.EngineCommand{Type: protocol.CmdReloadConfig}
-						m.history.Append("system", fmt.Sprintf("✓ Added MCP server '%s' (%s %v) and saved to config!", m.state.Palette.MCPName, m.state.Palette.MCPCmd, args))
+						name, cmd := m.state.Palette.MCPName, m.state.Palette.MCPCmd
+						args := strings.Fields(m.state.Palette.MCPArgs)
+						note := fmt.Sprintf("✓ Added MCP server '%s' (%s %v) and saved to config!", name, cmd, args)
 						m.state.Palette.Open = false
 						m.state.Palette.Mode = "palette"
 						m.state.Palette.InputBuffer = ""
 						m.state.Palette.InputStep = 0
-						return m, nil
+						return m, editConfigCmd(note, func(c *config.Config) {
+							if c.MCP.Servers == nil {
+								c.MCP.Servers = make(map[string]config.MCPServer)
+							}
+							c.MCP.Servers[name] = config.MCPServer{Command: cmd, Args: args}
+						})
 					}
 				}
 

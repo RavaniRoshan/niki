@@ -105,13 +105,19 @@ func TestPaletteConnectFlow(t *testing.T) {
 		t.Fatalf("unexpected connect key: %s", m.state.Palette.ConnectKey)
 	}
 
-	// Submit key
-	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	// Submit key: the keychain write and config save happen in the
+	// returned command (never in Update), so the test drives it.
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if m.state.Palette.Open {
 		t.Fatal("connect modal should close after submit")
 	}
+	if cmd == nil {
+		t.Fatal("submit must dispatch the connect command")
+	}
+	m3, _ := m.Update(cmd())
+	m = m3.(AppModel)
 	lastCell := m.history.Cells[len(m.history.Cells)-1].Text
 	if !strings.Contains(lastCell, "Connected openai") {
 		t.Fatalf("expected connect notification in history, got: %s", lastCell)
@@ -148,15 +154,32 @@ func TestPaletteCustomModelFlow(t *testing.T) {
 		m = m2.(AppModel)
 	}
 
-	// Submit
-	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	// Submit: the config write and the label update happen in the
+	// returned commands (never in Update), so the test drives them.
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if m.state.Palette.Open {
 		t.Fatal("palette should close after custom model submit")
 	}
+	if cmd == nil {
+		t.Fatal("custom model submit must dispatch the config command")
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			m3, _ := m.Update(c())
+			m = m3.(AppModel)
+		}
+	} else {
+		m3, _ := m.Update(msg)
+		m = m3.(AppModel)
+	}
 	if !strings.Contains(m.state.ModelName, "deepseek-r1") {
 		t.Fatalf("expected model to contain deepseek-r1, got: %s", m.state.ModelName)
+	}
+	if len(m.history.Cells) == 0 || !strings.Contains(m.history.Cells[len(m.history.Cells)-1].Text, "Switched custom model") {
+		t.Fatal("expected the custom model note in history")
 	}
 }
 
@@ -201,12 +224,17 @@ func TestPaletteMCPAddFlow(t *testing.T) {
 		m2, _ = m.Update(tea.KeyPressMsg{Text: string([]rune{r}), Code: []rune{r}[0]})
 		m = m2.(AppModel)
 	}
-	m2, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = m2.(AppModel)
 
 	if m.state.Palette.Open {
 		t.Fatal("mcp_add modal should close after step 2")
 	}
+	if cmd == nil {
+		t.Fatal("mcp_add step 2 must dispatch the config command")
+	}
+	m3, _ := m.Update(cmd())
+	m = m3.(AppModel)
 
 	lastCell := m.history.Cells[len(m.history.Cells)-1].Text
 	if !strings.Contains(lastCell, "Added MCP server 'github'") {
