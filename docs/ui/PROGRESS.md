@@ -343,3 +343,23 @@ what remains.
   The dim hierarchy is preserved (placeholder < muted < tool
   detail).
 - Gates: full suite, build/vet/gofmt, lint clean.
+
+## 2026-10-12 — macOS CI: hermetic keychain, race-aware pause gate
+
+- macOS CI (finally running after the gate fix) exposed two more
+  environment/design issues in order:
+  1. The connect test executed the real keychain write — a blocking
+     call on macOS CI. Fixed hermetically: the test injects a memory
+     backend via secrets.UseBackendForTest.
+  2. TestBoundedMemoryNoGCPause's 16ms GC-pause gate measured
+     69ms under -race on a shared macOS runner: the detector's own
+     allocations dominate STW pauses and production never runs with
+     -race. The gate now applies without -race (0.58ms measured) and
+     logs under it, via build-tag-selected raceEnabled; the
+     heap-growth gate always applies.
+- These join the earlier fixes from the same CI wave: the broken
+  lint step (Go 1.24 vs go.mod 1.26), the pre-existing lint findings
+  it hid, the hardcoded binary path in PTY tests, the exec exit
+  code and mid-turn Ctrl+C assumptions, the wall_time wrap flake,
+  the GNU-only sed in the refactor recipe, and the inline
+  keychain/config I/O in Update.
