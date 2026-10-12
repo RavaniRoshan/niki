@@ -1,7 +1,7 @@
-[◑] NikiCode v0.1.0  claude-sonnet · act  /home/dev/project…
+[▸◑] NikiCode v0.1.0  claude-sonnet · act  /home/dev/projec…
 ────────────────────────────────────────────────────────────
-PLAN                   64 lines                             
-✓ 1. Read the han… ✓ search  "RateLimit" in internal/**     
+PLAN                 Contract: 5 requirements. Assumed: lim…
+✓ 1. Read the han… ✓ read  internal/auth/token.go           
 ◐ 2. Add the limi… verified  5 of 5 required  ·  trust T2 b…
 ○ 3. run go test … ─────────────────────────────────────────
                    ✓ R1  Expired tokens are rejected        
@@ -17,4 +17,4 @@ PLAN                   64 lines
                    not verified  load behavior: no check is…
                    branch main  $0.0008                     
 > > steer with enter                      mode act · ctrl+k
-[◑] working · claude-sonnet · esc interrupt
+[▸◑] working · claude-sonnet · esc interrupt

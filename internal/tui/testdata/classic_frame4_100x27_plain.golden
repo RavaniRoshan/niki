@@ -1,6 +1,10 @@
-  _____    niki 0.1.0                   
- /  *  \   claude-sonnet - approvals ask
- \_____/   /home/dev/projects/api - main
+                                                
+  ##                                            
+    #### #####     niki 0.1.0                   
+       #####o##    claude-sonnet - approvals ask
+    #### #####     /home/dev/projects/api - main
+  ########                                      
+    ## ##                                       
 Type a request - / for commands - ctrl+k for everything - ? for help
 
 > harden POST /login: reject expired tokens and rate-limit failed logins                            
@@ -15,6 +19,10 @@ failed shell  go test ./internal/auth                                           
     --- FAIL: TestRefreshKeepsSession (0.00s)                                                       
     token_test.go:81: session id changed after refresh                                              
 ! stream error: connection reset -- retrying 1/4 (jittered backoff)                                 
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
                                                                                                     
                                                                                                     
 

@@ -1,6 +1,10 @@
- ▄███▄   niki 0.1.0                   
-███◑███  claude-sonnet · approvals ask
- ▀███▀   /home/dev/projects/api · main
+                                                
+  ██                                            
+    ████ █████     niki 0.1.0                   
+       █████◑██    claude-sonnet · approvals ask
+    ████ █████     /home/dev/projects/api · main
+  ████████                                      
+    ██ ██                                       
 Type a request · / for commands · ctrl+k for everything · ?…
 
 › harden POST /login: reject expired tokens and rate-limit  
@@ -16,6 +20,10 @@ failed logins
 ◐ edit  internal/auth/limit.go                              
                                                             
   Writing the limiter now, then running the auth tests.     
+                                                            
+                                                            
+                                                            
+                                                            
                                                             
 
   ◐ writing internal/auth/limit.go · esc pause

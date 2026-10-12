@@ -1,6 +1,10 @@
-[1;38;2;249;115;22m ▄███▄ [m  [1;38;2;56;189;248mniki [m[38;2;125;139;166m0.1.0[m                   
-[1;38;2;249;115;22m███◑███[m  [38;2;241;245;249mclaude-sonnet · approvals ask[m
-[1;38;2;249;115;22m ▀███▀ [m  [38;2;125;139;166m/home/dev/projects/api · main[m
+[1;38;2;249;115;22m                 [m                               
+[1;38;2;249;115;22m  ██             [m                               
+[1;38;2;249;115;22m    ████ █████   [m  [1;38;2;56;189;248mniki [m[38;2;125;139;166m0.1.0[m                   
+[1;38;2;249;115;22m       █████◑██  [m  [38;2;241;245;249mclaude-sonnet · approvals ask[m
+[1;38;2;249;115;22m    ████ █████   [m  [38;2;125;139;166m/home/dev/projects/api · main[m
+[1;38;2;249;115;22m  ████████       [m                               
+[1;38;2;249;115;22m    ██ ██        [m                               
 [38;2;118;133;159mType a request · / for commands · ctrl+k for everything · ? for help[m
 
 [38;2;248;250;252;48;2;30;41;59m› harden POST /login: reject expired tokens and rate-limit failed logins[m[48;2;30;41;59m                            [m
@@ -17,6 +21,10 @@
 [1;38;2;245;158;11m↺ stream error: connection reset — retrying 1/4 (jittered backoff)[m                                  
   [38;2;125;139;166m✓ Answered: write the limiter without it[m                                                          
 [38;2;34;197;94m✓[m [1;38;2;241;245;249mshell[m  [38;2;148;163;184mgo test ./...[m                                                                     [38;2;148;163;184m31 passed[m
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
 
 [38;2;34;197;94mverified[m  [38;2;241;245;249m5 of 5 required[m  ·  [38;2;125;139;166mtrust T2 baseline-validated[m
 ────────────────────────────────────────────────────────────────────────────────────────────────────

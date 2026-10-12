@@ -1,8 +1,16 @@
- ▄███▄   niki 0.1.0                   
-███◑███  claude-sonnet · approvals ask
- ▀███▀   /home/dev/projects/api · main
+                                                
+  ██                                            
+    ████ █████     niki 0.1.0                   
+       █████◑██    claude-sonnet · approvals ask
+    ████ █████     /home/dev/projects/api · main
+  ████████                                      
+    ██ ██                                       
 Type a request · / for commands · ctrl+k for everything · ?…
 
+› harden POST /login: reject expired tokens and rate-limit  
+failed logins                                               
+  Reading the handler and its tests first, then adding a li…
+  Contract: 5 requirements. Assumed: limit is per client IP…
 ✓ read  internal/auth/token.go                              
     112 lines                                               
 ✓ read  internal/auth/token_test.go                         

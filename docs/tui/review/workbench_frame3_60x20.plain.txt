@@ -1,4 +1,4 @@
-[o] NikiCode v0.1.0  claude-sonnet - act  /home/dev/proje...
+[>o] NikiCode v0.1.0  claude-sonnet - act  /home/dev/proj...
 ------------------------------------------------------------
 PLAN               > harden POST /login: reject expired     
 done 1. Read th... tokens and rate-limit failed logins      
@@ -16,5 +16,5 @@ queued 3. run g...   Contract: 5 requirements. Assumed: l...
                                                             
                      - writing internal/auth/limit.go - e...
                    contract  queued 0 of 5                  
-> > steer with enter - queue with ctrl+ente
-[o] working - claude-sonnet - esc interrupt
+> > steer with enter                      mode act - ctrl+k
+[>o] working - claude-sonnet - esc interrupt

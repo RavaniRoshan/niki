@@ -1,6 +1,10 @@
-[c[?u[?2026$p[>1u[?2026h[?2026h[?2026$p[?2027$p[?2026l[?2026h[>4m[?1049h[?25l[?5W[?2004h[>4;2m[>1u[?u[H[2J ▄███▄   [1mNikiCode[m  v0.11.0
-███◐███  mock: gpt-4o-mini · mode act
- ▀███▀   /tmp/TestRecordWorkbenchSession4188955875/003 · —
+[c[?u[?2026$p[>1u[?2026h[?2026h[?2026$p[?2027$p[?2026l[?2026h[>4m[?1049h[?25l[?5W[?2004h[>4;2m[>1u[?u[H[2J[1;17H[1K
+  ██[13X
+    ████ █████     [1mNikiCode[m  v0.11.0
+[7G[1K[C█████◐██    mock: gpt-4o-mini · mode act
+    ████ █████     /tmp/TestRecordWorkbenchSession3894545771/003 · —
+  ████████       
+    ██ ██        
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   CONTEXT
 [5G—
@@ -8,42 +12,48 @@
   COST
 turn —
 [5Gsession —[26d[1m> > [22;7mD[mescribe a change, or ask a question[39X[26;80H   mode act · ctrl+k
-[◐] idle · mock: gpt-4o-mini[18X[27;47Hshift+tab mode · ctrl+o expand · ctrl+k menu · ? help[?2026l[?2026hM[5Gharden POST /lo[7m [m[59X[?2026l[?2026h[H[1m ▄███▄ [m
-[1m███◑███[m
-[1m ▀███▀ [m[26;5H[7ms[mteer with enter[59X
-[2G[1m◑[m] working · mock: gpt-4o-mini · esc interrupt             ctrl+c stop · esc pause · ctrl+o expand[?2026l[?2026h[5;2H› harden POST /login[28X[5;50H CONTEXT
+[▸◐] idle · mock: gpt-4o-mini[17X[27;47Hshift+tab mode · ctrl+o expand · ctrl+k menu · ? help[?2026l[?2026hM[5Gharden POST /l[7m [m[60X[?2026l[?2026h[1;17H[1m[1K[m
+[1m  ██[13X[m
+[1m    ████ █████   [m
+[7G[1m[1K █████◑██  [m
+[1m    ████ █████   [m
+[1m  ████████       [m
+[1m    ██ ██        [m[26;5H[7ms[mteer with enter[59X
+[2G[1m▸◑[m] working · mock: gpt-4o-mini · esc interrupt            ctrl+c stop · esc pause · ctrl+o expand[?2026l[?2026h[9;2H› harden POST /login[28X[9;50H CONTEXT
 [6D[1K —
 
 [4D[1K COST
-[1K turn —[10;52H[1K session —[24;4H[1m◐ [mthinking… · esc pause
-[2Gcontract  ○ 0 of 1[?2026l[?2026h[6;4HAcknowledged: [24;6Hstreaming… · esc pause[?2026l[?2026h[6;18Hharden POST [?2026l[?2026h/login [16X[6;53H12 / 128k[24;2Hnot verified  the run ended without a passing v…            
- ────────────────────────────────────────────────            
+[1K turn —[14;52H[1K session —[24;4H[1m◐ [mthinking… · esc pause
+[2Gcontract  ○ 0 of 1[?2026l[?2026h[10;4HAcknowledged: [24;6Hstreaming… · esc pause[?2026l[?2026h[10;18Hharden POST /login [?2026l[?2026h[10;53H12 / 128k
 
-[18X[27;79Henter accept · d diff[?2026l[?2026h[11;25r[25;1H
-[1;27r[25;1H branch (none)[K[?2026l[?2026h[6;37HI  [?2026l[?2026hwill run [?2026l[?2026ht… [?2026l[?2026h[2C59 [9;58H$0.0002
-[4D$0.0002[23;62H      
-[6D      [25;17H$0.0002[?2026l[?2026h[9;64H4
-[2C4[25;23H4[?2026l[?2026h[9;64H6
-[2C6[25;23H6[?2026l[?2026h[9;64H7
-[2C7[25;23H7[?2026l[?2026h[9;64H9
-[2C9[25;23H9[?2026l[?2026h[9;63H11
-[C11[25;22H11[?2026l[?2026h[6;53H60 [9;64H3
-[2C3[25;23H3[?2026l[?2026h[9;64H5
-[2C5[25;23H5[?2026l[?2026h[9;64H7
-[2C7[25;23H7[?2026l[?2026h[9;64H9
-[2C9[25;23H9[?2026l[?2026h[9;63H21
-[C21[25;22H21[?2026l[?2026h[9;64H3
-[2C3[25;23H3[?2026l[?2026h[9;64H4
-[2C4[25;23H4[?2026l[?2026h[9;64H6
-[2C6[25;23H6[?2026l[?2026h[9;64H8
-[2C8[25;23H8[?2026l[?2026h[9;63H30
-[C30[25;22H30[?2026l[?2026h[9;64H2
-[2C2[25;23H2[?2026l[?2026h[11;24r[24;1H
-[1;27r[H ▄███▄ 
-███○███
- ▀███▀ [7;4H[not verified] step limit reached without veri[22;16Hstep limit reached without verifi
+
+[4D$0.0001
+[4D$0.0001[?2026l[?2026h[24;2Hnot verified  the run ended without a passing v…[18X
+ ────────────────────────────────────────────────[18X[27;61H[18X[27;79Henter accept · d diff[?2026l[?2026h[15;25r[25;1H
+[1;27r[25;1H branch (none)  $0.0001[K[?2026l[?2026h[10;37HI  [?2026l[?2026hwill [?2026l[?2026hrun  [?2026l[?2026ht… [?2026l[?2026h[2C59 [13;64H3
+[2C3[25;23H3[?2026l[?2026h[13;64H5
+[2C5[25;23H5[?2026l[?2026h[13;64H7
+[2C7[25;23H7[?2026l[?2026h[13;64H8
+[2C8[25;23H8[?2026l[?2026h[13;63H10
+[C10[25;22H10[?2026l[?2026h[13;64H2
+[2C2[25;23H2[?2026l[?2026h[10;53H60 [?2026l[?2026h[13;64H4
+[2C4[25;23H4[?2026l[?2026h[13;64H6
+[2C6[25;23H6[?2026l[?2026h[13;64H8
+[2C8[25;23H8[?2026l[?2026h[13;63H20
+[C20[25;22H20[?2026l[?2026h[13;64H2
+[2C2[25;23H2[?2026l[?2026h[13;64H4
+[2C4[25;23H4[?2026l[?2026h[13;64H6
+[2C6[25;23H6[?2026l[?2026h[13;64H8
+[2C8[25;23H8[?2026l[?2026h[15;24r[24;1H
+[1;27r[1;17H[1K
+  ██[13X
+    ████ █████   
+[7G[1K[C█████○██  
+    ████ █████   
+  ████████       
+    ██ ██        [11;4H[not verified] step limit reached without veri[22;16Hstep limit reached without verifi
 
    step limit reached without verification[K
  b
 [5G[7mD[mescribe a change, or ask a question
-[2G○] error · mock: gpt-4o-mini[18X[?2026l[?2026h[>4m[<1u[?1049l[?25h[?2004l[?2026l[<u[?2026l
+[2G▸○] error · mock: gpt-4o-mini[18X[?2026l[?2026h[>4m[<1u[?1049l[?25h[?2004l[?2026l[<u[?2026l

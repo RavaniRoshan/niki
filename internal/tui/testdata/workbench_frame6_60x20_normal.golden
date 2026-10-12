@@ -1,4 +1,4 @@
-[◑] NikiCode v0.1.0  claude-sonnet · act  /home/dev/project…
+[▸◑] NikiCode v0.1.0  claude-sonnet · act  /home/dev/projec…
 ────────────────────────────────────────────────────────────
 PLAN               thought · ctrl+o expand                  
 ✓ 1. Read the han… ── step 2 · Add the limiter ──────────── 
@@ -17,4 +17,4 @@ PLAN               thought · ctrl+o expand
                                                             
                    contract  ○ 0 of 5                       
 > > steer with enter                      mode act · ctrl+k
-[◑] working · claude-sonnet · checkpoints 1 · esc interrupt
+[▸◑] working · claude-sonnet · checkpoints 1 · esc interrupt

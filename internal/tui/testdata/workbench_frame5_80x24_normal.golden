@@ -1,16 +1,17 @@
- ▄███▄   NikiCode  v0.1.0             
-███◑███  claude-sonnet · mode act     
- ▀███▀   /home/dev/projects/api · main
+                                                
+  ██                                            
+    ████ █████     NikiCode  v0.1.0             
+       █████◑██    claude-sonnet · mode act     
+    ████ █████     /home/dev/projects/api · main
+  ████████                                      
+    ██ ██                                       
 ────────────────────────────────────────────────────────────────────────────────
-PLAN                       64 lines                       CONTEXT          
-✓ 1. Read the handler… ✓ search  "RateLimi……internal/**     5.1k / 128k    
-◐ 2. Add the limiter       3 matches                                       
-○ 3. run go test ./in… ✓ edit  internal/auth/limit.go     COST             
-                       verified  5 of 5 required  ·  tru…   turn $0.0008   
-                       ──────────────────────────────────   session $0.0008
-                       ✓ R1  Expired tokens are rejected                   
-                             go test ./... · passed                        
-                       ✓ R2  Refresh keeps the session id                  
+PLAN                     Contract: 5 requirements. Assum… CONTEXT          
+✓ 1. Read the handler… verified  5 of 5 required  ·  tru…   5.1k / 128k    
+◐ 2. Add the limiter   ──────────────────────────────────                  
+○ 3. run go test ./in… ✓ R1  Expired tokens are rejected  COST             
+                             go test ./... · passed         turn $0.0008   
+                       ✓ R2  Refresh keeps the session id   session $0.0008
                              token_test.go:81 · passed                     
                        ✓ R3  Rate limit returns 429                        
                              limit_test.go:12 · passed                     
@@ -19,6 +20,5 @@ PLAN                       64 lines                       CONTEXT
                        ✓ R5  No new dependency                             
                              go.mod unchanged · tamper c…                  
                        not verified  load behavior: no c…                  
-                       branch main  $0.0008                                
 > > steer with enter                                          mode act · ctrl+k
-[◑] working · claude-sonnet · esc interrupt               enter accept · d diff
+[▸◑] working · claude-sonnet · esc interrupt              enter accept · d diff

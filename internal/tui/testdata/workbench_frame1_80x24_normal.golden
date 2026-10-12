@@ -1,6 +1,10 @@
- ▄███▄   NikiCode  v0.1.0             
-███◐███  claude-sonnet · mode act     
- ▀███▀   /home/dev/projects/api · main
+                                                
+  ██                                            
+    ████ █████     NikiCode  v0.1.0             
+       █████◐██    claude-sonnet · mode act     
+    ████ █████     /home/dev/projects/api · main
+  ████████                                      
+    ██ ██                                       
 ────────────────────────────────────────────────────────────────────────────────
   CONTEXT    
     —        
@@ -16,9 +20,5 @@
              
              
              
-             
-             
-             
-             
 > > Describe a change, or ask a question                      mode act · ctrl+k
-[◐] idle · claude-sonnet  shift+tab mode · ctrl+o expand · ctrl+k menu · ? help
+[▸◐] idle · claude-sonnet shift+tab mode · ctrl+o expand · ctrl+k menu · ? help

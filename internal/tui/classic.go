@@ -61,26 +61,13 @@ func classicRule(width int) string {
 	return strings.Repeat(ruleChar(), width)
 }
 
-// classicOrb renders the one-eyed orb for the current run state. The
-// eye is driven only by real events: working, done, error,
-// interrupted, idle (C0). ASCII fallback art under plain/ASCII mode.
-// The art itself lives in nibArt (one module, WORKBENCH.md §4); the
-// classic eye mapping stays here so the classic goldens hold.
+// classicOrb renders Nib for the current run state. The eye is
+// driven only by real events: working, done, error, interrupted,
+// idle (C0). ASCII fallback art under plain/ASCII mode. The art
+// lives in nibArt (one module); the classic eye mapping stays here
+// so the classic goldens hold.
 func (m AppModel) classicOrb() string {
-	eye, asciiEye := "◐", "o"
-	style := m.theme.Accent
-	switch m.state.TurnOutcome {
-	case "done":
-		eye, asciiEye = "●", "o"
-		style = m.theme.Success
-	case "error":
-		eye, asciiEye = "○", "x"
-		style = m.theme.Error
-	}
-	if m.state.Busy {
-		eye, asciiEye = "◑", "*"
-		style = m.theme.ActivityGlyph
-	}
+	_, eye, asciiEye, style := m.nibState()
 	return nibArt(eye, asciiEye, style)
 }
 
@@ -133,7 +120,7 @@ func (m AppModel) classicHeader() string {
 		m.theme.Assistant.Render(model+" "+sep()+" approvals "+permissionShort(m.state.PermissionMode)),
 		m.theme.Muted.Render(dir+" "+sep()+" "+branch),
 	)
-	head := lipgloss.JoinHorizontal(lipgloss.Top, orb, "  ", identity)
+	head := lipgloss.JoinHorizontal(lipgloss.Center, orb, "  ", identity)
 
 	tipText := "Type a request " + sep() + " / for commands " + sep() + " ctrl+k for everything " + sep() + " ? for help"
 	if m.state.Width > 0 && CellWidth(tipText) > m.state.Width {
@@ -433,11 +420,11 @@ func (m AppModel) classicFooter() string {
 }
 
 // classicChrome is the number of lines the classic layout spends on
-// chrome around the scroll region: orb header (3) + tip + blank +
-// SETUP block (3 + blank, when unconfigured) + blank + activity +
-// rule + composer + footer.
+// chrome around the scroll region: mascot header (nibArtRows) + tip
+// + blank + SETUP block (3 + blank, when unconfigured) + blank +
+// activity + rule + composer + footer.
 func (m AppModel) classicChrome() int {
-	chrome := 3 + 1 + 1 + 1 + 1 + 1 + 1 + 1
+	chrome := nibArtRows + 1 + 1 + 1 + 1 + 1 + 1 + 1
 	if m.needsSetup() {
 		chrome += 4
 	}

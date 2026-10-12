@@ -1,6 +1,10 @@
-[1;38;2;249;115;22m ▄███▄ [m  [1;38;2;56;189;248mniki [m[38;2;125;139;166m0.1.0[m                   
-[1;38;2;249;115;22m███◑███[m  [38;2;241;245;249mclaude-sonnet · approvals ask[m
-[1;38;2;249;115;22m ▀███▀ [m  [38;2;125;139;166m/home/dev/projects/api · main[m
+[1;38;2;249;115;22m                 [m                               
+[1;38;2;249;115;22m  ██             [m                               
+[1;38;2;249;115;22m    ████ █████   [m  [1;38;2;56;189;248mniki [m[38;2;125;139;166m0.1.0[m                   
+[1;38;2;249;115;22m       █████◑██  [m  [38;2;241;245;249mclaude-sonnet · approvals ask[m
+[1;38;2;249;115;22m    ████ █████   [m  [38;2;125;139;166m/home/dev/projects/api · main[m
+[1;38;2;249;115;22m  ████████       [m                               
+[1;38;2;249;115;22m    ██ ██        [m                               
 [38;2;118;133;159mType a request · / for commands · ctrl+k for everything · ? for help[m
 
 [38;2;248;250;252;48;2;30;41;59m› harden POST /login: reject expired tokens and rate-limit failed logins[m[48;2;30;41;59m        [m
@@ -11,6 +15,10 @@
 [38;2;34;197;94m✓[m [1;38;2;241;245;249msearch[m  [38;2;148;163;184m"RateLimit" in internal/**[m                                   [38;2;148;163;184m3 matches[m
 [1;38;2;249;115;22m◐[m [1;38;2;241;245;249medit[m  [38;2;148;163;184minternal/auth/limit.go[m                                                  [38;2;148;163;184m[m
   [38;2;241;245;249mWriting the limiter now, then running the auth tests.[m                         
+                                                                                
+                                                                                
+                                                                                
+                                                                                
                                                                                 
                                                                                 
                                                                                 

@@ -1,6 +1,10 @@
- ▄███▄   niki 0.1.0                   
-███◑███  claude-sonnet · approvals ask
- ▀███▀   /home/dev/projects/api · main
+                                                
+  ██                                            
+    ████ █████     niki 0.1.0                   
+       █████◑██    claude-sonnet · approvals ask
+    ████ █████     /home/dev/projects/api · main
+  ████████                                      
+    ██ ██                                       
 Type a request · / for commands · ctrl+k for everything · ? for help
 
 › harden POST /login: reject expired tokens and rate-limit failed logins        
@@ -17,6 +21,10 @@ Type a request · / for commands · ctrl+k for everything · ? for help
 ↺ stream error: connection reset — retrying 1/4 (jittered backoff)              
   ✓ Answered: write the limiter without it                                      
 ✓ shell  go test ./...                                                 31 passed
+                                                                                
+                                                                                
+                                                                                
+                                                                                
 
 verified  5 of 5 required  ·  trust T2 baseline-validated
 ────────────────────────────────────────────────────────────────────────────────

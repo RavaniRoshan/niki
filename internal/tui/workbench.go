@@ -17,20 +17,34 @@ import (
 // element is driven by a real Op/Event — an element whose event has
 // not fired is absent (P20/P21), never placeholder chrome.
 
-// nibArt is the one art module for the mascot: a constant-width
-// 3-row orb whose eye and body color come from the caller's state
-// mapping. Width never changes between states (no jitter).
+// nibArt is the one art module for the mascot: Nib, rasterized
+// from the shipped mark's exact coordinates
+// (docs/assets/nikicode-mascot.svg — the prompt chevron body, the
+// round head, the one cut-out eye, two feet). The raster is
+// derived from those coordinates, never redrawn by eye. Width
+// never changes between states (no jitter): the eye glyph is the
+// only cell that differs.
 func nibArt(eye, asciiEye string, style lipgloss.Style) string {
 	if UseASCII() {
 		return lipgloss.JoinVertical(lipgloss.Left,
-			style.Render("  _____ "),
-			style.Render(" /  "+asciiEye+"  \\"),
-			style.Render(" \\_____/ "))
+			style.Render("                 "),
+			style.Render("  ##             "),
+			style.Render("    #### #####   "),
+			style.Render("       #####"+asciiEye+"##  "),
+			style.Render("    #### #####   "),
+			style.Render("  ########       "),
+			style.Render("    ## ##        "),
+		)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
-		style.Render(" ▄███▄ "),
-		style.Render("███"+eye+"███"),
-		style.Render(" ▀███▀ "))
+		style.Render("                 "),
+		style.Render("  ██             "),
+		style.Render("    ████ █████   "),
+		style.Render("       █████"+eye+"██  "),
+		style.Render("    ████ █████   "),
+		style.Render("  ████████       "),
+		style.Render("    ██ ██        "),
+	)
 }
 
 // nibState maps the run state machine to the word, the eye, its
@@ -51,16 +65,29 @@ func (m AppModel) nibState() (word, eye, asciiEye string, style lipgloss.Style) 
 	}
 }
 
-// wbOrbOneRow is the compact mascot form for the status bar.
-func (m AppModel) wbOrbOneRow() string {
+// nibArtRows is the full form's height in rows (the raster's row
+// count; the header and its chrome math derive from it).
+const nibArtRows = 7
+
+// nibArtCols is the full form's width in columns, identical in
+// every state.
+const nibArtCols = 17
+
+// nibOneRow is the compact mascot form for the status bar: the
+// chevron body's essence beside the state eye, two cells, constant
+// width in every state.
+func (m AppModel) nibOneRow() string {
 	_, eye, asciiEye, style := m.nibState()
 	if UseASCII() {
-		eye = asciiEye
+		return style.Render(">" + asciiEye)
 	}
-	return style.Render(eye)
+	return style.Render("▸" + eye)
 }
 
-// wbOrb is the full 3-row mascot for the header.
+// wbOrbOneRow is the compact mascot form for the status bar.
+func (m AppModel) wbOrbOneRow() string { return m.nibOneRow() }
+
+// wbOrb is the full mascot for the header.
 func (m AppModel) wbOrb() string {
 	_, eye, asciiEye, style := m.nibState()
 	return nibArt(eye, asciiEye, style)
@@ -88,16 +115,18 @@ func (m AppModel) wbModel() string {
 	return m.state.ModelName
 }
 
-// wbHeaderLines is the header's row count at the current width.
+// wbHeaderLines is the header's row count at the current width:
+// the full form at wide terminals, the one-row form below.
 func (m AppModel) wbHeaderLines() int {
 	if m.state.Width >= 80 {
-		return 3
+		return nibArtRows
 	}
 	return 1
 }
 
-// wbFullHeader renders the wide header: orb beside the identity
-// rows (product/version, model/mode, cwd/branch).
+// wbFullHeader renders the wide header: the mascot beside the
+// identity rows (product/version, model/mode, cwd/branch), the
+// identity vertically centered against the art.
 func (m AppModel) wbFullHeader(width int) string {
 	ver := m.state.Version
 	if ver == "" {
@@ -108,7 +137,7 @@ func (m AppModel) wbFullHeader(width int) string {
 		m.theme.Assistant.Render(m.wbModel()+" "+sep()+" mode "+m.wbMode()),
 		m.theme.Muted.Render(homeDir(m.state.Directory)+" "+sep()+" "+m.wbBranch()),
 	)
-	head := lipgloss.JoinHorizontal(lipgloss.Top, m.wbOrb(), "  ", identity)
+	head := lipgloss.JoinHorizontal(lipgloss.Center, m.wbOrb(), "  ", identity)
 	return truncLines(head, width)
 }
 

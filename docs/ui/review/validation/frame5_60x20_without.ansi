@@ -1,8 +1,16 @@
-[1;38;2;249;115;22m ▄███▄ [m  [1;38;2;56;189;248mniki [m[38;2;125;139;166m0.1.0[m                   
-[1;38;2;249;115;22m███◑███[m  [38;2;241;245;249mclaude-sonnet · approvals ask[m
-[1;38;2;249;115;22m ▀███▀ [m  [38;2;125;139;166m/home/dev/projects/api · main[m
+[1;38;2;249;115;22m                 [m                               
+[1;38;2;249;115;22m  ██             [m                               
+[1;38;2;249;115;22m    ████ █████   [m  [1;38;2;56;189;248mniki [m[38;2;125;139;166m0.1.0[m                   
+[1;38;2;249;115;22m       █████◑██  [m  [38;2;241;245;249mclaude-sonnet · approvals ask[m
+[1;38;2;249;115;22m    ████ █████   [m  [38;2;125;139;166m/home/dev/projects/api · main[m
+[1;38;2;249;115;22m  ████████       [m                               
+[1;38;2;249;115;22m    ██ ██        [m                               
 [38;2;118;133;159mType a request · / for commands · ctrl+k for everything · ?…[m
 
+  [38;2;241;245;249mContract: 5 requirements. Assumed: limit is per client IP…[m
+[38;2;34;197;94m✓[m [1;38;2;241;245;249mread[m  [38;2;148;163;184minternal/auth/token.go[m                              
+    [38;2;148;163;184m112 lines[m                                               
+[38;2;34;197;94m✓[m [1;38;2;241;245;249mread[m  [38;2;148;163;184minternal/auth/token_test.go[m                         
     [38;2;148;163;184m64 lines[m                                                
 [38;2;34;197;94m✓[m [1;38;2;241;245;249msearch[m  [38;2;148;163;184m"RateLimit" in internal/**[m                        
     [38;2;148;163;184m3 matches[m                                               

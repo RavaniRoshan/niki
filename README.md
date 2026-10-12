@@ -1,13 +1,18 @@
 <div align="center">
 
-<pre>
-             ##    ## ###### ##    ## ######  ######  ######  ###### ########
-             ###   ##   ##   ##   ##   ##   ##    ## ##    ## ##    ## ##      
- ▄███▄     ####  ##   ##   ##  ##   ##   ##       ##    ## ##    ## ##      
-███◐███    ## ## ##   ##   ## ##   ##   ##       ##    ## ##    ## ######  
- ▀███▀     ##  ####   ##   ######   ##   ##    ## ##    ## ##    ## ##      
-             ##   ### ###### ##   ## ######  ######  ######  ###### ########
-</pre>
+<table>
+<tr>
+<td align="right" width="120"><img src="docs/assets/nikicode-mascot-olive.svg" width="110" alt="Nib, the NikiCode mascot"></td>
+<td align="left"><pre>
+##    ## ###### ##    ## ######  ######  ######  ###### ########
+###   ##   ##   ##   ##   ##   ##    ## ##    ## ##    ## ##      
+####  ##   ##   ##  ##   ##   ##       ##    ## ##    ## ##      
+## ## ##   ##   ## ##   ##   ##       ##    ## ##    ## ######  
+##  ####   ##   ######   ##   ##    ## ##    ## ##    ## ##      
+##   ### ###### ##   ## ######  ######  ######  ###### ########
+</pre></td>
+</tr>
+</table>
 
 **NikiCode is an agentic coding tool that lives in your terminal, understands your codebase, and helps you code faster by executing routine tasks, explaining complex code, and handling git workflows — all through natural language commands.**
 <!-- claims: C1 C2 C3 C4 C5 C6 -->
@@ -63,7 +68,7 @@ Measured on the host (`AMD Ryzen 7 4800H`, `Linux WSL2`, `go1.27.1`) with the in
 
 ## 🖥️ The Workbench
 
-NikiCode's interface is a full-screen, three-rail workbench: the plan and the live agents on the left, the run trace in the centre, the instruments (context, checkpoints, cost) on the right, and Nib — the orb — as the status indicator. Every visible element is driven by a real event from the engine; when an event has not fired, its element is absent, never faked.
+NikiCode's interface is a full-screen, three-rail workbench: the plan and the live agents on the left, the run trace in the centre, the instruments (context, checkpoints, cost) on the right, and Nib — the mascot — as the status indicator. Every visible element is driven by a real event from the engine; when an event has not fired, its element is absent, never faked.
 
 ```
 ┌ header ────────────────────────────────────────────────────────────────┐

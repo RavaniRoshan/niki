@@ -1,17 +1,17 @@
-  _____    NikiCode  v0.1.0             
- /  o  \   claude-sonnet - mode act     
- \_____/   /home/dev/projects/api - main
+                                                
+  ##                                            
+    #### #####     NikiCode  v0.1.0             
+       #####o##    claude-sonnet - mode act     
+    #### #####     /home/dev/projects/api - main
+  ########                                      
+    ## ##                                       
 ----------------------------------------------------------------------------------------------------
-PLAN                           64 lines                                     CONTEXT          
-done 1. Read the handle... done search  "RateLimit" in internal/**            5.1k / 128k    
-running 2. Add the limiter     3 matches                                                     
-queued 3. run go test .... done edit  internal/auth/limit.go                COST             
-                               +62 -4                                         turn $0.0008   
-                             Writing the limiter now, then running the a...   session $0.0008
-                           failed shell  go test ./internal/auth                             
-                           verified  5 of 5 required  -  trust T2 baseli...                  
-                           ------------------------------------------------                  
-                           done R1  Expired tokens are rejected                              
+PLAN                         Contract: 5 requirements. Assumed: limit is... CONTEXT          
+done 1. Read the handle... done read  internal/auth/token.go                  5.1k / 128k    
+running 2. Add the limiter     112 lines                                                     
+queued 3. run go test .... verified  5 of 5 required  -  trust T2 baseli... COST             
+                           ------------------------------------------------   turn $0.0008   
+                           done R1  Expired tokens are rejected               session $0.0008
                                  go test ./... - passed                                      
                            done R2  Refresh keeps the session id                             
                                  token_test.go:81 - passed                                   
@@ -24,4 +24,4 @@ queued 3. run go test .... done edit  internal/auth/limit.go                COST
                            not verified  load behavior: no check is conf...                  
                            branch main  $0.0008                                              
 > > steer with enter                                                              mode act - ctrl+k
-[o] working - claude-sonnet - esc interrupt                                   enter accept - d diff
+[>o] working - claude-sonnet - esc interrupt                                  enter accept - d diff

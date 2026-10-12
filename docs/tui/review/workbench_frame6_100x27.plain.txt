@@ -1,20 +1,20 @@
-  _____    NikiCode  v0.1.0             
- /  o  \   claude-sonnet - mode act     
- \_____/   /home/dev/projects/api - main
+                                                
+  ##                                            
+    #### #####     NikiCode  v0.1.0             
+       #####o##    claude-sonnet - mode act     
+    #### #####     /home/dev/projects/api - main
+  ########                                      
+    ## ##                                       
 ----------------------------------------------------------------------------------------------------
-PLAN                       done plan  3 steps                               CONTEXT          
-done 1. Read the handle...     3 steps                                        5.1k / 128k    
-running 2. Add the limiter -- step 1 - Read the handler and its tests ----                   
-queued 3. run go test .... done read  internal/auth/token.go                CHECKPOINTS      
-                               112 lines                                    done turn 1      
-                           thought - ctrl+o expand                                           
-                           -- step 2 - Add the limiter -------------------  COST             
-                           done edit  internal/auth/limit.go                  turn $0.0008   
-                               +62 -4                                         session $0.0008
+PLAN                           112 lines                                    CONTEXT          
+done 1. Read the handle... thought - ctrl+o expand                            5.1k / 128k    
+running 2. Add the limiter -- step 2 - Add the limiter -------------------                   
+queued 3. run go test .... done edit  internal/auth/limit.go                CHECKPOINTS      
+                               +62 -4                                       done turn 1      
                              --- a/internal/auth/limit.go                                    
-                             +++ b/internal/auth/limit.go                                    
-                             @@ -4,1 +4,1 @@                                                 
-                             -    return true                                                
+                             +++ b/internal/auth/limit.go                   COST             
+                             @@ -4,1 +4,1 @@                                  turn $0.0008   
+                             -    return true                                 session $0.0008
                              +    return allowed()                                           
                            -- step 3 - run go test ./internal/auth -------                   
                            failed shell  go test ./internal/auth                             
@@ -23,5 +23,5 @@ queued 3. run go test .... done read  internal/auth/token.go                CHEC
                                token_test.go:81: session id changed after r                  
                                                                                              
                            contract  queued 0 of 5                                           
-> > steer with enter - queue with ctrl+enter                                       
-[o] working - claude-sonnet - checkpoints 1 - esc interrupt ctrl+c stop - esc pause - ctrl+o expand
+> > steer with enter                                                              mode act - ctrl+k
+[>o] working - claude-sonnet - checkpoints 1 - esc interrupt

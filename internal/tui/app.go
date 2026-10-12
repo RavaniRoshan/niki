@@ -2098,10 +2098,8 @@ func (m AppModel) executeSlashCommand(input string) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) renderMascot() string {
-	top := m.theme.Accent.Render(" ▄███▄ ")
-	mid := m.theme.Accent.Render("███◐███")
-	bot := m.theme.Accent.Render(" ▀███▀ ")
-	return lipgloss.JoinVertical(lipgloss.Left, top, mid, bot)
+	_, eye, asciiEye, style := m.nibState()
+	return nibArt(eye, asciiEye, style)
 }
 
 func (m AppModel) welcomeCardView() string {

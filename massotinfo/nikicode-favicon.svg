@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="NikiCode">
+  <mask id="niki-eye-f"><rect width="32" height="32" fill="#fff"/><circle cx="25.6" cy="13.6" r="2.4" fill="#000"/></mask>
+  <g fill="none" stroke="#4D7C0F" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5.5 8 L19 16 L5.5 24"/>
+  </g>
+  <circle cx="23.2" cy="16" r="7.6" fill="#4D7C0F" mask="url(#niki-eye-f)"/>
+</svg>

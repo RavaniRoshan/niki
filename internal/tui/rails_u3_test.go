@@ -3,6 +3,7 @@ package tui
 import (
 	"image/color"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -205,10 +206,11 @@ func TestNibHeaderAndStatusBarAgree(t *testing.T) {
 	for name, frame := range frames {
 		lines := strings.Split(frame, "\n")
 		last := lines[len(lines)-1]
-		if !strings.Contains(last, "["+wantStatusEye(name)+"] "+wantWord(name)) {
+		// The one-row form: the chevron body beside the state eye.
+		if !strings.Contains(last, "[\u25b8"+wantStatusEye(name)+"] "+wantWord(name)) {
 			t.Fatalf("[%s] status bar missing the state eye/word: %q", name, last)
 		}
-		head := strings.Join(lines[:3], "\n")
+		head := strings.Join(lines[:nibArtRows], "\n")
 		if !strings.Contains(head, wantHeaderEye(name)) {
 			t.Fatalf("[%s] header orb missing the state eye:\n%s", name, head)
 		}
@@ -372,6 +374,55 @@ func TestNibContrastEveryTheme(t *testing.T) {
 			} else {
 				t.Logf("[nib contrast %-10s %-20s %.2f:1", name, b.label, ratio)
 			}
+		}
+	}
+}
+
+// U3+: the TUI art is a fixed-shape raster of the shipped mark: a
+// constant row and column count in every state, exactly one eye
+// cell, and the eye inside the head (right of the chevron).
+func TestNibArtShape(t *testing.T) {
+	for _, ascii := range []bool{false, true} {
+		if ascii {
+			t.Setenv("NIKI_ASCII", "1")
+			ApplyDisplayEnv(io.Discard)
+		}
+		m := workbenchModel(t, 100, 27)
+		m.state.ModelName = "claude-sonnet"
+		for _, st := range []struct {
+			name string
+			arm  func(*AppModel)
+		}{
+			{"idle", func(m *AppModel) {}},
+			{"working", func(m *AppModel) { m.state.Busy = true }},
+			{"done", func(m *AppModel) { m.state.TurnOutcome = "done" }},
+			{"error", func(m *AppModel) { m.state.TurnOutcome = "error" }},
+			{"interrupted", func(m *AppModel) { m.state.TurnOutcome = "interrupted" }},
+		} {
+			mm := m
+			st.arm(&mm)
+			art := mm.wbOrb()
+			lines := strings.Split(Downsample(art), "\n")
+			if len(lines) != nibArtRows {
+				t.Fatalf("[%s ascii=%v] art has %d rows, want %d", st.name, ascii, len(lines), nibArtRows)
+			}
+			eyes := 0
+			for _, line := range lines {
+				if CellWidth(line) != nibArtCols {
+					t.Fatalf("[%s ascii=%v] row width %d, want %d: %q", st.name, ascii, CellWidth(line), nibArtCols, line)
+				}
+				for _, r := range line {
+					if r == '◐' || r == '◑' || r == '●' || r == '○' || r == 'o' || r == '*' || r == 'x' {
+						eyes++
+					}
+				}
+			}
+			if eyes != 1 {
+				t.Fatalf("[%s ascii=%v] the art must carry exactly one eye cell, got %d", st.name, ascii, eyes)
+			}
+		}
+		if ascii {
+			os.Unsetenv("NIKI_ASCII")
 		}
 	}
 }

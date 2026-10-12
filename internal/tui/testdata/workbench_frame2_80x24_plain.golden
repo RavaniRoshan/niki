@@ -1,6 +1,10 @@
-  _____    NikiCode  v0.1.0             
- /  o  \   claude-sonnet - mode act     
- \_____/   /home/dev/projects/api - main
+                                                
+  ##                                            
+    #### #####     NikiCode  v0.1.0             
+       #####o##    claude-sonnet - mode act     
+    #### #####     /home/dev/projects/api - main
+  ########                                      
+    ## ##                                       
 --------------------------------------------------------------------------------
  > harden POST /login: reject       CONTEXT          
  expired tokens and rate-limit        5.1k / 128k    
@@ -14,11 +18,7 @@
                                                      
                                                      
                                                      
-                                                     
-                                                     
-                                                     
-                                                     
    - streaming... - esc pause                        
  contract  queued 0 of 5                             
 > > steer with enter                                          mode act - ctrl+k
-[o] working - claude-sonnet - esc interrupt
+[>o] working - claude-sonnet - esc interrupt

@@ -25,9 +25,8 @@ Replace the chat-style UI with the **Workbench**: a full-screen,
 three-rail, task-first interface. The primary object is a Run grouped
 by plan Step, not a message. Every visible element is driven by a
 real Op/Event from the existing seam; an element with no event is
-absent (P20/P21), never faked, never zeroed. Nib (the existing orb)
-becomes the header/status mascot, driven only by the run state
-machine.
+absent (P20/P21), never faked, never zeroed. Nib — the mascot — is
+the header/status indicator, driven only by the run state machine.
 
 Rule of proof: each element ships with a test asserting it is
 **absent before its event fires and present after**.
@@ -136,23 +135,33 @@ minimal seam additions in §6, proposed, not yet built), **DEFER**
 
 ## 4. Nib (the mascot)
 
-Nib is the existing orb, promoted to header + status bar. No new art:
-the current `renderMascot` body and the CLASSIC.md eye table carry
-over, with the mission's eye semantics:
+Nib is a creature built from the terminal prompt: a bold chevron
+body, a round head on the chevron's point, one eye, two feet. The
+mark IS the prompt with a character behind it. The exact geometry
+is the shipped SVG (`docs/assets/nikicode-mascot.svg`); the TUI art
+is a raster of those exact coordinates, never redrawn by eye.
 
+- One eye, always. Two reference mascots exist and Nib stays clear
+  of both by construction: never a second eye, never a rounded-square
+  body, never a wide legged silhouette.
 - idle: accent body, half-lit eye. working: accent body, flipped
   half-lit eye (static — the sweep belongs to the activity line, so
   there is never a double spinner). done: success body, filled eye.
   error: error body, hollow eye. interrupted: muted body, half-lit
   eye.
 - ASCII fallback eyes: `o` (idle/working), `*` (done), `x` (error).
-- Width tiers: full 3-row art wide, compact one-row form mid, none
-  below the minimum. Constant width in every state (no jitter);
-  art lives in one module (`wordmark.go` + `theme.go`).
+- Width tiers: the full 7-row raster at wide terminals, a compact
+  one-row form (chevron + eye) at mid widths, none below the
+  minimum. Constant width in every state (no jitter); the art lives
+  in one module (`nibArt` in `internal/tui/workbench.go`).
 - It never schedules a redraw of its own; it changes only when a
   real event changes the run state (pure `View()`).
-- Contrast: body-vs-background passes 3:1 in every theme variant —
-  the existing `contrast_test.go` gate covers any palette it gets.
+- Contrast: the body colors clear the 3:1 UI-glyph bar in every
+  theme variant — the per-theme mascot contrast gate covers it.
+- The same drawing ships for the other surfaces: the currentColor
+  SVG for inlining, the olive-baked SVG for `<img>`/README use (an
+  `<img>` cannot inherit `currentColor`), and the bolder feet-less
+  favicon variant for 16-32px (`docs/assets/`).
 
 ## 5. One core, three views
 
@@ -312,7 +321,7 @@ taken unilaterally.
 
 Shipped in U1 (proven by tests, goldens, dumps — evidence in
 docs/tui/PROGRESS.md):
-- The six regions: header (full orb ≥80 columns, compact one-row
+- The six regions: header (full mascot raster ≥80 columns, one-row
   form below), left rail (PLAN, AGENTS), centre (viewport + live
   block), right rail (CONTEXT, COST), composer, status bar.
 - Left rail AGENTS is now event-wired: `subagent_started/
@@ -372,7 +381,7 @@ U3 (rails + mascot) is **built and tested**:
   status-bar count render only from it and are absent when
   none exist.
 - Nib is proven across all five run states (idle/working/done/
-  error/interrupted) in BOTH the header orb and the status bar:
+  error/interrupted) in BOTH the header mascot and the status bar:
   body color and eye shape change together (color is never the
   only signal), the art is constant-width across states, the
   ASCII eyes are o/*/x, NO_COLOR keeps every state legible,

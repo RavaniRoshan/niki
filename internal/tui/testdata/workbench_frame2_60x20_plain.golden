@@ -1,4 +1,4 @@
-[o] NikiCode v0.1.0  claude-sonnet - act  /home/dev/proje...
+[>o] NikiCode v0.1.0  claude-sonnet - act  /home/dev/proj...
 ------------------------------------------------------------
  > harden POST /login: reject expired     
  tokens and rate-limit failed logins      
@@ -17,4 +17,4 @@
    - streaming... - esc pause             
  contract  queued 0 of 5                  
 > > steer with enter                      mode act - ctrl+k
-[o] working - claude-sonnet - esc interrupt
+[>o] working - claude-sonnet - esc interrupt

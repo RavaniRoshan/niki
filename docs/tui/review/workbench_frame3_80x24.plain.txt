@@ -1,6 +1,10 @@
-  _____    NikiCode  v0.1.0             
- /  o  \   claude-sonnet - mode act     
- \_____/   /home/dev/projects/api - main
+                                                
+  ##                                            
+    #### #####     NikiCode  v0.1.0             
+       #####o##    claude-sonnet - mode act     
+    #### #####     /home/dev/projects/api - main
+  ########                                      
+    ## ##                                       
 --------------------------------------------------------------------------------
 PLAN                   > harden POST /login: reject       CONTEXT          
 done 1. Read the ha... expired tokens and rate-limit        5.1k / 128k    
@@ -14,11 +18,7 @@ queued 3. run go te...   Reading the handler and its t... COST
                        done search  "RateL......nternal/*                  
                            3 matches                                       
                        running edit  internal/auth/limit.                  
-                                                                           
-                         Writing the limiter now, then...                  
-                                                                           
-                                                                           
                          - writing internal/auth/limit...                  
                        contract  queued 0 of 5                             
-> > steer with enter - queue with ctrl+enter                   
-[o] working - claude-sonnet - esc interrupt
+> > steer with enter                                          mode act - ctrl+k
+[>o] working - claude-sonnet - esc interrupt

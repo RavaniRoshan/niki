@@ -1,27 +1,27 @@
-  _____    NikiCode  v0.1.0             
- /  o  \   claude-sonnet - mode act     
- \_____/   /home/dev/projects/api - main
+                                                
+  ##                                            
+    #### #####     NikiCode  v0.1.0             
+       #####o##    claude-sonnet - mode act     
+    #### #####     /home/dev/projects/api - main
+  ########                                      
+    ## ##                                       
 ----------------------------------------------------------------------------------------------------
-PLAN                       done read  internal/auth/token.go                CONTEXT          
-done 1. Read the handle...     112 lines                                      5.1k / 128k    
-running 2. Add the limiter done read  internal/auth/token_test.go                            
-queued 3. run go test ....     64 lines                                     COST             
-                           done search  "RateLimit" in internal/**            turn $0.0008   
-                               3 matches                                      session $0.0008
+PLAN                       > harden POST /login: reject expired tokens and  CONTEXT          
+done 1. Read the handle... rate-limit failed logins                           5.1k / 128k    
+running 2. Add the limiter   Reading the handler and its tests first, th...                  
+queued 3. run go test ....   Contract: 5 requirements. Assumed: limit is... COST             
+                           done read  internal/auth/token.go                  turn $0.0008   
+                               112 lines                                      session $0.0008
+                           done read  internal/auth/token_test.go                            
+                               64 lines                                                      
+                           done search  "RateLimit" in internal/**                           
+                               3 matches                                                     
                            running edit  internal/auth/limit.go                              
-                                                                                             
-                             Writing the limiter now, then running the a...                  
-                           failed shell  go test ./internal/auth                             
-                               exit 1 - 2 failing                                            
-                               --- FAIL: TestRefreshKeepsSession (0.00s)                     
-                               token_test.go:81: session id changed after r                  
-                           ! stream error: connection reset -- retrying 1/4                  
-                                                                                             
                            ! needs you  add golang.org/x/time?                               
                              n keep the constraint - y allow once - v vi...                  
                              [n] write the limiter without it (default)                      
                            [y] allow once                                                    
                            [v] view the diff                                                 
                            contract  queued 0 of 5                                           
-> > answer the question above, or steer                                            
-[o] working - claude-sonnet - esc interrupt
+> > answer the question above, or steer                                           mode act - ctrl+k
+[>o] working - claude-sonnet - esc interrupt

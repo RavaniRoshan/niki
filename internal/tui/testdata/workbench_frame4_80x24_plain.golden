@@ -1,19 +1,19 @@
-  _____    NikiCode  v0.1.0             
- /  o  \   claude-sonnet - mode act     
- \_____/   /home/dev/projects/api - main
+                                                
+  ##                                            
+    #### #####     NikiCode  v0.1.0             
+       #####o##    claude-sonnet - mode act     
+    #### #####     /home/dev/projects/api - main
+  ########                                      
+    ## ##                                       
 --------------------------------------------------------------------------------
-PLAN                   done read  internal/auth/token.go  CONTEXT          
-done 1. Read the ha...     112 lines                        5.1k / 128k    
-running 2. Add the ... done read  interna......ken_test.g                  
-queued 3. run go te...     64 lines                       COST             
-                       done search  "RateL......nternal/*   turn $0.0008   
-                           3 matches                        session $0.0008
-                       running edit  internal/auth/limit.                  
-                                                                           
-                         Writing the limiter now, then...                  
-                       failed shell  go test ./internal/a                  
-                           exit 1 - 2 failing                              
-                           --- FAIL: TestRefreshKeepsSess                  
+PLAN                   expired tokens and rate-limit      CONTEXT          
+done 1. Read the ha... failed logins                        5.1k / 128k    
+running 2. Add the ...   Reading the handler and its t...                  
+queued 3. run go te...   Contract: 5 requirements. Ass... COST             
+                       done read  internal/auth/token.go    turn $0.0008   
+                           112 lines                        session $0.0008
+                       done read  interna......ken_test.g                  
+                           64 lines                                        
                        ! needs you  add golang.org/x/t...                  
                          n keep the constraint - y all...                  
                          [n] write the limiter without...                  
@@ -21,4 +21,4 @@ queued 3. run go te...     64 lines                       COST
                        [v] view the diff                                   
                        contract  queued 0 of 5                             
 > > answer the question above, or steer                       mode act - ctrl+k
-[o] working - claude-sonnet - esc interrupt
+[>o] working - claude-sonnet - esc interrupt

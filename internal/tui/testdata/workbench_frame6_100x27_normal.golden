@@ -1,20 +1,20 @@
- ▄███▄   NikiCode  v0.1.0             
-███◑███  claude-sonnet · mode act     
- ▀███▀   /home/dev/projects/api · main
+                                                
+  ██                                            
+    ████ █████     NikiCode  v0.1.0             
+       █████◑██    claude-sonnet · mode act     
+    ████ █████     /home/dev/projects/api · main
+  ████████                                      
+    ██ ██                                       
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-PLAN                       ✓ plan  3 steps                                  CONTEXT          
-✓ 1. Read the handler and…     3 steps                                        5.1k / 128k    
-◐ 2. Add the limiter       ── step 1 · Read the handler and its tests ────                   
-○ 3. run go test ./intern… ✓ read  internal/auth/token.go                   CHECKPOINTS      
-                               112 lines                                    ✓ turn 1         
-                           thought · ctrl+o expand                                           
-                           ── step 2 · Add the limiter ───────────────────  COST             
-                           ✓ edit  internal/auth/limit.go                     turn $0.0008   
-                               +62 −4                                         session $0.0008
+PLAN                           112 lines                                    CONTEXT          
+✓ 1. Read the handler and… thought · ctrl+o expand                            5.1k / 128k    
+◐ 2. Add the limiter       ── step 2 · Add the limiter ───────────────────                   
+○ 3. run go test ./intern… ✓ edit  internal/auth/limit.go                   CHECKPOINTS      
+                               +62 −4                                       ✓ turn 1         
                              --- a/internal/auth/limit.go                                    
-                             +++ b/internal/auth/limit.go                                    
-                             @@ -4,1 +4,1 @@                                                 
-                             -    return true                                                
+                             +++ b/internal/auth/limit.go                   COST             
+                             @@ -4,1 +4,1 @@                                  turn $0.0008   
+                             -    return true                                 session $0.0008
                              +    return allowed()                                           
                            ── step 3 · run go test ./internal/auth ───────                   
                            ✗ shell  go test ./internal/auth                                  
@@ -24,4 +24,4 @@ PLAN                       ✓ plan  3 steps                                  CO
                                                                                              
                            contract  ○ 0 of 5                                                
 > > steer with enter                                                              mode act · ctrl+k
-[◑] working · claude-sonnet · checkpoints 1 · esc interrupt ctrl+c stop · esc pause · ctrl+o expand
+[▸◑] working · claude-sonnet · checkpoints 1 · esc interrupt

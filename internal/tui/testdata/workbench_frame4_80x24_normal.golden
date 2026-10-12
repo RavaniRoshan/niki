@@ -1,19 +1,19 @@
- ▄███▄   NikiCode  v0.1.0             
-███◑███  claude-sonnet · mode act     
- ▀███▀   /home/dev/projects/api · main
+                                                
+  ██                                            
+    ████ █████     NikiCode  v0.1.0             
+       █████◑██    claude-sonnet · mode act     
+    ████ █████     /home/dev/projects/api · main
+  ████████                                      
+    ██ ██                                       
 ────────────────────────────────────────────────────────────────────────────────
-PLAN                   ✓ read  internal/auth/token.go     CONTEXT          
-✓ 1. Read the handler…     112 lines                        5.1k / 128k    
-◐ 2. Add the limiter   ✓ read  internal/a……oken_test.go                    
-○ 3. run go test ./in…     64 lines                       COST             
-                       ✓ search  "RateLimi……internal/**     turn $0.0008   
-                           3 matches                        session $0.0008
-                       ◐ edit  internal/auth/limit.go                      
-                                                                           
-                         Writing the limiter now, then r…                  
-                       ✗ shell  go test ./internal/auth                    
-                           exit 1 · 2 failing                              
-                           --- FAIL: TestRefreshKeepsSess                  
+PLAN                   expired tokens and rate-limit      CONTEXT          
+✓ 1. Read the handler… failed logins                        5.1k / 128k    
+◐ 2. Add the limiter     Reading the handler and its tes…                  
+○ 3. run go test ./in…   Contract: 5 requirements. Assum… COST             
+                       ✓ read  internal/auth/token.go       turn $0.0008   
+                           112 lines                        session $0.0008
+                       ✓ read  internal/a……oken_test.go                    
+                           64 lines                                        
                        ■ needs you  add golang.org/x/tim…                  
                          n keep the constraint · y allow…                  
                          [n] write the limiter without i…                  
@@ -21,4 +21,4 @@ PLAN                   ✓ read  internal/auth/token.go     CONTEXT
                        [v] view the diff                                   
                        contract  ○ 0 of 5                                  
 > > answer the question above, or steer                       mode act · ctrl+k
-[◑] working · claude-sonnet · esc interrupt
+[▸◑] working · claude-sonnet · esc interrupt

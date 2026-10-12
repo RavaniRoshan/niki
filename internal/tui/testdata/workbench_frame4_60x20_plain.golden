@@ -1,15 +1,15 @@
-[o] NikiCode v0.1.0  claude-sonnet - act  /home/dev/proje...
+[>o] NikiCode v0.1.0  claude-sonnet - act  /home/dev/proj...
 ------------------------------------------------------------
-PLAN               done read  internal/auth/token.go        
-done 1. Read th...     112 lines                            
-running 2. Add ... done read  internal/auth/token_test.go   
-queued 3. run g...     64 lines                             
+PLAN               > harden POST /login: reject expired     
+done 1. Read th... tokens and rate-limit failed logins      
+running 2. Add ...   Reading the handler and its tests fi...
+queued 3. run g...   Contract: 5 requirements. Assumed: l...
+                   done read  internal/auth/token.go        
+                       112 lines                            
+                   done read  internal/auth/token_test.go   
+                       64 lines                             
                    done search  "RateLimit" in internal/**  
                        3 matches                            
-                   running edit  internal/auth/limit.go     
-                                                            
-                     Writing the limiter now, then runnin...
-                   failed shell  go test ./internal/auth    
                    ! needs you  add golang.org/x/time?      
                      n keep the constraint - y allow once...
                      [n] write the limiter without it (de...
@@ -17,4 +17,4 @@ queued 3. run g...     64 lines
                    [v] view the diff                        
                    contract  queued 0 of 5                  
 > > answer the question above, or steer   mode act - ctrl+k
-[o] working - claude-sonnet - esc interrupt
+[>o] working - claude-sonnet - esc interrupt
