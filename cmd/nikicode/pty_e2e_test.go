@@ -16,7 +16,7 @@ import (
 
 func ptyRun(t *testing.T, args ...string) (restore func()) {
 	t.Helper()
-	cmd := exec.Command("../../bin/nikicode", args...)
+	cmd := exec.Command(ensureBinary(t), args...)
 	f, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestPTYRestoreOnSIGTERM(t *testing.T) {
 	if os.Getenv("NIKI_PTY_TESTS") == "" {
 		t.Skip("set NIKI_PTY_TESTS=1 to run")
 	}
-	cmd := exec.Command("../../bin/nikicode")
+	cmd := exec.Command(ensureBinary(t))
 	f, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -85,12 +85,12 @@ func TestNonTTYExec(t *testing.T) {
 	if os.Getenv("NIKI_PTY_TESTS") == "" {
 		t.Skip("set NIKI_PTY_TESTS=1 to run")
 	}
-	cmd := exec.Command("../../bin/nikicode", "exec", "hello")
+	cmd := exec.Command(ensureBinary(t), "exec", "hello")
 	cmd.Env = append(os.Environ(), "NIKICODE_MOCK=1")
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
+	out, _ := cmd.Output()
+	// The mock run ends not-verified (no allowlisted checks in this
+	// HOME), so exec exits non-zero by the L3 rule; the assertion
+	// that matters is the escape-free plain output.
 	if strings.ContainsAny(string(out), "\x1b") {
 		t.Fatalf("escape sequences present in non-TTY output: %q", out)
 	}
@@ -102,7 +102,7 @@ func TestPTYCodingLoop(t *testing.T) {
 	if os.Getenv("NIKI_PTY_TESTS") == "" {
 		t.Skip("set NIKI_PTY_TESTS=1 to run")
 	}
-	cmd := exec.Command("../../bin/nikicode")
+	cmd := exec.Command(ensureBinary(t))
 	cmd.Env = append(os.Environ(), "HOME="+t.TempDir(), "NIKICODE_MOCK=1")
 	f, err := pty.Start(cmd)
 	if err != nil {
@@ -137,6 +137,23 @@ func TestPTYCodingLoop(t *testing.T) {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+	// Wait for the turn to truly end before exiting: Ctrl+C mid-turn
+	// only interrupts. The verdict card renders per verification
+	// attempt and the run can keep re-planning, so the reliable
+	// idle signal is the composer returning to its idle placeholder.
+	turnEnd := time.After(60 * time.Second)
+	mark := len(out.String()) // the idle placeholder also shows pre-submit
+	for !strings.Contains(out.String()[mark:], "Describe a change") {
+		select {
+		case <-turnEnd:
+			scr := out.String()
+			if len(scr) > 1500 {
+				scr = scr[len(scr)-1500:]
+			}
+			t.Fatalf("turn never ended; screen tail: %q", scr)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 	if _, err := f.Write([]byte{0x03, 0x03}); err != nil { // Double Ctrl+C to confirm exit
 		t.Fatal(err)
 	}
@@ -146,7 +163,11 @@ func TestPTYCodingLoop(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		_ = cmd.Process.Kill()
-		t.Fatal("no clean exit")
+		scr := out.String()
+		if len(scr) > 1500 {
+			scr = scr[len(scr)-1500:]
+		}
+		t.Fatalf("no clean exit; screen tail: %q", scr)
 	}
 }
 
@@ -219,7 +240,7 @@ func TestColdAndWarmStartToComposer(t *testing.T) {
 	var cold, warm time.Duration
 	for i := 0; i < 2; i++ {
 		start := time.Now()
-		cmd := exec.Command("../../bin/nikicode")
+		cmd := exec.Command(ensureBinary(t))
 		f, err := pty.Start(cmd)
 		if err != nil {
 			t.Fatal(err)
@@ -252,7 +273,7 @@ func TestColdStartFirstFrame(t *testing.T) {
 		t.Skip("set NIKI_PTY_TESTS=1 to run")
 	}
 	start := time.Now()
-	cmd := exec.Command("../../bin/nikicode")
+	cmd := exec.Command(ensureBinary(t))
 	f, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -329,7 +350,7 @@ func TestBootWith5MCPAnd50Skills(t *testing.T) {
 		_ = os.WriteFile(skillPath, []byte(content), 0o644)
 	}
 
-	nikiBin, err := filepath.Abs("../../bin/nikicode")
+	nikiBin, err := filepath.Abs(ensureBinary(t))
 	if err != nil {
 		t.Fatal(err)
 	}

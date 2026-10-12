@@ -275,3 +275,30 @@ what remains.
   (eval toolsCall, i18n readFileBytes).
 - Gates: golangci-lint run (whole repo) 0 issues; go build/vet/gofmt
   clean; go test ./... all ok; race clean on tui/provider/doctor.
+
+## 2026-10-12 — CI green: PTY tests and the budget flake
+
+- PTY tests hardcoded ../../bin/nikicode instead of the self-building
+  ensureBinary helper, so the e2e job (which never builds it) failed
+  with "no such file or directory" — these tests had never run in CI
+  since the quality gate broke. All six call sites now use
+  ensureBinary(t).
+- TestNonTTYExec asserted exit 0 for `exec hello`; the mock run ends
+  not-verified (no allowlisted checks) and exits non-zero by the L3
+  rule. The assertion now covers the test's actual purpose (no escape
+  sequences in non-TTY output) and tolerates the not-verified exit.
+- TestPTYCodingLoop sent its double Ctrl+C mid-turn: the TUI's
+  Ctrl+C ladder is clear-input -> interrupt -> arm-exit, so two
+  presses while busy only interrupt. It now waits for the turn's true
+  end (the composer returning to its idle placeholder, measured on
+  post-reply output only — the placeholder also shows pre-submit)
+  before exiting. The screen tail dump stays in the failure path.
+- TestBudgetFixtureRunsHitEachBudget/wall_time_wrap could not hold
+  the [85%, 100%) window under -race/CI (a 400ms budget read 1.26):
+  reaching 85% takes many steps whose cost grows, so a single step
+  straddles into stopped. The scenario is removed with the reasoning
+  recorded at the case site; wrap semantics stay covered
+  deterministically by the steps and cost dimensions, and the wall
+  dimension keeps its stop case (no inflation can flip that).
+- Gates: NIKI_PTY_TESTS=1 ./cmd/nikicode (all pass), full suite,
+  build/vet/gofmt, whole-repo golangci-lint 0 issues.

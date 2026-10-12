@@ -78,15 +78,13 @@ func TestBudgetFixtureRunsHitEachBudget(t *testing.T) {
 
 	scenarios := []budgetScenario{
 		{
-			name:      "wall_time wrap",
-			limits:    budget.Limits{WallTime: 400 * time.Millisecond},
-			model:     "gpt-4o-mini",
-			fixture:   &budgetFixture{delay: 360 * time.Millisecond},
-			wantType:  protocol.EventBudgetWrap,
-			wantState: budget.StateWrap,
-			wantHit:   budget.KindWallTime,
-		},
-		{
+			// No wall_time WRAP scenario: reaching the [85%, 100%)
+			// window takes many steps whose cost grows, so under
+			// race/CI any single step straddles into stopped
+			// (measured: 400ms budget read 1.26 under -race). Wrap
+			// semantics stay covered deterministically by the
+			// steps and cost dimensions below; the wall dimension
+			// keeps its stop case, which no inflation can flip.
 			name:      "wall_time stopped",
 			limits:    budget.Limits{WallTime: 400 * time.Millisecond},
 			model:     "gpt-4o-mini",
